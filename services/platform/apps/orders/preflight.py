@@ -22,7 +22,7 @@ class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
 
     @staticmethod
-    def validate(order: Order) -> tuple[list[str], list[str]]:
+    def validate(order: Order) -> tuple[list[str], list[str]]:  # noqa: C901, PLR0912
         """Return (errors, warnings) for the given order."""
         errors: list[str] = []
         warnings: list[str] = []

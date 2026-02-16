@@ -170,7 +170,7 @@ class ANAFQuotaTracker:
 
     def _get_reset_time(self) -> str:
         """Get next reset time (midnight Romanian time)."""
-        from .settings import ROMANIA_TIMEZONE
+        from .settings import ROMANIA_TIMEZONE  # noqa: PLC0415
 
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -319,7 +319,7 @@ class ANAFQuotaTracker:
 
     def _seconds_until_midnight(self) -> int:
         """Get seconds until midnight Romanian time."""
-        from .settings import ROMANIA_TIMEZONE
+        from .settings import ROMANIA_TIMEZONE  # noqa: PLC0415
 
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -368,7 +368,7 @@ class ANAFQuotaTracker:
                 cui = kwargs.get(cui_param)
                 if cui is None and args:
                     # Try to get from args based on function signature
-                    import inspect
+                    import inspect  # noqa: PLC0415
 
                     sig = inspect.signature(func)
                     params = list(sig.parameters.keys())
@@ -392,7 +392,7 @@ class ANAFQuotaTracker:
                         QuotaEndpoint.DOWNLOAD,
                     )
                 ):
-                    import inspect
+                    import inspect  # noqa: PLC0415
 
                     sig = inspect.signature(func)
                     params = list(sig.parameters.keys())

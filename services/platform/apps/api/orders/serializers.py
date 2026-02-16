@@ -48,7 +48,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
                 logger.warning("🚨 [Sealing] No request context available for sealed price tokens")
                 return None
 
-            from apps.orders.price_sealing import get_client_ip
+            from apps.orders.price_sealing import get_client_ip  # noqa: PLC0415
 
             client_ip = get_client_ip(request)
 
@@ -67,7 +67,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
         except Exception as e:
             # If sealing fails completely, return None
             logger.error(f"🔥 [Sealing] Complete failure in sealed price token generation: {e}")
-            import traceback
+            import traceback  # noqa: PLC0415
 
             logger.error(traceback.format_exc())
             return None

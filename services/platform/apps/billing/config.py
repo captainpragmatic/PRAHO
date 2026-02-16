@@ -238,8 +238,9 @@ def get_vat_rate(country_code: str | None = None, fallback: bool = True) -> Deci
     Returns:
         VAT rate as Decimal (e.g., Decimal("0.21") for 21%)
     """
-    from apps.common.tax_service import TaxService
-    from .tax_models import TaxRule
+    from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+    from .tax_models import TaxRule  # noqa: PLC0415
 
     country = (country_code or DEFAULT_COUNTRY_CODE).upper()
     rate = TaxService.get_vat_rate(country, as_decimal=True)
@@ -278,9 +279,9 @@ def get_payment_due_date(issue_date=None):
     Returns:
         datetime: Due date
     """
-    from datetime import timedelta
+    from datetime import timedelta  # noqa: PLC0415
 
-    from django.utils import timezone
+    from django.utils import timezone  # noqa: PLC0415
 
     if issue_date is None:
         issue_date = timezone.now()

@@ -41,8 +41,8 @@ def update_aggregation_for_event(event_id: str) -> dict[str, Any]:
 
     Called asynchronously after each event is recorded.
     """
-    from .metering_models import UsageEvent
-    from .metering_service import MeteringService
+    from .metering_models import UsageEvent  # noqa: PLC0415
+    from .metering_service import MeteringService  # noqa: PLC0415
 
     logger.debug(f"Processing aggregation for event {event_id}")
 
@@ -76,7 +76,7 @@ def process_pending_usage_events(limit: int = 1000, meter_id: str | None = None)
     Should be run periodically to catch any events that weren't
     processed immediately.
     """
-    from .metering_service import AggregationService
+    from .metering_service import AggregationService  # noqa: PLC0415
 
     logger.info(f"Processing pending usage events (limit={limit})")
 
@@ -120,7 +120,7 @@ def advance_billing_cycles() -> dict[str, Any]:
 
     Should be run daily to ensure billing cycles are created ahead of time.
     """
-    from .usage_invoice_service import BillingCycleManager
+    from .usage_invoice_service import BillingCycleManager  # noqa: PLC0415
 
     logger.info("Advancing billing cycles")
 
@@ -159,7 +159,7 @@ def close_expired_billing_cycles() -> dict[str, Any]:
 
     Should be run hourly to ensure timely cycle closure.
     """
-    from .usage_invoice_service import BillingCycleManager
+    from .usage_invoice_service import BillingCycleManager  # noqa: PLC0415
 
     logger.info("Closing expired billing cycles")
 
@@ -183,8 +183,8 @@ def rate_pending_aggregations(billing_cycle_id: str | None = None) -> dict[str, 
 
     Can be run for a specific billing cycle or all pending.
     """
-    from .metering_models import BillingCycle
-    from .metering_service import RatingEngine
+    from .metering_models import BillingCycle  # noqa: PLC0415
+    from .metering_service import RatingEngine  # noqa: PLC0415
 
     logger.info(f"Rating pending aggregations (cycle={billing_cycle_id})")
 
@@ -223,7 +223,7 @@ def generate_pending_invoices() -> dict[str, Any]:
 
     Should be run after closing and rating cycles.
     """
-    from .usage_invoice_service import BillingCycleManager
+    from .usage_invoice_service import BillingCycleManager  # noqa: PLC0415
 
     logger.info("Generating pending invoices")
 
@@ -302,7 +302,7 @@ def check_usage_thresholds(customer_id: str, meter_id: str, subscription_id: str
 
     Called asynchronously after usage events are recorded.
     """
-    from .metering_service import UsageAlertService
+    from .metering_service import UsageAlertService  # noqa: PLC0415
 
     logger.debug(f"Checking thresholds for customer {customer_id}, meter {meter_id}")
 
@@ -324,7 +324,7 @@ def send_usage_alert_notification(alert_id: str) -> dict[str, Any]:
     """
     Send notification for a usage alert.
     """
-    from .metering_service import UsageAlertService
+    from .metering_service import UsageAlertService  # noqa: PLC0415
 
     logger.info(f"Sending usage alert notification: {alert_id}")
 
@@ -347,8 +347,8 @@ def check_all_usage_thresholds() -> dict[str, Any]:
 
     Should be run periodically (e.g., every 15 minutes).
     """
-    from .metering_service import UsageAlertService
-    from .subscription_models import Subscription
+    from .metering_service import UsageAlertService  # noqa: PLC0415
+    from .subscription_models import Subscription  # noqa: PLC0415
 
     logger.info("Checking all usage thresholds")
 
@@ -385,7 +385,7 @@ def sync_aggregation_to_stripe(aggregation_id: str) -> dict[str, Any]:
     """
     Sync a usage aggregation to Stripe.
     """
-    from .stripe_metering import StripeUsageSyncService
+    from .stripe_metering import StripeUsageSyncService  # noqa: PLC0415
 
     logger.info(f"Syncing aggregation {aggregation_id} to Stripe")
 
@@ -406,7 +406,7 @@ def sync_billing_cycle_to_stripe(billing_cycle_id: str) -> dict[str, Any]:
     """
     Sync all aggregations in a billing cycle to Stripe.
     """
-    from .stripe_metering import StripeUsageSyncService
+    from .stripe_metering import StripeUsageSyncService  # noqa: PLC0415
 
     logger.info(f"Syncing billing cycle {billing_cycle_id} to Stripe")
 
@@ -429,8 +429,8 @@ def sync_pending_to_stripe() -> dict[str, Any]:
 
     Should be run periodically (e.g., every hour).
     """
-    from .metering_models import UsageAggregation
-    from .stripe_metering import StripeUsageSyncService
+    from .metering_models import UsageAggregation  # noqa: PLC0415
+    from .stripe_metering import StripeUsageSyncService  # noqa: PLC0415
 
     logger.info("Syncing pending aggregations to Stripe")
 
@@ -489,10 +489,10 @@ def collect_virtualmin_usage() -> dict[str, Any]:
     Should be run hourly or more frequently.
     Uses iterator() for memory-efficient processing of large datasets.
     """
-    from apps.provisioning.models import VirtualminAccount
+    from apps.provisioning.models import VirtualminAccount  # noqa: PLC0415
 
-    from .metering_models import UsageMeter
-    from .metering_service import MeteringService, UsageEventData
+    from .metering_models import UsageMeter  # noqa: PLC0415
+    from .metering_service import MeteringService, UsageEventData  # noqa: PLC0415
 
     logger.info("Collecting Virtualmin usage data")
 
@@ -609,9 +609,9 @@ def collect_service_usage() -> dict[str, Any]:
     Should be run hourly.
     Uses iterator() for memory-efficient processing of large datasets.
     """
-    from apps.provisioning.models import Service
+    from apps.provisioning.models import Service  # noqa: PLC0415
 
-    from .metering_service import MeteringService, UsageEventData
+    from .metering_service import MeteringService, UsageEventData  # noqa: PLC0415
 
     try:
         metering_service = MeteringService()
@@ -735,7 +735,7 @@ def register_scheduled_tasks() -> None:
 
     Call this from a management command or app ready signal.
     """
-    from django_q.models import Schedule
+    from django_q.models import Schedule  # noqa: PLC0415
 
     schedules = [
         {

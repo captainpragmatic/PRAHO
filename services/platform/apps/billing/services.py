@@ -111,7 +111,7 @@ class InvoiceService:
         Uses transaction.atomic and select_for_update to prevent race conditions
         in sequence number generation.
         """
-        from django.db import IntegrityError, transaction
+        from django.db import IntegrityError, transaction  # noqa: PLC0415
 
         try:
             with transaction.atomic():
@@ -137,7 +137,7 @@ class InvoiceService:
                         sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
 
                 # Calculate totals using current Romanian VAT rate
-                from apps.common.tax_service import TaxService
+                from apps.common.tax_service import TaxService  # noqa: PLC0415
 
                 vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
                 subtotal_amount = Decimal(order.total_cents) / 100

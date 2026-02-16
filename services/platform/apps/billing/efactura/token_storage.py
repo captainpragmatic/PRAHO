@@ -166,7 +166,7 @@ class OAuthToken(models.Model):
     def _encrypt(self, value: str) -> str:
         """Encrypt a value using settings encryption."""
         try:
-            from apps.settings.encryption import SettingsEncryption
+            from apps.settings.encryption import SettingsEncryption  # noqa: PLC0415
 
             encryption = SettingsEncryption()
             return encryption.encrypt_value(value)
@@ -180,7 +180,7 @@ class OAuthToken(models.Model):
     def _decrypt(self, value: str) -> str:
         """Decrypt a value using settings encryption."""
         try:
-            from apps.settings.encryption import SettingsEncryption
+            from apps.settings.encryption import SettingsEncryption  # noqa: PLC0415
 
             encryption = SettingsEncryption()
             if encryption.is_encrypted(value):
@@ -195,7 +195,7 @@ class OAuthToken(models.Model):
     def _is_encrypted(self, value: str) -> bool:
         """Check if a value is encrypted."""
         try:
-            from apps.settings.encryption import SettingsEncryption
+            from apps.settings.encryption import SettingsEncryption  # noqa: PLC0415
 
             encryption = SettingsEncryption()
             return encryption.is_encrypted(value)
@@ -247,7 +247,7 @@ class OAuthToken(models.Model):
         self.save(update_fields=["is_active", "updated_at"])
 
     @classmethod
-    def store_token(
+    def store_token(  # noqa: PLR0913
         cls,
         cui: str,
         access_token: str,
@@ -346,7 +346,7 @@ class TokenStorageService:
 
     def __init__(self, settings: Any = None):
         """Initialize with optional settings override."""
-        from .settings import efactura_settings
+        from .settings import efactura_settings  # noqa: PLC0415
 
         self._settings = settings or efactura_settings
 
@@ -366,7 +366,7 @@ class TokenStorageService:
         Returns:
             Access token or None
         """
-        from django.core.cache import cache
+        from django.core.cache import cache  # noqa: PLC0415
 
         cui = cui or self._settings.company_cui
         if not cui:
@@ -388,7 +388,7 @@ class TokenStorageService:
 
         return None
 
-    def store_token(
+    def store_token(  # noqa: PLR0913
         self,
         access_token: str,
         expires_in: int,
@@ -411,7 +411,7 @@ class TokenStorageService:
         Returns:
             Created OAuthToken
         """
-        from django.core.cache import cache
+        from django.core.cache import cache  # noqa: PLC0415
 
         cui = cui or self._settings.company_cui
         if not cui:
@@ -441,7 +441,7 @@ class TokenStorageService:
         Args:
             cui: Company CUI. If None, uses company CUI from settings.
         """
-        from django.core.cache import cache
+        from django.core.cache import cache  # noqa: PLC0415
 
         cui = cui or self._settings.company_cui
         if not cui:

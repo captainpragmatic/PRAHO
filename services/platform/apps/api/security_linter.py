@@ -85,7 +85,7 @@ class APISecurityLinter:
         except Exception as e:
             print(f"❌ Error processing {file_path}: {e}")
 
-    def _check_ast_violations(self, file_path: Path, tree: ast.AST, content: str, lines: list[str]) -> None:
+    def _check_ast_violations(self, file_path: Path, tree: ast.AST, content: str, lines: list[str]) -> None:  # noqa: C901
         """Check for violations using AST analysis"""
 
         class APIVisitor(ast.NodeVisitor):

@@ -7,12 +7,12 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, transaction
 from django.utils import timezone
 
 from apps.billing.models import Currency
 from apps.common.types import EmailAddress, Err, Ok, Result
-from django.core.exceptions import ObjectDoesNotExist
 from apps.common.validators import log_security_event
 from apps.products.models import Product
 from apps.provisioning.service_models import Service, ServicePlan
@@ -146,7 +146,7 @@ class OrderCalculationService:
             subtotal_cents += (qty * unit) + setup
 
         # Use authoritative VAT calculator for consistency
-        from .vat_rules import CustomerVATInfo, OrderVATCalculator
+        from .vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
         # Determine customer context for VAT calculation
         if billing_address:
@@ -335,7 +335,7 @@ class OrderService:
 
                 # Determine VAT using comprehensive VAT rules (per customer country/business)
                 try:
-                    from .vat_rules import OrderVATCalculator  # noqa: PLC0415
+                    from .vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
                     # Extract customer VAT context from billing address snapshot
                     customer_country = (data.billing_address.get("country") or "RO").upper()
@@ -370,7 +370,7 @@ class OrderService:
                 except Exception as e:
                     # Fallback to centralized VAT service if VAT rules fail
                     logger.warning(f"🔥 [OrderService] VAT calculation failed, using fallback: {e}")
-                    from apps.common.tax_service import TaxService
+                    from apps.common.tax_service import TaxService  # noqa: PLC0415
 
                     fallback_vat_result = TaxService.calculate_vat(
                         amount_cents=subtotal_cents,
@@ -585,7 +585,7 @@ class OrderServiceCreationService:
                     billing_cycle = "monthly"
 
                 # Generate unique username (will be updated during provisioning)
-                import time
+                import time  # noqa: PLC0415
 
                 username = f"tmp_{int(time.time())}_{order.id.hex[:8]}"
 

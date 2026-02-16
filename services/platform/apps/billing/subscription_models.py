@@ -379,11 +379,14 @@ class Subscription(models.Model):
             validate_financial_amount(self.locked_price_cents, "Locked price")
 
         # Validate period dates
-        if self.current_period_end and self.current_period_start:
-            if self.current_period_end <= self.current_period_start:
-                raise ValidationError("Period end must be after period start")
+        if (
+            self.current_period_end
+            and self.current_period_start
+            and self.current_period_end <= self.current_period_start
+        ):
+            raise ValidationError("Period end must be after period start")
 
-    def save(self, *args: Any, **kwargs: Any) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
         """Generate subscription number if not set."""
         if not self.subscription_number:
             self.subscription_number = self._generate_subscription_number()
@@ -393,7 +396,7 @@ class Subscription(models.Model):
 
     def _generate_subscription_number(self) -> str:
         """Generate unique subscription number."""
-        from .invoice_models import InvoiceSequence
+        from .invoice_models import InvoiceSequence  # noqa: PLC0415
 
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="subscription")
         return sequence.get_next_number("SUB")

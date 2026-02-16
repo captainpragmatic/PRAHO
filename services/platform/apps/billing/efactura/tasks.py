@@ -261,7 +261,7 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
     Returns:
         Dict with download result
     """
-    from .models import EFacturaStatus
+    from .models import EFacturaStatus  # noqa: PLC0415
 
     logger.info(f"[e-Factura Task] Downloading response for document {document_id}")
 
@@ -293,7 +293,7 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
 def _create_deadline_alerts(approaching_documents: list) -> None:
     """Create audit alerts for approaching deadlines."""
     try:
-        from apps.audit.models import AuditAlert
+        from apps.audit.models import AuditAlert  # noqa: PLC0415
 
         for document in approaching_documents:
             deadline = document.submission_deadline

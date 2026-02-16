@@ -293,7 +293,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
 
     def get_total_monthly_cost(self, obj: Service) -> Decimal:
         """Get total monthly cost including VAT"""
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         base_price = self.get_monthly_price(obj)
         vat_multiplier = Decimal("1") + TaxService.get_vat_rate("RO", as_decimal=True)
@@ -301,7 +301,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
 
     def get_vat_amount(self, obj: Service) -> Decimal:
         """Get VAT amount"""
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         base_price = self.get_monthly_price(obj)
         vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)

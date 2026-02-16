@@ -61,7 +61,7 @@ class Result:
 def get_stripe():
     """Get configured Stripe module"""
     try:
-        import stripe
+        import stripe  # noqa: PLC0415
 
         stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", None)
         return stripe
@@ -302,7 +302,7 @@ class StripeSubscriptionMeterService:
             }
 
             if trial_days:
-                from datetime import timedelta
+                from datetime import timedelta  # noqa: PLC0415
 
                 trial_end = timezone.now() + timedelta(days=trial_days)
                 sub_params["trial_end"] = int(trial_end.timestamp())
@@ -407,7 +407,7 @@ class StripeUsageSyncService:
 
         Reports the aggregated usage as a meter event to Stripe.
         """
-        from .metering_models import UsageAggregation
+        from .metering_models import UsageAggregation  # noqa: PLC0415
 
         try:
             aggregation = UsageAggregation.objects.select_related("meter", "customer", "subscription").get(
@@ -462,7 +462,7 @@ class StripeUsageSyncService:
         """
         Sync all aggregations in a billing cycle to Stripe.
         """
-        from .metering_models import BillingCycle, UsageAggregation
+        from .metering_models import BillingCycle, UsageAggregation  # noqa: PLC0415
 
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
@@ -555,7 +555,7 @@ class StripeMeterWebhookHandler:
         logger.info(f"Stripe Meter updated: {meter_data.id}")
 
         # Update local meter if it exists
-        from .metering_models import UsageMeter
+        from .metering_models import UsageMeter  # noqa: PLC0415
 
         try:
             local_meter = UsageMeter.objects.get(stripe_meter_id=meter_data.id)
@@ -612,7 +612,7 @@ class StripeMeterWebhookHandler:
         subscription_id = invoice_data.get("subscription")
         if subscription_id:
             try:
-                from .subscription_models import Subscription
+                from .subscription_models import Subscription  # noqa: PLC0415
 
                 subscription = Subscription.objects.get(stripe_subscription_id=subscription_id)
                 billing_cycle = subscription.billing_cycles.filter(status="invoiced").order_by("-period_start").first()

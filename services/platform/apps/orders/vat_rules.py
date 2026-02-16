@@ -85,14 +85,14 @@ class OrderVATCalculator:
     @classmethod
     def _get_vat_rate(cls, country_code: str) -> Decimal:
         """Get VAT rate from centralized TaxService."""
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         return TaxService.get_vat_rate(country_code, as_decimal=False)
 
     @classmethod
     def _get_eu_countries(cls) -> set[str]:
         """Get EU countries from centralized TaxService."""
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         return TaxService.get_eu_countries()
 
@@ -176,7 +176,7 @@ class OrderVATCalculator:
         return result
 
     @classmethod
-    def _determine_vat_scenario(
+    def _determine_vat_scenario(  # noqa: PLR0911, PLR0912
         cls,
         country_code: str,
         is_business: bool,
@@ -272,7 +272,7 @@ class OrderVATCalculator:
                 return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
 
     @classmethod
-    def _generate_vat_reasoning(
+    def _generate_vat_reasoning(  # noqa: PLR0911
         cls,
         scenario: VATScenario,
         country_code: str,
@@ -355,7 +355,7 @@ class OrderVATCalculator:
 
         pattern = vat_patterns.get(country_code)
         if pattern:
-            import re
+            import re  # noqa: PLC0415
 
             return bool(re.match(pattern, vat_clean))
 

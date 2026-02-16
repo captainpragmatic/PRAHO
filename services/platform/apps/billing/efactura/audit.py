@@ -42,7 +42,11 @@ class EFacturaAuditService:
     ) -> None:
         """Log successful XML generation."""
         try:
-            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditContext,
+                BillingAuditService,
+                BusinessEventData,
+            )
 
             event_data = BusinessEventData(
                 event_type="invoice_xml_generated",
@@ -71,7 +75,10 @@ class EFacturaAuditService:
     ) -> None:
         """Log XML validation result."""
         try:
-            from apps.audit.services import AuditService, ComplianceEventRequest
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditService,
+                ComplianceEventRequest,
+            )
 
             status = "success" if validation_result.is_valid else "validation_failed"
             error_count = len(validation_result.errors)
@@ -110,7 +117,7 @@ class EFacturaAuditService:
     ) -> None:
         """Log e-Factura submission attempt."""
         try:
-            from apps.audit.services import (
+            from apps.audit.services import (  # noqa: PLC0415
                 AuditContext,
                 AuditService,
                 BillingAuditService,
@@ -168,7 +175,11 @@ class EFacturaAuditService:
     ) -> None:
         """Log e-Factura status change."""
         try:
-            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditContext,
+                BillingAuditService,
+                BusinessEventData,
+            )
 
             event_data = BusinessEventData(
                 event_type="invoice_status_changed",
@@ -196,7 +207,7 @@ class EFacturaAuditService:
     ) -> None:
         """Log e-Factura acceptance by ANAF."""
         try:
-            from apps.audit.services import (
+            from apps.audit.services import (  # noqa: PLC0415
                 AuditContext,
                 AuditService,
                 BillingAuditService,
@@ -254,8 +265,8 @@ class EFacturaAuditService:
     ) -> None:
         """Log e-Factura rejection by ANAF."""
         try:
-            from apps.audit.models import AuditAlert
-            from apps.audit.services import (
+            from apps.audit.models import AuditAlert  # noqa: PLC0415
+            from apps.audit.services import (  # noqa: PLC0415
                 AuditContext,
                 AuditService,
                 BillingAuditService,
@@ -319,7 +330,11 @@ class EFacturaAuditService:
     ) -> None:
         """Log retry scheduling."""
         try:
-            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditContext,
+                BillingAuditService,
+                BusinessEventData,
+            )
 
             event_data = BusinessEventData(
                 event_type="efactura_submitted",  # Reuse existing event type
@@ -347,8 +362,11 @@ class EFacturaAuditService:
     ) -> None:
         """Log deadline warning."""
         try:
-            from apps.audit.models import AuditAlert
-            from apps.audit.services import AuditService, ComplianceEventRequest
+            from apps.audit.models import AuditAlert  # noqa: PLC0415
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditService,
+                ComplianceEventRequest,
+            )
 
             # Log as compliance event
             compliance_request = ComplianceEventRequest(
@@ -392,7 +410,11 @@ class EFacturaAuditService:
     ) -> None:
         """Log successful response download."""
         try:
-            from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditContext,
+                BillingAuditService,
+                BusinessEventData,
+            )
 
             event_data = BusinessEventData(
                 event_type="invoice_pdf_generated",  # Reuse existing type

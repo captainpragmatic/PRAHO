@@ -13,22 +13,22 @@ ISO_COUNTRY_CODE_LENGTH = 2
 IDEMPOTENCY_KEY_MIN_LENGTH = 16
 IDEMPOTENCY_KEY_MAX_LENGTH = 128
 
-from django.db import transaction
-from django.utils import timezone
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.request import Request
-from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
+from django.db import transaction  # noqa: E402
+from django.utils import timezone  # noqa: E402
+from rest_framework import status  # noqa: E402
+from rest_framework.decorators import api_view, permission_classes, throttle_classes  # noqa: E402
+from rest_framework.permissions import AllowAny  # noqa: E402
+from rest_framework.request import Request  # noqa: E402
+from rest_framework.response import Response  # noqa: E402
+from rest_framework.throttling import ScopedRateThrottle  # noqa: E402
 
-from apps.api.secure_auth import require_customer_authentication
-from apps.common.types import Ok
-from apps.customers.models import Customer
-from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
-from apps.products.models import Product
+from apps.api.secure_auth import require_customer_authentication  # noqa: E402
+from apps.common.types import Ok  # noqa: E402
+from apps.customers.models import Customer  # noqa: E402
+from apps.orders.services import OrderCreateData, OrderService, StatusChangeData  # noqa: E402
+from apps.products.models import Product  # noqa: E402
 
-from .serializers import (
+from .serializers import (  # noqa: E402
     CartCalculationInputSerializer,
     CartCalculationOutputSerializer,
     OrderCreateInputSerializer,
@@ -118,7 +118,7 @@ def product_detail(request: Request, slug: str) -> Response:
 @permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def calculate_cart_totals(request: Request, customer: Customer) -> Response:
+def calculate_cart_totals(request: Request, customer: Customer) -> Response:  # noqa: PLR0915
     """
     Calculate cart totals with Romanian VAT compliance.
     Server-authoritative pricing - never trust client input.
@@ -170,7 +170,7 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
                     continue
 
                 # Get current pricing (server-authoritative)
-                from apps.products.models import ProductPrice
+                from apps.products.models import ProductPrice  # noqa: PLC0415
 
                 try:
                     product_price = ProductPrice.objects.get(product=product, currency=currency, is_active=True)
@@ -202,8 +202,11 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
                 )
 
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
-        from apps.customers.models import Customer
-        from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
+        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.orders.vat_rules import (  # noqa: PLC0415
+            CustomerVATInfo,
+            OrderVATCalculator,
+        )
 
         # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
         try:
@@ -270,7 +273,7 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(request: Request, customer: Customer) -> Response:
+def preflight_order(request: Request, customer: Customer) -> Response:  # noqa: PLR0915
     """
     🔎 Preflight validation for portal checkout.
     Validates customer profile, product/price availability, VAT scenario, and returns errors/warnings + totals preview.
@@ -292,11 +295,13 @@ def preflight_order(request: Request, customer: Customer) -> Response:
             )
 
         # Create a preview order data structure (without saving to DB)
-        import uuid
+        import uuid  # noqa: PLC0415
 
-        from apps.billing.models import Currency
-        from apps.orders.preflight import OrderPreflightValidationService
-        from apps.orders.services import OrderService
+        from apps.billing.models import Currency  # noqa: PLC0415
+        from apps.orders.preflight import (  # noqa: PLC0415
+            OrderPreflightValidationService,
+        )
+        from apps.orders.services import OrderService  # noqa: PLC0415
 
         # Get currency (default to RON)
         currency = Currency.objects.get(code="RON")
@@ -311,7 +316,7 @@ def preflight_order(request: Request, customer: Customer) -> Response:
 
         for cart_item in cart_items:
             # Get product and pricing
-            from apps.products.models import Product
+            from apps.products.models import Product  # noqa: PLC0415
 
             try:
                 product_id = cart_item.get("product_id")
@@ -374,7 +379,10 @@ def preflight_order(request: Request, customer: Customer) -> Response:
                 )
 
         # Calculate VAT using the VAT calculator
-        from apps.orders.vat_rules import OrderVATCalculator
+        from apps.orders.vat_rules import (  # noqa: PLC0415
+            CustomerVATInfo,
+            OrderVATCalculator,
+        )
 
         company_name = billing_address.get("company_name", "")
         vat_number = billing_address.get("vat_number", "")
@@ -408,7 +416,7 @@ def preflight_order(request: Request, customer: Customer) -> Response:
         )
 
         # Create a temporary order object for validation (not saved to DB)
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Normalize billing address for validation (ensure country is ISO code)
         normalized_billing_address = dict(billing_address)
@@ -475,7 +483,7 @@ def preflight_order(request: Request, customer: Customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCreateThrottle])
 @require_customer_authentication
-def create_order(request: Request, customer: Customer) -> Response:
+def create_order(request: Request, customer: Customer) -> Response:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """
     Create order from cart items with server-side pricing resolution.
     Supports idempotency keys to prevent duplicate orders and race conditions.
@@ -494,7 +502,7 @@ def create_order(request: Request, customer: Customer) -> Response:
         )
 
     # 🔒 SECURITY: Check for existing order with this idempotency key
-    from django.core.cache import cache
+    from django.core.cache import cache  # noqa: PLC0415
 
     cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
     existing_order_id = cache.get(cache_key)
@@ -502,7 +510,7 @@ def create_order(request: Request, customer: Customer) -> Response:
     if existing_order_id:
         logger.info(f"🔄 [API] Returning existing order for idempotency key: {idempotency_key[:8]}...")
         try:
-            from apps.orders.models import Order
+            from apps.orders.models import Order  # noqa: PLC0415
 
             existing_order = Order.objects.get(id=existing_order_id, customer=customer)
             serializer = OrderDetailSerializer(existing_order)
@@ -655,7 +663,9 @@ def create_order(request: Request, customer: Customer) -> Response:
                         serializer = OrderDetailSerializer(order)
                     else:
                         # Collect preflight errors for client visibility
-                        from apps.orders.preflight import OrderPreflightValidationService
+                        from apps.orders.preflight import (  # noqa: PLC0415
+                            OrderPreflightValidationService,
+                        )
 
                         errs, warns = OrderPreflightValidationService.validate(order)
                         preflight = {"errors": errs, "warnings": warns}
@@ -703,7 +713,7 @@ def order_list(request: Request, customer) -> Response:
 
     try:
         # Get customer orders
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         orders = Order.objects.filter(customer_id=customer_id).order_by("-created_at")
 
@@ -735,7 +745,7 @@ def order_detail(request: Request, customer, order_id: str) -> Response:
     customer_id = customer.id
 
     try:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         order = Order.objects.prefetch_related("items").get(id=order_id, customer_id=customer_id)
 
@@ -827,8 +837,8 @@ def confirm_order(request: Request, customer, order_id: str) -> Response:
     Confirm order after successful payment and trigger service provisioning.
     """
     try:
-        from apps.audit.services import AuditService
-        from apps.orders.models import Order
+        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Get order and verify ownership
         order = Order.objects.prefetch_related("items").get(id=order_id, customer_id=customer.id)

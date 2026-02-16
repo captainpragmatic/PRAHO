@@ -40,7 +40,7 @@ def _is_valid_domain_suffix(domain: str, allowed_domains: list[str]) -> bool:
         domain = domain.split(":")[0]
 
     for allowed in allowed_domains:
-        allowed = allowed.lower()
+        allowed = allowed.lower()  # noqa: PLW2901
         # Exact match
         if domain == allowed:
             return True

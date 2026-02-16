@@ -161,7 +161,7 @@ class Payment(models.Model):
     @classmethod
     def generate_idempotency_key(cls, prefix: str = "pay") -> str:
         """Generate a unique idempotency key."""
-        import secrets
+        import secrets  # noqa: PLC0415
 
         return f"{prefix}_{secrets.token_hex(24)}"
 

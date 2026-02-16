@@ -456,7 +456,7 @@ class UsageAggregation(models.Model):
         elif self.meter.aggregation_type == "count":
             self.total_value = Decimal(events.count())
         elif self.meter.aggregation_type == "max":
-            from django.db.models import Max
+            from django.db.models import Max  # noqa: PLC0415
 
             result = events.aggregate(max_val=Max("value"))
             self.max_value = result["max_val"]

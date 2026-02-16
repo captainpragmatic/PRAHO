@@ -430,7 +430,7 @@ def run_daily_billing() -> dict[str, Any]:
     Returns:
         Dictionary with billing run statistics
     """
-    from apps.billing.subscription_service import RecurringBillingService
+    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
 
     logger.info("📅 [Billing] Starting daily billing run")
 
@@ -485,7 +485,7 @@ def process_expired_trials() -> dict[str, Any]:
     Returns:
         Dictionary with processing result
     """
-    from apps.billing.subscription_service import RecurringBillingService
+    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
 
     logger.info("⏰ [Trials] Processing expired trials")
 
@@ -528,7 +528,7 @@ def process_grace_period_expirations() -> dict[str, Any]:
     Returns:
         Dictionary with processing result
     """
-    from apps.billing.subscription_service import RecurringBillingService
+    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
 
     logger.info("⚠️ [Grace] Processing expired grace periods")
 
@@ -569,7 +569,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
     Returns:
         Dictionary with notification result
     """
-    from apps.billing.subscription_service import GrandfatheringService
+    from apps.billing.subscription_service import GrandfatheringService  # noqa: PLC0415
 
     logger.info(f"📢 [Grandfathering] Checking for expiring grandfathering ({days_ahead} days)")
 
@@ -580,7 +580,9 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
         for gf in expiring:
             try:
                 # Send notification email
-                from apps.notifications.services import EmailService
+                from apps.notifications.services import (  # noqa: PLC0415
+                    EmailService,
+                )
 
                 EmailService.send_template_email(
                     template_key="grandfathering_expiring",
@@ -628,7 +630,7 @@ def run_payment_collection() -> dict[str, Any]:
     Returns:
         Dictionary with collection result
     """
-    from apps.billing.payment_models import (
+    from apps.billing.payment_models import (  # noqa: PLC0415
         PaymentCollectionRun,
         PaymentRetryAttempt,
     )

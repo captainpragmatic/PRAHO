@@ -160,7 +160,7 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     DEPRECATED: Use OrderVATCalculator.calculate_vat() instead for full compliance.
     """
     try:
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         tax_profile = customer.get_tax_profile()
 
@@ -178,7 +178,7 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     except Exception as e:
         logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
         # Fall back to centralized Romanian VAT rate
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         return TaxService.get_vat_rate("RO", as_decimal=True)
 
@@ -580,7 +580,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         subtotal_cents = (unit_cents * quantity) + setup_cents
 
         # VAT calc per rules
-        from .vat_rules import CustomerVATInfo, OrderVATCalculator
+        from .vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
         billing = customer.get_billing_address()
         tax_profile = customer.get_tax_profile()
@@ -1514,7 +1514,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def cart_update(request: HttpRequest) -> HttpResponse:
+def cart_update(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     📝 Update cart item quantity via HTMX
     """
@@ -1565,7 +1565,7 @@ def cart_update(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def cart_remove(request: HttpRequest) -> HttpResponse:
+def cart_remove(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     🗑️ Remove item from cart via HTMX
     """

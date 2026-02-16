@@ -107,7 +107,7 @@ class ProrationService:
     """
 
     @staticmethod
-    def calculate_proration(
+    def calculate_proration(  # noqa: PLR0913
         old_price_cents: int,
         new_price_cents: int,
         old_quantity: int,
@@ -241,7 +241,7 @@ class SubscriptionService:
             Result with created subscription or error message
         """
         try:
-            from .currency_models import Currency
+            from .currency_models import Currency  # noqa: PLC0415
 
             with transaction.atomic():
                 # Get or create default currency
@@ -274,7 +274,7 @@ class SubscriptionService:
                 quantity = data.get("quantity", 1)
 
                 # Calculate cycle days
-                from .subscription_models import BILLING_CYCLE_DAYS
+                from .subscription_models import BILLING_CYCLE_DAYS  # noqa: PLC0415
 
                 cycle_days = BILLING_CYCLE_DAYS.get(billing_cycle, 30)
 
@@ -344,7 +344,7 @@ class SubscriptionService:
             Result with SubscriptionChange record or error message
         """
         try:
-            from apps.products.models import Product
+            from apps.products.models import Product  # noqa: PLC0415
 
             with transaction.atomic():
                 # Determine new values
@@ -429,7 +429,7 @@ class SubscriptionService:
         user: User | None = None,
     ) -> Invoice:
         """Create an invoice for proration charges."""
-        from .currency_models import Currency
+        from .currency_models import Currency  # noqa: PLC0415
 
         # Get sequence
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
@@ -441,7 +441,7 @@ class SubscriptionService:
             currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
         # Calculate tax using centralized TaxService (ADR-0015)
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         subtotal_cents = change.proration_amount_cents
         vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
@@ -572,7 +572,7 @@ class GrandfatheringService:
     """
 
     @staticmethod
-    def apply_grandfathering_for_price_increase(
+    def apply_grandfathering_for_price_increase(  # noqa: PLR0913
         product: Product,
         old_price_cents: int,
         new_price_cents: int,
@@ -836,7 +836,7 @@ class RecurringBillingService:
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
             # Calculate amounts using centralized TaxService (ADR-0015)
-            from apps.common.tax_service import TaxService
+            from apps.common.tax_service import TaxService  # noqa: PLC0415
 
             subtotal_cents = subscription.total_price_cents
             tax_rate = TaxService.get_vat_rate("RO", as_decimal=True)

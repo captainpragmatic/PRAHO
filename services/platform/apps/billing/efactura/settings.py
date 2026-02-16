@@ -369,7 +369,7 @@ class EFacturaSettings:
         """Lazy load SettingsService to avoid circular imports."""
         if self._settings_service is None:
             try:
-                from apps.settings.services import SettingsService
+                from apps.settings.services import SettingsService  # noqa: PLC0415
 
                 self._settings_service = SettingsService
             except ImportError:

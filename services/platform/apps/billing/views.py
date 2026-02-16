@@ -40,11 +40,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.billing.config import get_invoice_payment_terms_days
-from apps.common.tax_service import TaxService
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
 from apps.common.mixins import get_search_context
+from apps.common.tax_service import TaxService
 from apps.common.utils import json_error, json_success
 from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket
@@ -64,8 +64,8 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-from .payment_service import PaymentService
-from .services import (
+from .payment_service import PaymentService  # noqa: E402
+from .services import (  # noqa: E402
     log_security_event,
     # TODO: Add RefundService imports when implemented
 )
@@ -152,7 +152,7 @@ def _validate_financial_document_access(
     return None
 
 
-def _validate_financial_document_access_with_redirect(
+def _validate_financial_document_access_with_redirect(  # noqa: PLR0912
     request: HttpRequest, document: Invoice | ProformaInvoice, action: str = "view"
 ) -> None | HttpResponseRedirect:
     """
@@ -2030,7 +2030,7 @@ def efactura_document_detail(request: HttpRequest, pk: str) -> HttpResponse:
     try:
         from apps.integrations.models import WebhookEvent  # noqa: PLC0415
     except ImportError:
-        WebhookEvent = None
+        WebhookEvent = None  # noqa: N806
 
     if WebhookEvent is not None:
         try:

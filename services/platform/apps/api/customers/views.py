@@ -653,7 +653,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
-def update_customer_billing_address(request: Request, customer: Customer) -> Response:
+def update_customer_billing_address(request: Request, customer: Customer) -> Response:  # noqa: C901, PLR0912
     """
     🏠 Update customer billing address during checkout validation failures.
 

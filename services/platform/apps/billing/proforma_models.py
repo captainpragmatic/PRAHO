@@ -292,7 +292,7 @@ class ProformaLine(models.Model):
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        from decimal import ROUND_HALF_EVEN
+        from decimal import ROUND_HALF_EVEN  # noqa: PLC0415
 
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderItem)

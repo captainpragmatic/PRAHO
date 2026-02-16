@@ -272,7 +272,7 @@ class EFacturaXMLGenerator:
         # Invoice type code (380 = Commercial invoice)
         ET.SubElement(root, f"{{{cbc}}}InvoiceTypeCode").text = "380"
 
-        # Note (optional)
+        # Note (optional)  # noqa: ERA001
         if invoice.notes:
             ET.SubElement(root, f"{{{cbc}}}Note").text = invoice.notes[:500]  # Limit length
 
@@ -454,10 +454,7 @@ class EFacturaXMLGenerator:
         ET.SubElement(tax_category, f"{{{cbc}}}ID").text = "S"  # Standard rate
 
         # Calculate effective tax rate
-        if invoice.subtotal_cents > 0:
-            tax_rate = (invoice.tax_cents / invoice.subtotal_cents) * 100
-        else:
-            tax_rate = 21.0  # Default Romanian VAT (Aug 2025)
+        tax_rate = (invoice.tax_cents / invoice.subtotal_cents) * 100 if invoice.subtotal_cents > 0 else 21.0
         ET.SubElement(tax_category, f"{{{cbc}}}Percent").text = f"{tax_rate:.2f}"
 
         tax_scheme = ET.SubElement(tax_category, f"{{{cac}}}TaxScheme")

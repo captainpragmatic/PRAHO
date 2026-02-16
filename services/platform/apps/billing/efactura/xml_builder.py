@@ -257,7 +257,7 @@ class BaseUBLBuilder:
                     return (Decimal(str(tax_rate)) * 100).quantize(Decimal("0.01"))
 
         # Fallback: current rate from TaxService (only for invoices with no lines)
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         return TaxService.get_vat_rate("RO", as_decimal=False)
 

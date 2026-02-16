@@ -897,7 +897,7 @@ def user_customers_api(request: HttpRequest, user: User) -> Response:
     """
     try:
         # Get customer memberships with role information
-        from apps.users.models import CustomerMembership
+        from apps.users.models import CustomerMembership  # noqa: PLC0415
 
         memberships = CustomerMembership.objects.filter(user=user).select_related("customer")
 

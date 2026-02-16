@@ -76,16 +76,16 @@ class UsageInvoiceService:
         # Use centralized config for defaults
         self.default_vat_rate = billing_config.DEFAULT_VAT_RATE
 
-    def generate_invoice_from_cycle(self, billing_cycle_id: str) -> Result:
+    def generate_invoice_from_cycle(self, billing_cycle_id: str) -> Result:  # noqa: C901, PLR0915
         """
         Generate an invoice from a billing cycle.
 
         The billing cycle must be in 'closed' or 'rated' status.
         All usage aggregations must be rated.
         """
-        from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
-        from .metering_models import BillingCycle, UsageAggregation
-        from .payment_models import CreditLedger
+        from .invoice_models import Invoice, InvoiceLine, InvoiceSequence  # noqa: PLC0415
+        from .metering_models import BillingCycle, UsageAggregation  # noqa: PLC0415
+        from .payment_models import CreditLedger  # noqa: PLC0415
 
         try:
             billing_cycle = BillingCycle.objects.select_related(
@@ -112,7 +112,7 @@ class UsageInvoiceService:
 
         if unrated:
             # Rate them first
-            from .metering_service import RatingEngine
+            from .metering_service import RatingEngine  # noqa: PLC0415
 
             rating_engine = RatingEngine()
             rating_result = rating_engine.rate_billing_cycle(str(billing_cycle_id))
@@ -305,9 +305,9 @@ class UsageInvoiceService:
 
     def _get_customer_credit_balance(self, customer: Any) -> int:
         """Get customer's available credit balance in cents"""
-        from django.db.models import Sum
+        from django.db.models import Sum  # noqa: PLC0415
 
-        from .payment_models import CreditLedger
+        from .payment_models import CreditLedger  # noqa: PLC0415
 
         result = CreditLedger.objects.filter(customer=customer).aggregate(total=Sum("delta_cents"))
 
@@ -317,7 +317,7 @@ class UsageInvoiceService:
         """Get the applicable VAT rate for a customer."""
         # Check if customer has tax profile with reverse charge
         try:
-            from apps.customers.models import CustomerTaxProfile
+            from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
             tax_profile = CustomerTaxProfile.objects.get(customer=customer)
 
@@ -351,7 +351,7 @@ class UsageInvoiceService:
 
         # Try to get from customer addresses
         try:
-            from apps.customers.models import CustomerAddress
+            from apps.customers.models import CustomerAddress  # noqa: PLC0415
 
             billing_addr = CustomerAddress.objects.filter(
                 customer=customer, address_type="billing", is_current=True
@@ -369,7 +369,7 @@ class UsageInvoiceService:
 
         # Try to get tax ID from tax profile
         try:
-            from apps.customers.models import CustomerTaxProfile
+            from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
             tax_profile = CustomerTaxProfile.objects.get(customer=customer)
             address["tax_id"] = tax_profile.cui or tax_profile.vat_number or ""
@@ -383,7 +383,7 @@ class UsageInvoiceService:
         meter = aggregation.meter
         unit = meter.unit_display or meter.get_unit_display()
 
-        # Format: "Bandwidth Usage: 150 GB (100 GB included, 50 GB overage)"
+        # Format: "Bandwidth Usage: 150 GB (100 GB included, 50 GB overage)"  # noqa: ERA001
         parts = [f"{meter.display_name}:"]
 
         if aggregation.included_allowance > 0:
@@ -407,7 +407,7 @@ class UsageInvoiceService:
         """
         Issue a draft invoice (change status from draft to issued).
         """
-        from .invoice_models import Invoice
+        from .invoice_models import Invoice  # noqa: PLC0415
 
         try:
             invoice = Invoice.objects.get(id=invoice_id)
@@ -454,10 +454,10 @@ class BillingCycleManager:
         """
         Create a new billing cycle for a subscription.
         """
-        from dateutil.relativedelta import relativedelta
+        from dateutil.relativedelta import relativedelta  # noqa: PLC0415
 
-        from .metering_models import BillingCycle
-        from .subscription_models import Subscription
+        from .metering_models import BillingCycle  # noqa: PLC0415
+        from .subscription_models import Subscription  # noqa: PLC0415
 
         try:
             subscription = Subscription.objects.get(id=subscription_id)
@@ -526,7 +526,7 @@ class BillingCycleManager:
 
         Returns: (created_count, error_count, errors)
         """
-        from .subscription_models import Subscription
+        from .subscription_models import Subscription  # noqa: PLC0415
 
         active_subscriptions = Subscription.objects.filter(status__in=("active", "trialing"))
 
@@ -556,8 +556,8 @@ class BillingCycleManager:
 
         Returns: (closed_count, error_count)
         """
-        from .metering_models import BillingCycle
-        from .metering_service import AggregationService
+        from .metering_models import BillingCycle  # noqa: PLC0415
+        from .metering_service import AggregationService  # noqa: PLC0415
 
         now = timezone.now()
         expired_cycles = BillingCycle.objects.filter(status="active", period_end__lte=now)
@@ -584,7 +584,7 @@ class BillingCycleManager:
 
         Returns: (generated_count, error_count)
         """
-        from .metering_models import BillingCycle
+        from .metering_models import BillingCycle  # noqa: PLC0415
 
         pending_cycles = BillingCycle.objects.filter(status="closed", invoice__isnull=True)
 

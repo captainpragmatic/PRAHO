@@ -61,7 +61,7 @@ def _is_valid_ip(ip: str) -> bool:
     """Basic IP address validation"""
     try:
         # Simple validation - just check it has correct format
-        import ipaddress
+        import ipaddress  # noqa: PLC0415
 
         ipaddress.ip_address(ip)
         return True
@@ -90,7 +90,7 @@ class PriceSealingService:
             # Check if we're in production (based on DEBUG setting)
             if not getattr(settings, "DEBUG", True):
                 # Production mode - require dedicated secret
-                from django.core.exceptions import ImproperlyConfigured
+                from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
 
                 raise ImproperlyConfigured(
                     "🚨 [Security] PRICE_SEALING_SECRET environment variable is required for production. "
@@ -99,7 +99,7 @@ class PriceSealingService:
                 )
             else:
                 # Development mode - allow fallback with warning
-                import logging
+                import logging  # noqa: PLC0415
 
                 logger = logging.getLogger(__name__)
                 logger.warning(
@@ -243,7 +243,7 @@ class PriceSealingService:
         Raises:
             ValidationError: If prices don't match database or other validation fails
         """
-        from apps.products.models import ProductPrice
+        from apps.products.models import ProductPrice  # noqa: PLC0415
 
         try:
             product_price_id = uuid.UUID(unsealed_data["product_price_id"])

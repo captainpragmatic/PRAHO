@@ -147,7 +147,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def create_payment_intent_direct(
+    def create_payment_intent_direct(  # noqa: PLR0913
         order_id: str,
         amount_cents: int,
         currency: str = "RON",
@@ -200,7 +200,9 @@ class PaymentService:
                     customer_obj = None
                     if customer_id:
                         try:
-                            from apps.customers.models import Customer
+                            from apps.customers.models import (  # noqa: PLC0415
+                                Customer,
+                            )
 
                             customer_obj = Customer.objects.get(id=customer_id)
                         except Customer.DoesNotExist:
@@ -338,7 +340,7 @@ class PaymentService:
             SubscriptionResult with subscription details
         """
         try:
-            from apps.customers.models import Customer
+            from apps.customers.models import Customer  # noqa: PLC0415
 
             customer = Customer.objects.get(id=customer_id)
 
