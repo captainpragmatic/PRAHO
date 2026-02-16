@@ -47,6 +47,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -67,13 +69,13 @@ jobs:
 
     - name: Ruff no-new-debt gate (platform)
       run: |
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
-          BASE_REF="${{ github.event.pull_request.base.sha }}"
-        else
-          BASE_REF="${{ github.event.before }}"
-        fi
+        BASE_REF="${{ github.event.before }}"
         if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
-          BASE_REF="HEAD~1"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
         fi
         echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
         ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py \

@@ -70,6 +70,50 @@ def normalize_path(path_value: str) -> str:
     return raw_path.as_posix().lstrip("./")
 
 
+def git_ref_exists(ref: str) -> bool:
+    result = run_git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], check=False)
+    return result.returncode == 0
+
+
+def resolve_changed_files_for_baseline(baseline_ref: str) -> tuple[list[str], str | None]:
+    primary_range = f"{baseline_ref}...HEAD"
+    primary = run_git(["diff", "--name-only", primary_range], check=False)
+    if primary.returncode == 0:
+        return primary.stdout.splitlines(), baseline_ref
+
+    stderr_tail = primary.stderr.strip()
+    print(
+        f"⚠️ Unable to diff against requested baseline '{baseline_ref}' ({primary_range}).",
+        file=sys.stderr,
+    )
+    if stderr_tail:
+        print(stderr_tail, file=sys.stderr)
+
+    if git_ref_exists("HEAD~1"):
+        fallback_range = "HEAD~1...HEAD"
+        fallback = run_git(["diff", "--name-only", fallback_range], check=False)
+        if fallback.returncode == 0:
+            print(
+                "⚠️ Falling back to baseline 'HEAD~1' for no-new-debt comparison.",
+                file=sys.stderr,
+            )
+            return fallback.stdout.splitlines(), "HEAD~1"
+
+    # Single-commit repositories have no HEAD~1. Compare against an empty tree.
+    root_commit_diff = run_git(["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], check=False)
+    if root_commit_diff.returncode == 0:
+        print(
+            "⚠️ Repository has no parent commit; using current HEAD file list with empty baseline.",
+            file=sys.stderr,
+        )
+        return root_commit_diff.stdout.splitlines(), None
+
+    raise RuntimeError(
+        "Could not determine changed files for Ruff no-new-debt gate. "
+        "Ensure checkout history includes the baseline commit."
+    )
+
+
 def collect_python_candidates(
     *,
     explicit_paths: list[str],
@@ -77,7 +121,9 @@ def collect_python_candidates(
     since: str | None,
     baseline_ref: str,
     path_prefixes: list[str],
-) -> list[str]:
+) -> tuple[list[str], str | None]:
+    effective_baseline_ref: str | None = baseline_ref
+
     if explicit_paths:
         raw_files = [normalize_path(p) for p in explicit_paths]
     elif staged:
@@ -86,7 +132,7 @@ def collect_python_candidates(
         raw_files = run_git(["diff", "--name-only", since]).stdout.splitlines()
     else:
         # Triple-dot gives the range from merge-base(baseline_ref, HEAD) -> HEAD.
-        raw_files = run_git(["diff", "--name-only", f"{baseline_ref}...HEAD"]).stdout.splitlines()
+        raw_files, effective_baseline_ref = resolve_changed_files_for_baseline(baseline_ref)
 
     prefixes = [p.rstrip("/").lstrip("./") for p in path_prefixes if p.strip()]
 
@@ -103,7 +149,7 @@ def collect_python_candidates(
         seen.add(normalized)
         result.append(normalized)
 
-    return sorted(result)
+    return sorted(result), effective_baseline_ref
 
 
 def read_line_from_file(path: Path, line_number: int) -> str:
@@ -185,7 +231,10 @@ def run_ruff_json(
     return issues
 
 
-def build_baseline_tree(*, files: list[str], baseline_ref: str, baseline_root: Path) -> list[Path]:
+def build_baseline_tree(*, files: list[str], baseline_ref: str | None, baseline_root: Path) -> list[Path]:
+    if baseline_ref is None:
+        return []
+
     baseline_files: list[Path] = []
     for rel in files:
         show = run_git(["show", f"{baseline_ref}:{rel}"], check=False)
@@ -236,7 +285,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ruff_bin = resolve_ruff_binary(args.ruff_bin)
-    candidates = collect_python_candidates(
+    candidates, effective_baseline_ref = collect_python_candidates(
         explicit_paths=args.paths,
         staged=args.staged,
         since=args.since,
@@ -253,7 +302,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="ruff-baseline-") as temp_dir:
         baseline_root = Path(temp_dir)
         baseline_files = build_baseline_tree(
-            files=candidates, baseline_ref=args.baseline_ref, baseline_root=baseline_root
+            files=candidates, baseline_ref=effective_baseline_ref, baseline_root=baseline_root
         )
         baseline_violations = run_ruff_json(files=baseline_files, root_for_rel=baseline_root, ruff_bin=ruff_bin)
 
