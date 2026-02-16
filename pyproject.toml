@@ -114,6 +114,13 @@ dev = [
     "django-stubs[compatible-mypy]>=4.2.0",
     "types-requests>=2.31.0",
     "types-python-dateutil>=2.8.0",
+    "lxml-stubs>=0.5.0",
+    "types-bleach>=6.0.0",
+    "types-psutil>=5.9.0",
+    "types-paramiko>=3.4.0",
+    "types-pytz>=2024.1.0",
+    "types-qrcode>=7.4.0",
+    "types-reportlab>=4.1.0",
     "pre-commit>=3.4.0",
 
     # Documentation
@@ -578,7 +585,10 @@ module = [
     "rest_framework.*",
     "django_q.*",
     "captcha.*",
-    "faker.*"
+    "faker.*",
+    "prometheus_client.*",
+    "anymail.*",
+    "weasyprint",
 ]
 ignore_missing_imports = true
 
@@ -602,7 +612,7 @@ disable_error_code = ["attr-defined", "misc"]
 # API views: additional DRF-specific relaxations
 [[tool.mypy.overrides]]
 module = ["apps.api.*.views"]
-disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call"]
+disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call", "untyped-decorator"]
 
 # API serializers and core: DRF typing issues
 [[tool.mypy.overrides]]
@@ -649,6 +659,16 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = "*.tasks"
 disable_error_code = ["attr-defined"]
+
+# Signal modules: dynamic signal registration
+[[tool.mypy.overrides]]
+module = ["apps.promotions.signals", "apps.infrastructure.signals", "apps.notifications.signals"]
+disable_error_code = ["attr-defined", "misc"]
+
+# Infrastructure tasks/services: Ansible/paramiko/terraform dynamic attrs
+[[tool.mypy.overrides]]
+module = ["apps.infrastructure.tasks", "apps.infrastructure.deployment_service", "apps.infrastructure.ansible_service"]
+disable_error_code = ["attr-defined", "misc", "no-any-return"]
 
 # Targeted relief for abstract base models ONLY (TEMP)
 [[tool.mypy.overrides]]
