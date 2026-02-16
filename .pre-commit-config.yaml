@@ -24,6 +24,7 @@ repos:
         exclude: ^(scripts/.*\.py|.*/management/commands/.*\.py)$
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
+        exclude: \.j2$
 
   # ===============================================================================
   # RUFF - STRATEGIC LINTING ⚡🔒
@@ -34,14 +35,6 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.8
     hooks:
-      # Fast linting check - strategic rules only
-      - id: ruff
-        name: "Strategic Linting (Performance & Security)"
-        args:
-          - --config=pyproject.toml
-          - --statistics
-        exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
-
       # Auto-formatting (safe fixes only)
       - id: ruff-format
         name: "Auto-format Python Code"
@@ -54,6 +47,17 @@ repos:
 
   - repo: local
     hooks:
+      # Block only newly-introduced Ruff issues; tolerate historical debt.
+      - id: ruff-new-violations
+        name: "Ruff: Block New Violations Only"
+        entry: .venv/bin/python
+        args: [scripts/ruff_new_violations.py, --staged]
+        language: system
+        files: \.py$
+        exclude: ^migrations/.*\.py$
+        pass_filenames: true
+        require_serial: true
+
       # Only check modified Python files for performance
       - id: type-check-modified
         name: "Type Check Modified Files"

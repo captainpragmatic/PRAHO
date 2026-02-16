@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 PRAHO Platform Test Data Setup Script
 Creates comprehensive test data for development environment.

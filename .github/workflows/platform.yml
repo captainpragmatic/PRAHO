@@ -65,6 +65,21 @@ jobs:
         echo "Running platform unit tests..."
         PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py test tests --verbosity=2
 
+    - name: Ruff no-new-debt gate (platform)
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE_REF="${{ github.event.pull_request.base.sha }}"
+        else
+          BASE_REF="${{ github.event.before }}"
+        fi
+        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+          BASE_REF="HEAD~1"
+        fi
+        echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
+        ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py \
+          --baseline-ref "$BASE_REF" \
+          --path-prefix services/platform
+
     - name: Lint platform code
       run: |
         cd services/platform

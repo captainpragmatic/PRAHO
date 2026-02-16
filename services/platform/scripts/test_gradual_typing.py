@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 PRAHO Platform - Gradual Typing Configuration Test
 

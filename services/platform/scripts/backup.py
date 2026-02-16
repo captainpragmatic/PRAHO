@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 PRAHO PLATFORM - Database Backup Script
 ===============================================================================
@@ -349,7 +348,6 @@ class PragmaticHostBackup:
     def _send_backup_notification(self, success: bool, backup_name: str, details: str) -> None:
         """Send backup notification email"""
         try:
-
             if success:
                 subject = f"PragmaticHost: Backup Successful - {backup_name}"
                 message = f"Backup completed successfully.\n\nDetails: {details}"

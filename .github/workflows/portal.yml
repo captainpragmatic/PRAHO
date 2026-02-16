@@ -77,6 +77,21 @@ jobs:
         echo "Running portal unit tests..."
         PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/pytest tests/ -v --tb=short --maxfail=10
 
+    - name: Ruff no-new-debt gate (portal)
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE_REF="${{ github.event.pull_request.base.sha }}"
+        else
+          BASE_REF="${{ github.event.before }}"
+        fi
+        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+          BASE_REF="HEAD~1"
+        fi
+        echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
+        ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py \
+          --baseline-ref "$BASE_REF" \
+          --path-prefix services/portal
+
     - name: Lint portal code
       run: |
         cd services/portal
