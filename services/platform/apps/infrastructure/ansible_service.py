@@ -193,7 +193,7 @@ class AnsibleService:
             logger.info(f"📜 [Ansible] Running: {playbook} on {deployment.ipv4_address}")
 
             # Execute
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: PLW1510, S603
                 cmd,
                 cwd=ANSIBLE_BASE_PATH,
                 capture_output=True,
@@ -322,7 +322,7 @@ ansible_python_interpreter=/usr/bin/python3
 
             # Try to extract host stats
             # Format: hostname : ok=X changed=Y unreachable=Z failed=W
-            import re
+            import re  # noqa: PLC0415
 
             match = re.search(
                 r"ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)",
@@ -353,7 +353,7 @@ _ansible_service: AnsibleService | None = None
 
 def get_ansible_service() -> AnsibleService:
     """Get global Ansible service instance"""
-    global _ansible_service
+    global _ansible_service  # noqa: PLW0603
     if _ansible_service is None:
         _ansible_service = AnsibleService()
     return _ansible_service

@@ -23,6 +23,6 @@ class IntegrationsConfig(AppConfig):
     def ready(self) -> None:
         """Import signal handlers when the app is ready"""
         with contextlib.suppress(ImportError):
-            from . import (  # noqa: PLC0415  # Django pattern: import signals in ready() to avoid circular imports
+            from . import (  # Django pattern: import signals in ready() to avoid circular imports
                 signals,  # noqa: F401
             )

@@ -7,16 +7,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
 from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
-    from apps.customers.models import Customer
+    pass
 
 logger = logging.getLogger(__name__)
 

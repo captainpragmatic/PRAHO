@@ -7,10 +7,10 @@ Role-based access control for infrastructure management operations.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
-from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 

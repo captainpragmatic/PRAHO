@@ -331,7 +331,9 @@ def domain_detail(request: HttpRequest, domain_id: str) -> HttpResponse:
 
 
 @login_required
-def domain_register(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912 # Domain registration flow requires multiple validation branches
+def domain_register(  # noqa: PLR0912 - Domain registration flow requires multiple validation branches
+    request: HttpRequest,
+) -> HttpResponse:
     """🆕 Domain registration form and availability check"""
     # Type guard: @login_required ensures authenticated user
     user = cast(User, request.user)

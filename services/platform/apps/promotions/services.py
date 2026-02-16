@@ -23,7 +23,6 @@ from .models import (
     LoyaltyProgram,
     LoyaltyTier,
     LoyaltyTransaction,
-    PromotionCampaign,
     PromotionRule,
     Referral,
     ReferralCode,
@@ -170,7 +169,7 @@ class CouponService:
         return cls._validate_coupon_instance(coupon, order, customer, cached_items)
 
     @classmethod
-    def _validate_coupon_instance(
+    def _validate_coupon_instance(  # noqa: C901, PLR0911, PLR0912
         cls,
         coupon: Coupon,
         order: Order,
@@ -214,13 +213,12 @@ class CouponService:
             )
 
         # Minimum items check
-        if coupon.min_order_items:
-            if len(cached_items) < coupon.min_order_items:
-                return ValidationResult(
-                    is_valid=False,
-                    error_message=f"Minimum {coupon.min_order_items} items required",
-                    error_code="MIN_ITEMS_NOT_MET",
-                )
+        if coupon.min_order_items and len(cached_items) < coupon.min_order_items:
+            return ValidationResult(
+                is_valid=False,
+                error_message=f"Minimum {coupon.min_order_items} items required",
+                error_code="MIN_ITEMS_NOT_MET",
+            )
 
         # Product restrictions check
         if not coupon.applies_to_all_products:
@@ -233,13 +231,17 @@ class CouponService:
                 )
 
         # Currency check for fixed discounts
-        if coupon.discount_type == "fixed" and coupon.currency:
-            if order.currency and order.currency.code != coupon.currency.code:
-                return ValidationResult(
-                    is_valid=False,
-                    error_message=f"Coupon only valid for {coupon.currency.code} orders",
-                    error_code="CURRENCY_MISMATCH",
-                )
+        if (
+            coupon.discount_type == "fixed"
+            and coupon.currency
+            and order.currency
+            and order.currency.code != coupon.currency.code
+        ):
+            return ValidationResult(
+                is_valid=False,
+                error_message=f"Coupon only valid for {coupon.currency.code} orders",
+                error_code="CURRENCY_MISMATCH",
+            )
 
         # Check if already applied to this order
         if CouponRedemption.objects.filter(coupon=coupon, order=order).exists():
@@ -453,7 +455,7 @@ class CouponService:
 
     @classmethod
     @transaction.atomic
-    def apply_coupon(
+    def apply_coupon(  # noqa: PLR0913
         cls,
         code: str,
         order: Order,
@@ -702,10 +704,7 @@ class PromotionRuleService:
             .order_by("priority")
         )
 
-        applicable = []
-        for rule in queryset:
-            if cls._rule_matches_order(rule, order, cached_items):
-                applicable.append(rule)
+        applicable = [rule for rule in queryset if cls._rule_matches_order(rule, order, cached_items)]
 
         return applicable
 
@@ -743,9 +742,8 @@ class PromotionRuleService:
 
         # Customer type
         customer_types = conditions.get("customer_types")
-        if customer_types and order.customer:
-            if order.customer.customer_type not in customer_types:
-                return False
+        if customer_types and order.customer and order.customer.customer_type not in customer_types:
+            return False
 
         # Product type requirements - use cached items
         required_product_types = conditions.get("required_product_types")
@@ -878,10 +876,9 @@ class PromotionRuleService:
                 if base_amount_cents >= threshold:
                     applicable_tier = tier
                     break
-            elif threshold_type == "quantity":
-                if total_quantity >= threshold:
-                    applicable_tier = tier
-                    break
+            elif threshold_type == "quantity" and total_quantity >= threshold:
+                applicable_tier = tier
+                break
 
         if not applicable_tier:
             return 0
@@ -1148,7 +1145,7 @@ class LoyaltyService:
         program: LoyaltyProgram | None = None,
     ) -> CustomerLoyalty:
         """Get or create loyalty membership for a customer."""
-        from .models import LoyaltyProgram
+        from .models import LoyaltyProgram  # noqa: PLC0415
 
         if program is None:
             program = LoyaltyProgram.objects.filter(is_active=True).first()
@@ -1170,7 +1167,6 @@ class LoyaltyService:
     @classmethod
     def _assign_initial_tier(cls, membership: CustomerLoyalty) -> None:
         """Assign initial tier to new member."""
-        from .models import LoyaltyTier
 
         initial_tier = (
             LoyaltyTier.objects.filter(
@@ -1248,8 +1244,7 @@ class LoyaltyService:
         program = membership.program
 
         # Validate points
-        if points > membership.points_balance:
-            points = membership.points_balance
+        points = min(points, membership.points_balance)
 
         if points < program.min_points_to_redeem:
             return DiscountResult()
@@ -1293,7 +1288,6 @@ class LoyaltyService:
     @classmethod
     def _check_tier_upgrade(cls, membership: CustomerLoyalty) -> None:
         """Check and apply tier upgrade if eligible."""
-        from .models import LoyaltyTier
 
         current_tier_order = membership.current_tier.sort_order if membership.current_tier else -1
 

@@ -182,10 +182,10 @@ class NodeValidationService:
 
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507
 
             # Load private key
-            import io
+            import io  # noqa: PLC0415
 
             key_file = io.StringIO(private_key_content)
             pkey = paramiko.Ed25519Key.from_private_key(key_file)
@@ -268,10 +268,10 @@ class NodeValidationService:
             },
         )
 
-    def _check_virtualmin(self, deployment: NodeDeployment) -> ValidationResult:
+    def _check_virtualmin(self, deployment: NodeDeployment) -> ValidationResult:  # noqa: PLR0911
         """Check Virtualmin API is accessible"""
-        import urllib.error
-        import urllib.request
+        import urllib.error  # noqa: PLC0415
+        import urllib.request  # noqa: PLC0415
 
         url = f"https://{deployment.ipv4_address}:10000/"
 
@@ -281,10 +281,10 @@ class NodeValidationService:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
 
-            request = urllib.request.Request(url, method="HEAD")
+            request = urllib.request.Request(url, method="HEAD")  # noqa: S310
             request.add_header("User-Agent", "PRAHO-Validation/1.0")
 
-            with urllib.request.urlopen(request, timeout=self.timeout, context=ctx) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=ctx) as response:  # noqa: S310
                 status_code = response.getcode()
 
                 # Webmin typically returns 200 or 401 (needs auth)
@@ -416,7 +416,7 @@ _validation_service: NodeValidationService | None = None
 
 def get_validation_service() -> NodeValidationService:
     """Get global validation service instance"""
-    global _validation_service
+    global _validation_service  # noqa: PLW0603
     if _validation_service is None:
         _validation_service = NodeValidationService()
     return _validation_service

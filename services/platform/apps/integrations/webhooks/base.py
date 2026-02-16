@@ -101,7 +101,7 @@ class BaseWebhookProcessor(ABC):
         # Validate that signature implementation is secure
         self._validate_signature_implementation()
 
-    def process_webhook(
+    def process_webhook(  # noqa: PLR0913
         self,
         payload: dict[str, Any],
         signature: str = "",
@@ -122,10 +122,10 @@ class BaseWebhookProcessor(ABC):
             metadata = WebhookRequestMetadata(signature, headers, raw_body, ip_address, user_agent)
             result = (
                 self._validate_payload(payload)
-                .and_then(lambda event_info: self._check_duplicates(event_info))
+                .and_then(self._check_duplicates)
                 .and_then(lambda event_info: self._create_context(payload, metadata, event_info))
-                .and_then(lambda context: self._verify_signature_with_context(context))
-                .and_then(lambda context: self._create_and_process_event(context))
+                .and_then(self._verify_signature_with_context)
+                .and_then(self._create_and_process_event)
             )
 
             # Type-safe handling of Result union types using match statement
@@ -212,7 +212,7 @@ class BaseWebhookProcessor(ABC):
         If a concurrent request creates the same event, IntegrityError is caught and
         handled as a duplicate.
         """
-        from django.db import IntegrityError
+        from django.db import IntegrityError  # noqa: PLC0415
 
         event_id = context.event_info["event_id"]
         event_type = context.event_info["event_type"]

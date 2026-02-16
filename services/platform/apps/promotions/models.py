@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import F, Sum
+from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -34,8 +34,6 @@ from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
-    from apps.orders.models import Order
-    from apps.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -210,9 +208,7 @@ class PromotionCampaign(models.Model):
         now = timezone.now()
         if self.start_date > now:
             return False
-        if self.end_date and self.end_date < now:
-            return False
-        return True
+        return not (self.end_date and self.end_date < now)
 
     @property
     def is_within_budget(self) -> bool:
@@ -534,7 +530,7 @@ class Coupon(models.Model):
             return max(0, self.max_total_uses - self.total_uses)
         return None
 
-    def can_be_used(self) -> tuple[bool, str]:
+    def can_be_used(self) -> tuple[bool, str]:  # noqa: PLR0911
         """
         Check if coupon can be used (basic validity check).
         Returns (is_valid, reason_if_invalid).
@@ -557,7 +553,7 @@ class Coupon(models.Model):
         """Get number of times customer has used this coupon."""
         return self.redemptions.filter(customer=customer, status="applied").count()
 
-    def can_customer_use(self, customer: Customer | None) -> tuple[bool, str]:
+    def can_customer_use(self, customer: Customer | None) -> tuple[bool, str]:  # noqa: C901, PLR0911, PLR0912
         """
         Check if specific customer can use this coupon.
         Returns (is_valid, reason_if_invalid).
@@ -583,12 +579,11 @@ class Coupon(models.Model):
         elif self.customer_target == "existing":
             if not customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
                 return False, "Coupon only valid for existing customers"
-        elif self.customer_target == "specific":
-            if not self.assigned_customer:
-                return False, "Coupon configuration error"
+        elif self.customer_target == "specific" and not self.assigned_customer:
+            return False, "Coupon configuration error"
 
         # First order only check
-        if self.first_order_only:
+        if self.first_order_only:  # noqa: SIM102
             if customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
                 return False, "Coupon only valid for first order"
 
@@ -625,7 +620,7 @@ class Coupon(models.Model):
         if max_attempts is None:
             max_attempts = cls.MAX_CODE_GENERATION_ATTEMPTS
 
-        for attempt in range(max_attempts):
+        for _attempt in range(max_attempts):
             random_part = "".join(secrets.choice(COUPON_CODE_CHARS) for _ in range(length))
             code = f"{prefix}{random_part}" if prefix else random_part
             if not cls.objects.filter(code=code).exists():
@@ -662,7 +657,7 @@ class Coupon(models.Model):
             ValidationError: If validate=True and any coupon fails validation.
         """
         coupons = []
-        for _ in range(count):
+        for _ in range(count):  # noqa: F402
             code = cls.generate_code(length=length, prefix=prefix)
             coupon = cls(code=code, **coupon_defaults)
 
@@ -975,9 +970,7 @@ class PromotionRule(models.Model):
             return False
         if self.valid_until and self.valid_until < now:
             return False
-        if self.campaign and not self.campaign.can_apply():
-            return False
-        return True
+        return not (self.campaign and not self.campaign.can_apply())
 
 
 # ===============================================================================
@@ -1088,7 +1081,7 @@ class ReferralCode(models.Model):
         if not name_part:
             name_part = "REF"
 
-        for attempt in range(max_attempts):
+        for _attempt in range(max_attempts):
             random_part = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
             code = f"{name_part}{random_part}"
             if not cls.objects.filter(code=code).exists():
@@ -1282,9 +1275,7 @@ class GiftCard(models.Model):
             return False
         if self.current_balance_cents <= 0:
             return False
-        if self.valid_until and timezone.now() > self.valid_until:
-            return False
-        return True
+        return not (self.valid_until and timezone.now() > self.valid_until)
 
     @classmethod
     def generate_code(cls, max_attempts: int = 100) -> str:
@@ -1299,8 +1290,8 @@ class GiftCard(models.Model):
         Raises:
             RuntimeError: If unable to generate a unique code within max_attempts.
         """
-        for attempt in range(max_attempts):
-            # Format: XXXX-XXXX-XXXX-XXXX
+        for _attempt in range(max_attempts):
+            # Format: XXXX-XXXX-XXXX-XXXX  # noqa: ERA001
             parts = [
                 "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4)) for _ in range(4)
             ]
@@ -1338,7 +1329,7 @@ class GiftCardTransaction(models.Model):
     )
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
 
-    # Amount (positive = credit, negative = debit)
+    # Amount (positive = credit, negative = debit)  # noqa: ERA001
     amount_cents = models.BigIntegerField(help_text=_("Transaction amount in cents"))
     balance_after_cents = models.BigIntegerField(help_text=_("Balance after transaction"))
 
@@ -1614,7 +1605,7 @@ class LoyaltyTransaction(models.Model):
     )
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
 
-    # Points (positive = credit, negative = debit)
+    # Points (positive = credit, negative = debit)  # noqa: ERA001
     points = models.IntegerField(help_text=_("Points change (positive or negative)"))
     balance_after = models.PositiveIntegerField(help_text=_("Balance after transaction"))
 

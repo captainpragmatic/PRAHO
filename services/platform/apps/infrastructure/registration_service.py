@@ -52,11 +52,16 @@ class NodeRegistrationService:
             Result with VirtualminServer instance or error
         """
         # Import here to avoid circular imports
-        from apps.provisioning.virtualmin_models import VirtualminServer
-        from apps.common.credential_vault import CredentialData, get_credential_vault
+        from apps.common.credential_vault import (  # noqa: PLC0415
+            CredentialData,
+            get_credential_vault,
+        )
+        from apps.provisioning.virtualmin_models import (  # noqa: PLC0415
+            VirtualminServer,
+        )
 
         # Validate deployment status
-        if deployment.status != "completed" and deployment.status != "registering":
+        if deployment.status not in {"completed", "registering"}:
             return Err(f"Cannot register node in status '{deployment.status}'")
 
         if not deployment.ipv4_address:
@@ -156,11 +161,15 @@ class NodeRegistrationService:
         try:
             with transaction.atomic():
                 # Remove credentials from vault
-                from apps.common.credential_vault import get_credential_vault
+                from apps.common.credential_vault import (  # noqa: PLC0415
+                    get_credential_vault,
+                )
 
-                vault = get_credential_vault()
+                get_credential_vault()
                 # Deactivate credential if it exists
-                from apps.common.credential_vault import EncryptedCredential
+                from apps.common.credential_vault import (  # noqa: PLC0415
+                    EncryptedCredential,
+                )
 
                 try:
                     credential = EncryptedCredential.objects.get(
@@ -183,7 +192,7 @@ class NodeRegistrationService:
                     # Check for existing accounts first
                     if hasattr(server, "accounts") and server.accounts.exists():
                         logger.warning(
-                            f"📝 [Registration] VirtualminServer has accounts, deactivating instead of deleting"
+                            "📝 [Registration] VirtualminServer has accounts, deactivating instead of deleting"
                         )
                         server.is_active = False
                         server.save(update_fields=["is_active", "updated_at"])
@@ -260,7 +269,7 @@ _registration_service: NodeRegistrationService | None = None
 
 def get_registration_service() -> NodeRegistrationService:
     """Get global registration service instance"""
-    global _registration_service
+    global _registration_service  # noqa: PLW0603
     if _registration_service is None:
         _registration_service = NodeRegistrationService()
     return _registration_service

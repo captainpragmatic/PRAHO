@@ -43,7 +43,7 @@ class Command(BaseCommand):
             help="Force update existing settings",
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:  # noqa: C901, PLR0912, PLR0915
         """Execute the command"""
         force = options.get("force", False)
         secret_key = options.get("secret_key")
@@ -54,7 +54,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("💳 Setting up Stripe payment integration settings..."))
 
         # Ensure integrations category exists
-        integrations_category, created = SettingCategory.objects.get_or_create(
+        _integrations_category, created = SettingCategory.objects.get_or_create(
             key="integrations",
             defaults={
                 "name": "Integrations",

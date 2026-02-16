@@ -474,7 +474,7 @@ class ProductPrice(models.Model):
         """Get effective monthly price in currency units"""
         return Decimal(self.effective_monthly_price_cents) / 100
 
-    def clean(self) -> None:
+    def clean(self) -> None:  # noqa: C901, PLR0912
         """🔒 Validate pricing constraints and log security validation"""
         super().clean()
 

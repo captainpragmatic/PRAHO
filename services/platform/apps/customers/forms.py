@@ -1322,7 +1322,7 @@ class CustomerEditForm(forms.Form):
 
         return cleaned_data
 
-    def save(self, user: User | None = None) -> Customer:
+    def save(self, user: User | None = None) -> Customer:  # noqa: PLR0915
         """Update customer and all related profiles"""
         data = self.cleaned_data
 

@@ -7,6 +7,7 @@ import os
 import sys
 from datetime import timedelta
 from decimal import Decimal
+from typing import Any
 
 import django
 
@@ -17,33 +18,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 django.setup()
 
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from django.utils import timezone
+from django.contrib.auth import get_user_model  # noqa: E402
+from django.db import transaction  # noqa: E402
+from django.utils import timezone  # noqa: E402
 
-from apps.billing.models import Currency, Invoice, ProformaInvoice
-from apps.customers.models import (
+from apps.billing.models import Currency, Invoice, ProformaInvoice  # noqa: E402
+from apps.customers.models import (  # noqa: E402
     Customer,
     CustomerAddress,
     CustomerBillingProfile,
     CustomerTaxProfile,
 )
-from apps.orders.models import Order, OrderItem
-from apps.products.models import (
+from apps.orders.models import Order, OrderItem  # noqa: E402
+from apps.products.models import (  # noqa: E402
     Product,
     ProductBundle,
     ProductBundleItem,
     ProductPrice,
     ProductRelationship,
 )
-from apps.provisioning.models import Service, ServicePlan
-from apps.tickets.models import SupportCategory, Ticket, TicketComment
-from apps.users.models import CustomerMembership
+from apps.provisioning.models import Service, ServicePlan  # noqa: E402
+from apps.tickets.models import SupportCategory, Ticket, TicketComment  # noqa: E402
+from apps.users.models import CustomerMembership  # noqa: E402
 
 User = get_user_model()
 
 
-def check_existing_data():
+def check_existing_data() -> bool:
     """Check if we already have test data."""
     users_count = User.objects.count()
     customers_count = Customer.objects.count()
@@ -51,13 +52,13 @@ def check_existing_data():
 
     if users_count > 0 or customers_count > 0 or memberships_count > 0:
         print(
-            f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships"
+            f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships"  # noqa: RUF001
         )
         return True
     return False
 
 
-def create_test_data():
+def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
     """Create comprehensive test data for all models."""
     print("🚀 Creating comprehensive test data...")
 
@@ -78,7 +79,7 @@ def create_test_data():
             superuser.save()
             print("✅ Created superuser")
         else:
-            print("ℹ️  Superuser already exists")
+            print("ℹ️  Superuser already exists")  # noqa: RUF001
 
         # 2. Create test customer
         customer, created = Customer.objects.get_or_create(
@@ -96,10 +97,10 @@ def create_test_data():
         if created:
             print("✅ Created test customer")
         else:
-            print("ℹ️  Test customer already exists")
+            print("ℹ️  Test customer already exists")  # noqa: RUF001
 
         # 3. Create tax profile for customer
-        tax_profile, created = CustomerTaxProfile.objects.get_or_create(
+        _tax_profile, created = CustomerTaxProfile.objects.get_or_create(
             customer=customer,
             defaults={
                 "cui": "RO12345678",
@@ -112,7 +113,7 @@ def create_test_data():
             print("✅ Created tax profile")
 
         # 4. Create billing profile for customer
-        billing_profile, created = CustomerBillingProfile.objects.get_or_create(
+        _billing_profile, created = CustomerBillingProfile.objects.get_or_create(
             customer=customer,
             defaults={
                 "payment_terms": 30,
@@ -126,7 +127,7 @@ def create_test_data():
             print("✅ Created billing profile")
 
         # 5. Create primary address for customer
-        primary_address, created = CustomerAddress.objects.get_or_create(
+        _primary_address, created = CustomerAddress.objects.get_or_create(
             customer=customer,
             address_type="primary",
             defaults={
@@ -157,10 +158,10 @@ def create_test_data():
             customer_user.save()
             print("✅ Created customer user")
         else:
-            print("ℹ️  Customer user already exists")
+            print("ℹ️  Customer user already exists")  # noqa: RUF001
 
         # 7. Create membership relationship
-        membership, created = CustomerMembership.objects.get_or_create(
+        _membership, created = CustomerMembership.objects.get_or_create(
             user=customer_user,
             customer=customer,
             defaults={
@@ -248,7 +249,7 @@ def create_test_data():
                 print("✅ Created service plan")
 
             # Now create the service
-            service, created = Service.objects.get_or_create(
+            _service, created = Service.objects.get_or_create(
                 customer=customer,
                 service_name="testcompany.com Hosting",
                 defaults={
@@ -283,7 +284,7 @@ def create_test_data():
     return superuser, customer_user, customer
 
 
-def create_service_if_missing(customer):
+def create_service_if_missing(customer: Any) -> None:
     """Create service plan and service if they don't exist."""
     try:
         # First create a service plan (required dependency)
@@ -305,7 +306,7 @@ def create_service_if_missing(customer):
             print("✅ Created service plan")
 
         # Now create the service for this customer
-        service, created = Service.objects.get_or_create(
+        _service, created = Service.objects.get_or_create(
             customer=customer,
             service_name=f"{customer.name} Hosting",
             defaults={
@@ -326,7 +327,7 @@ def create_service_if_missing(customer):
         print(f"⚠️  Service creation failed: {e}")
 
 
-def create_products_if_missing():
+def create_products_if_missing() -> None:  # noqa: C901, PLR0912
     """Create comprehensive product catalog with all related models."""
     try:
         # Ensure currencies exist
@@ -583,7 +584,7 @@ def create_products_if_missing():
         prices_created = 0
         for price_data in prices_data:
             product = created_products[price_data["product"]]
-            price, created = ProductPrice.objects.get_or_create(
+            _price, created = ProductPrice.objects.get_or_create(
                 product=product,
                 currency=price_data["currency"],
                 billing_period=price_data["period"],
@@ -622,7 +623,7 @@ def create_products_if_missing():
             source_product = created_products[rel_data["source"]]
             target_product = created_products[rel_data["target"]]
 
-            relationship, created = ProductRelationship.objects.get_or_create(
+            _relationship, created = ProductRelationship.objects.get_or_create(
                 source_product=source_product,
                 target_product=target_product,
                 relationship_type=rel_data["type"],
@@ -698,12 +699,12 @@ def create_products_if_missing():
 
     except Exception as e:
         print(f"⚠️  Products creation failed: {e}")
-        import traceback
+        import traceback  # noqa: PLC0415
 
         traceback.print_exc()
 
 
-def create_orders_if_missing(customer, customer_user):
+def create_orders_if_missing(customer: Any, customer_user: Any) -> None:
     """Create sample orders with various statuses."""
     try:
         # Get currencies
@@ -817,7 +818,7 @@ def create_orders_if_missing(customer, customer_user):
         print(f"⚠️  Orders creation failed: {e}")
 
 
-def create_billing_data_if_missing(customer):
+def create_billing_data_if_missing(customer: Any) -> None:
     """Create sample invoices and proformas with different currencies and VAT."""
     try:
         # Ensure currencies exist
@@ -862,7 +863,7 @@ def create_billing_data_if_missing(customer):
 
         invoice_count = 0
         for invoice_data in invoices_data:
-            invoice, created = Invoice.objects.get_or_create(
+            _invoice, created = Invoice.objects.get_or_create(
                 customer=customer,
                 number=invoice_data["number"],
                 defaults={
@@ -921,7 +922,7 @@ def create_billing_data_if_missing(customer):
 
         proforma_count = 0
         for proforma_data in proformas_data:
-            proforma, created = ProformaInvoice.objects.get_or_create(
+            _proforma, created = ProformaInvoice.objects.get_or_create(
                 customer=customer,
                 number=proforma_data["number"],
                 defaults={
@@ -944,7 +945,7 @@ def create_billing_data_if_missing(customer):
         print(f"⚠️  Billing data creation failed: {e}")
 
 
-def create_tickets_if_missing(customer, customer_user, superuser):
+def create_tickets_if_missing(customer: Any, customer_user: Any, superuser: Any) -> None:
     """Create sample tickets with different statuses and replies."""
     try:
         # First create a support category
@@ -1030,7 +1031,7 @@ def create_tickets_if_missing(customer, customer_user, superuser):
                         time_spent=0.5,
                     )
 
-                elif ticket_data["replies"] == 5:
+                elif ticket_data["replies"] == 5:  # noqa: PLR2004
                     # 5-reply conversation between customer and support
                     comments_data = [
                         {
@@ -1087,7 +1088,7 @@ def create_tickets_if_missing(customer, customer_user, superuser):
         print(f"⚠️  Ticket creation failed: {e}")
 
 
-def print_credentials(superuser, customer_user, customer):
+def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None:  # noqa: C901, PLR0915
     """Print login credentials and test data info."""
     print("\n" + "=" * 60)
     print("🎉 PRAHO Platform Test Data Ready!")
@@ -1116,11 +1117,11 @@ def print_credentials(superuser, customer_user, customer):
     print(f"   🔗 Memberships: {memberships_count}")
 
     if customers_count > 1:
-        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")
+        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")  # noqa: RUF001
 
     # Check optional models
     try:
-        from apps.products.models import Product
+        from apps.products.models import Product  # noqa: PLC0415
 
         products_count = Product.objects.count()
         print(f"   📦 Products: {products_count}")
@@ -1130,7 +1131,7 @@ def print_credentials(superuser, customer_user, customer):
         pass
 
     try:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         orders_count = Order.objects.count()
         print(f"   🛒 Orders: {orders_count}")
@@ -1140,7 +1141,7 @@ def print_credentials(superuser, customer_user, customer):
         pass
 
     try:
-        from apps.provisioning.models import Service
+        from apps.provisioning.models import Service  # noqa: PLC0415
 
         services_count = Service.objects.count()
         print(f"   🚀 Services: {services_count}")
@@ -1150,7 +1151,7 @@ def print_credentials(superuser, customer_user, customer):
         pass
 
     try:
-        from apps.billing.models import Invoice, ProformaInvoice
+        from apps.billing.models import Invoice, ProformaInvoice  # noqa: PLC0415
 
         invoices_count = Invoice.objects.count()
         proformas_count = ProformaInvoice.objects.count()
@@ -1162,7 +1163,7 @@ def print_credentials(superuser, customer_user, customer):
         pass
 
     try:
-        from apps.tickets.models import Ticket
+        from apps.tickets.models import Ticket  # noqa: PLC0415
 
         tickets_count = Ticket.objects.count()
         print(f"   🎫 Tickets: {tickets_count}")
@@ -1175,10 +1176,10 @@ def print_credentials(superuser, customer_user, customer):
     print("=" * 60)
 
 
-def main():
+def main() -> None:  # noqa: C901, PLR0912, PLR0915
     """Main function."""
     if check_existing_data():
-        print("ℹ️  Test data already exists. Retrieving existing data...")
+        print("ℹ️  Test data already exists. Retrieving existing data...")  # noqa: RUF001
 
         try:
             # Get existing test accounts - try both possible emails

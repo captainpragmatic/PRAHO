@@ -1164,7 +1164,7 @@ def _execute_bulk_backup(accounts: list[VirtualminAccount], form_data: dict[str,
 
         for i in range(0, len(accounts), batch_size):
             batch = accounts[i : i + batch_size]
-            logger.debug(f"📦 [Bulk Backup] Processing batch {i//batch_size + 1} ({len(batch)} accounts)")
+            logger.debug(f"📦 [Bulk Backup] Processing batch {i // batch_size + 1} ({len(batch)} accounts)")
 
             for account in batch:
                 try:

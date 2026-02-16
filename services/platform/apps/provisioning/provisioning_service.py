@@ -269,12 +269,12 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_reactivated": 0}
 
     @staticmethod
-    def provision_service(service: Service) -> dict[str, str]:
+    def provision_service(service: Service) -> dict[str, str]:  # noqa: PLR0911, PLR0915
         """
         Provision a new service after order confirmation.
         This triggers the actual infrastructure setup for the service.
         """
-        from django.utils import timezone
+        from django.utils import timezone  # noqa: PLC0415
 
         try:
             logger.info(f"🚀 [Provisioning] Provisioning service {service.id} ({service.service_name})")
@@ -307,12 +307,12 @@ class ProvisioningService:
                 # Implement actual provisioning based on control panel type
                 if service.server.control_panel == "Virtualmin":
                     try:
-                        from .virtualmin_gateway import VirtualminGateway, VirtualminConfig
-                        from .virtualmin_gateway import (
+                        from .virtualmin_gateway import (  # noqa: PLC0415
                             VirtualminAuthError,
-                            VirtualminTransientError,
-                            VirtualminConflictExistsError,
+                            VirtualminConfig,
+                            VirtualminGateway,
                             VirtualminQuotaExceededError,
+                            VirtualminTransientError,
                         )
 
                         # Create gateway and test connection

@@ -15,15 +15,15 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
-    from apps.users.models import User
+    pass
 
 
 # Hostname format validator: prd-sha-het-de-fsn1-001
@@ -341,7 +341,7 @@ class NodeDeployment(models.Model):
     )
 
     # Node identity (auto-generated from naming convention)
-    # Format: {env}-{type}-{provider.code}-{region.country_code}-{region.normalized_code}-{number}
+    # Format: {env}-{type}-{provider.code}-{region.country_code}-{region.normalized_code}-{number}  # noqa: ERA001
     # Example: prd-sha-het-de-fsn1-001
     hostname = models.CharField(
         max_length=23,
@@ -547,7 +547,7 @@ class NodeDeployment(models.Model):
             f"{self.node_number:03d}"
         )
 
-    def save(self, *args, **kwargs) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
         """Auto-generate hostname on save"""
         if not self.hostname:
             self.hostname = self.generate_hostname()
@@ -650,7 +650,7 @@ class NodeDeployment(models.Model):
 
     def calculate_running_hours(self) -> float:
         """Calculate hours the node has been running"""
-        from django.utils import timezone
+        from django.utils import timezone  # noqa: PLC0415
 
         if not self.started_at:
             return 0.0

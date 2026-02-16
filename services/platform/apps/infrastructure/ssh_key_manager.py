@@ -18,7 +18,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -111,8 +111,8 @@ class SSHKeyManager:
         ).decode("utf-8")
 
         # Calculate fingerprint (using SHA256)
-        import hashlib
-        import base64
+        import base64  # noqa: PLC0415
+        import hashlib  # noqa: PLC0415
 
         # The public key bytes in raw format for fingerprint
         raw_public = public_key.public_bytes(
@@ -486,7 +486,7 @@ _ssh_key_manager: SSHKeyManager | None = None
 
 def get_ssh_key_manager() -> SSHKeyManager:
     """Get global SSH key manager instance"""
-    global _ssh_key_manager
+    global _ssh_key_manager  # noqa: PLW0603
     if _ssh_key_manager is None:
         _ssh_key_manager = SSHKeyManager()
     return _ssh_key_manager

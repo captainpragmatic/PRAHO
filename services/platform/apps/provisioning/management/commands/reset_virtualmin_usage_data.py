@@ -55,7 +55,6 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Successfully reset usage data for {updated_count} accounts. "
-                f"Run account sync to fetch real API data."
+                f"Successfully reset usage data for {updated_count} accounts. Run account sync to fetch real API data."
             )
         )

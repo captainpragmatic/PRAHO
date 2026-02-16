@@ -232,7 +232,7 @@ class ProviderCommandResult:
     command: str
 
 
-def run_provider_command(
+def run_provider_command(  # noqa: PLR0911
     provider_type: str,
     operation: str,
     credentials: dict[str, str],
@@ -290,7 +290,7 @@ def run_provider_command(
     except KeyError as e:
         return Err(f"Missing required parameter: {e}")
 
-    cmd = [tool_path] + cmd_args
+    cmd = [tool_path, *cmd_args]
     cmd_str = " ".join(cmd)
 
     # Build environment with credentials
@@ -308,7 +308,7 @@ def run_provider_command(
 
     # Execute command
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: PLW1510, S603
             cmd,
             capture_output=True,
             text=True,
@@ -502,7 +502,7 @@ def validate_provider_prerequisites(
     cli_path = shutil.which(cli_tool) if cli_tool else None
     if not cli_path:
         return Err(
-            f"CLI tool '{cli_tool}' not found for provider '{provider_type}'. " f"Please install it before deploying."
+            f"CLI tool '{cli_tool}' not found for provider '{provider_type}'. Please install it before deploying."
         )
     details["cli_tool"] = cli_tool
     details["cli_path"] = cli_path
@@ -538,7 +538,7 @@ def get_credentials_for_provider(
     Returns:
         Result with credentials dict or error
     """
-    from apps.common.credential_vault import get_credential_vault
+    from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
 
     vault = get_credential_vault()
     config = get_provider_config(provider.provider_type)

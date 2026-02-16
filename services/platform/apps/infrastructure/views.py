@@ -20,7 +20,6 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.common.credential_vault import get_credential_vault
 from apps.settings.services import SettingsService
 
-from .audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from .forms import (
     CloudProviderForm,
     DeploymentDestroyForm,
@@ -33,16 +32,9 @@ from .models import (
     NodeDeploymentLog,
     NodeRegion,
     NodeSize,
-    PanelType,
 )
 from .permissions import (
-    can_deploy_nodes,
-    can_destroy_nodes,
     can_manage_deployments,
-    can_manage_providers,
-    can_manage_regions,
-    can_manage_sizes,
-    can_view_infrastructure,
     require_deploy_permission,
     require_deployment_management,
     require_destroy_permission,
@@ -899,7 +891,7 @@ def hostname_preview_api(request: HttpRequest) -> JsonResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: PROVIDERS
+# CONFIGURATION: PROVIDERS  # noqa: ERA001
 # ===============================================================================
 
 
@@ -1016,7 +1008,7 @@ def provider_edit(request: HttpRequest, pk) -> HttpResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: SIZES
+# CONFIGURATION: SIZES  # noqa: ERA001
 # ===============================================================================
 
 
@@ -1111,7 +1103,7 @@ def size_edit(request: HttpRequest, pk) -> HttpResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: REGIONS
+# CONFIGURATION: REGIONS  # noqa: ERA001
 # ===============================================================================
 
 
@@ -1174,10 +1166,10 @@ def region_toggle(request: HttpRequest, pk) -> HttpResponse:
 @require_infrastructure_view
 def cost_dashboard(request: HttpRequest) -> HttpResponse:
     """Cost tracking dashboard with summary and trends."""
-    from datetime import datetime
-    from decimal import Decimal
+    from datetime import datetime  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     service = get_cost_tracking_service()
 
@@ -1245,10 +1237,9 @@ def cost_dashboard(request: HttpRequest) -> HttpResponse:
 @require_infrastructure_view
 def cost_history(request: HttpRequest) -> HttpResponse:
     """Monthly cost history view."""
-    from calendar import month_name
-    from datetime import datetime
+    from calendar import month_name  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     service = get_cost_tracking_service()
     now = timezone.now()
@@ -1294,7 +1285,7 @@ def cost_history(request: HttpRequest) -> HttpResponse:
 @require_GET
 def cost_api_summary(request: HttpRequest) -> JsonResponse:
     """API endpoint for cost summary data."""
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     year = request.GET.get("year")
     month = request.GET.get("month")

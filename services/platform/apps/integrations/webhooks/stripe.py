@@ -61,7 +61,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         could allow forged payloads to pass verification.
         """
         try:
-            from apps.settings.services import SettingsService
+            from apps.settings.services import SettingsService  # noqa: PLC0415
 
             # Get encrypted webhook secret from settings system
             webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
@@ -131,13 +131,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return handler
         return None
 
-    def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
+    def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:  # noqa: PLR0911
         """💳 Handle PaymentIntent events with race condition protection.
 
         SECURITY FIX: Uses select_for_update() to prevent race conditions where
         concurrent webhook deliveries could corrupt payment state.
         """
-        from django.db import transaction
+        from django.db import transaction  # noqa: PLC0415
 
         payment_intent = payload.get("data", {}).get("object", {})
         stripe_payment_id = payment_intent.get("id")
@@ -381,8 +381,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
     def _send_portal_webhook(self, data: dict[str, Any]) -> None:
         """Send webhook notification to Portal service"""
         try:
-            import requests
-            from django.conf import settings
+            import requests  # noqa: PLC0415
+            from django.conf import settings  # noqa: PLC0415
 
             # Get Portal webhook URL from settings
             portal_webhook_url = getattr(settings, "PORTAL_PAYMENT_WEBHOOK_URL", None)

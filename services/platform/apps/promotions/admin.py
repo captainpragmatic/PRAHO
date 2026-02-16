@@ -2,8 +2,9 @@
 Django Admin configuration for the Promotions app.
 """
 
+from typing import Any
+
 from django.contrib import admin
-from django.db.models import Count, Sum
 from django.utils.html import format_html
 
 from .models import (
@@ -20,7 +21,6 @@ from .models import (
     Referral,
     ReferralCode,
 )
-
 
 # ===============================================================================
 # Inline Admin Classes
@@ -113,24 +113,24 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
         ("Metadata", {"fields": ("metadata", "created_at", "updated_at", "created_by"), "classes": ("collapse",)}),
     )
 
-    def budget_display(self, obj):
+    def budget_display(self, obj: Any) -> str:
         if obj.budget_cents:
             return f"{obj.budget_cents / 100:.2f}"
         return "-"
 
     budget_display.short_description = "Budget"
 
-    def spent_display(self, obj):
+    def spent_display(self, obj: Any) -> str:
         return f"{obj.spent_cents / 100:.2f}"
 
     spent_display.short_description = "Spent"
 
-    def coupon_count(self, obj):
+    def coupon_count(self, obj: Any) -> int:
         return obj.coupons.count()
 
     coupon_count.short_description = "Coupons"
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
@@ -211,7 +211,7 @@ class CouponAdmin(admin.ModelAdmin):
         ),
     )
 
-    def discount_display(self, obj):
+    def discount_display(self, obj: Any) -> str:
         if obj.discount_type == "percent":
             return f"{obj.discount_percent}%"
         elif obj.discount_type == "fixed":
@@ -220,14 +220,14 @@ class CouponAdmin(admin.ModelAdmin):
 
     discount_display.short_description = "Discount"
 
-    def usage_display(self, obj):
+    def usage_display(self, obj: Any) -> str:
         if obj.max_total_uses:
             return f"{obj.total_uses}/{obj.max_total_uses}"
         return str(obj.total_uses)
 
     usage_display.short_description = "Usage"
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
@@ -264,15 +264,15 @@ class CouponRedemptionAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
 
-    def discount_cents_display(self, obj):
+    def discount_cents_display(self, obj: Any) -> str:
         return f"{obj.discount_cents / 100:.2f}"
 
     discount_cents_display.short_description = "Discount"
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: Any) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: Any, obj: Any = None) -> bool:
         return False
 
 
@@ -318,7 +318,7 @@ class PromotionRuleAdmin(admin.ModelAdmin):
         ("Metadata", {"fields": ("created_at", "updated_at", "created_by"), "classes": ("collapse",)}),
     )
 
-    def discount_display(self, obj):
+    def discount_display(self, obj: Any) -> str:
         if obj.discount_type in ("percent", "tiered_percent"):
             return f"{obj.discount_percent}%"
         elif obj.discount_type in ("fixed", "tiered_fixed"):
@@ -327,7 +327,7 @@ class PromotionRuleAdmin(admin.ModelAdmin):
 
     discount_display.short_description = "Discount"
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
@@ -370,12 +370,12 @@ class GiftCardAdmin(admin.ModelAdmin):
         ("Metadata", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
-    def initial_value_display(self, obj):
+    def initial_value_display(self, obj: Any) -> str:
         return f"{obj.initial_value_cents / 100:.2f}"
 
     initial_value_display.short_description = "Initial Value"
 
-    def balance_display(self, obj):
+    def balance_display(self, obj: Any) -> str:
         return f"{obj.current_balance_cents / 100:.2f}"
 
     balance_display.short_description = "Balance"
@@ -404,7 +404,7 @@ class ReferralCodeAdmin(admin.ModelAdmin):
     )
     raw_id_fields = ("owner", "referee_coupon")
 
-    def rewards_display(self, obj):
+    def rewards_display(self, obj: Any) -> str:
         return f"{obj.total_rewards_cents / 100:.2f}"
 
     rewards_display.short_description = "Total Rewards"
@@ -440,7 +440,7 @@ class ReferralAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
 
-    def referrer_reward_display(self, obj):
+    def referrer_reward_display(self, obj: Any) -> str:
         return f"{obj.referrer_reward_cents / 100:.2f}"
 
     referrer_reward_display.short_description = "Referrer Reward"
@@ -464,7 +464,7 @@ class LoyaltyProgramAdmin(admin.ModelAdmin):
     raw_id_fields = ("currency",)
     inlines = [LoyaltyTierInline]
 
-    def member_count(self, obj):
+    def member_count(self, obj: Any) -> int:
         return obj.memberships.filter(is_active=True).count()
 
     member_count.short_description = "Members"
@@ -518,7 +518,7 @@ class CustomerLoyaltyAdmin(admin.ModelAdmin):
     date_hierarchy = "enrolled_at"
     inlines = [LoyaltyTransactionInline]
 
-    def total_spend_display(self, obj):
+    def total_spend_display(self, obj: Any) -> str:
         return f"{obj.total_spend_cents / 100:.2f}"
 
     total_spend_display.short_description = "Total Spend"
@@ -555,7 +555,7 @@ class LoyaltyTransactionAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
 
-    def points_display(self, obj):
+    def points_display(self, obj: Any) -> str:
         color = "green" if obj.points > 0 else "red"
         return format_html(
             '<span style="color: {};">{:+d}</span>',
@@ -565,8 +565,8 @@ class LoyaltyTransactionAdmin(admin.ModelAdmin):
 
     points_display.short_description = "Points"
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: Any) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: Any, obj: Any = None) -> bool:
         return False

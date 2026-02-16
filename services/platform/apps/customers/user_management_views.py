@@ -121,7 +121,7 @@ def change_user_role(request: HttpRequest, customer_id: int, membership_id: int)
         if owner_count <= 1:
             messages.error(
                 request,
-                _("Cannot change role: {} is the only owner. " "Promote another user to owner first.").format(
+                _("Cannot change role: {} is the only owner. Promote another user to owner first.").format(
                     membership.user.email
                 ),
             )
@@ -187,7 +187,7 @@ def remove_user(request: HttpRequest, customer_id: int, membership_id: int) -> H
         if owner_count <= 1:
             messages.error(
                 request,
-                _("Cannot remove user: {} is the only owner. " "Promote another user to owner first.").format(
+                _("Cannot remove user: {} is the only owner. Promote another user to owner first.").format(
                     membership.user.email
                 ),
             )

@@ -6,22 +6,19 @@ Handles coupon validation, application, and promotion management.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Count, Q, QuerySet, Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
-from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView,
-    DeleteView,
     DetailView,
     ListView,
     TemplateView,
@@ -34,22 +31,15 @@ from .models import (
     CouponRedemption,
     CustomerLoyalty,
     GiftCard,
-    GiftCardTransaction,
     LoyaltyProgram,
-    LoyaltyTier,
     LoyaltyTransaction,
     PromotionCampaign,
     PromotionRule,
     Referral,
-    ReferralCode,
 )
 from .services import (
-    ApplyResult,
     CouponService,
     GiftCardService,
-    LoyaltyService,
-    PromotionRuleService,
-    ReferralService,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,10 +95,7 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
 
     # Check if user is associated with the order's customer
     customer = _get_customer_from_request(request)
-    if customer and order.customer_id == customer.id:
-        return True
-
-    return False
+    return bool(customer and order.customer_id == customer.id)
 
 
 @method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
@@ -121,8 +108,8 @@ class ValidateCouponView(View):
     Rate limited to prevent brute-force attacks on coupon codes.
     """
 
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:  # noqa: PLR0911
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -243,7 +230,7 @@ class ApplyCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -340,7 +327,7 @@ class RemoveCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -418,7 +405,7 @@ class AvailableCouponsView(View):
     """
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         order_id = request.GET.get("order_id")
 
@@ -528,7 +515,7 @@ class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -626,7 +613,7 @@ class CampaignListView(StaffRequiredMixin, ListView):
     context_object_name = "campaigns"
     paginate_by = 25
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[PromotionCampaign]:
         queryset = super().get_queryset()
 
         # Filter by status
@@ -649,7 +636,7 @@ class CampaignListView(StaffRequiredMixin, ListView):
             total_redemptions=Sum("coupons__total_uses"),
         )
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         context["statuses"] = PromotionCampaign.STATUS_CHOICES
         context["campaign_types"] = PromotionCampaign.CAMPAIGN_TYPES
@@ -663,7 +650,7 @@ class CampaignDetailView(StaffRequiredMixin, DetailView):
     template_name = "promotions/admin/campaign_detail.html"
     context_object_name = "campaign"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         campaign = self.object
 
@@ -701,7 +688,7 @@ class CampaignCreateView(StaffRequiredMixin, CreateView):
 
     model = PromotionCampaign
     template_name = "promotions/admin/campaign_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "name",
         "slug",
         "description",
@@ -715,7 +702,7 @@ class CampaignCreateView(StaffRequiredMixin, CreateView):
     ]
     success_url = reverse_lazy("promotions:campaign_list")
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.created_by = self.request.user
         messages.success(self.request, f"Campaign '{form.instance.name}' created successfully.")
         return super().form_valid(form)
@@ -726,7 +713,7 @@ class CampaignUpdateView(StaffRequiredMixin, UpdateView):
 
     model = PromotionCampaign
     template_name = "promotions/admin/campaign_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "name",
         "slug",
         "description",
@@ -741,10 +728,10 @@ class CampaignUpdateView(StaffRequiredMixin, UpdateView):
         "utm_campaign",
     ]
 
-    def get_success_url(self):
+    def get_success_url(self) -> str:
         return reverse("promotions:campaign_detail", kwargs={"pk": self.object.pk})
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         messages.success(self.request, f"Campaign '{form.instance.name}' updated successfully.")
         return super().form_valid(form)
 
@@ -762,7 +749,7 @@ class CouponListView(StaffRequiredMixin, ListView):
     context_object_name = "coupons"
     paginate_by = 50
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Coupon]:
         queryset = super().get_queryset().select_related("campaign", "currency")
 
         # Filter by status
@@ -787,7 +774,7 @@ class CouponListView(StaffRequiredMixin, ListView):
 
         return queryset
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         context["statuses"] = Coupon.STATUS_CHOICES
         context["discount_types"] = Coupon.DISCOUNT_TYPES
@@ -802,7 +789,7 @@ class CouponDetailView(StaffRequiredMixin, DetailView):
     template_name = "promotions/admin/coupon_detail.html"
     context_object_name = "coupon"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         coupon = self.object
 
@@ -828,7 +815,7 @@ class CouponCreateView(StaffRequiredMixin, CreateView):
 
     model = Coupon
     template_name = "promotions/admin/coupon_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "code",
         "name",
         "description",
@@ -855,14 +842,14 @@ class CouponCreateView(StaffRequiredMixin, CreateView):
     ]
     success_url = reverse_lazy("promotions:coupon_list")
 
-    def get_form(self, form_class=None):
+    def get_form(self, form_class: Any = None) -> Any:
         form = super().get_form(form_class)
         # Generate a code if not provided
         if not form.data.get("code"):
             form.initial["code"] = Coupon.generate_code()
         return form
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.created_by = self.request.user
         messages.success(self.request, f"Coupon '{form.instance.code}' created successfully.")
         return super().form_valid(form)
@@ -873,7 +860,7 @@ class CouponUpdateView(StaffRequiredMixin, UpdateView):
 
     model = Coupon
     template_name = "promotions/admin/coupon_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "name",
         "description",
         "campaign",
@@ -898,10 +885,10 @@ class CouponUpdateView(StaffRequiredMixin, UpdateView):
         "is_public",
     ]
 
-    def get_success_url(self):
+    def get_success_url(self) -> str:
         return reverse("promotions:coupon_detail", kwargs={"pk": self.object.pk})
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         messages.success(self.request, f"Coupon '{form.instance.code}' updated successfully.")
         return super().form_valid(form)
 
@@ -914,7 +901,7 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
 
     def _get_max_batch_size(self) -> int:
         """Get max batch size from SettingsService at runtime."""
-        from apps.settings.services import SettingsService
+        from apps.settings.services import SettingsService  # noqa: PLC0415
 
         return SettingsService.get_integer_setting("promotions.max_coupon_batch_size", self._DEFAULT_MAX_BATCH_SIZE)
 
@@ -982,7 +969,7 @@ class GiftCardListView(StaffRequiredMixin, ListView):
     context_object_name = "gift_cards"
     paginate_by = 50
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[GiftCard]:
         queryset = super().get_queryset().select_related("currency", "purchased_by", "redeemed_by")
 
         status = self.request.GET.get("status")
@@ -1003,7 +990,7 @@ class GiftCardDetailView(StaffRequiredMixin, DetailView):
     template_name = "promotions/admin/gift_card_detail.html"
     context_object_name = "gift_card"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         context["transactions"] = self.object.transactions.select_related("order", "customer", "created_by").order_by(
             "-created_at"
@@ -1016,7 +1003,7 @@ class GiftCardCreateView(StaffRequiredMixin, CreateView):
 
     model = GiftCard
     template_name = "promotions/admin/gift_card_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "initial_value_cents",
         "currency",
         "card_type",
@@ -1027,7 +1014,7 @@ class GiftCardCreateView(StaffRequiredMixin, CreateView):
     ]
     success_url = reverse_lazy("promotions:gift_card_list")
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.code = GiftCard.generate_code()
         form.instance.current_balance_cents = form.instance.initial_value_cents
         form.instance.status = "pending"
@@ -1048,7 +1035,7 @@ class ReferralListView(StaffRequiredMixin, ListView):
     context_object_name = "referrals"
     paginate_by = 50
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Referral]:
         queryset = (
             super()
             .get_queryset()
@@ -1072,7 +1059,7 @@ class LoyaltyDashboardView(StaffRequiredMixin, TemplateView):
 
     template_name = "promotions/admin/loyalty_dashboard.html"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
 
         # Get active program
@@ -1115,7 +1102,7 @@ class PromotionRuleListView(StaffRequiredMixin, ListView):
     context_object_name = "rules"
     paginate_by = 25
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[PromotionRule]:
         return super().get_queryset().select_related("campaign").order_by("priority", "-created_at")
 
 
@@ -1124,7 +1111,7 @@ class PromotionRuleCreateView(StaffRequiredMixin, CreateView):
 
     model = PromotionRule
     template_name = "promotions/admin/rule_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "name",
         "description",
         "campaign",
@@ -1143,7 +1130,7 @@ class PromotionRuleCreateView(StaffRequiredMixin, CreateView):
     ]
     success_url = reverse_lazy("promotions:rule_list")
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.created_by = self.request.user
         messages.success(self.request, f"Promotion rule '{form.instance.name}' created.")
         return super().form_valid(form)
@@ -1154,7 +1141,7 @@ class PromotionRuleUpdateView(StaffRequiredMixin, UpdateView):
 
     model = PromotionRule
     template_name = "promotions/admin/rule_form.html"
-    fields = [
+    fields: ClassVar[list[str]] = [
         "name",
         "description",
         "campaign",
@@ -1184,7 +1171,7 @@ class PromotionsDashboardView(StaffRequiredMixin, TemplateView):
 
     template_name = "promotions/admin/dashboard.html"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         now = timezone.now()
 

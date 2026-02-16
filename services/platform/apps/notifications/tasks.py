@@ -29,7 +29,7 @@ _DEFAULT_MAX_RETRIES = 3  # Fallback — authoritative source is SettingsService
 RETRY_DELAY_MINUTES = 5
 
 
-def send_email_task(
+def send_email_task(  # noqa: PLR0913
     email_log_id: str,
     to: list[str],
     subject: str,
@@ -208,7 +208,7 @@ def send_email_task(
         return {"success": False, "error": str(e)}
 
 
-def _schedule_email_retry(
+def _schedule_email_retry(  # noqa: PLR0913
     email_log_id: str,
     to: list[str],
     subject: str,
@@ -225,7 +225,7 @@ def _schedule_email_retry(
 ) -> None:
     """Schedule an email retry with exponential backoff."""
     try:
-        from django_q.tasks import async_task
+        from django_q.tasks import async_task  # noqa: PLC0415
 
         retry_config = getattr(settings, "EMAIL_RETRY", {})
         base_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)
@@ -277,7 +277,7 @@ def send_bulk_emails_task(
     Returns:
         Dict with sent_count, failed_count, and errors
     """
-    from apps.notifications.services import EmailService
+    from apps.notifications.services import EmailService  # noqa: PLC0415
 
     sent_count = 0
     failed_count = 0
@@ -314,7 +314,7 @@ def send_bulk_emails_task(
     # Update campaign if provided
     if campaign_id:
         try:
-            from apps.notifications.models import EmailCampaign
+            from apps.notifications.models import EmailCampaign  # noqa: PLC0415
 
             campaign = EmailCampaign.objects.get(id=campaign_id)
             campaign.emails_sent = sent_count
@@ -358,7 +358,7 @@ def process_email_queue() -> dict[str, Any]:
     for email_log in stuck_emails:
         try:
             # Re-queue the email
-            from django_q.tasks import async_task
+            from django_q.tasks import async_task  # noqa: PLC0415
 
             async_task(
                 "apps.notifications.tasks.send_email_task",
@@ -417,7 +417,7 @@ def retry_failed_emails(max_age_hours: int = 24) -> dict[str, Any]:
             continue
 
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import async_task  # noqa: PLC0415
 
             async_task(
                 "apps.notifications.tasks.send_email_task",
@@ -550,8 +550,8 @@ def send_scheduled_campaign(campaign_id: str) -> dict[str, Any]:
     Returns:
         Dict with campaign results
     """
-    from apps.notifications.models import EmailCampaign
-    from apps.notifications.services import EmailService
+    from apps.notifications.models import EmailCampaign  # noqa: PLC0415
+    from apps.notifications.services import EmailService  # noqa: PLC0415
 
     try:
         campaign = EmailCampaign.objects.select_related("template").get(id=campaign_id)
@@ -584,7 +584,7 @@ def send_scheduled_campaign(campaign_id: str) -> dict[str, Any]:
 
 def _get_campaign_recipients(campaign) -> list[tuple[str, dict[str, Any]]]:
     """Get recipients for a campaign based on audience filter."""
-    from apps.customers.models import Customer
+    from apps.customers.models import Customer  # noqa: PLC0415
 
     audience = campaign.audience
     recipients = []
@@ -600,7 +600,7 @@ def _get_campaign_recipients(campaign) -> list[tuple[str, dict[str, Any]]]:
         customers = customers.filter(status="inactive")
     elif audience == "overdue_payments":
         # Customers with overdue invoices
-        from apps.billing.models import Invoice
+        from apps.billing.models import Invoice  # noqa: PLC0415
 
         overdue_customer_ids = Invoice.objects.filter(status="overdue").values_list("customer_id", flat=True).distinct()
         customers = customers.filter(id__in=overdue_customer_ids)

@@ -13,14 +13,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from django.utils import timezone
-
 from apps.audit.services import AuditService
 from apps.common.request_ip import get_safe_client_ip
 
 if TYPE_CHECKING:
-    from django.http import HttpRequest
-
     from apps.audit.models import AuditEvent
     from apps.infrastructure.models import (
         CloudProvider,
@@ -457,7 +453,7 @@ class InfrastructureAuditService:
         )
 
     @classmethod
-    def _create_event(
+    def _create_event(  # noqa: PLR0913
         cls,
         action: str,
         content_object: Any,
@@ -504,7 +500,7 @@ _audit_service: InfrastructureAuditService | None = None
 
 def get_infrastructure_audit_service() -> InfrastructureAuditService:
     """Get global infrastructure audit service instance"""
-    global _audit_service
+    global _audit_service  # noqa: PLW0603
     if _audit_service is None:
         _audit_service = InfrastructureAuditService()
     return _audit_service

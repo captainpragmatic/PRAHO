@@ -427,7 +427,7 @@ class SettingsService:
         Returns:
             Result with updated setting or validation error
         """
-        from django.db import IntegrityError
+        from django.db import IntegrityError  # noqa: PLC0415
 
         try:
             # Infer data type
@@ -448,7 +448,7 @@ class SettingsService:
                         key=key,
                         name=cls._generate_name_from_key(key),
                         description=f"System setting: {key}",
-                        category=key.split(".")[0] if "." in key else "system",
+                        category=key.split(".", maxsplit=1)[0] if "." in key else "system",
                         data_type=data_type,
                         value=json_value,
                         default_value=json_default,

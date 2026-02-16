@@ -13,7 +13,7 @@ from apps.common.types import Err, Ok, Result
 from .provisioning_service import ProvisioningService
 
 if TYPE_CHECKING:
-    from .models import Service
+    pass
 
 # Logger for backward compatibility with tests
 logger = logging.getLogger(__name__)

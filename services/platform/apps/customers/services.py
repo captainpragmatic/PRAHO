@@ -6,11 +6,10 @@ Maintains backward compatibility after ADR-0012 feature-based reorganization.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Sum
 from django.utils import timezone
 
 # Core customer service
@@ -189,7 +188,7 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _calculate_engagement_score(customer: Any, metrics: dict[str, Any]) -> int:
+    def _calculate_engagement_score(customer: Any, metrics: dict[str, Any]) -> int:  # noqa: C901, PLR0912
         """Calculate customer engagement score (0-100)."""
         score = 0
 

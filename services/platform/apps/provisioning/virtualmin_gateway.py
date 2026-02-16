@@ -1306,7 +1306,7 @@ class VirtualminGateway:
                 if usage > 0 or quota is not None:
                     domain_info["disk_usage_mb"] = usage
                     domain_info["disk_quota_mb"] = quota
-                    logger.debug(f"🎯 [Parsing] Processed domain {i+1}/{len(domain_data)}")
+                    logger.debug(f"🎯 [Parsing] Processed domain {i + 1}/{len(domain_data)}")
                     break  # Use first valid domain data
 
         return domain_info

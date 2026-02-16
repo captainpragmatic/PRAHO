@@ -15,9 +15,6 @@ from django.http.response import HttpResponseBase
 from django.urls import include, path
 from django.views.generic import RedirectView
 
-# Import dashboard view
-from apps.common.views import dashboard_view
-
 # Import legal views
 from apps.common.legal_views import (
     cookie_policy,
@@ -25,6 +22,9 @@ from apps.common.legal_views import (
     privacy_policy,
     terms_of_service,
 )
+
+# Import dashboard view
+from apps.common.views import dashboard_view
 
 
 def root_redirect(request: HttpRequest) -> HttpResponseBase:

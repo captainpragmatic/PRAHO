@@ -561,7 +561,7 @@ class VirtualminBackupService:
 
         # Check available disk space (rough estimate)
         disk_info = account_info.get("disk_usage_mb", 0)
-        disk_quota_mb = account_info.get("disk_quota_mb", 0)
+        account_info.get("disk_quota_mb", 0)
 
         # Estimate backup size (typically 1.5x of current usage for full backup with compression)
         estimated_backup_size_mb = int(disk_info * 1.5)
@@ -711,10 +711,10 @@ class VirtualminBackupService:
             logger.error(f"Config backup execution failed: {e}")
             return Err(f"Config backup failed: {e!s}")
 
-    def _verify_backup_integrity(self, backup_id: str, metadata: dict[str, Any]) -> Result[None, str]:
+    def _verify_backup_integrity(self, backup_id: str, metadata: dict[str, Any]) -> Result[None, str]:  # noqa: PLR0911
         """Verify backup file integrity and completeness."""
-        import os
-        import tarfile
+        import os  # noqa: PLC0415
+        import tarfile  # noqa: PLC0415
 
         try:
             # Get backup file path from metadata or construct it
@@ -781,7 +781,7 @@ class VirtualminBackupService:
 
     def _upload_backup_to_s3(self, backup_id: str, metadata: dict[str, Any]) -> Result[dict[str, Any], str]:
         """Upload backup files to S3 with encryption."""
-        import os
+        import os  # noqa: PLC0415
 
         try:
             s3_client = self._get_s3_client()
@@ -873,9 +873,9 @@ class VirtualminBackupService:
         metadata.update({"status": "completed", "completed_at": timezone.now().isoformat(), "s3_info": upload_info})
         return metadata
 
-    def _download_backup_from_s3(self, backup_id: str) -> Result[tuple[str, dict[str, Any]], str]:
+    def _download_backup_from_s3(self, backup_id: str) -> Result[tuple[str, dict[str, Any]], str]:  # noqa: PLR0911
         """Download backup from S3 for restoration."""
-        import os
+        import os  # noqa: PLC0415
 
         try:
             s3_client = self._get_s3_client()

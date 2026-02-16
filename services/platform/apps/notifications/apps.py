@@ -9,7 +9,7 @@ class NotificationsConfig(AppConfig):
     def ready(self) -> None:
         """Initialize notification signals when app is ready."""
         # Import signals to register them
-        from . import signals  # noqa: F401
+        from . import signals
 
         # Set up Anymail signal handlers for email tracking
         signals.setup_anymail_signals()

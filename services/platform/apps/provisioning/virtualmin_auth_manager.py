@@ -287,7 +287,7 @@ class VirtualminAuthenticationManager:
             if not self._ssh_client:
                 return create_error_result("Failed to establish SSH connection")
 
-            stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=SUDO_COMMAND_TIMEOUT)
+            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=SUDO_COMMAND_TIMEOUT)
 
             # Read output
             output = stdout.read().decode("utf-8")

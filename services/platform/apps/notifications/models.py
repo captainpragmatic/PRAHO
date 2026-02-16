@@ -667,10 +667,10 @@ class EmailSuppression(models.Model):
             provider: Email provider that reported the issue
             expires_days: Days until suppression expires (None = permanent)
         """
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
-        from django.db import transaction
-        from django.utils import timezone
+        from django.db import transaction  # noqa: PLC0415
+        from django.utils import timezone  # noqa: PLC0415
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         expires_at = None
@@ -709,9 +709,9 @@ class EmailSuppression(models.Model):
     @classmethod
     def is_suppressed(cls, email: str) -> bool:
         """Check if an email is currently suppressed."""
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
-        from django.utils import timezone
+        from django.utils import timezone  # noqa: PLC0415
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
@@ -860,7 +860,7 @@ class EmailPreference(models.Model):
 
     def update_marketing_consent(self, consent: bool, source: str = "") -> None:
         """Update marketing consent with GDPR tracking."""
-        from django.utils import timezone
+        from django.utils import timezone  # noqa: PLC0415
 
         self.marketing = consent
         if consent:

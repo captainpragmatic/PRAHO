@@ -390,7 +390,7 @@ class VirtualminProvisioningService:
             logger.exception(f"🔥 [VirtualminService] Validation error for {account.domain}: {e}")
             return Err(f"Validation error: {e}")
 
-    def _execute_rollback(
+    def _execute_rollback(  # noqa: C901, PLR0912, PLR0915
         self, rollback_operations: list[dict[str, Any]], gateway: VirtualminGateway, account: VirtualminAccount
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -501,7 +501,7 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(self, account: VirtualminAccount, reason: str = "") -> Result[bool, str]:
+    def suspend_account(self, account: VirtualminAccount, reason: str = "") -> Result[bool, str]:  # noqa: PLR0911
         """
         Suspend Virtualmin account with idempotency and rollback support.
 
@@ -613,7 +613,7 @@ class VirtualminProvisioningService:
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            except Exception as e:
+            except Exception:
                 IdempotencyManager.clear(idempotency_key)
                 raise
 
@@ -621,7 +621,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(self, account: VirtualminAccount) -> Result[bool, str]:
+    def unsuspend_account(self, account: VirtualminAccount) -> Result[bool, str]:  # noqa: PLR0911
         """
         Unsuspend (reactivate) Virtualmin account with idempotency and rollback support.
 
@@ -734,7 +734,7 @@ class VirtualminProvisioningService:
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            except Exception as e:
+            except Exception:
                 IdempotencyManager.clear(idempotency_key)
                 raise
 
@@ -742,7 +742,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(self, account: VirtualminAccount) -> Result[bool, str]:
+    def delete_account(self, account: VirtualminAccount) -> Result[bool, str]:  # noqa: PLR0911, PLR0912, PLR0915
         """
         Delete Virtualmin account permanently with idempotency and rollback support.
 
@@ -890,7 +890,7 @@ class VirtualminProvisioningService:
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            except Exception as e:
+            except Exception:
                 IdempotencyManager.clear(idempotency_key)
                 raise
 
@@ -931,7 +931,7 @@ class VirtualminProvisioningService:
             Valid Virtualmin username
         """
         # Remove TLD and special characters
-        base = domain.split(".")[0]
+        base = domain.split(".", maxsplit=1)[0]
         username = "".join(c for c in base if c.isalnum())
 
         # Ensure minimum length and uniqueness

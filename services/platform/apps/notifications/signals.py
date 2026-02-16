@@ -32,7 +32,7 @@ def setup_anymail_signals() -> None:
     This function should be called from apps.py ready() method.
     """
     try:
-        from anymail.signals import (
+        from anymail.signals import (  # noqa: PLC0415
             post_send,
             tracking,
         )
@@ -85,7 +85,7 @@ def handle_anymail_tracking(sender: Any, event: Any, esp_name: str, **kwargs: An
 
     Called when a tracking event is received (delivery, bounce, complaint, open, click).
     """
-    from apps.notifications.services import EmailService
+    from apps.notifications.services import EmailService  # noqa: PLC0415
 
     try:
         event_type = event.event_type
@@ -133,7 +133,7 @@ def handle_anymail_tracking(sender: Any, event: Any, esp_name: str, **kwargs: An
 
 def clear_template_cache(template_key: str, locale: str) -> None:
     """Clear cached email template after update."""
-    from django.core.cache import cache
+    from django.core.cache import cache  # noqa: PLC0415
 
     cache_key = f"email_template:{template_key}:{locale}"
     cache.delete(cache_key)

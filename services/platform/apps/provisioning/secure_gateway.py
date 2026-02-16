@@ -95,7 +95,7 @@ class SecureServerGateway:
             return False, {"error": "Invalid service configuration"}
 
         # Get decrypted API credentials
-        api_key, api_secret = server.get_management_api_credentials()
+        api_key, _api_secret = server.get_management_api_credentials()
         if not api_key:
             logger.error(f"🔥 [Server Gateway] No API credentials for {server.name}")
             return False, {"error": "Missing API credentials"}

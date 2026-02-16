@@ -140,7 +140,7 @@ class SESWebhookView(View):
         subscribe_url = data.get("SubscribeURL")
         if subscribe_url:
             # SECURITY: Validate SubscribeURL is from AWS SNS to prevent SSRF
-            from urllib.parse import urlparse
+            from urllib.parse import urlparse  # noqa: PLC0415
 
             parsed = urlparse(subscribe_url)
 
@@ -165,7 +165,7 @@ class SESWebhookView(View):
                 return HttpResponse("Invalid SubscribeURL domain", status=400)
 
             # Auto-confirm subscription
-            import requests
+            import requests  # noqa: PLC0415
 
             try:
                 requests.get(subscribe_url, timeout=10)
@@ -460,7 +460,7 @@ class UnsubscribeView(View):
         if not email or not token:
             return HttpResponse("Missing parameters", status=400)
 
-        from apps.notifications.services import EmailPreferenceService
+        from apps.notifications.services import EmailPreferenceService  # noqa: PLC0415
 
         success = EmailPreferenceService.process_unsubscribe(email, token, category)
 
@@ -511,7 +511,7 @@ class UnsubscribeView(View):
         if not email or not token:
             return JsonResponse({"error": "Missing parameters"}, status=400)
 
-        from apps.notifications.services import EmailPreferenceService
+        from apps.notifications.services import EmailPreferenceService  # noqa: PLC0415
 
         success = EmailPreferenceService.process_unsubscribe(email, token, category)
 

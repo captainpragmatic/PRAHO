@@ -780,13 +780,13 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     """User profile view and editing"""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
-    profile, created = UserProfile.objects.get_or_create(user=user)
+    profile, _created = UserProfile.objects.get_or_create(user=user)
 
     if request.method == "POST":
         # Handle language change if present
         if "language" in request.POST:
             selected_language = request.POST.get("language")
-            from django.conf import settings
+            from django.conf import settings  # noqa: PLC0415
 
             # Set the language in session
             session_key = getattr(settings, "LANGUAGE_SESSION_KEY", "django_language")

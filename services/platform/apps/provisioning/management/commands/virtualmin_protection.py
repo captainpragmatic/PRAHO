@@ -97,7 +97,7 @@ class Command(BaseCommand):
     def _disable_protection(self, options: dict[str, Any]) -> None:
         """Disable deletion protection"""
         if not options["confirm"]:
-            raise CommandError("⚠️  Disabling deletion protection is dangerous! " "Add --confirm flag to proceed.")
+            raise CommandError("⚠️  Disabling deletion protection is dangerous! Add --confirm flag to proceed.")
 
         accounts = self._get_accounts(options)
 

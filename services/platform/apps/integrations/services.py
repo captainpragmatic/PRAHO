@@ -206,4 +206,3 @@ class ExternalSyncService:
 
 def placeholder_function() -> None:
     """Placeholder function to satisfy imports until integration services are implemented."""
-    pass

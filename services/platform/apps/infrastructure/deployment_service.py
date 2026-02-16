@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from django.db import transaction
 from django.utils import timezone
@@ -23,7 +23,6 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
 from apps.infrastructure.provider_config import (
-    get_provider_config,
     map_terraform_outputs_to_deployment,
     run_provider_command,
     validate_provider_prerequisites,
@@ -36,7 +35,6 @@ from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
     from apps.infrastructure.models import NodeDeployment, NodeSize
-    from apps.provisioning.virtualmin_models import VirtualminServer
     from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -108,7 +106,7 @@ class NodeDeploymentService:
         self._validation = get_validation_service()
         self._registration = get_registration_service()
 
-    def deploy_node(
+    def deploy_node(  # noqa: C901, PLR0911, PLR0912, PLR0915
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -129,7 +127,7 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
-        from pathlib import Path
+        from pathlib import Path  # noqa: PLC0415
 
         start_time = timezone.now()
         stages_completed: list[str] = []
@@ -144,7 +142,7 @@ class NodeDeploymentService:
 
         def log_deployment(level: str, message: str) -> None:
             """Log to both logger and deployment log"""
-            from apps.infrastructure.models import NodeDeploymentLog
+            from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
             getattr(logger, level)(f"[Deployment:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(
@@ -296,7 +294,7 @@ class NodeDeploymentService:
 
             playbook_names = self._ansible.get_playbook_order(panel_type)
             stage_keys = ["ansible_base", "ansible_panel", "ansible_harden", "ansible_backup"]
-            ansible_playbooks = list(zip(stage_keys, playbook_names))
+            ansible_playbooks = list(zip(stage_keys, playbook_names, strict=False))
 
             for stage_name, playbook in ansible_playbooks:
                 report_progress(stage_name)
@@ -350,8 +348,8 @@ class NodeDeploymentService:
             log_deployment("info", "Registering node as VirtualminServer")
 
             # Generate a random password for Virtualmin admin
-            import secrets
-            import string
+            import secrets  # noqa: PLC0415
+            import string  # noqa: PLC0415
 
             admin_password = "".join(
                 secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
@@ -429,7 +427,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         logger.info(f"[Destroy:{deployment.hostname}] Starting node destruction")
 
@@ -459,7 +457,7 @@ class NodeDeploymentService:
                     logger.warning(f"Unregistration failed: {unregister_result.unwrap_err()}")
 
             # Find Terraform deployment directory
-            from pathlib import Path
+            from pathlib import Path  # noqa: PLC0415
 
             deploy_dir = (
                 Path(SettingsService.get_setting("node_deployment.terraform_state_path", "/var/lib/praho/terraform"))
@@ -553,7 +551,7 @@ class NodeDeploymentService:
             user=user,
         )
 
-    def upgrade_node_size(
+    def upgrade_node_size(  # noqa: PLR0911
         self,
         deployment: NodeDeployment,
         new_size: NodeSize,
@@ -572,7 +570,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         logger.info(f"[Upgrade:{deployment.hostname}] Starting node resize to {new_size.name}")
 
@@ -671,7 +669,7 @@ class NodeDeploymentService:
         Returns:
             Result with list of AnsibleResult or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         if deployment.status != "completed":
             return Err(f"Can only run maintenance on completed deployments, current status: {deployment.status}")
@@ -768,7 +766,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         logger.info(f"[Stop:{deployment.hostname}] Stopping node")
 
@@ -828,7 +826,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         logger.info(f"[Start:{deployment.hostname}] Starting node")
 
@@ -885,7 +883,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         logger.info(f"[Reboot:{deployment.hostname}] Rebooting node")
 
@@ -924,7 +922,7 @@ class NodeDeploymentService:
 
     def _mark_failed(self, deployment: NodeDeployment, error_message: str) -> None:
         """Mark deployment as failed with error message"""
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
         deployment.status = "failed"
         deployment.save()
@@ -945,7 +943,7 @@ _deployment_service: NodeDeploymentService | None = None
 
 def get_deployment_service() -> NodeDeploymentService:
     """Get global deployment service instance"""
-    global _deployment_service
+    global _deployment_service  # noqa: PLW0603
     if _deployment_service is None:
         _deployment_service = NodeDeploymentService()
     return _deployment_service

@@ -193,9 +193,9 @@ module "{module_name}_node" {{
   fqdn               = "{deployment.hostname}.{dns_zone}"
   environment        = "{deployment.environment}"
   node_type          = "{deployment.node_type}"
-  {server_type_var}  = "{deployment.node_size.provider_type_id if deployment.node_size else ''}"
+  {server_type_var}  = "{deployment.node_size.provider_type_id if deployment.node_size else ""}"
   server_image       = "{image_default}"
-  {region_var}       = "{deployment.region.provider_region_id if deployment.region else ''}"
+  {region_var}       = "{deployment.region.provider_region_id if deployment.region else ""}"
   ssh_public_key     = var.ssh_public_key
 }}
 
@@ -284,7 +284,7 @@ terraform {
 # This file will be deleted after deployment
 
 {api_token_var}      = "{api_token}"
-cloudflare_api_token = "{cloudflare_api_token or ''}"
+cloudflare_api_token = "{cloudflare_api_token or ""}"
 ssh_public_key       = "{ssh_public_key}"
 """
 
@@ -345,7 +345,7 @@ ssh_public_key       = "{ssh_public_key}"
         logger.info(f"🏗️ [Terraform] Running: {cmd_str} in {deploy_dir}")
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: PLW1510, S603
                 cmd,
                 cwd=deploy_dir,
                 capture_output=True,
@@ -402,7 +402,7 @@ _terraform_service: TerraformService | None = None
 
 def get_terraform_service() -> TerraformService:
     """Get global Terraform service instance"""
-    global _terraform_service
+    global _terraform_service  # noqa: PLW0603
     if _terraform_service is None:
         _terraform_service = TerraformService()
     return _terraform_service

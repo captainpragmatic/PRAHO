@@ -92,8 +92,8 @@ class WebhookView(View):
             result = (
                 self._parse_request(request)
                 .and_then(lambda payload: self._extract_metadata(request, payload))
-                .and_then(lambda context: self._get_processor(context))
-                .and_then(lambda context: self._process_webhook(context))
+                .and_then(self._get_processor)
+                .and_then(self._process_webhook)
             )
 
             if result.is_ok():

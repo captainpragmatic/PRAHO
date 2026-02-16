@@ -5,8 +5,7 @@ All endpoints require appropriate authentication and include rate limiting.
 
 from django.urls import path
 
-from . import views
-from . import webhooks
+from . import views, webhooks
 
 app_name = "notifications"
 
