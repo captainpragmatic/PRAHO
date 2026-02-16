@@ -33,7 +33,6 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.common.flow_analysis import (
-    AnalysisMode,
     AnalysisResult,
     AnalysisSeverity,
     HybridFlowAnalyzer,
@@ -147,10 +146,7 @@ class Command(BaseCommand):
 
         analyzer = HybridFlowAnalyzer(config)
 
-        if path.is_file():
-            result = analyzer.analyze_file(path)
-        else:
-            result = analyzer.analyze_directory(path)
+        result = analyzer.analyze_file(path) if path.is_file() else analyzer.analyze_directory(path)
 
         # Output results
         if options["format"] == "json":

@@ -19,17 +19,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import stat
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import models
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -79,7 +76,7 @@ class FileMetadata:
         }
 
     @classmethod
-    def from_path(cls, file_path: Path) -> "FileMetadata":
+    def from_path(cls, file_path: Path) -> FileMetadata:
         """Create metadata from a file path."""
         stat_info = file_path.stat()
         file_hash = cls._calculate_hash(file_path)
@@ -391,12 +388,9 @@ class FileIntegrityMonitoringService:
 
     def _is_excluded(self, relative_path: str) -> bool:
         """Check if a path should be excluded."""
-        from fnmatch import fnmatch
+        from fnmatch import fnmatch  # noqa: PLC0415
 
-        for pattern in self.config.exclude_patterns:
-            if fnmatch(relative_path, pattern):
-                return True
-        return False
+        return any(fnmatch(relative_path, pattern) for pattern in self.config.exclude_patterns)
 
     def _get_file_severity(self, relative_path: str) -> FileSeverity:
         """Determine severity level for a file."""

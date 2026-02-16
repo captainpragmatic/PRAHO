@@ -406,7 +406,7 @@ class ComplianceReportService:
         Returns:
             ComplianceReport object
         """
-        from apps.audit.models import AuditEvent
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         logger.info(
             f"📊 [Compliance] Generating {report_type.value} report "
@@ -629,7 +629,7 @@ class ComplianceReportService:
 
     def _generate_log_integrity(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate log integrity verification section"""
-        from apps.audit.siem import get_siem_service
+        from apps.audit.siem import get_siem_service  # noqa: PLC0415
 
         siem = get_siem_service()
 
@@ -670,7 +670,7 @@ class ComplianceReportService:
 
     def _generate_retention_compliance(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate retention compliance section"""
-        from apps.audit.models import AuditEvent
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         retention_config = getattr(settings, "AUDIT_LOG_RETENTION", {})
 
@@ -773,14 +773,14 @@ class ComplianceReportService:
     def export_report(
         self,
         report: ComplianceReport,
-        format: ReportFormat = ReportFormat.JSON,
+        output_format: ReportFormat = ReportFormat.JSON,
     ) -> str:
         """
         Export report to specified format.
 
         Args:
             report: ComplianceReport to export
-            format: Output format
+            output_format: Output format
 
         Returns:
             Path to exported file
@@ -789,14 +789,14 @@ class ComplianceReportService:
 
         filename = f"{report.report_type.value}_{report.generated_at.strftime('%Y%m%d_%H%M%S')}"
 
-        if format == ReportFormat.JSON:
+        if output_format == ReportFormat.JSON:
             return self._export_json(report, filename)
-        elif format == ReportFormat.CSV:
+        elif output_format == ReportFormat.CSV:
             return self._export_csv(report, filename)
-        elif format == ReportFormat.PDF:
+        elif output_format == ReportFormat.PDF:
             return self._export_pdf(report, filename)
 
-        raise ValueError(f"Unsupported format: {format}")
+        raise ValueError(f"Unsupported format: {output_format}")
 
     def _export_json(self, report: ComplianceReport, filename: str) -> str:
         """Export report as JSON"""
@@ -991,7 +991,7 @@ class LogRetentionService:
 
     def _process_category(self, category: str, config: dict[str, Any]) -> dict[str, int]:
         """Process retention for a specific category"""
-        from apps.audit.models import AuditEvent
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         retention_days = config.get("retention_days", 365)
         action = config.get("action", "archive")
@@ -1068,7 +1068,7 @@ class LogRetentionService:
 
     def get_retention_status(self) -> dict[str, Any]:
         """Get current retention status for all categories"""
-        from apps.audit.models import AuditEvent
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         status = {}
 

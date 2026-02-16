@@ -20,7 +20,6 @@ from typing import Any
 
 from django.conf import settings
 
-
 # =============================================================================
 # THREAD-LOCAL STORAGE FOR REQUEST CONTEXT
 # =============================================================================
@@ -215,7 +214,7 @@ class SIEMJSONFormatter(logging.Formatter):
             "stack_trace": "".join(traceback.format_exception(*exc_info)) if exc_tb else "",
         }
 
-    def _get_event_category(self, record: logging.LogRecord) -> str:
+    def _get_event_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
         """Determine event category from logger name"""
         logger_name = record.name.lower()
 
@@ -242,9 +241,7 @@ class SIEMJSONFormatter(logging.Formatter):
 
         if level in ("ERROR", "CRITICAL"):
             return "error"
-        elif level == "WARNING":
-            return "info"
-        elif level == "DEBUG":
+        elif level in {"WARNING", "DEBUG"}:
             return "info"
 
         return "info"
@@ -283,10 +280,11 @@ class SIEMJSONFormatter(logging.Formatter):
             "environment",
         }
 
-        extra = {}
-        for key, value in record.__dict__.items():
-            if key not in standard_attrs and not key.startswith("_"):
-                extra[key] = value
+        extra = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in standard_attrs and not key.startswith("_")
+        }
 
         if extra:
             return {"extra": extra}
@@ -316,7 +314,7 @@ class AuditLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format audit log record with integrity chain"""
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
         self.sequence += 1
         timestamp = datetime.utcfromtimestamp(record.created).isoformat() + "Z"
@@ -364,7 +362,7 @@ class AuditLogFormatter(logging.Formatter):
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:
+    def _determine_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
         """Determine audit category from log record"""
         message = record.getMessage().lower()
 
@@ -467,7 +465,7 @@ class ComplianceLogFormatter(logging.Formatter):
 
         return json.dumps(compliance_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:
+    def _determine_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
         """Determine compliance category"""
         message = record.getMessage().lower()
 

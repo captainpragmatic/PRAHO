@@ -89,10 +89,7 @@ class TraceMiddleware:
             return True
 
         # Check DEBUG mode
-        if getattr(settings, "DEBUG", False) and request.META.get("HTTP_X_DEBUG_TRACE", "").lower() == "true":
-            return True
-
-        return False
+        return bool(getattr(settings, "DEBUG", False) and request.META.get("HTTP_X_DEBUG_TRACE", "").lower() == "true")
 
     def _traced_request(self, request: HttpRequest) -> HttpResponse:
         """Process request with full tracing enabled."""
@@ -314,7 +311,7 @@ def trace_view(
         def my_view(request):
             return render(request, "template.html")
     """
-    from functools import wraps
+    from functools import wraps  # noqa: PLC0415
 
     def decorator(view_func):
         @wraps(view_func)
@@ -355,7 +352,7 @@ def trace_view(
 # =============================================================================
 
 __all__ = [
-    "TraceMiddleware",
     "DebugTraceMiddleware",
+    "TraceMiddleware",
     "trace_view",
 ]

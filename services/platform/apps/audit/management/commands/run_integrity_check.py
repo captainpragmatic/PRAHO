@@ -131,7 +131,7 @@ class Command(BaseCommand):
     def _parse_period(self, options: dict[str, Any]) -> tuple[Any, Any]:
         """Parse the time period from options."""
         if options.get("start") and options.get("end"):
-            from django.utils.dateparse import parse_datetime
+            from django.utils.dateparse import parse_datetime  # noqa: PLC0415
 
             period_start = parse_datetime(options["start"])
             period_end = parse_datetime(options["end"])
@@ -152,7 +152,7 @@ class Command(BaseCommand):
                         delta = timedelta(days=days)
                     except ValueError:
                         self.stderr.write(self.style.ERROR(f"Invalid period format: {period_str}"))
-                        raise SystemExit(1)
+                        raise SystemExit(1) from None
 
             period_end = timezone.now()
             period_start = period_end - delta
@@ -190,7 +190,7 @@ class Command(BaseCommand):
             )
 
             if verbose and check.findings:
-                self.stdout.write(f"\n  Findings:")
+                self.stdout.write("\n  Findings:")
                 for finding in check.findings[:10]:  # Limit output
                     self.stdout.write(
                         f"    - [{finding.get('severity', 'unknown')}] "
@@ -268,7 +268,7 @@ class Command(BaseCommand):
     def _setup_scheduled_tasks(self) -> None:
         """Configure scheduled integrity check tasks using Django-Q2."""
         try:
-            from django_q.models import Schedule
+            from django_q.models import Schedule  # noqa: PLC0415
 
             # Hourly hash verification for critical events
             Schedule.objects.update_or_create(

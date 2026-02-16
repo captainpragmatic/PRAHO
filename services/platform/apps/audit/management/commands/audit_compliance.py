@@ -295,8 +295,8 @@ class Command(BaseCommand):
 
     def handle_export_siem(self, options: dict[str, Any]) -> None:
         """Export audit logs for SIEM"""
-        from apps.audit.models import AuditEvent
-        from apps.audit.siem import (
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.audit.siem import (  # noqa: PLC0415
             CEFFormatter,
             JSONFormatter,
             LEEFFormatter,

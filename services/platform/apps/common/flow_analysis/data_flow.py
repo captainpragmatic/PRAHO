@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import ast
 import logging
-import re
 from dataclasses import dataclass, field
-from typing import Any
 
 from apps.common.flow_analysis.base import (
     AnalysisContext,
@@ -372,15 +370,13 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             arg_name = arg.arg
             if arg_name == "request":
                 self._mark_request_tainted(node)
-            elif arg_name in ("data", "form_data", "user_input", "payload"):
-                # Mark suspicious parameter names as tainted
-                if self.context:
-                    location = CodeLocation.from_ast_node(arg, self.context.file_path)
-                    self.tainted_vars[arg_name] = TaintedVariable(
-                        name=arg_name,
-                        source=f"function parameter: {arg_name}",
-                        location=location,
-                    )
+            elif arg_name in ("data", "form_data", "user_input", "payload") and self.context:
+                location = CodeLocation.from_ast_node(arg, self.context.file_path)
+                self.tainted_vars[arg_name] = TaintedVariable(
+                    name=arg_name,
+                    source=f"function parameter: {arg_name}",
+                    location=location,
+                )
 
         self.generic_visit(node)
 
@@ -506,25 +502,24 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         self.in_format_string = True
 
         for value in node.values:
-            if isinstance(value, ast.FormattedValue):
-                if self._is_tainted_expression(value.value):
-                    source_var = self._get_taint_source(value.value)
-                    if source_var and source_var in self.tainted_vars:
-                        tainted = self.tainted_vars[source_var]
-                        if not tainted.is_sanitized:
-                            location = CodeLocation.from_ast_node(node, self.context.file_path)
-                            self.add_issue(
-                                category=IssueCategory.TAINTED_DATA,
-                                severity=AnalysisSeverity.MEDIUM,
-                                message=f"Tainted variable '{source_var}' used in f-string",
-                                location=location,
-                                code_snippet=self.get_source_line(self.context, location.line_number),
-                                remediation=(
-                                    "Sanitize the variable before use in f-string, "
-                                    "or use proper escaping for the context."
-                                ),
-                                cwe_id="CWE-116",
-                            )
+            if isinstance(value, ast.FormattedValue) and self._is_tainted_expression(value.value):
+                source_var = self._get_taint_source(value.value)
+                if source_var and source_var in self.tainted_vars:
+                    tainted = self.tainted_vars[source_var]
+                    if not tainted.is_sanitized:
+                        location = CodeLocation.from_ast_node(node, self.context.file_path)
+                        self.add_issue(
+                            category=IssueCategory.TAINTED_DATA,
+                            severity=AnalysisSeverity.MEDIUM,
+                            message=f"Tainted variable '{source_var}' used in f-string",
+                            location=location,
+                            code_snippet=self.get_source_line(self.context, location.line_number),
+                            remediation=(
+                                "Sanitize the variable before use in f-string, "
+                                "or use proper escaping for the context."
+                            ),
+                            cwe_id="CWE-116",
+                        )
 
         self.in_format_string = False
         self.generic_visit(node)
@@ -537,14 +532,13 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
 
         # Check for request.GET['key'] or request.POST['key'] patterns
         subscript_str = self._get_subscript_string(node)
-        if any(source in subscript_str for source in TAINT_SOURCES):
-            if self.current_assignment_target:
-                location = CodeLocation.from_ast_node(node, self.context.file_path)
-                self.tainted_vars[self.current_assignment_target] = TaintedVariable(
-                    name=self.current_assignment_target,
-                    source=subscript_str,
-                    location=location,
-                )
+        if any(source in subscript_str for source in TAINT_SOURCES) and self.current_assignment_target:
+            location = CodeLocation.from_ast_node(node, self.context.file_path)
+            self.tainted_vars[self.current_assignment_target] = TaintedVariable(
+                name=self.current_assignment_target,
+                source=subscript_str,
+                location=location,
+            )
 
         self.generic_visit(node)
 
@@ -610,7 +604,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         all_sinks = SQL_SINKS | XSS_SINKS | COMMAND_SINKS | PATH_SINKS | DESERIALIZATION_SINKS
         return func_name in all_sinks or any(sink in func_name for sink in all_sinks)
 
-    def _get_taint_source(self, node: ast.expr) -> str | None:
+    def _get_taint_source(self, node: ast.expr) -> str | None:  # noqa: PLR0911
         """Get the name of the tainted variable in an expression."""
         if isinstance(node, ast.Name):
             if node.id in self.tainted_vars:
@@ -696,42 +690,37 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         # Check for subprocess with shell=True
         if "subprocess" in func_name:
             for kw in node.keywords:
-                if kw.arg == "shell":
-                    if isinstance(kw.value, ast.Constant) and kw.value.value is True:
-                        location = CodeLocation.from_ast_node(node, self.context.file_path)
-                        self.add_issue(
-                            category=IssueCategory.COMMAND_INJECTION,
-                            severity=AnalysisSeverity.HIGH,
-                            message="subprocess with shell=True is vulnerable to command injection",
-                            location=location,
-                            code_snippet=self.get_source_line(self.context, location.line_number),
-                            remediation="Use shell=False and pass command as a list.",
-                            cwe_id="CWE-78",
-                        )
+                if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                    location = CodeLocation.from_ast_node(node, self.context.file_path)
+                    self.add_issue(
+                        category=IssueCategory.COMMAND_INJECTION,
+                        severity=AnalysisSeverity.HIGH,
+                        message="subprocess with shell=True is vulnerable to command injection",
+                        location=location,
+                        code_snippet=self.get_source_line(self.context, location.line_number),
+                        remediation="Use shell=False and pass command as a list.",
+                        cwe_id="CWE-78",
+                    )
 
         # Check for SQL raw queries
         if func_name in {"raw", "extra"} or "execute" in func_name:
             # Check if query uses string formatting with tainted data
             for arg in node.args:
-                if isinstance(arg, (ast.JoinedStr, ast.BinOp)):
-                    if self._contains_tainted_data(arg):
-                        location = CodeLocation.from_ast_node(node, self.context.file_path)
-                        self.add_issue(
-                            category=IssueCategory.SQL_INJECTION,
-                            severity=AnalysisSeverity.CRITICAL,
-                            message="SQL query built with string formatting and tainted data",
-                            location=location,
-                            code_snippet=self.get_source_line(self.context, location.line_number),
-                            remediation="Use parameterized queries: cursor.execute('SELECT * FROM t WHERE id=%s', [user_id])",
-                            cwe_id="CWE-89",
-                        )
+                if isinstance(arg, (ast.JoinedStr, ast.BinOp)) and self._contains_tainted_data(arg):
+                    location = CodeLocation.from_ast_node(node, self.context.file_path)
+                    self.add_issue(
+                        category=IssueCategory.SQL_INJECTION,
+                        severity=AnalysisSeverity.CRITICAL,
+                        message="SQL query built with string formatting and tainted data",
+                        location=location,
+                        code_snippet=self.get_source_line(self.context, location.line_number),
+                        remediation="Use parameterized queries: cursor.execute('SELECT * FROM t WHERE id=%s', [user_id])",
+                        cwe_id="CWE-89",
+                    )
 
     def _contains_tainted_data(self, node: ast.expr) -> bool:
         """Check if an expression contains tainted data anywhere."""
-        for child in ast.walk(node):
-            if isinstance(child, ast.expr) and self._is_tainted_expression(child):
-                return True
-        return False
+        return any(isinstance(child, ast.expr) and self._is_tainted_expression(child) for child in ast.walk(node))
 
     # Helper methods for name extraction
 

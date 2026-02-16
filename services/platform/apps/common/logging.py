@@ -32,7 +32,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import sys
 import threading
 import time
 import traceback
@@ -170,10 +169,7 @@ class SecurityEventFilter(logging.Filter):
             return True
 
         # Check for security level
-        if record.levelno >= logging.WARNING:
-            return True
-
-        return False
+        return record.levelno >= logging.WARNING
 
 
 class SensitiveDataFilter(logging.Filter):
@@ -282,7 +278,7 @@ class QueryBudget:
     raise_on_exceed: bool = False
 
 
-class QueryBudgetExceeded(Exception):
+class QueryBudgetExceeded(Exception):  # noqa: N818
     """Exception raised when query budget is exceeded."""
 
     def __init__(self, message: str, summary: dict[str, Any]) -> None:
@@ -330,7 +326,7 @@ class QueryTracer:
         self._start_time: float = 0
         self._enabled = getattr(settings, "DEBUG", False)
 
-    def __enter__(self) -> "QueryTracer":
+    def __enter__(self) -> QueryTracer:
         if self._enabled:
             reset_queries()
             self._start_time = time.time()
@@ -393,7 +389,7 @@ class QueryTracer:
 
     def _normalize_sql(self, sql: str) -> str:
         """Normalize SQL for duplicate detection (remove parameter values)."""
-        import re
+        import re  # noqa: PLC0415
 
         # Replace numeric values
         normalized = re.sub(r"\b\d+\b", "?", sql)
@@ -493,7 +489,7 @@ class MethodTrace:
     args_summary: str
     return_summary: str | None
     exception: str | None
-    children: list["MethodTrace"] = field(default_factory=list)
+    children: list[MethodTrace] = field(default_factory=list)
 
 
 class MethodTracer:
@@ -741,7 +737,7 @@ class PerformanceProfiler:
         self.end_snapshot: PerformanceSnapshot | None = None
         self._start_time: float = 0
 
-    def __enter__(self) -> "PerformanceProfiler":
+    def __enter__(self) -> PerformanceProfiler:
         self._start_time = time.time()
         self.start_snapshot = self._take_snapshot()
         return self
@@ -756,14 +752,14 @@ class PerformanceProfiler:
 
     def _take_snapshot(self) -> PerformanceSnapshot:
         """Take a snapshot of current system metrics."""
-        import gc
+        import gc  # noqa: PLC0415
 
-        from django.core.cache import cache
+        from django.core.cache import cache  # noqa: PLC0415
 
         # Memory usage (requires psutil for accurate measurement)
         memory_mb = 0.0
         try:
-            import psutil
+            import psutil  # noqa: PLC0415
 
             process = psutil.Process()
             memory_mb = process.memory_info().rss / 1024 / 1024
@@ -920,8 +916,10 @@ class RuntimeAnalyzer:
 
                 if qt.get("potential_n_plus_one"):
                     lines.append("  N+1 Patterns:")
-                    for pattern in qt["potential_n_plus_one"][:3]:
-                        lines.append(f"    - {pattern['pattern'][:60]}... ({pattern['count']}x)")
+                    lines.extend(
+                        f"    - {pattern['pattern'][:60]}... ({pattern['count']}x)"
+                        for pattern in qt["potential_n_plus_one"][:3]
+                    )
 
             # Performance summary
             if analysis.get("performance"):
@@ -941,8 +939,7 @@ class RuntimeAnalyzer:
             # Errors
             if analysis.get("errors"):
                 lines.append("  ERRORS:")
-                for error in analysis["errors"]:
-                    lines.append(f"    - {error}")
+                lines.extend(f"    - {error}" for error in analysis["errors"])
 
             lines.append("")
 
@@ -978,7 +975,7 @@ class SideEffectDetector:
         self.cache_ops: list[dict[str, Any]] = []
         self._initial_query_count = 0
 
-    def __enter__(self) -> "SideEffectDetector":
+    def __enter__(self) -> SideEffectDetector:
         self._initial_query_count = len(connection.queries)
         return self
 
@@ -1074,35 +1071,35 @@ def trace_execution(func: F) -> F:
 # =============================================================================
 
 __all__ = [
-    # Request ID & Context
-    "RequestIDFilter",
-    "set_request_id",
-    "get_request_id",
-    "clear_request_id",
-    "set_request_context",
-    "get_request_context",
-    "clear_request_context",
-    # Security Filters
-    "SecurityEventFilter",
-    "SensitiveDataFilter",
-    # Structured Logging
-    "StructuredLogAdapter",
-    "get_logger",
-    # Query Tracing
-    "QueryTracer",
-    "QueryInfo",
-    "QueryBudget",
-    "QueryBudgetExceeded",
+    "MethodTrace",
     # Method Tracing
     "MethodTracer",
-    "MethodTrace",
     # Performance
     "PerformanceProfiler",
     "PerformanceSnapshot",
+    "QueryBudget",
+    "QueryBudgetExceeded",
+    "QueryInfo",
+    # Query Tracing
+    "QueryTracer",
+    # Request ID & Context
+    "RequestIDFilter",
     # Analysis
     "RuntimeAnalyzer",
+    # Security Filters
+    "SecurityEventFilter",
+    "SensitiveDataFilter",
     "SideEffectDetector",
+    # Structured Logging
+    "StructuredLogAdapter",
     # Helpers
     "assert_max_queries",
+    "clear_request_context",
+    "clear_request_id",
+    "get_logger",
+    "get_request_context",
+    "get_request_id",
+    "set_request_context",
+    "set_request_id",
     "trace_execution",
 ]

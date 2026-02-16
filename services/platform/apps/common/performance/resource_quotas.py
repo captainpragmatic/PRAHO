@@ -13,16 +13,14 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
-from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import models
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -269,7 +267,7 @@ class QuotaEnforcer:
                 cache_key = f"{self.CACHE_PREFIX}:usage:{customer_id}:{qt.value}"
                 cache.delete(cache_key)
 
-    def _calculate_usage_from_db(
+    def _calculate_usage_from_db(  # noqa: PLR0911
         self,
         customer_id: int,
         quota_type: QuotaType,
@@ -278,7 +276,7 @@ class QuotaEnforcer:
         # Import models here to avoid circular imports
         try:
             if quota_type == QuotaType.SERVICES:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
 
                 return Service.objects.filter(
                     customer_id=customer_id,
@@ -286,14 +284,16 @@ class QuotaEnforcer:
                 ).count()
 
             elif quota_type == QuotaType.DOMAINS:
-                from apps.provisioning.models import ServiceDomain
+                from apps.provisioning.models import (  # noqa: PLC0415
+                    ServiceDomain,
+                )
 
                 return ServiceDomain.objects.filter(
                     service__customer_id=customer_id,
                 ).count()
 
             elif quota_type == QuotaType.STORAGE_MB:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -302,7 +302,7 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.BANDWIDTH_MB:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -311,7 +311,7 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.EMAIL_ACCOUNTS:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -320,7 +320,7 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.DATABASES:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -333,7 +333,7 @@ class QuotaEnforcer:
                 return 0
 
             elif quota_type == QuotaType.USERS:
-                from apps.users.models import CustomerMembership
+                from apps.users.models import CustomerMembership  # noqa: PLC0415
 
                 return CustomerMembership.objects.filter(
                     customer_id=customer_id,
@@ -371,7 +371,7 @@ _quota_enforcer: QuotaEnforcer | None = None
 
 def get_quota_enforcer() -> QuotaEnforcer:
     """Get the global quota enforcer instance."""
-    global _quota_enforcer
+    global _quota_enforcer  # noqa: PLW0603
     if _quota_enforcer is None:
         _quota_enforcer = QuotaEnforcer()
     return _quota_enforcer
@@ -493,11 +493,11 @@ class CustomerIsolationMixin:
             objects = ServiceQuerySet.as_manager()
     """
 
-    def for_customer(self, customer_id: int) -> "models.QuerySet[Any]":
+    def for_customer(self, customer_id: int) -> models.QuerySet[Any]:
         """Filter queryset by customer ID."""
         return self.filter(customer_id=customer_id)  # type: ignore[attr-defined]
 
-    def for_request(self, request: HttpRequest) -> "models.QuerySet[Any]":
+    def for_request(self, request: HttpRequest) -> models.QuerySet[Any]:
         """Filter queryset by customer from request."""
         customer_id = getattr(request, "current_customer_id", None)
         if customer_id is None:

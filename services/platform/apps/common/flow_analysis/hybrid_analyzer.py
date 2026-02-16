@@ -25,7 +25,6 @@ from apps.common.flow_analysis.base import (
     AnalysisMode,
     AnalysisResult,
     AnalysisSeverity,
-    CodeLocation,
     FlowIssue,
     IssueCategory,
 )
@@ -120,7 +119,7 @@ class HybridFlowAnalyzer:
                 analysis_mode=AnalysisMode.HYBRID,
             )
 
-        if not path.suffix == ".py":
+        if path.suffix != ".py":
             return AnalysisResult(
                 errors=[f"Not a Python file: {file_path}"],
                 analysis_mode=AnalysisMode.HYBRID,
@@ -307,50 +306,48 @@ class HybridFlowAnalyzer:
             i.location.line_number for i in control_issues if i.category == IssueCategory.INFINITE_LOOP
         }
 
-        for data_issue in data_issues:
-            if data_issue.location.line_number in infinite_loop_lines:
-                # Security issue in infinite loop - amplify severity
-                cross_ref_issues.append(
-                    FlowIssue(
-                        category=IssueCategory.TAINTED_DATA,
-                        severity=AnalysisSeverity.CRITICAL,
-                        message=(f"AMPLIFIED: {data_issue.message} - occurs in potential infinite loop"),
-                        location=data_issue.location,
-                        mode=AnalysisMode.HYBRID,
-                        code_snippet=data_issue.code_snippet,
-                        remediation=(f"{data_issue.remediation} Additionally, fix the infinite loop."),
-                        cwe_id=data_issue.cwe_id,
-                        metadata={
-                            **data_issue.metadata,
-                            "cross_reference": "infinite_loop",
-                        },
-                    )
-                )
+        cross_ref_issues.extend(
+            FlowIssue(
+                category=IssueCategory.TAINTED_DATA,
+                severity=AnalysisSeverity.CRITICAL,
+                message=(f"AMPLIFIED: {data_issue.message} - occurs in potential infinite loop"),
+                location=data_issue.location,
+                mode=AnalysisMode.HYBRID,
+                code_snippet=data_issue.code_snippet,
+                remediation=(f"{data_issue.remediation} Additionally, fix the infinite loop."),
+                cwe_id=data_issue.cwe_id,
+                metadata={
+                    **data_issue.metadata,
+                    "cross_reference": "infinite_loop",
+                },
+            )
+            for data_issue in data_issues
+            if data_issue.location.line_number in infinite_loop_lines
+        )
 
         # Check for security issues in unreachable code
         unreachable_lines = {
             i.location.line_number for i in control_issues if i.category == IssueCategory.UNREACHABLE_CODE
         }
 
-        for data_issue in data_issues:
-            if data_issue.location.line_number in unreachable_lines:
-                # Security issue in unreachable code - lower priority but note it
-                cross_ref_issues.append(
-                    FlowIssue(
-                        category=data_issue.category,
-                        severity=AnalysisSeverity.LOW,  # Lower because unreachable
-                        message=f"UNREACHABLE: {data_issue.message} - in dead code",
-                        location=data_issue.location,
-                        mode=AnalysisMode.HYBRID,
-                        code_snippet=data_issue.code_snippet,
-                        remediation="Remove the dead code or fix the control flow to make it reachable.",
-                        cwe_id=data_issue.cwe_id,
-                        metadata={
-                            **data_issue.metadata,
-                            "cross_reference": "unreachable_code",
-                        },
-                    )
-                )
+        cross_ref_issues.extend(
+            FlowIssue(
+                category=data_issue.category,
+                severity=AnalysisSeverity.LOW,  # Lower because unreachable
+                message=f"UNREACHABLE: {data_issue.message} - in dead code",
+                location=data_issue.location,
+                mode=AnalysisMode.HYBRID,
+                code_snippet=data_issue.code_snippet,
+                remediation="Remove the dead code or fix the control flow to make it reachable.",
+                cwe_id=data_issue.cwe_id,
+                metadata={
+                    **data_issue.metadata,
+                    "cross_reference": "unreachable_code",
+                },
+            )
+            for data_issue in data_issues
+            if data_issue.location.line_number in unreachable_lines
+        )
 
         # Check for missing exception handlers with tainted data
         exception_issues = [i for i in control_issues if i.category == IssueCategory.EXCEPTION_FLOW]
@@ -432,7 +429,7 @@ class HybridFlowAnalyzer:
         }
 
 
-def analyze_code(
+def analyze_code(  # noqa: PLR0911
     source: str | Path,
     config: HybridAnalysisConfig | None = None,
 ) -> AnalysisResult:

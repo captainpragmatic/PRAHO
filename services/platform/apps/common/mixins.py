@@ -19,7 +19,6 @@ from django.db.models import Q, QuerySet
 from django.http import HttpRequest
 
 # Generic type variable removed for Python 3.13 compatibility
-
 from apps.common.constants import DEFAULT_PAGE_SIZE
 
 DEFAULT_ORPHANS = 3

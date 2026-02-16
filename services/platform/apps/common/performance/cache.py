@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import json
 import logging
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from django.conf import settings
 from django.core.cache import cache, caches
@@ -176,7 +176,7 @@ class CacheService:
         """Generate a cache key for a queryset count."""
         # Create a hash of the query SQL
         sql = str(queryset.query)
-        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]
+        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]  # noqa: S324
         model = queryset.model._meta.label
         return f"{self.PREFIX_QUERYSET}:count:{model}:{query_hash}"
 
@@ -187,7 +187,7 @@ _cache_service: CacheService | None = None
 
 def get_cache_service() -> CacheService:
     """Get the global cache service instance."""
-    global _cache_service
+    global _cache_service  # noqa: PLW0603
     if _cache_service is None:
         _cache_service = CacheService()
     return _cache_service
@@ -278,7 +278,7 @@ def cached_queryset(
                     key_parts.append(f"{k}={str(v)[:50]}")
 
             key = f"{CacheService.PREFIX_QUERYSET}:{':'.join(key_parts)}"
-            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]
+            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]  # noqa: S324
             cache_key = f"qs:{func.__name__}:{key_hash}"
 
             cached_result = cache.get(cache_key)

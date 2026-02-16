@@ -736,7 +736,7 @@ class SIEMService:
     def start(self) -> None:
         """Start background log forwarding"""
         if not self.config.enabled:
-            logger.info("ℹ️ [SIEM] SIEM integration is disabled")
+            logger.info("ℹ️ [SIEM] SIEM integration is disabled")  # noqa: RUF001
             return
 
         self._running = True
@@ -886,7 +886,7 @@ class SIEMService:
         Returns:
             Tuple of (is_valid, list_of_errors)
         """
-        from apps.audit.models import AuditEvent
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         # Fetch events in order
         events = AuditEvent.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date).order_by("timestamp")
@@ -930,7 +930,7 @@ _siem_service: SIEMService | None = None
 
 def get_siem_service() -> SIEMService:
     """Get or create global SIEM service instance"""
-    global _siem_service
+    global _siem_service  # noqa: PLW0603
     if _siem_service is None:
         _siem_service = SIEMService()
     return _siem_service

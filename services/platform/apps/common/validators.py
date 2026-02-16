@@ -685,7 +685,7 @@ class BusinessLogicValidator:
         # Rate limiting for enumeration prevention
         cache_key = f"company_check:{request_ip or 'unknown'}"
         current_checks = cache.get(cache_key, 0)
-        from apps.settings.services import SettingsService
+        from apps.settings.services import SettingsService  # noqa: PLC0415
 
         if current_checks >= SettingsService.get_integer_setting(
             "security.company_check_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP

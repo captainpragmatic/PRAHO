@@ -110,7 +110,7 @@ class Command(BaseCommand):
         if get_result.is_err():
             raise CommandError(f"Retrieve test failed: {get_result.unwrap_err()}")
 
-        retrieved_username, retrieved_password, metadata = get_result.unwrap()
+        retrieved_username, retrieved_password, _metadata = get_result.unwrap()
 
         if retrieved_username != test_username or retrieved_password != test_password:
             raise CommandError("Credential round-trip test failed")

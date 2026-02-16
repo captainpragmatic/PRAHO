@@ -14,12 +14,11 @@ import functools
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
@@ -316,7 +315,7 @@ def async_task(
 
             # Queue the task with Django-Q2
             try:
-                from django_q.tasks import async_task as q_async_task
+                from django_q.tasks import async_task as q_async_task  # noqa: PLC0415
 
                 q_async_task(
                     _execute_tracked_task,
@@ -565,7 +564,7 @@ class DistributedLock:
         # Use cache.add for atomic set-if-not-exists
         return cache.add(self._cache_key, self._lock_id, self.timeout)
 
-    def __enter__(self) -> "DistributedLock":
+    def __enter__(self) -> DistributedLock:
         if not self.acquire():
             raise RuntimeError(f"Failed to acquire lock: {self.lock_name}")
         return self
@@ -625,7 +624,7 @@ def schedule_task(
     task_id = generate_task_id(f"scheduled_{func.__name__}")
 
     try:
-        from django_q.tasks import schedule
+        from django_q.tasks import schedule  # noqa: PLC0415
 
         schedule(
             func,
@@ -648,7 +647,7 @@ def schedule_task(
 def cancel_scheduled_task(task_id: str) -> bool:
     """Cancel a scheduled task by ID."""
     try:
-        from django_q.models import Schedule
+        from django_q.models import Schedule  # noqa: PLC0415
 
         deleted, _ = Schedule.objects.filter(name=task_id).delete()
         return deleted > 0

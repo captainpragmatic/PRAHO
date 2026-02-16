@@ -1680,7 +1680,7 @@ class GDPRConsentService:
         When user_id is provided with a cookie_id, also links any prior anonymous
         CookieConsent records with the same cookie_id to this user.
         """
-        from .signals import cookie_consent_updated  # noqa: PLC0415  # circular import
+        from .signals import cookie_consent_updated  # circular import  # noqa: PLC0415
 
         try:
             status_map = {
@@ -4232,7 +4232,7 @@ class DomainsAuditService:
     """
 
     @staticmethod
-    def log_domain_event(  # noqa: PLR0913  # Domain audit requires multiple domain-specific parameters
+    def log_domain_event(  # Domain audit requires multiple domain-specific parameters  # noqa: PLR0913
         event_type: str,
         domain: Any,
         user: User | None = None,
@@ -4306,7 +4306,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_tld_event(  # noqa: PLR0913  # TLD audit requires multiple configuration parameters
+    def log_tld_event(  # TLD audit requires multiple configuration parameters  # noqa: PLR0913
         event_type: str,
         tld: Any,
         user: User | None = None,
@@ -4374,7 +4374,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_registrar_event(  # noqa: PLR0913  # Registrar audit requires multiple security parameters
+    def log_registrar_event(  # Registrar audit requires multiple security parameters  # noqa: PLR0913
         event_type: str,
         registrar: Any,
         user: User | None = None,
@@ -4446,7 +4446,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_order_event(  # noqa: PLR0913  # Order audit requires multiple order-specific parameters
+    def log_domain_order_event(  # Order audit requires multiple order-specific parameters  # noqa: PLR0913
         event_type: str,
         domain_order_item: Any,
         user: User | None = None,
@@ -4515,7 +4515,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_security_event(  # noqa: PLR0913  # Security audit requires multiple security parameters
+    def log_domain_security_event(  # Security audit requires multiple security parameters  # noqa: PLR0913
         event_type: str,
         domain: Any,
         security_action: str,
@@ -4660,7 +4660,7 @@ class IntegrationsAuditService:
     """
 
     @staticmethod
-    def log_webhook_success(  # noqa: PLR0913  # Webhook audit requires multiple related parameters
+    def log_webhook_success(  # Webhook audit requires multiple related parameters  # noqa: PLR0913
         webhook_event: Any,
         response_time_ms: int,
         response_status: int = 200,
@@ -4746,7 +4746,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_failure(  # noqa: PLR0913  # Webhook failure audit requires multiple error context parameters
+    def log_webhook_failure(  # Webhook failure audit requires multiple error context parameters  # noqa: PLR0913
         webhook_event: Any,
         error_details: dict[str, Any],
         security_flags: dict[str, bool] | None = None,
@@ -4840,7 +4840,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_retry_exhausted(  # noqa: PLR0913  # Webhook retry exhaustion tracking needs comprehensive failure context
+    def log_webhook_retry_exhausted(  # Webhook retry exhaustion tracking needs comprehensive failure context  # noqa: PLR0913
         webhook_event: Any,
         total_attempts: int,
         final_error: str,
