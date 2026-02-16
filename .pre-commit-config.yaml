@@ -108,9 +108,18 @@ repos:
         args:
           - -c
           - |
-            # Check if portal tries to import platform code
-            if grep -r "from apps\." services/portal/ --include="*.py" 2>/dev/null; then
-              echo "❌ Portal is trying to import platform apps!"
+            # Validate runtime import isolation from portal context.
+            cd services/portal || exit 1
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then
+              echo "❌ SECURITY BREACH: Portal can import apps.customers.customer_models"
+              exit 1
+            fi
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then
+              echo "❌ SECURITY BREACH: Portal can import apps.billing.invoice_models"
+              exit 1
+            fi
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then
+              echo "❌ SECURITY BREACH: Portal can import apps.orders.signals_extended"
               exit 1
             fi
             exit 0

@@ -11,6 +11,9 @@ import os
 
 from django.core.asgi import get_asgi_application
 
+from config.import_isolation_guard import enforce_portal_import_isolation
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+enforce_portal_import_isolation()
 
 application = get_asgi_application()

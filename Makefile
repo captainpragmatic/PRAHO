@@ -153,7 +153,7 @@ dev-platform: build-css
 	@echo "⚙️ Setting up scheduled tasks..."
 	@$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --settings=config.settings.dev || echo "⚠️ Scheduled tasks setup skipped"
 	@echo "🚀 Starting Django-Q2 workers in background..."
-	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 & 
+	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 &
 	@QCLUSTER_PID=$$!; \
 	echo "📊 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
 	echo "🌐 Starting platform server on :8700..."; \
@@ -220,7 +220,7 @@ test-platform-pytest:
 test-portal:
 	@echo "🧪 [Portal] Testing without database access (strict isolation)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/portal && env -u PYTHONPATH $(PWD)/.venv/bin/python -m pytest -v
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -m pytest -v
 	@echo "✅ Portal tests completed - database access properly blocked!"
 
 test-integration:
@@ -239,20 +239,27 @@ test-cache:
 test-security:
 	@echo "🔒 [Security] Validating service isolation (no Redis dependencies)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🧪 Testing portal cannot import platform-specific code..."
+	@echo "🧪 Testing portal cannot import platform-specific modules..."
 	@cd services/portal && \
-		if env -u PYTHONPATH $(PWD)/.venv/bin/python -c "from apps.billing.models import Invoice" 2>/dev/null; then \
-			echo "❌ SECURITY BREACH: Portal can import platform models!"; \
+		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then \
+			echo "❌ SECURITY BREACH: Portal can import apps.customers.customer_models"; \
 			exit 1; \
-		else \
-			echo "✅ Portal properly isolated from platform models"; \
-		fi
+		fi && \
+		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then \
+			echo "❌ SECURITY BREACH: Portal can import apps.billing.invoice_models"; \
+			exit 1; \
+		fi && \
+		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then \
+			echo "❌ SECURITY BREACH: Portal can import apps.orders.signals_extended"; \
+			exit 1; \
+		fi && \
+		echo "✅ Portal properly isolated from platform modules"
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
-	@cd services/portal && env -u PYTHONPATH $(PWD)/.venv/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
-	@cd services/portal && env -u PYTHONPATH $(PWD)/.venv/bin/python -m pytest conftest.py::test_db_access_blocked -v || echo "✅ Database access properly blocked"
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"
 
 test-e2e:
@@ -269,7 +276,7 @@ test-e2e:
 		echo "   Start services with: RATELIMIT_ENABLE=false make dev"; \
 		echo "   Or use: make dev-e2e (starts services with rate limiting disabled)"; \
 	fi
-	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"
 
 test-with-e2e: test-e2e
@@ -279,7 +286,7 @@ test-e2e-platform:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "⚠️  Requires platform service running (make dev-platform)"
 	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700." && exit 1)
-	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/platform/ -v
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/platform/ -v
 	@echo "✅ Platform E2E tests completed!"
 
 test-e2e-portal:
@@ -287,13 +294,13 @@ test-e2e-portal:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "⚠️  Requires portal service running (make dev-portal)"
 	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701." && exit 1)
-	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/portal/ -v
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/portal/ -v
 	@echo "✅ Portal E2E tests completed!"
 
 test-e2e-orm:
 	@echo "🎭 [E2E ORM] Running ORM-based E2E tests (no server needed)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/orm/ -v
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/orm/ -v
 	@echo "✅ ORM E2E tests completed!"
 
 test:
@@ -377,6 +384,10 @@ lint-portal:
 lint:
 	@echo "🔄 [All Services] Comprehensive linting..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "📋 Phase 0: Ruff no-new-debt gate"
+	@BASE_REF=$$(git merge-base HEAD origin/master 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo HEAD); \
+		echo "🔍 Comparing new Ruff violations against: $$BASE_REF"; \
+		.venv/bin/python scripts/ruff_new_violations.py --baseline-ref "$$BASE_REF"
 	@echo "📋 Phase 1: Platform service"
 	@$(MAKE) lint-platform
 	@echo "📋 Phase 2: Portal service"

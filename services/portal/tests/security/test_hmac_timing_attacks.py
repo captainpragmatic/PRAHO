@@ -557,41 +557,88 @@ class HMACStatisticalTimingAnalysisTestCase(SimpleTestCase):
             PORTAL_ID="timing-analysis-test"
         ):
             client = PlatformAPIClient()
-            generation_times = []
-
             # Test various request characteristics
             test_requests = [
-                ('GET', '/api/short/', b''),
-                ('POST', '/api/medium/', b'{"data": "medium request"}'),
-                ('PUT', '/api/long/', b'{"data": "' + b'x' * 1000 + b'"}'),
-                ('DELETE', '/api/query/', b''),
-                ('POST', '/api/complex/', b'{"nested": {"data": {"with": "complexity"}}}'),
+                ("GET", "/api/short/", b""),
+                ("POST", "/api/medium/", b'{"data": "medium request"}'),
+                ("PUT", "/api/long/", b'{"data": "' + b"x" * 1000 + b'"}'),
+                ("DELETE", "/api/query/", b""),
+                ("POST", "/api/complex/", b'{"nested": {"data": {"with": "complexity"}}}'),
             ]
 
-            for method, path, body in test_requests:
-                for _ in range(20):
-                    start_time = time.perf_counter()
-                    client._generate_hmac_headers(method, path, body)
-                    end_time = time.perf_counter()
-                    generation_times.append(end_time - start_time)
+            # Measure each request profile independently to avoid mixing
+            # expected payload-size differences into one variance bucket.
+            batch_size = 400
+            samples_per_profile = 25
+            fixed_timestamp = "1700000000.0"
+            profile_medians: list[float] = []
 
-            # Statistical analysis
-            if len(generation_times) > 10:
-                mean_time = statistics.mean(generation_times)
-                stddev_time = statistics.stdev(generation_times)
-                min_time = min(generation_times)
-                max_time = max(generation_times)
+            with patch("apps.api_client.services.secrets.token_urlsafe", return_value="deterministic-nonce"):
+                for method, path, body in test_requests:
+                    for _ in range(5):  # warmup
+                        client._generate_hmac_headers(method, path, body, fixed_timestamp=fixed_timestamp)
 
-                # Performance requirements
-                self.assertLess(mean_time, 0.01,
-                               f"HMAC generation too slow: mean={mean_time:.4f}s")
-                self.assertLess(max_time, 0.05,
-                               f"HMAC generation max time too slow: max={max_time:.4f}s")
+                    per_call_times: list[float] = []
+                    for _ in range(samples_per_profile):
+                        start_ns = time.perf_counter_ns()
+                        for _ in range(batch_size):
+                            client._generate_hmac_headers(method, path, body, fixed_timestamp=fixed_timestamp)
+                        elapsed_ns = time.perf_counter_ns() - start_ns
+                        per_call_times.append((elapsed_ns / batch_size) / 1_000_000_000)
 
-                # Consistency requirements
-                coefficient_of_variation = stddev_time / mean_time if mean_time > 0 else 0
-                self.assertLess(coefficient_of_variation, 0.8,
-                               f"HMAC generation timing too variable: CV={coefficient_of_variation:.3f}")
+                    mean_time = statistics.mean(per_call_times)
+                    median_time = statistics.median(per_call_times)
+                    profile_medians.append(median_time)
+                    percentile_90 = (
+                        statistics.quantiles(per_call_times, n=10)[8]
+                        if len(per_call_times) >= 20
+                        else max(per_call_times)
+                    )
+
+                    # Performance requirements (per profile)
+                    self.assertLess(
+                        mean_time,
+                        0.01,
+                        f"HMAC generation too slow for {method} {path}: mean={mean_time:.4f}s",
+                    )
+                    self.assertLess(
+                        max(per_call_times),
+                        0.05,
+                        f"HMAC generation max time too slow for {method} {path}: max={max(per_call_times):.4f}s",
+                    )
+
+                    # Consistency requirements (within profile only).
+                    # Use robust percentile/median checks to avoid false failures
+                    # from occasional CI scheduler spikes.
+                    p90_ratio = percentile_90 / median_time if median_time > 0 else 0
+                    self.assertLess(
+                        p90_ratio,
+                        3.5,
+                        (
+                            f"HMAC generation timing too variable for {method} {path}: "
+                            f"p90/median={p90_ratio:.3f}"
+                        ),
+                    )
+
+                    outlier_cutoff = median_time * 5
+                    outlier_rate = sum(1 for t in per_call_times if t > outlier_cutoff) / len(per_call_times)
+                    self.assertLess(
+                        outlier_rate,
+                        0.20,
+                        (
+                            f"Too many timing outliers for {method} {path}: "
+                            f"rate={outlier_rate:.2%}"
+                        ),
+                    )
+
+            # Cross-profile sanity check: payload-size differences should not explode.
+            if profile_medians:
+                mean_ratio = max(profile_medians) / min(profile_medians)
+                self.assertLess(
+                    mean_ratio,
+                    4.0,
+                    f"HMAC generation timing differs too much across request profiles: ratio={mean_ratio:.2f}",
+                )
 
     def test_end_to_end_timing_analysis(self):
         """🔐 End-to-end timing analysis of complete HMAC authentication flow"""

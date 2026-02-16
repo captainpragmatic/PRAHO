@@ -6,29 +6,16 @@ End-to-end tests for service provisioning workflow.
 Tests the complete flow from order confirmation to service activation.
 """
 
-import os
-import sys
 from datetime import timedelta
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Add platform to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../services/platform'))
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-
-import django
-django.setup()
-
+from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.utils import timezone
-from django.contrib.auth import get_user_model
 
+from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
-from apps.billing.models import Currency, Invoice, Payment
 from apps.products.models import Product
 
 User = get_user_model()
@@ -228,8 +215,8 @@ class TestServiceProvisioningWorkflow(TestCase):
 
         assert order.items.count() == 3
 
-        # Calculate totals
-        subtotal = sum(item.line_total_cents for item in order.items.all())
+        # Calculate subtotal (pre-tax)
+        subtotal = sum(item.subtotal_cents for item in order.items.all())
         assert subtotal == 44300  # 9900 + 29900 + 4500
 
 
@@ -460,7 +447,7 @@ class TestBundleProvisioning(TestCase):
                 'bundle_components': [
                     {'type': 'hosting', 'plan': 'standard'},
                     {'type': 'domain', 'name': 'example.ro'},
-                    {'type': 'ssl', 'type': 'standard'},
+                    {'type': 'ssl', 'plan': 'standard'},
                 ],
             },
         )

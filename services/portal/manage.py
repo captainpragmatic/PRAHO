@@ -3,10 +3,13 @@
 import os
 import sys
 
+from config.import_isolation_guard import enforce_portal_import_isolation
+
 
 def main() -> None:
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+    enforce_portal_import_isolation()
     try:
         from django.core.management import execute_from_command_line  # noqa: PLC0415
     except ImportError as exc:
@@ -18,5 +21,5 @@ def main() -> None:
     execute_from_command_line(sys.argv)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
