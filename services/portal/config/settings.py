@@ -3,6 +3,7 @@ PRAHO Portal - Customer-Facing Service Settings
 🚨 ARCHITECTURE: In-memory DB for Django internals only. NO business data stored.
 Portal apps use NO models or ORM - pure API-only communication with platform.
 """
+
 import os
 import secrets
 from pathlib import Path
@@ -64,7 +65,7 @@ if not _secret_key:
         import warnings
 
         warnings.warn(
-            "DJANGO_SECRET_KEY not set! Using insecure default. " "This is only acceptable in development.",
+            "DJANGO_SECRET_KEY not set! Using insecure default. This is only acceptable in development.",
             RuntimeWarning,
             stacklevel=2,
         )
@@ -149,7 +150,7 @@ if not _api_token:
         import warnings
 
         warnings.warn(
-            "PLATFORM_API_TOKEN not set! Using insecure default. " "This is only acceptable in development.",
+            "PLATFORM_API_TOKEN not set! Using insecure default. This is only acceptable in development.",
             RuntimeWarning,
             stacklevel=2,
         )

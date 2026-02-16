@@ -2,7 +2,6 @@
 IP address utilities for PRAHO Portal Service
 """
 
-
 from django.http import HttpRequest
 
 

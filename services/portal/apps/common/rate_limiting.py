@@ -246,7 +246,7 @@ class AuthenticationRateLimitMiddleware:
         Ensures all auth responses take similar time regardless of success/failure.
         """
         elapsed = time.time() - start_time
-        target_delay = random.uniform(self.MIN_RESPONSE_TIME, self.MAX_RESPONSE_TIME)
+        target_delay = random.uniform(self.MIN_RESPONSE_TIME, self.MAX_RESPONSE_TIME)  # noqa: S311
 
         remaining_delay = target_delay - elapsed
         if remaining_delay > 0:

@@ -60,7 +60,7 @@ class OrderInputValidator:
                 raise ValidationError(_("Cantitatea nu poate depăși 50"))
             return qty
         except (ValueError, TypeError):
-            raise ValidationError(_("Cantitate nevalidă"))
+            raise ValidationError(_("Cantitate nevalidă")) from None
 
     @staticmethod
     def validate_billing_period(period: str) -> str:
@@ -130,12 +130,12 @@ class OrderInputValidator:
                     try:
                         numeric_value = int(value)
                         if 1 <= numeric_value <= 1000:  # Reasonable limits
-                            value = numeric_value
+                            value = numeric_value  # noqa: PLW2901
                         else:
                             continue  # Skip invalid values
                     except (ValueError, TypeError):
                         continue
-                elif isinstance(value, str):
+                elif isinstance(value, str):  # noqa: SIM102 - Readable type-check then validation
                     # General string validation - prevent injection
                     if len(value) > OrderInputValidator.MAX_CONFIG_STRING_LENGTH or any(
                         char in value for char in ["<", ">", '"', "'"]

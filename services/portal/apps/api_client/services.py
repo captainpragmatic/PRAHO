@@ -122,7 +122,7 @@ class PlatformAPIClient:
 
         allow_insecure_http = bool(getattr(settings, "PLATFORM_API_ALLOW_INSECURE_HTTP", False))
         if not settings.DEBUG and not allow_insecure_http and base_url.startswith("http://"):
-            base_url = f"https://{base_url[len('http://'):]}"
+            base_url = f"https://{base_url[len('http://') :]}"
 
         normalized_endpoint = "/" + endpoint.lstrip("/")
 

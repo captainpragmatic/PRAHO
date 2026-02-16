@@ -13,8 +13,8 @@ from typing import Any, ClassVar
 from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect
 from django.middleware.csrf import get_token
+from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
 from django.utils.translation import activate, get_language
@@ -334,8 +334,7 @@ class PortalAuthenticationMiddleware:
             return False
 
         logger.debug(
-            f"✅ [Auth] {session_type} session is within valid lifetime "
-            f"({session_age:.0f}s / {max_age_seconds:.0f}s)"
+            f"✅ [Auth] {session_type} session is within valid lifetime ({session_age:.0f}s / {max_age_seconds:.0f}s)"
         )
         return True
 

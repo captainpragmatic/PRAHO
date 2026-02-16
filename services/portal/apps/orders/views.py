@@ -1089,7 +1089,7 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 # PAYMENT SUCCESS HANDLER
 # ===============================================================================
 
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt  # noqa: E402
 
 
 @csrf_exempt
@@ -1102,9 +1102,9 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     to clean up Portal session data and update UI state.
     """
     try:
-        import json
+        import json  # noqa: PLC0415
 
-        from django.http import JsonResponse
+        from django.http import JsonResponse  # noqa: PLC0415
 
         data = json.loads(request.body)
 

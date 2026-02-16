@@ -198,8 +198,7 @@ def require_customer_role(required_roles: list[str] | None = None, realtime_veri
 
             if not user_role:
                 logger.warning(
-                    f"🚨 [Security] No role found for user {request.session.get('user_id')} "
-                    f"in customer {customer_id}"
+                    f"🚨 [Security] No role found for user {request.session.get('user_id')} in customer {customer_id}"
                 )
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("Rol inexistent")}, status=403)
@@ -275,7 +274,7 @@ def log_access_attempt(view_func: Callable) -> Callable:
         response = view_func(request, *args, **kwargs)
 
         # Log access result
-        ACCESS_DENIED_STATUS_CODE = 400
+        ACCESS_DENIED_STATUS_CODE = 400  # noqa: N806
         if response.status_code >= ACCESS_DENIED_STATUS_CODE:
             logger.warning(
                 f"🚨 [Access] Access denied {response.status_code} - "

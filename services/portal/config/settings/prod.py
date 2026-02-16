@@ -11,7 +11,7 @@ from .base import *  # noqa: F403
 DEBUG = False
 
 # 🔒 SECURITY: Strict secret validation for production
-from apps.common.security_validation import validate_all_secrets
+from apps.common.security_validation import validate_all_secrets  # noqa: E402
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
@@ -53,7 +53,6 @@ except ImportError as e:
     import logging
 
     logging.getLogger(__name__).warning(f"⚠️ [Security] Could not import security validation: {e}")
-    pass
 
 # Security settings
 SESSION_COOKIE_SECURE = True

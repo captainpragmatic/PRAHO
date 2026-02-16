@@ -1166,7 +1166,7 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
 
         if not response or not response.get("success"):
             logger.warning(
-                f"🚨 [Security] Platform API rejected customer switch: " f"user {user_id} -> customer {customer_id}"
+                f"🚨 [Security] Platform API rejected customer switch: user {user_id} -> customer {customer_id}"
             )
             messages.error(request, _("Customer access verification failed. Please try again."))
             return redirect("/profile/")
@@ -1175,7 +1175,7 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         verification_data = response.get("data", {})
         if not verification_data.get("has_access"):
             logger.warning(
-                f"🚨 [Security] Unauthorized customer switch attempt: " f"user {user_id} -> customer {customer_id}"
+                f"🚨 [Security] Unauthorized customer switch attempt: user {user_id} -> customer {customer_id}"
             )
             messages.error(request, _("You don't have access to this customer."))
             return redirect("/profile/")
@@ -1184,12 +1184,11 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         selected_customer_name = verification_data.get("customer_name", f"Customer {customer_id}")
         selected_role = verification_data.get("role", "viewer")
         # Note: permissions available if needed for future use
-        # permissions = verification_data.get('permissions', [])
+        # permissions = verification_data.get('permissions', [])  # noqa: ERA001
 
     except PlatformAPIError as e:
         logger.error(
-            f"🔥 [Security] Customer switch verification failed: "
-            f"user {user_id} -> customer {customer_id}, error: {e}"
+            f"🔥 [Security] Customer switch verification failed: user {user_id} -> customer {customer_id}, error: {e}"
         )
         messages.error(request, _("Unable to verify customer access. Please try again."))
         return redirect("/profile/")
@@ -1201,7 +1200,7 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
 
         if not cached_access:
             logger.warning(
-                f"🚨 [Security] Customer not found in cached memberships: " f"user {user_id} -> customer {customer_id}"
+                f"🚨 [Security] Customer not found in cached memberships: user {user_id} -> customer {customer_id}"
             )
             # Still allow switch if Platform API approved, but log the discrepancy
             logger.warning("🚨 [Security] Cached memberships out of sync with Platform API")

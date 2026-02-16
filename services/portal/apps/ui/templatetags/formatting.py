@@ -99,7 +99,7 @@ def romanian_currency(value: TemplateNumeric, currency: str = "RON") -> str:
 
 
 @register.filter
-def romanian_vat(value: TemplateNumeric, vat_rate: float = None) -> str:
+def romanian_vat(value: TemplateNumeric, vat_rate: float | None = None) -> str:
     """
     Calculate and format VAT amount in Romanian style
 

@@ -30,7 +30,7 @@ class HMACPriceSealer:
     # Secret key for HMAC signing (in production, use settings.SECRET_KEY)
     @staticmethod
     def _get_secret_key() -> str:
-        from django.conf import settings
+        from django.conf import settings  # noqa: PLC0415
 
         return getattr(settings, "SECRET_KEY", "insecure-fallback-key")
 
@@ -46,9 +46,9 @@ class HMACPriceSealer:
         Returns:
             Dict with sealed data including signature, timestamp, nonce, body_hash
         """
-        import hmac
-        import time
-        import uuid
+        import hmac  # noqa: PLC0415
+        import time  # noqa: PLC0415
+        import uuid  # noqa: PLC0415
 
         secret_key = HMACPriceSealer._get_secret_key()
         timestamp = int(time.time())
@@ -87,8 +87,8 @@ class HMACPriceSealer:
         Returns:
             True if seal is valid, False otherwise
         """
-        import hmac as hmac_mod
-        import time
+        import hmac as hmac_mod  # noqa: PLC0415
+        import time  # noqa: PLC0415
 
         secret_key = HMACPriceSealer._get_secret_key()
 
@@ -149,8 +149,8 @@ class HMACPriceSealer:
         This validates portal_id, timestamp, nonce replay, IP binding, and signature
         over the provided body hash.
         """
-        import hmac as hmac_mod
-        import time
+        import hmac as hmac_mod  # noqa: PLC0415
+        import time  # noqa: PLC0415
 
         secret_key = HMACPriceSealer._get_secret_key()
         if not isinstance(client_ip, str) or not client_ip:
@@ -228,7 +228,7 @@ class CartRateLimiter:
         # 🔒 SECURITY: Check per-IP rate limits (new)
         if client_ip:
             # IP hash for privacy
-            import hashlib
+            import hashlib  # noqa: PLC0415
 
             ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
 
@@ -272,7 +272,7 @@ class CartRateLimiter:
 
         # 🔒 SECURITY: Record IP-based operations
         if client_ip:
-            import hashlib
+            import hashlib  # noqa: PLC0415
 
             ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
 
@@ -454,7 +454,7 @@ class GDPRCompliantCartSession:
             logger.info(f"🔄 [Cart] Updated existing item: {product_slug}")
         else:
             self.cart["items"].append(item)
-            logger.info(f"➕ [Cart] Added new item: {product_slug}")
+            logger.info(f"➕ [Cart] Added new item: {product_slug}")  # noqa: RUF001
 
         self._save_cart()
 
@@ -691,11 +691,11 @@ class CartCalculationService:
             logger.error(
                 f"🔥 [Cart] PlatformAPIError details - status_code: {e.status_code}, response_data: {e.response_data}"
             )
-            raise ValidationError(_("Error calculating totals"))
+            raise ValidationError(_("Error calculating totals")) from e
         except Exception as e:
             logger.error(f"🔥 [Cart] Unexpected error: {e}")
             logger.error(f"🔥 [Cart] Exception type: {type(e)}")
-            raise ValidationError(_("Error calculating totals"))
+            raise ValidationError(_("Error calculating totals")) from e
 
 
 class OrderCreationService:
@@ -844,7 +844,7 @@ class OrderCreationService:
             }
 
             # 🔒 SECURITY: Generate idempotency key to prevent race conditions and duplicate orders
-            import uuid
+            import uuid  # noqa: PLC0415
 
             effective_idempotency_key = idempotency_key or uuid.uuid4().hex
             order_data["idempotency_key"] = effective_idempotency_key
@@ -872,4 +872,4 @@ class OrderCreationService:
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Orders] Order creation failed: {e}")
-            raise ValidationError(_("Error creating order"))
+            raise ValidationError(_("Error creating order")) from e

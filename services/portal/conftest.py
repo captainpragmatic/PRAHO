@@ -4,9 +4,9 @@
 # Ensures portal service cannot access platform database during tests
 # This enforces the security boundary between services
 
-from collections.abc import Callable, Generator
 import hmac
 import time
+from collections.abc import Callable, Generator
 from typing import Any, Never
 from unittest.mock import Mock, patch
 
@@ -93,16 +93,19 @@ def mock_middleware_api_calls() -> Generator[None, None, None]:
     deterministic without affecting tests that exercise the API client
     directly (they mock ``requests.request`` themselves).
     """
-    from apps.api_client.services import api_client as _api_client
+    from apps.api_client.services import api_client as _api_client  # noqa: PLC0415
 
-    with patch.object(
-        _api_client,
-        "validate_session_secure",
-        return_value={"active": True, "state_version": 1},
-    ), patch.object(
-        _api_client,
-        "get_user_customers",
-        return_value=[],
+    with (
+        patch.object(
+            _api_client,
+            "validate_session_secure",
+            return_value={"active": True, "state_version": 1},
+        ),
+        patch.object(
+            _api_client,
+            "get_user_customers",
+            return_value=[],
+        ),
     ):
         yield
 
@@ -133,8 +136,9 @@ def block_database_access(request: pytest.FixtureRequest) -> Generator[None, Non
             "Portal must communicate with platform via API only."
         )
 
-    with patch.object(connections[DEFAULT_DB_ALIAS], "ensure_connection", blocked_ensure_connection), patch.object(
-        connections[DEFAULT_DB_ALIAS], "cursor", blocked_cursor
+    with (
+        patch.object(connections[DEFAULT_DB_ALIAS], "ensure_connection", blocked_ensure_connection),
+        patch.object(connections[DEFAULT_DB_ALIAS], "cursor", blocked_cursor),
     ):
         yield
 
