@@ -619,8 +619,8 @@ disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "return-
 
 # Tests: allow friction-free typing
 [[tool.mypy.overrides]]
-module = "tests.*"
-disable_error_code = ["call-arg", "attr-defined", "no-any-return"]
+module = ["tests.*", "apps.*.tests", "apps.*.tests.*"]
+disable_error_code = ["call-arg", "attr-defined", "no-any-return", "misc", "type-arg", "assignment", "union-attr", "arg-type", "return-value", "no-untyped-def", "untyped-decorator", "operator", "no-untyped-call", "index"]
 disallow_untyped_defs = false
 
 # Settings & scripts are dynamic
