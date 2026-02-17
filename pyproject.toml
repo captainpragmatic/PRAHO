@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "praho-platform"
-version = "0.15.2"
+version = "0.16.0"
 description = "PRAHO Platform - PRAHO Really Automates Hosting Operations"
 authors = [
     {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}

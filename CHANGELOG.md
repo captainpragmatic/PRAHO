@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.16.0] - 2026-02-17
+
 ### Changed
 - **Lint Zero-Debt**: Eliminated all Ruff violations across Platform and Portal services — zero warnings, zero errors
 - **Portal Lint**: Reduced portal lint debt with code fixes and type annotations
