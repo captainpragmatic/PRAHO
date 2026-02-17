@@ -430,6 +430,14 @@ ignore = [
 "services/platform/tests/audit/test_audit_e2e.py" = ["PLC0415"]
 "services/platform/tests/audit/test_audit_signal_registration.py" = ["PLC0415"]
 
+# Django model and form files - Meta inner class attributes are handled by metaclass processing
+"**/models.py" = [
+    "RUF012",      # Django model Meta attributes (ordering, indexes, etc.) don't need ClassVar
+]
+"**/forms.py" = [
+    "RUF012",      # Django form Meta attributes (fields, widgets, etc.) don't need ClassVar
+]
+
 # Django admin files - Allow admin patterns and ClassVar conflicts
 "**/admin.py" = [
     "RUF012",      # Django admin attributes don't need ClassVar (conflicts with MyPy)
