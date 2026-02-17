@@ -37,6 +37,16 @@ from .validators import log_security_event
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MAX_PAYMENT_RETRIES = 5
+MAX_PAYMENT_RETRIES = _DEFAULT_MAX_PAYMENT_RETRIES
+
+
+def get_max_payment_retries() -> int:
+    """Get max payment retries from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("billing.max_payment_retries", _DEFAULT_MAX_PAYMENT_RETRIES)
+
 
 # ===============================================================================
 # TYPE DEFINITIONS
@@ -107,7 +117,7 @@ class ProrationService:
     """
 
     @staticmethod
-    def calculate_proration(
+    def calculate_proration(  # noqa: PLR0913
         old_price_cents: int,
         new_price_cents: int,
         old_quantity: int,
@@ -241,7 +251,7 @@ class SubscriptionService:
             Result with created subscription or error message
         """
         try:
-            from .currency_models import Currency
+            from .currency_models import Currency  # noqa: PLC0415
 
             with transaction.atomic():
                 # Get or create default currency
@@ -274,7 +284,7 @@ class SubscriptionService:
                 quantity = data.get("quantity", 1)
 
                 # Calculate cycle days
-                from .subscription_models import BILLING_CYCLE_DAYS
+                from .subscription_models import BILLING_CYCLE_DAYS  # noqa: PLC0415
 
                 cycle_days = BILLING_CYCLE_DAYS.get(billing_cycle, 30)
 
@@ -344,7 +354,7 @@ class SubscriptionService:
             Result with SubscriptionChange record or error message
         """
         try:
-            from apps.products.models import Product
+            from apps.products.models import Product  # noqa: PLC0415
 
             with transaction.atomic():
                 # Determine new values
@@ -384,7 +394,9 @@ class SubscriptionService:
                     new_billing_cycle=new_billing_cycle,
                     prorate=data.get("prorate", True),
                     apply_immediately=data.get("apply_immediately", True),
-                    effective_date=timezone.now() if data.get("apply_immediately", True) else subscription.current_period_end,
+                    effective_date=timezone.now()
+                    if data.get("apply_immediately", True)
+                    else subscription.current_period_end,
                     reason=data.get("reason", ""),
                     created_by=user,
                 )
@@ -427,7 +439,7 @@ class SubscriptionService:
         user: User | None = None,
     ) -> Invoice:
         """Create an invoice for proration charges."""
-        from .currency_models import Currency
+        from .currency_models import Currency  # noqa: PLC0415
 
         # Get sequence
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
@@ -439,7 +451,7 @@ class SubscriptionService:
             currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
         # Calculate tax using centralized TaxService (ADR-0015)
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         subtotal_cents = change.proration_amount_cents
         vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
@@ -570,7 +582,7 @@ class GrandfatheringService:
     """
 
     @staticmethod
-    def apply_grandfathering_for_price_increase(
+    def apply_grandfathering_for_price_increase(  # noqa: PLR0913
         product: Product,
         old_price_cents: int,
         new_price_cents: int,
@@ -795,13 +807,17 @@ class RecurringBillingService:
                         else:
                             result["payments_failed"] += 1
                             subscription.mark_payment_failed()
-                            result["errors"].append(f"Payment failed for {subscription.subscription_number}: {payment_result.error}")
+                            result["errors"].append(
+                                f"Payment failed for {subscription.subscription_number}: {payment_result.error}"
+                            )
                     else:
                         # No payment method, just renew (manual payment expected)
                         subscription.renew()
 
                 else:
-                    result["errors"].append(f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}")
+                    result["errors"].append(
+                        f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"
+                    )
 
             except Exception as e:
                 logger.exception(f"Error processing subscription {subscription.id}: {e}")
@@ -827,11 +843,10 @@ class RecurringBillingService:
     def _generate_renewal_invoice(subscription: Subscription) -> Result[Invoice, str]:
         """Generate a renewal invoice for a subscription."""
         try:
-
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
             # Calculate amounts using centralized TaxService (ADR-0015)
-            from apps.common.tax_service import TaxService
+            from apps.common.tax_service import TaxService  # noqa: PLC0415
 
             subtotal_cents = subscription.total_price_cents
             tax_rate = TaxService.get_vat_rate("RO", as_decimal=True)
@@ -945,7 +960,7 @@ class RecurringBillingService:
 
         for subscription in expired_grace:
             try:
-                if subscription.failed_payment_count >= 5:
+                if subscription.failed_payment_count >= MAX_PAYMENT_RETRIES:
                     # Max retries exceeded - cancel
                     subscription.cancel(
                         reason="non_payment",

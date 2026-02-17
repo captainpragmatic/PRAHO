@@ -10,9 +10,18 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+
+def normalize_repo_path(file_path: str) -> str:
+    """Normalize path so checks work from repository root and service root."""
+    normalized = file_path.replace("\\", "/").lstrip("./")
+    if normalized.startswith("services/platform/"):
+        return normalized[len("services/platform/") :]
+    return normalized
 
 
 def get_modified_python_files(staged_only: bool = False, since: str | None = None) -> list[str]:
@@ -42,7 +51,8 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
 
 def should_check_file(file_path: str) -> bool:
     """Determine if a file should be type-checked based on path."""
-    path = Path(file_path)
+    normalized = normalize_repo_path(file_path)
+    path = Path(normalized)
 
     # Skip non-app files
     if not str(path).startswith("apps/"):
@@ -88,9 +98,16 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
         for f in files_to_check:
             print(f"  • {f}")
 
-    # Run mypy
-    cmd = ["mypy", *files_to_check]
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+    repo_root = Path(__file__).resolve().parents[3]
+    service_root = repo_root / "services" / "platform"
+    normalized_files = [normalize_repo_path(f) for f in files_to_check]
+
+    # Run mypy from service root so plugin imports (e.g. config.settings.*) resolve consistently.
+    cmd = ["mypy", *normalized_files]
+    env = os.environ.copy()
+    env["PATH"] = f"{repo_root / '.venv' / 'bin'}:{env.get('PATH', '')}"
+    env["PYTHONPATH"] = f"{service_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=service_root, env=env)  # noqa: S603
 
     if result.returncode == 0:
         print("✅ Type checking passed")
@@ -108,6 +125,7 @@ def run_mypy_on_files(files: list[str], verbose: bool = False) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Type check modified Python files")
+    parser.add_argument("files", nargs="*", help="Optional explicit file list (e.g., pre-commit)")
     parser.add_argument("--staged", action="store_true", help="Check only staged files")
     parser.add_argument("--since", help="Check files modified since this commit")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -116,8 +134,8 @@ def main() -> int:
 
     print("🎯 PRAHO Platform - Type Safety Check")
 
-    # Get modified files
-    files = get_modified_python_files(staged_only=args.staged, since=args.since)
+    # Use explicit file list when provided (e.g., direct hook invocation), otherwise detect from git.
+    files = args.files or get_modified_python_files(staged_only=args.staged, since=args.since)
 
     if not files:
         print("i  No Python files modified")

@@ -2,30 +2,30 @@
 <div class="p-6">
     {% if cart_order and cart_order.items.exists %}
         <h3 class="text-lg font-medium text-white mb-4">Order Summary</h3>
-        
+
         <div class="space-y-3 text-sm">
             <!-- Subtotal -->
             <div class="flex justify-between text-gray-300">
                 <span>Subtotal ({{ cart_order.items.count }} item{{ cart_order.items.count|pluralize }}):</span>
                 <span>{{ cart_order.subtotal|floatformat:2 }} {{ cart_order.currency }}</span>
             </div>
-            
+
             <!-- VAT -->
             <div class="flex justify-between text-gray-300">
                 <span>VAT ({{ cart_order.vat_rate|floatformat:0 }}%):</span>
                 <span>{{ cart_order.vat_amount|floatformat:2 }} {{ cart_order.currency }}</span>
             </div>
-            
+
             <!-- Divider -->
             <hr class="border-slate-600">
-            
+
             <!-- Total -->
             <div class="flex justify-between text-lg font-medium text-white">
                 <span>Total:</span>
                 <span>{{ cart_order.total|floatformat:2 }} {{ cart_order.currency }}</span>
             </div>
         </div>
-        
+
         <!-- Checkout Button -->
         <div class="mt-6">
             <a href="#" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg inline-block text-center transition-colors">

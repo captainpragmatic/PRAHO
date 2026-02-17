@@ -28,21 +28,21 @@
       <!-- Back Button -->
       {% url 'orders:order_list' as order_list_url %}
       {% button "← Back to Orders" variant="outline" href=order_list_url %}
-      
+
       <!-- Action Buttons for Staff -->
       {% if is_staff %}
         {% if can_edit %}
           {% url 'orders:order_edit' pk=order.id as order_edit_url %}
           {% button "✏️ Edit" variant="primary" href=order_edit_url %}
         {% endif %}
-        
+
         {% if order.status == "completed" or order.status == "partially_refunded" %}
           {% button "💰 Refund Order" onclick="showRefundModal()" variant="success" %}
         {% endif %}
-        
+
         {% if order.status not in "cancelled,refunded,completed" %}
           {% if order.status == "draft" %}
-            <button 
+            <button
               hx-get="{% url 'orders:order_validate' pk=order.id %}"
               hx-target="#preflight-container"
               hx-swap="innerHTML"
@@ -60,7 +60,7 @@
       {% elif not is_staff and order.status in "completed,partially_refunded" %}
         <!-- Refund Request Button for Customers -->
         {% button "🎫 Request Refund" onclick="showOrderRefundRequestModal()" variant="primary" %}
-        
+
         {% if order.status not in "cancelled,refunded,completed" %}
           <button
             type="button"
@@ -117,7 +117,7 @@
             <div>
               <dt class="text-sm font-medium text-slate-400">{% trans "Customer" %}</dt>
               <dd class="mt-1 text-sm text-white">
-                <a href="{% url 'customers:detail' customer_id=order.customer.id %}" 
+                <a href="{% url 'customers:detail' customer_id=order.customer.id %}"
                    class="hover:text-blue-400 transition-colors">
                   {{ order.customer.name }}
                 </a>
@@ -331,7 +331,7 @@
             {% endif %}
           </div>
           {% endif %}
-          
+
           <div class="mb-4">
             <label for="new_status" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "New Status" %}
@@ -361,7 +361,7 @@
               {% endif %}
             </select>
           </div>
-          
+
           <div class="mb-4">
             <label for="notes" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Notes" %} <span class="text-slate-500">({% trans "optional" %})</span>
@@ -371,9 +371,9 @@
                       placeholder="{% trans 'Add a note about this status change...' %}"></textarea>
           </div>
         </div>
-        
+
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideStatusModal()" 
+          <button type="button" onclick="hideStatusModal()"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -489,7 +489,7 @@ document.addEventListener('DOMContentLoaded', function() {
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
           <h3 class="text-lg font-medium text-white mb-4">💰 {% trans "Refund Order" %}</h3>
-          
+
           <div class="mb-4">
             <label for="refund_type" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Type" %}
@@ -503,7 +503,7 @@ document.addEventListener('DOMContentLoaded', function() {
               {% endif %}
             </select>
           </div>
-          
+
           <div id="partial_amount_section" class="mb-4 hidden">
             <label for="refund_amount" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Amount" %}
@@ -521,7 +521,7 @@ document.addEventListener('DOMContentLoaded', function() {
               {% trans "Maximum refundable:" %} {{ order.total_cents|cents_to_currency|romanian_currency:order.currency }}
             </p>
           </div>
-          
+
           <div class="mb-4">
             <label for="refund_reason" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Reason" %}
@@ -541,7 +541,7 @@ document.addEventListener('DOMContentLoaded', function() {
               <option value="other">❓ {% trans "Other" %}</option>
             </select>
           </div>
-          
+
           <div class="mb-4">
             <label for="refund_notes" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Notes" %} <span class="text-slate-500">({% trans "required" %})</span>
@@ -550,7 +550,7 @@ document.addEventListener('DOMContentLoaded', function() {
                       class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                       placeholder="{% trans 'Please explain the reason for this refund...' %}"></textarea>
           </div>
-          
+
           <div class="mb-4">
             <label class="flex items-center">
               <input type="checkbox" id="process_payment_refund" name="process_payment_refund" value="true" checked
@@ -564,9 +564,9 @@ document.addEventListener('DOMContentLoaded', function() {
             </p>
           </div>
         </div>
-        
+
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideRefundModal()" 
+          <button type="button" onclick="hideRefundModal()"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -604,24 +604,24 @@ document.getElementById('refund_type').addEventListener('change', function() {
 // Handle refund form submission
 document.getElementById('refundForm').addEventListener('submit', function(e) {
     e.preventDefault();
-    
+
     const formData = new FormData(this);
-    
+
     // Show confirmation dialog
     const refundType = formData.get('refund_type');
-    const confirmMessage = refundType === 'full' 
+    const confirmMessage = refundType === 'full'
         ? '{% trans "Are you sure you want to process a FULL refund? This action cannot be undone." %}'
         : '{% trans "Are you sure you want to process this PARTIAL refund? This action cannot be undone." %}';
-    
+
     if (!confirm(confirmMessage)) {
         return;
     }
-    
+
     // Disable submit button to prevent double-clicks
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     submitBtn.innerHTML = '⏳ {% trans "Processing..." %}';
-    
+
     fetch(this.action, {
         method: 'POST',
         body: formData,
@@ -668,7 +668,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
           <p class="text-sm text-slate-400 mb-4">
             {% trans "Submit a refund request for this order. Our billing team will review your request and contact you." %}
           </p>
-          
+
           <div class="mb-4">
             <label for="refund_request_reason" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Refund Reason" %} <span class="text-red-400">*</span>
@@ -688,7 +688,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
               <option value="other">❓ {% trans "Other Reason" %}</option>
             </select>
           </div>
-          
+
           <div class="mb-4">
             <label for="refund_request_notes" class="block text-sm font-medium text-slate-400 mb-2">
               {% trans "Details" %} <span class="text-red-400">*</span>
@@ -715,9 +715,9 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
             </div>
           </div>
         </div>
-        
+
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideOrderRefundRequestModal()" 
+          <button type="button" onclick="hideOrderRefundRequestModal()"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -743,25 +743,25 @@ function hideOrderRefundRequestModal() {
 // Handle order refund request form submission
 document.getElementById('orderRefundRequestForm').addEventListener('submit', function(e) {
     e.preventDefault();
-    
+
     const formData = new FormData(this);
-    
+
     // Basic validation
     if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
         alert('{% trans "Please fill in all required fields." %}');
         return;
     }
-    
+
     // Show confirmation
     if (!confirm('{% trans "Submit refund request? We will create a support ticket and contact you." %}')) {
         return;
     }
-    
+
     // Disable submit button
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
-    
+
     fetch(this.action, {
         method: 'POST',
         body: formData,

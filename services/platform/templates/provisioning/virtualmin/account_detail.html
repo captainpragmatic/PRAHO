@@ -9,10 +9,10 @@
     <!-- =============================================================================== -->
     <!-- PAGE HEADER WITH ACTIONS -->
     <!-- =============================================================================== -->
-    
+
     <!-- Breadcrumb Navigation -->
     {% breadcrumb breadcrumb_items css_class="mb-6" %}
-    
+
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <div>
             <div class="flex items-center mt-2">
@@ -129,22 +129,22 @@
         <!-- Tab Navigation -->
         <div class="border-b border-slate-700">
             <nav class="flex space-x-8 px-6" aria-label="Tabs">
-                <button @click="activeTab = 'overview'" 
+                <button @click="activeTab = 'overview'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'overview', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'overview' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     {% trans "Overview" %}
                 </button>
-                <button @click="activeTab = 'backups'" 
+                <button @click="activeTab = 'backups'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'backups', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'backups' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     {% trans "Backups" %}
                 </button>
-                <button @click="activeTab = 'logs'" 
+                <button @click="activeTab = 'logs'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'logs', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'logs' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     ⚙️ {% trans "Jobs" %}
                 </button>
-                <button @click="activeTab = 'settings'" 
+                <button @click="activeTab = 'settings'"
                         :class="{ 'border-blue-500 text-blue-400': activeTab === 'settings', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'settings' }"
                         class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
                     {% trans "Settings" %}
@@ -205,7 +205,7 @@
                             {% else %}
                                 {% button "Enable Account" href="#" variant="success" icon="play" %}
                             {% endif %}
-                            
+
                             <!-- Protection Toggle -->
                             <button class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if account.protected_from_deletion %}text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20{% else %}text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20{% endif %}"
                                     data-protection-url="{{ toggle_protection_url }}"
@@ -219,7 +219,7 @@
                                     🔒 {% trans "Enable Protection" %}
                                 {% endif %}
                             </button>
-                            
+
                             <!-- Delete Account -->
                             {% if account.can_be_deleted %}
                             <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
@@ -229,7 +229,7 @@
                                 🗑️ {% trans "Delete Account" %}
                             </button>
                             {% else %}
-                            <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed" 
+                            <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed"
                                     disabled>
                                 🗑️ {% trans "Delete Account" %} <span class="text-xs">({% trans "Protected" %})</span>
                             </button>
@@ -246,7 +246,7 @@
                         <h3 class="text-lg font-semibold text-slate-100">{% trans "Backup History" %}</h3>
                         {% button "Create Backup" href=backup_url variant="primary" %}
                     </div>
-                    
+
                     {% if backups %}
                     <div class="space-y-3">
                         {% for backup in backups %}
@@ -296,7 +296,7 @@
                         <h3 class="text-lg font-semibold text-slate-100">{% trans "Provisioning Jobs" %}</h3>
                         <span class="text-sm text-slate-400">{% trans "Recent operations and their status" %}</span>
                     </div>
-                    
+
                     {% if recent_jobs %}
                     <div class="space-y-3">
                         {% for job in recent_jobs %}
@@ -353,14 +353,14 @@
                                         {% endif %}
                                     </div>
                                     <div>
-                                        <a href="{% url 'provisioning:virtualmin_job_status' job.id %}" 
+                                        <a href="{% url 'provisioning:virtualmin_job_status' job.id %}"
                                            class="text-blue-400 hover:text-blue-300 text-sm">
                                             {% trans "View Details" %} →
                                         </a>
                                     </div>
                                 </div>
                             </div>
-                            
+
                             {% if job.error_message %}
                             <div class="mt-3 p-3 bg-red-900/20 border border-red-700 rounded text-sm">
                                 <div class="flex items-start">
@@ -374,10 +374,10 @@
                             {% endif %}
                         </div>
                         {% endfor %}
-                        
+
                         {% if recent_jobs|length == 10 %}
                         <div class="text-center py-4">
-                            <a href="/provisioning/virtualmin/servers/{{ account.server.id }}/" 
+                            <a href="/provisioning/virtualmin/servers/{{ account.server.id }}/"
                                class="text-blue-400 hover:text-blue-300 text-sm">
                                 {% trans "View all jobs for this server" %} →
                             </a>
@@ -402,20 +402,20 @@
             <div x-show="activeTab === 'settings'" x-transition>
                 <div class="space-y-6">
                     <h3 class="text-lg font-semibold text-slate-100">{% trans "Account Settings" %}</h3>
-                    
+
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- Basic Settings -->
                         <div class="space-y-4">
                             <h4 class="text-md font-medium text-slate-200">{% trans "Basic Settings" %}</h4>
-                            
+
                             <div>
                                 <label class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Contact Email" %}
                                 </label>
-                                <input type="email" value="{{ account.contact_email|default:'' }}" 
+                                <input type="email" value="{{ account.contact_email|default:'' }}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
-                            
+
                             <div>
                                 <label class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "PHP Version" %}
@@ -431,20 +431,20 @@
                         <!-- Resource Limits -->
                         <div class="space-y-4">
                             <h4 class="text-md font-medium text-slate-200">{% trans "Resource Limits" %}</h4>
-                            
+
                             <div>
                                 <label class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Disk Quota" %} (GB)
                                 </label>
-                                <input type="number" value="{{ account.disk_quota_gb|default:'' }}" 
+                                <input type="number" value="{{ account.disk_quota_gb|default:'' }}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
-                            
+
                             <div>
                                 <label class="block text-sm font-medium text-slate-300 mb-1">
                                     {% trans "Bandwidth Quota" %} (GB)
                                 </label>
-                                <input type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}" 
+                                <input type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}"
                                        placeholder="{% trans "Use -1 for unlimited" %}"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <p class="text-xs text-slate-400 mt-1">{% trans "Use -1 for unlimited bandwidth" %}</p>
@@ -468,12 +468,12 @@ function confirmProtectionToggle(button) {
     const domain = button.dataset.domain;
     const url = button.dataset.protectionUrl;
     const csrf = button.dataset.csrf;
-    
+
     // Only require confirmation for DISABLING protection (dangerous action)
     if (action === 'disable') {
         const actionText = 'Disable Protection';
         const message = `Type "I really am sure I want to do this!" to confirm disabling protection for ${domain}`;
-        
+
         // Use the dangerous action modal from base.html
         window.dispatchEvent(new CustomEvent('confirm-dangerous-action', {
             detail: {
@@ -502,9 +502,9 @@ function confirmProtectionToggle(button) {
 function confirmAccountDelete(button) {
     const domain = button.dataset.domain;
     const url = button.dataset.deleteUrl;
-    
+
     const message = `Type "I really am sure I want to do this!" to confirm permanent deletion of ${domain}`;
-    
+
     // Use the dangerous action modal from base.html
     window.dispatchEvent(new CustomEvent('confirm-dangerous-action', {
         detail: {

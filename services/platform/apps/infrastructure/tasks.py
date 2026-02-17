@@ -7,14 +7,14 @@ These tasks are queued and executed asynchronously by Q cluster workers.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
-from apps.infrastructure.deployment_service import DeploymentResult, get_deployment_service
-from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
+from apps.infrastructure.deployment_service import get_deployment_service
+from apps.infrastructure.validation_service import get_validation_service
 from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
@@ -44,8 +44,8 @@ def deploy_node_task(
     Returns:
         dict with deployment result information
     """
-    from apps.infrastructure.models import NodeDeployment
-    from apps.users.models import User
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:deploy_node] Starting deployment for deployment_id={deployment_id}")
 
@@ -57,10 +57,8 @@ def deploy_node_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.deploy_node(
@@ -107,8 +105,8 @@ def destroy_node_task(
     Returns:
         dict with destruction result information
     """
-    from apps.infrastructure.models import NodeDeployment
-    from apps.users.models import User
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:destroy_node] Starting destruction for deployment_id={deployment_id}")
 
@@ -120,10 +118,8 @@ def destroy_node_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.destroy_node(
@@ -167,8 +163,8 @@ def retry_deployment_task(
     Returns:
         dict with retry result information
     """
-    from apps.infrastructure.models import NodeDeployment
-    from apps.users.models import User
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:retry_deployment] Retrying deployment_id={deployment_id}")
 
@@ -180,10 +176,8 @@ def retry_deployment_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.retry_deployment(
@@ -226,7 +220,10 @@ def validate_node_task(deployment_id: int) -> dict:
     Returns:
         dict with validation result information
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+    )
 
     logger.info(f"[Task:validate_node] Validating deployment_id={deployment_id}")
 
@@ -292,7 +289,7 @@ def bulk_validate_nodes_task() -> dict:
     Returns:
         dict with overall validation summary
     """
-    from apps.infrastructure.models import NodeDeployment
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
 
     logger.info("[Task:bulk_validate] Starting bulk validation of all nodes")
 
@@ -312,11 +309,13 @@ def bulk_validate_nodes_task() -> dict:
             # Quick health check instead of full validation
             is_healthy = service.quick_health_check(deployment)
 
-            results.append({
-                "deployment_id": deployment.id,
-                "hostname": deployment.hostname,
-                "healthy": is_healthy,
-            })
+            results.append(
+                {
+                    "deployment_id": deployment.id,
+                    "hostname": deployment.hostname,
+                    "healthy": is_healthy,
+                }
+            )
 
             if is_healthy:
                 passed_count += 1
@@ -327,16 +326,17 @@ def bulk_validate_nodes_task() -> dict:
         except Exception as e:
             logger.error(f"[Task:bulk_validate] Error validating {deployment.hostname}: {e}")
             failed_count += 1
-            results.append({
-                "deployment_id": deployment.id,
-                "hostname": deployment.hostname,
-                "healthy": False,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "deployment_id": deployment.id,
+                    "hostname": deployment.hostname,
+                    "healthy": False,
+                    "error": str(e),
+                }
+            )
 
     logger.info(
-        f"[Task:bulk_validate] Complete: {passed_count} healthy, {failed_count} unhealthy "
-        f"out of {len(results)} nodes"
+        f"[Task:bulk_validate] Complete: {passed_count} healthy, {failed_count} unhealthy out of {len(results)} nodes"
     )
 
     return {
@@ -361,10 +361,10 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict:
     Returns:
         dict with cleanup summary
     """
-    from datetime import timedelta
-    from pathlib import Path
+    from datetime import timedelta  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
 
-    from apps.infrastructure.models import NodeDeployment
+    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
 
     logger.info(f"[Task:cleanup] Cleaning up failed deployments older than {max_age_hours}h")
 
@@ -387,7 +387,7 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict:
             deploy_dir = terraform_base / deployment.hostname
 
             if deploy_dir.exists():
-                import shutil
+                import shutil  # noqa: PLC0415
 
                 shutil.rmtree(deploy_dir)
                 logger.info(f"[Task:cleanup] Removed Terraform state: {deploy_dir}")
@@ -430,8 +430,12 @@ def upgrade_node_task(
     Returns:
         dict with upgrade result information
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog, NodeSize
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+        NodeSize,
+    )
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:upgrade_node] Upgrading deployment_id={deployment_id} to size_id={new_size_id}")
 
@@ -449,10 +453,8 @@ def upgrade_node_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.upgrade_node_size(
@@ -510,8 +512,11 @@ def maintenance_task(
     Returns:
         dict with maintenance result information
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+    )
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:maintenance] Running maintenance on deployment_id={deployment_id}")
 
@@ -523,10 +528,8 @@ def maintenance_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.run_maintenance(
@@ -586,8 +589,11 @@ def stop_node_task(
     Returns:
         dict with stop result information
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+    )
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:stop_node] Stopping deployment_id={deployment_id}")
 
@@ -599,10 +605,8 @@ def stop_node_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.stop_node(
@@ -657,8 +661,11 @@ def start_node_task(
     Returns:
         dict with start result information
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+    )
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:start_node] Starting deployment_id={deployment_id}")
 
@@ -670,10 +677,8 @@ def start_node_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.start_node(
@@ -728,8 +733,11 @@ def reboot_node_task(
     Returns:
         dict with reboot result information
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+    )
+    from apps.users.models import User  # noqa: PLC0415
 
     logger.info(f"[Task:reboot_node] Rebooting deployment_id={deployment_id}")
 
@@ -741,10 +749,8 @@ def reboot_node_task(
 
     user = None
     if user_id:
-        try:
+        with contextlib.suppress(User.DoesNotExist):
             user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            pass
 
     service = get_deployment_service()
     result = service.reboot_node(
@@ -806,7 +812,7 @@ def queue_deploy_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.deploy_node_task",
@@ -840,7 +846,7 @@ def queue_destroy_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
@@ -874,7 +880,7 @@ def queue_retry_deployment(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.retry_deployment_task",
@@ -908,7 +914,7 @@ def queue_upgrade_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.upgrade_node_task",
@@ -942,7 +948,7 @@ def queue_maintenance(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.maintenance_task",
@@ -974,7 +980,7 @@ def queue_stop_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.stop_node_task",
@@ -1005,7 +1011,7 @@ def queue_start_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.start_node_task",
@@ -1036,7 +1042,7 @@ def queue_reboot_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.reboot_node_task",
@@ -1056,13 +1062,16 @@ def queue_reboot_node(
 # ===============================================================================
 
 
-def deployment_complete_hook(task):
+def deployment_complete_hook(task: Any) -> None:
     """
     Hook called when a deployment task completes.
 
     Used for notifications and audit logging.
     """
-    from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
+    from apps.infrastructure.models import (  # noqa: PLC0415
+        NodeDeployment,
+        NodeDeploymentLog,
+    )
 
     logger.info(f"[Hook:deployment] Task {task.name} completed: success={task.success}")
 
@@ -1078,7 +1087,7 @@ def deployment_complete_hook(task):
                     NodeDeploymentLog.objects.create(
                         deployment=deployment,
                         level="INFO",
-                        message=f"Background task completed successfully",
+                        message="Background task completed successfully",
                         phase="complete",
                     )
                 else:
@@ -1093,7 +1102,7 @@ def deployment_complete_hook(task):
                 pass
 
 
-def destruction_complete_hook(task):
+def destruction_complete_hook(task: Any) -> None:
     """
     Hook called when a destruction task completes.
     """
@@ -1107,7 +1116,7 @@ def destruction_complete_hook(task):
             logger.error(f"[Hook:destruction] Destruction failed: {task.result.get('error')}")
 
 
-def lifecycle_complete_hook(task):
+def lifecycle_complete_hook(task: Any) -> None:
     """
     Hook called when a lifecycle operation task completes.
 
@@ -1123,8 +1132,7 @@ def lifecycle_complete_hook(task):
             logger.info(f"[Hook:lifecycle] {action.title()} completed for {hostname}")
         else:
             logger.error(
-                f"[Hook:lifecycle] {action.title()} failed for {hostname}: "
-                f"{task.result.get('error', 'Unknown error')}"
+                f"[Hook:lifecycle] {action.title()} failed for {hostname}: {task.result.get('error', 'Unknown error')}"
             )
 
 
@@ -1142,16 +1150,14 @@ def calculate_daily_costs_task() -> dict:
     Returns:
         dict with calculation results
     """
-    from datetime import timedelta
+    from datetime import timedelta  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     logger.info("[Task:calculate_daily_costs] Starting daily cost calculation")
 
     now = timezone.now()
-    yesterday_start = timezone.make_aware(
-        now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    )
+    yesterday_start = timezone.make_aware(now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1))
     yesterday_end = timezone.make_aware(
         now.replace(hour=23, minute=59, second=59, microsecond=999999) - timedelta(days=1)
     )
@@ -1190,10 +1196,10 @@ def calculate_monthly_costs_task(year: int, month: int) -> dict:
     Returns:
         dict with calculation results
     """
-    from calendar import monthrange
-    from datetime import datetime
+    from calendar import monthrange  # noqa: PLC0415
+    from datetime import datetime  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     logger.info(f"[Task:calculate_monthly_costs] Calculating costs for {year}-{month:02d}")
 
@@ -1239,10 +1245,10 @@ def generate_cost_report_task(year: int, month: int) -> dict:
     Returns:
         dict with cost report data
     """
-    from calendar import monthrange
-    from datetime import datetime
+    from calendar import monthrange  # noqa: PLC0415
+    from datetime import datetime  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     logger.info(f"[Task:generate_cost_report] Generating report for {year}-{month:02d}")
 
@@ -1283,16 +1289,10 @@ def generate_cost_report_task(year: int, month: int) -> dict:
             }
             for d in deployment_breakdown[:10]  # Top 10
         ],
-        "by_provider": {
-            name: str(cost)
-            for name, cost in provider_breakdown.items()
-        },
+        "by_provider": {name: str(cost) for name, cost in provider_breakdown.items()},
     }
 
-    logger.info(
-        f"[Task:generate_cost_report] Report generated for {year}-{month:02d}: "
-        f"{summary.total_eur:.2f} EUR"
-    )
+    logger.info(f"[Task:generate_cost_report] Report generated for {year}-{month:02d}: {summary.total_eur:.2f} EUR")
 
     return report
 
@@ -1308,7 +1308,7 @@ def queue_calculate_monthly_costs(year: int, month: int) -> str:
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import async_task  # noqa: PLC0415
 
     task_id = async_task(
         "apps.infrastructure.tasks.calculate_monthly_costs_task",

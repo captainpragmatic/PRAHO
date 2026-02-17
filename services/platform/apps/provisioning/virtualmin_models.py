@@ -196,9 +196,9 @@ class VirtualminAccount(models.Model):
     Links PRAHO's service management to Virtualmin's hosting infrastructure.
 
     ARCHITECTURAL DECISION: OneToOne Relationship with Service
-    
+
     We use OneToOneField instead of ForeignKey because:
-    1. **Current Business Logic**: Each PRAHO service should have at most one 
+    1. **Current Business Logic**: Each PRAHO service should have at most one
        VirtualMin hosting account. This enforces data integrity at the database level.
     2. **Simplified Queries**: service.virtualmin_account provides direct access
        without additional filtering or .first() calls.
@@ -213,7 +213,7 @@ class VirtualminAccount(models.Model):
     2. Update all service.virtualmin_account references to service.virtualmin_accounts.all()
     3. Add filtering logic in views/serializers to handle multiple accounts
     4. Update domain uniqueness constraint to allow multiple accounts per service
-    
+
     The migration is straightforward since OneToOne is implemented as FK + unique
     constraint, so dropping the unique constraint converts it to ForeignKey.
     """
@@ -229,11 +229,11 @@ class VirtualminAccount(models.Model):
     # Account identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     domain = models.CharField(
-        max_length=255, 
+        max_length=255,
         unique=True,  # Database-level uniqueness constraint
-        db_index=True, 
+        db_index=True,
         verbose_name=_("Primary Domain"),
-        help_text=_("Must be unique across all VirtualMin accounts")
+        help_text=_("Must be unique across all VirtualMin accounts"),
     )
 
     # Service linkage (OneToOne for current business logic - see class docstring)
@@ -266,24 +266,23 @@ class VirtualminAccount(models.Model):
 
     # Virtualmin account details
     virtualmin_username = models.CharField(
-        max_length=32, 
-        unique=True, 
+        max_length=32,
+        unique=True,
         db_index=True,
         verbose_name=_("Virtualmin Username"),
-        help_text=_("Unique Virtualmin virtual server username")
+        help_text=_("Unique Virtualmin virtual server username"),
     )
     encrypted_password = models.BinaryField(verbose_name=_("Encrypted Password"))
     template_name = models.CharField(max_length=50, default="Default", verbose_name=_("Virtualmin Template"))
-    
+
     # All domains managed by this account
-    domains = models.JSONField(
-        default=list,
-        help_text=_("All domains managed by this Virtualmin account")
-    )
+    domains = models.JSONField(default=list, help_text=_("All domains managed by this Virtualmin account"))
 
     # Resource limits
     disk_quota_mb = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("Disk Quota (MB)"))
-    bandwidth_quota_mb = models.IntegerField(null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"), help_text=_("Use -1 for unlimited bandwidth"))
+    bandwidth_quota_mb = models.IntegerField(
+        null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"), help_text=_("Use -1 for unlimited bandwidth")
+    )
 
     # Account status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="provisioning", verbose_name=_("Status"))
@@ -293,7 +292,7 @@ class VirtualminAccount(models.Model):
     protected_from_deletion = models.BooleanField(
         default=True,
         verbose_name=_("Protected from Deletion"),
-        help_text=_("Prevents accidental deletion of active Virtualmin accounts")
+        help_text=_("Prevents accidental deletion of active Virtualmin accounts"),
     )
 
     # Virtualmin metadata (from PRAHO recovery seeds)
@@ -577,9 +576,7 @@ class VirtualminProvisioningJob(models.Model):
 
     # Rollback tracking
     rollback_executed = models.BooleanField(
-        default=False,
-        verbose_name=_("Rollback Executed"),
-        help_text=_("Whether rollback was attempted after failure")
+        default=False, verbose_name=_("Rollback Executed"), help_text=_("Whether rollback was attempted after failure")
     )
     rollback_status = models.CharField(
         max_length=20,
@@ -591,12 +588,10 @@ class VirtualminProvisioningJob(models.Model):
             ("failed", _("Rollback Failed")),
         ),
         verbose_name=_("Rollback Status"),
-        help_text=_("Status of rollback operation if executed")
+        help_text=_("Status of rollback operation if executed"),
     )
     rollback_details = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Details of rollback operations performed")
+        default=dict, blank=True, help_text=_("Details of rollback operations performed")
     )
 
     # Execution tracking

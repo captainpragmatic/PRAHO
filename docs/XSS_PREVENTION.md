@@ -104,7 +104,7 @@ Expected result: All should render as plain text, not execute.
 The platform includes these CSP protections:
 
 ```
-Content-Security-Policy: 
+Content-Security-Policy:
   default-src 'self';
   script-src 'self';
   style-src 'self' 'unsafe-inline' fonts.googleapis.com;

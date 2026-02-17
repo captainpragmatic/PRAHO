@@ -345,9 +345,9 @@ class EFacturaDocument(models.Model):
     @classmethod
     def get_awaiting_response(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
         """Get documents awaiting ANAF response."""
-        return cls.objects.filter(status__in=[EFacturaStatus.SUBMITTED.value, EFacturaStatus.PROCESSING.value]).order_by(
-            "submitted_at"
-        )[:limit]
+        return cls.objects.filter(
+            status__in=[EFacturaStatus.SUBMITTED.value, EFacturaStatus.PROCESSING.value]
+        ).order_by("submitted_at")[:limit]
 
     @classmethod
     def get_ready_for_retry(cls) -> models.QuerySet[EFacturaDocument]:
@@ -382,6 +382,7 @@ class EFacturaDocument(models.Model):
         """Calculate the submission deadline from invoice issue date."""
         if self.invoice.issued_at:
             from apps.settings.services import SettingsService  # noqa: PLC0415
+
             deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
             return self.invoice.issued_at + timedelta(days=deadline_days)
         return None
@@ -392,6 +393,7 @@ class EFacturaDocument(models.Model):
         deadline = self.submission_deadline
         if deadline:
             from apps.settings.services import SettingsService  # noqa: PLC0415
+
             warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
             return timezone.now() >= deadline - timedelta(hours=warning_hours)
         return False

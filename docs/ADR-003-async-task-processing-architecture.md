@@ -1,9 +1,9 @@
 # ADR-003: Async Task Processing Architecture
 
-**Status:** Accepted  
-**Date:** 2025-09-02  
-**Authors:** PRAHO Development Team  
-**Supersedes:** None  
+**Status:** Accepted
+**Date:** 2025-09-02
+**Authors:** PRAHO Development Team
+**Supersedes:** None
 
 ## Context
 
@@ -38,7 +38,7 @@ Currently, we use Django-Q2 for asynchronous task processing as decided in the p
 
 **Cons:**
 - **Additional infrastructure complexity** - Redis dependency
-- **Two failure modes** - both PostgreSQL AND Redis must be operational  
+- **Two failure modes** - both PostgreSQL AND Redis must be operational
 - **Operational overhead** - Redis monitoring, backup, persistence configuration
 - **Team expertise gap** - distributed systems knowledge required
 - **Memory management** - Redis keeps all data in RAM
@@ -58,7 +58,7 @@ Currently, we use Django-Q2 for asynchronous task processing as decided in the p
 **Cons:**
 - **Significant development overhead** - 2-3 months to build production-ready system
 - **Missing enterprise features** - monitoring, admin interface, job result storage
-- **Performance polling** - database polling vs pub/sub notifications  
+- **Performance polling** - database polling vs pub/sub notifications
 - **Concurrency complexity** - row locking, dead letter handling, worker coordination
 - **Maintenance burden** - ongoing feature development and bug fixes
 - **Team velocity impact** - engineering resources diverted from business features
@@ -86,7 +86,7 @@ Currently, we use Django-Q2 for asynchronous task processing as decided in the p
 All async task solutions face common security challenges:
 
 - **Unvalidated job payloads** - always validate input data
-- **Resource exhaustion** - set memory/time limits  
+- **Resource exhaustion** - set memory/time limits
 - **Information leakage in error messages** - sanitize before storing
 - **No built-in rate limiting** - implement at application level
 
@@ -125,7 +125,7 @@ Q_CLUSTER = {
     'save_limit': 50,
 }
 
-# Production (PostgreSQL)  
+# Production (PostgreSQL)
 Q_CLUSTER = {
     'name': 'praho-cluster',
     'workers': 4,
@@ -159,7 +159,7 @@ Q_CLUSTER = {
 
 ## Future Considerations
 
-- **Volume scaling**: Monitor queue performance; migrate to Redis backend if >1000 jobs/minute  
+- **Volume scaling**: Monitor queue performance; migrate to Redis backend if >1000 jobs/minute
 - **Complex workflows**: Django-Q2 handles our current workflow requirements well
 - **Multi-tenant**: Django-Q2 supports multiple brokers for tenant isolation
 

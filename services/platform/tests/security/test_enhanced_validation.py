@@ -473,7 +473,7 @@ class TestSecureUserRegistrationService(TestCase):
             request_ip='192.168.1.1'
         )
 
-        # Current implementation doesn't prevent XSS - returns success  
+        # Current implementation doesn't prevent XSS - returns success
         # TODO: Implement XSS input validation
         self.assertTrue(result.is_ok())
 
@@ -500,7 +500,7 @@ class TestSecureUserRegistrationService(TestCase):
         )
 
         # Current implementation doesn't prevent privilege escalation - returns success
-        # TODO: Implement privilege escalation prevention 
+        # TODO: Implement privilege escalation prevention
         self.assertTrue(result.is_ok())
 
     @patch('apps.common.security_decorators.cache')

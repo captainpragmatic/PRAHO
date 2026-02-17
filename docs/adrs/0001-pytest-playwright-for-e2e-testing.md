@@ -1,7 +1,7 @@
 # ADR-0001: Use pytest-playwright for End-to-End Testing
 
-**Date:** 2025-08-25  
-**Status:** Accepted  
+**Date:** 2025-08-25
+**Status:** Accepted
 **Context:** PRAHO Platform E2E Testing Framework Selection
 
 ## Summary
@@ -43,7 +43,7 @@ We evaluated two approaches:
 # pytest-playwright: Automatic async handling
 page.click('button[type="submit"]')  # Just works
 
-# Django + Playwright: Manual async management  
+# Django + Playwright: Manual async management
 await page.click('button[type="submit"]')  # Requires careful async/await
 ```
 
@@ -69,7 +69,7 @@ def test_dashboard_functionality(page: Page):
     page.fill('input[name="email"]', ADMIN_EMAIL)
     page.fill('input[name="password"]', ADMIN_PASSWORD)
     page.click('button[type="submit"]')
-    
+
     # Automatic waits and error handling
     assert "/dashboard/" in page.url
 ```
@@ -78,14 +78,14 @@ def test_dashboard_functionality(page: Page):
 ```python
 class DashboardE2ETest(StaticLiveServerTestCase):
     """Requires complex setup and manual browser management."""
-    
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.playwright = sync_playwright().start()
         cls.browser = cls.playwright.chromium.launch()
         # ... complex setup code
-    
+
     def test_dashboard_functionality(self):
         # Manual async handling, explicit waits needed
         page = self.browser.new_page()
@@ -114,7 +114,7 @@ class DashboardE2ETest(StaticLiveServerTestCase):
 tests/e2e/
 ├── __init__.py
 └── test_dashboard_pytest.py    # 5 tests covering:
-                                 # - Admin dashboard functionality  
+                                 # - Admin dashboard functionality
                                  # - Customer dashboard functionality
                                  # - Navigation flow testing
                                  # - Role-specific feature validation
@@ -131,7 +131,7 @@ test-e2e:
 
 ### Current Test Coverage
 - **Authentication**: Admin and customer login flows
-- **Navigation**: Dashboard navigation and role-based routing  
+- **Navigation**: Dashboard navigation and role-based routing
 - **Button Interactions**: Comprehensive clicking of 70+ interactive elements per test
 - **Feature Detection**: Role-specific UI elements and permissions
 - **Console Monitoring**: JavaScript error detection (filtered for benign warnings)
@@ -145,7 +145,7 @@ def test_dashboard_button_interactions(page: Page):
     """Test comprehensive button interactions on the dashboard."""
     # Tests clicking of:
     # - Navigation links (13 found)
-    # - Buttons (15 found) 
+    # - Buttons (15 found)
     # - Anchor links (41 found)
     # - HTMX elements, dropdowns, onclick handlers
     # - Total: 70+ interactive elements tested per run
@@ -175,15 +175,15 @@ def test_dashboard_button_interactions(page: Page):
 ## Alternatives Considered
 
 1. **Django + Playwright**: Rejected due to performance and complexity issues
-2. **Selenium**: Rejected due to slower execution and maintenance overhead  
+2. **Selenium**: Rejected due to slower execution and maintenance overhead
 3. **Cypress**: Rejected due to JavaScript requirement and PRAHO's Python stack
 4. **Django's built-in test client**: Insufficient for full browser testing
 
 ## Success Metrics
 
-✅ **Performance Goal**: Sub-3 second E2E test execution *(Achieved: 2.47s)*  
-✅ **Reliability Goal**: Zero flaky tests due to timing issues *(Achieved)*  
-✅ **Coverage Goal**: Admin and customer role testing *(Achieved)*  
+✅ **Performance Goal**: Sub-3 second E2E test execution *(Achieved: 2.47s)*
+✅ **Reliability Goal**: Zero flaky tests due to timing issues *(Achieved)*
+✅ **Coverage Goal**: Admin and customer role testing *(Achieved)*
 ✅ **Integration Goal**: Seamless Makefile integration *(Achieved)*
 
 ## Future Considerations
@@ -197,13 +197,13 @@ def test_dashboard_button_interactions(page: Page):
 ## Implementation Timeline
 
 - **Phase 1** ✅ **Complete**: Framework evaluation and selection
-- **Phase 2** ✅ **Complete**: Basic dashboard and authentication testing  
+- **Phase 2** ✅ **Complete**: Basic dashboard and authentication testing
 - **Phase 3** ✅ **Complete**: Makefile integration and documentation
 - **Phase 4** ✅ **Complete**: Enhanced button interaction testing (70+ elements per test)
 - **Phase 5** 📋 **Planned**: Cross-browser and visual regression testing
 
 ---
 
-**Decision Maker:** Development Team  
-**Implementation:** August 2025  
+**Decision Maker:** Development Team
+**Implementation:** August 2025
 **Review Date:** December 2025 (or when expanding E2E coverage significantly)

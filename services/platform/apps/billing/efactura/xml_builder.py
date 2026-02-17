@@ -94,7 +94,6 @@ class XMLBuilderError(Exception):
     """Exception raised when XML building fails."""
 
 
-
 class BaseUBLBuilder:
     """Base class for UBL document builders."""
 
@@ -125,8 +124,12 @@ class BaseUBLBuilder:
         """Get customer (buyer) information from invoice."""
         if self._customer is None:
             bill_to_country = getattr(self.invoice, "bill_to_country", None) or "RO"
-            street = getattr(self.invoice, "bill_to_street", None) or getattr(self.invoice, "bill_to_address1", "") or ""
-            postal_code = getattr(self.invoice, "bill_to_postal_code", None) or getattr(self.invoice, "bill_to_postal", "") or ""
+            street = (
+                getattr(self.invoice, "bill_to_street", None) or getattr(self.invoice, "bill_to_address1", "") or ""
+            )
+            postal_code = (
+                getattr(self.invoice, "bill_to_postal_code", None) or getattr(self.invoice, "bill_to_postal", "") or ""
+            )
             self._customer = CompanyInfo(
                 name=getattr(self.invoice, "bill_to_name", "") or "",
                 tax_id=getattr(self.invoice, "bill_to_tax_id", "") or "",
@@ -193,9 +196,7 @@ class BaseUBLBuilder:
             elem.set(key, value)
         return elem
 
-    def _add_cbc(
-        self, parent: etree._Element, tag: str, text: str | None = None, **attribs: str
-    ) -> etree._Element:
+    def _add_cbc(self, parent: etree._Element, tag: str, text: str | None = None, **attribs: str) -> etree._Element:
         """Add CommonBasicComponents element."""
         return self._add_element(parent, self._cbc(tag), text, **attribs)
 
@@ -247,17 +248,18 @@ class BaseUBLBuilder:
         the invoice has no lines or no stored rate.
         """
         # Try to derive from invoice lines (frozen at invoice creation)
-        lines = getattr(self.invoice, 'lines', None)
+        lines = getattr(self.invoice, "lines", None)
         if lines is not None:
-            first_line = lines.first() if hasattr(lines, 'first') else None
+            first_line = lines.first() if hasattr(lines, "first") else None
             if first_line is not None:
-                tax_rate = getattr(first_line, 'tax_rate', None)
+                tax_rate = getattr(first_line, "tax_rate", None)
                 if tax_rate is not None:
                     return (Decimal(str(tax_rate)) * 100).quantize(Decimal("0.01"))
 
         # Fallback: current rate from TaxService (only for invoices with no lines)
-        from apps.common.tax_service import TaxService
-        return TaxService.get_vat_rate('RO', as_decimal=False)
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+        return TaxService.get_vat_rate("RO", as_decimal=False)
 
     def _add_postal_address(self, parent: etree._Element, company: CompanyInfo) -> etree._Element:
         """Add PostalAddress element."""

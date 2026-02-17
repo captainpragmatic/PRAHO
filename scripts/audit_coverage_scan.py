@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Scan Python code for audit coverage gaps and anti-patterns.
 

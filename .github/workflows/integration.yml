@@ -41,6 +41,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -86,6 +88,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -97,6 +101,23 @@ jobs:
       run: |
         uv python install
         uv sync --all-groups
+
+    - name: Ruff no-new-debt gate (changed Python files)
+      run: |
+        BASE_REF="${{ github.event.before }}"
+        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
+        fi
+        if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+          echo "Baseline ref not present locally ($BASE_REF); fetching..."
+          git fetch origin "${BASE_REF}" --depth=1 || true
+        fi
+        echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
+        ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
 
     - name: Set up platform database
       run: |

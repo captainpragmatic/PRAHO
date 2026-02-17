@@ -51,12 +51,12 @@
         {% endif %}
       </h3>
     </div>
-    
+
     <div class="p-6">
       <!-- Order Form -->
       <form method="post" class="space-y-6">
         {% csrf_token %}
-        
+
         <!-- Customer Selection (New Orders) -->
         {% if not order %}
         <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -151,7 +151,7 @@
             {% url 'orders:order_list' as cancel_url %}
           {% endif %}
           {% button "Cancel" variant="outline" href=cancel_url %}
-          
+
           {% if order %}
             {% button "💾 Update Order" type="submit" variant="primary" %}
           {% else %}
@@ -173,7 +173,7 @@
     <!-- Order Items Management with HTMX for real-time updates -->
     {% include 'orders/partials/order_items_list.html' %}
   </div>
-  
+
   <!-- Financial Summary Sidebar -->
   <div class="mt-6">
     {% include 'orders/partials/financial_summary.html' %}

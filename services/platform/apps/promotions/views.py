@@ -6,22 +6,19 @@ Handles coupon validation, application, and promotion management.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Count, Q, QuerySet, Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
-from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView,
-    DeleteView,
     DetailView,
     ListView,
     TemplateView,
@@ -34,22 +31,15 @@ from .models import (
     CouponRedemption,
     CustomerLoyalty,
     GiftCard,
-    GiftCardTransaction,
     LoyaltyProgram,
-    LoyaltyTier,
     LoyaltyTransaction,
     PromotionCampaign,
     PromotionRule,
     Referral,
-    ReferralCode,
 )
 from .services import (
-    ApplyResult,
     CouponService,
     GiftCardService,
-    LoyaltyService,
-    PromotionRuleService,
-    ReferralService,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,10 +95,7 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
 
     # Check if user is associated with the order's customer
     customer = _get_customer_from_request(request)
-    if customer and order.customer_id == customer.id:
-        return True
-
-    return False
+    return bool(customer and order.customer_id == customer.id)
 
 
 @method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
@@ -121,8 +108,8 @@ class ValidateCouponView(View):
     Rate limited to prevent brute-force attacks on coupon codes.
     """
 
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:  # noqa: PLR0911
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -130,37 +117,46 @@ class ValidateCouponView(View):
                 "Rate limit exceeded for coupon validation from IP %s",
                 request.META.get("REMOTE_ADDR"),
             )
-            return JsonResponse({
-                "valid": False,
-                "error": "Too many requests. Please try again later.",
-                "error_code": "RATE_LIMITED",
-            }, status=429)
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Too many requests. Please try again later.",
+                    "error_code": "RATE_LIMITED",
+                },
+                status=429,
+            )
 
         code = request.POST.get("code", "").strip()
         order_id = request.POST.get("order_id")
 
         if not code:
-            return JsonResponse({
-                "valid": False,
-                "error": "Please enter a coupon code",
-                "error_code": "EMPTY_CODE",
-            })
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Please enter a coupon code",
+                    "error_code": "EMPTY_CODE",
+                }
+            )
 
         if not order_id:
-            return JsonResponse({
-                "valid": False,
-                "error": "Order not found",
-                "error_code": "NO_ORDER",
-            })
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Order not found",
+                    "error_code": "NO_ORDER",
+                }
+            )
 
         try:
             order = Order.objects.select_related("customer", "currency").get(id=order_id)
         except Order.DoesNotExist:
-            return JsonResponse({
-                "valid": False,
-                "error": "Order not found",
-                "error_code": "ORDER_NOT_FOUND",
-            })
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Order not found",
+                    "error_code": "ORDER_NOT_FOUND",
+                }
+            )
 
         # SECURITY: Verify user has permission to access this order
         if not _user_can_access_order(request, order):
@@ -169,11 +165,14 @@ class ValidateCouponView(View):
                 request.user.id if request.user.is_authenticated else "anonymous",
                 order_id,
             )
-            return JsonResponse({
-                "valid": False,
-                "error": "Order not found",
-                "error_code": "ORDER_NOT_FOUND",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Order not found",
+                    "error_code": "ORDER_NOT_FOUND",
+                },
+                status=404,
+            )
 
         # Get customer from request (DRY helper)
         customer = _get_customer_from_request(request)
@@ -182,37 +181,43 @@ class ValidateCouponView(View):
         validation = CouponService.validate_coupon(code, order, customer)
 
         if not validation.is_valid:
-            return JsonResponse({
-                "valid": False,
-                "error": validation.error_message,
-                "error_code": validation.error_code,
-            })
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": validation.error_message,
+                    "error_code": validation.error_code,
+                }
+            )
 
         # Get discount preview
         coupon = CouponService.get_coupon_by_code(code)
         if coupon:
             discount = CouponService.calculate_discount(coupon, order)
-            return JsonResponse({
-                "valid": True,
-                "coupon": {
-                    "code": coupon.code,
-                    "name": coupon.name,
-                    "description": coupon.description,
-                    "discount_type": coupon.discount_type,
-                },
-                "discount": {
-                    "amount_cents": discount.discount_cents,
-                    "amount_display": f"{discount.discount_cents / 100:.2f}",
-                    "description": discount.discount_description,
-                },
-                "warnings": validation.warnings,
-            })
+            return JsonResponse(
+                {
+                    "valid": True,
+                    "coupon": {
+                        "code": coupon.code,
+                        "name": coupon.name,
+                        "description": coupon.description,
+                        "discount_type": coupon.discount_type,
+                    },
+                    "discount": {
+                        "amount_cents": discount.discount_cents,
+                        "amount_display": f"{discount.discount_cents / 100:.2f}",
+                        "description": discount.discount_description,
+                    },
+                    "warnings": validation.warnings,
+                }
+            )
 
-        return JsonResponse({
-            "valid": False,
-            "error": "Coupon not found",
-            "error_code": "NOT_FOUND",
-        })
+        return JsonResponse(
+            {
+                "valid": False,
+                "error": "Coupon not found",
+                "error_code": "NOT_FOUND",
+            }
+        )
 
 
 @method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
@@ -225,7 +230,7 @@ class ApplyCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -233,27 +238,36 @@ class ApplyCouponView(View):
                 "Rate limit exceeded for coupon application from IP %s",
                 request.META.get("REMOTE_ADDR"),
             )
-            return JsonResponse({
-                "success": False,
-                "error": "Too many requests. Please try again later.",
-            }, status=429)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Too many requests. Please try again later.",
+                },
+                status=429,
+            )
 
         code = request.POST.get("code", "").strip()
         order_id = request.POST.get("order_id")
 
         if not code or not order_id:
-            return JsonResponse({
-                "success": False,
-                "error": "Missing required parameters",
-            }, status=400)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Missing required parameters",
+                },
+                status=400,
+            )
 
         try:
             order = Order.objects.select_related("customer", "currency").get(id=order_id)
         except Order.DoesNotExist:
-            return JsonResponse({
-                "success": False,
-                "error": "Order not found",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Order not found",
+                },
+                status=404,
+            )
 
         # SECURITY: Verify user has permission to access this order
         if not _user_can_access_order(request, order):
@@ -262,10 +276,13 @@ class ApplyCouponView(View):
                 request.user.id if request.user.is_authenticated else "anonymous",
                 order_id,
             )
-            return JsonResponse({
-                "success": False,
-                "error": "Order not found",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Order not found",
+                },
+                status=404,
+            )
 
         # Get customer from request (DRY helper)
         customer = _get_customer_from_request(request)
@@ -284,19 +301,23 @@ class ApplyCouponView(View):
         )
 
         if result.success:
-            return JsonResponse({
-                "success": True,
-                "discount_cents": result.discount_cents,
-                "discount_display": f"{result.discount_cents / 100:.2f}",
-                "new_total_cents": order.total_cents,
-                "new_total_display": f"{order.total_cents / 100:.2f}",
-                "warnings": result.warnings,
-            })
+            return JsonResponse(
+                {
+                    "success": True,
+                    "discount_cents": result.discount_cents,
+                    "discount_display": f"{result.discount_cents / 100:.2f}",
+                    "new_total_cents": order.total_cents,
+                    "new_total_display": f"{order.total_cents / 100:.2f}",
+                    "warnings": result.warnings,
+                }
+            )
         else:
-            return JsonResponse({
-                "success": False,
-                "error": result.error_message,
-            })
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": result.error_message,
+                }
+            )
 
 
 @method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
@@ -306,31 +327,40 @@ class RemoveCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
-            return JsonResponse({
-                "success": False,
-                "error": "Too many requests. Please try again later.",
-            }, status=429)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Too many requests. Please try again later.",
+                },
+                status=429,
+            )
 
         order_id = request.POST.get("order_id")
         redemption_id = request.POST.get("redemption_id")
 
         if not order_id:
-            return JsonResponse({
-                "success": False,
-                "error": "Missing order ID",
-            }, status=400)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Missing order ID",
+                },
+                status=400,
+            )
 
         try:
             order = Order.objects.get(id=order_id)
         except Order.DoesNotExist:
-            return JsonResponse({
-                "success": False,
-                "error": "Order not found",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Order not found",
+                },
+                status=404,
+            )
 
         # SECURITY: Verify user has permission to modify this order
         if not _user_can_access_order(request, order):
@@ -339,10 +369,13 @@ class RemoveCouponView(View):
                 request.user.id if request.user.is_authenticated else "anonymous",
                 order_id,
             )
-            return JsonResponse({
-                "success": False,
-                "error": "Order not found",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Order not found",
+                },
+                status=404,
+            )
 
         success = CouponService.remove_coupon(
             order=order,
@@ -350,16 +383,20 @@ class RemoveCouponView(View):
         )
 
         if success:
-            return JsonResponse({
-                "success": True,
-                "new_total_cents": order.total_cents,
-                "new_total_display": f"{order.total_cents / 100:.2f}",
-            })
+            return JsonResponse(
+                {
+                    "success": True,
+                    "new_total_cents": order.total_cents,
+                    "new_total_display": f"{order.total_cents / 100:.2f}",
+                }
+            )
         else:
-            return JsonResponse({
-                "success": False,
-                "error": "Failed to remove coupon",
-            })
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Failed to remove coupon",
+                }
+            )
 
 
 class AvailableCouponsView(View):
@@ -368,7 +405,7 @@ class AvailableCouponsView(View):
     """
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         order_id = request.GET.get("order_id")
 
@@ -394,21 +431,22 @@ class AvailableCouponsView(View):
             include_private=False,
         )
 
-        return JsonResponse({
-            "coupons": [
-                {
-                    "code": c.code,
-                    "name": c.name,
-                    "description": c.description,
-                    "discount_type": c.discount_type,
-                    "discount_value": (
-                        float(c.discount_percent) if c.discount_percent
-                        else c.discount_amount_cents
-                    ),
-                }
-                for c in coupons
-            ]
-        })
+        return JsonResponse(
+            {
+                "coupons": [
+                    {
+                        "code": c.code,
+                        "name": c.name,
+                        "description": c.description,
+                        "discount_type": c.discount_type,
+                        "discount_value": (
+                            float(c.discount_percent) if c.discount_percent else c.discount_amount_cents
+                        ),
+                    }
+                    for c in coupons
+                ]
+            }
+        )
 
 
 # ===============================================================================
@@ -432,34 +470,43 @@ class ValidateGiftCardView(View):
                 "Rate limit exceeded for gift card validation from IP %s",
                 request.META.get("REMOTE_ADDR"),
             )
-            return JsonResponse({
-                "valid": False,
-                "error": "Too many requests. Please try again later.",
-            }, status=429)
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Too many requests. Please try again later.",
+                },
+                status=429,
+            )
 
         code = request.POST.get("code", "").strip()
 
         if not code:
-            return JsonResponse({
-                "valid": False,
-                "error": "Please enter a gift card code",
-            })
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": "Please enter a gift card code",
+                }
+            )
 
         validation = GiftCardService.validate_gift_card(code)
 
         if validation.is_valid:
             gift_card = GiftCard.objects.get(code=code.upper().strip())
-            return JsonResponse({
-                "valid": True,
-                "balance_cents": gift_card.current_balance_cents,
-                "balance_display": f"{gift_card.current_balance_cents / 100:.2f}",
-                "currency": gift_card.currency.code,
-            })
+            return JsonResponse(
+                {
+                    "valid": True,
+                    "balance_cents": gift_card.current_balance_cents,
+                    "balance_display": f"{gift_card.current_balance_cents / 100:.2f}",
+                    "currency": gift_card.currency.code,
+                }
+            )
         else:
-            return JsonResponse({
-                "valid": False,
-                "error": validation.error_message,
-            })
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "error": validation.error_message,
+                }
+            )
 
 
 @method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
@@ -468,7 +515,7 @@ class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # noqa: PLC0415
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -476,28 +523,37 @@ class RedeemGiftCardView(View):
                 "Rate limit exceeded for gift card redemption from IP %s",
                 request.META.get("REMOTE_ADDR"),
             )
-            return JsonResponse({
-                "success": False,
-                "error": "Too many requests. Please try again later.",
-            }, status=429)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Too many requests. Please try again later.",
+                },
+                status=429,
+            )
 
         code = request.POST.get("code", "").strip()
         order_id = request.POST.get("order_id")
         amount_cents = request.POST.get("amount_cents")
 
         if not code or not order_id:
-            return JsonResponse({
-                "success": False,
-                "error": "Missing required parameters",
-            }, status=400)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Missing required parameters",
+                },
+                status=400,
+            )
 
         try:
             order = Order.objects.get(id=order_id)
         except Order.DoesNotExist:
-            return JsonResponse({
-                "success": False,
-                "error": "Order not found",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Order not found",
+                },
+                status=404,
+            )
 
         # SECURITY: Verify user has permission to modify this order
         if not _user_can_access_order(request, order):
@@ -506,10 +562,13 @@ class RedeemGiftCardView(View):
                 request.user.id if request.user.is_authenticated else "anonymous",
                 order_id,
             )
-            return JsonResponse({
-                "success": False,
-                "error": "Order not found",
-            }, status=404)
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Order not found",
+                },
+                status=404,
+            )
 
         # Get customer using DRY helper
         customer = _get_customer_from_request(request)
@@ -525,16 +584,20 @@ class RedeemGiftCardView(View):
         )
 
         if result.success:
-            return JsonResponse({
-                "success": True,
-                "discount_cents": result.discount_cents,
-                "new_total_cents": order.total_cents,
-            })
+            return JsonResponse(
+                {
+                    "success": True,
+                    "discount_cents": result.discount_cents,
+                    "new_total_cents": order.total_cents,
+                }
+            )
         else:
-            return JsonResponse({
-                "success": False,
-                "error": result.error_message,
-            })
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": result.error_message,
+                }
+            )
 
 
 # ===============================================================================
@@ -550,7 +613,7 @@ class CampaignListView(StaffRequiredMixin, ListView):
     context_object_name = "campaigns"
     paginate_by = 25
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[PromotionCampaign]:
         queryset = super().get_queryset()
 
         # Filter by status
@@ -566,16 +629,14 @@ class CampaignListView(StaffRequiredMixin, ListView):
         # Search
         search = self.request.GET.get("search")
         if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search) | Q(slug__icontains=search)
-            )
+            queryset = queryset.filter(Q(name__icontains=search) | Q(slug__icontains=search))
 
         return queryset.annotate(
             coupon_count=Count("coupons"),
             total_redemptions=Sum("coupons__total_uses"),
         )
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         context["statuses"] = PromotionCampaign.STATUS_CHOICES
         context["campaign_types"] = PromotionCampaign.CAMPAIGN_TYPES
@@ -589,7 +650,7 @@ class CampaignDetailView(StaffRequiredMixin, DetailView):
     template_name = "promotions/admin/campaign_detail.html"
     context_object_name = "campaign"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         campaign = self.object
 
@@ -599,22 +660,23 @@ class CampaignDetailView(StaffRequiredMixin, DetailView):
         ).order_by("-created_at")[:20]
 
         # Get recent redemptions
-        context["recent_redemptions"] = CouponRedemption.objects.filter(
-            coupon__campaign=campaign,
-            status="applied",
-        ).select_related("coupon", "order", "customer").order_by("-applied_at")[:10]
+        context["recent_redemptions"] = (
+            CouponRedemption.objects.filter(
+                coupon__campaign=campaign,
+                status="applied",
+            )
+            .select_related("coupon", "order", "customer")
+            .order_by("-applied_at")[:10]
+        )
 
         # Calculate stats
         context["stats"] = {
             "total_coupons": campaign.coupons.count(),
             "active_coupons": campaign.coupons.filter(status="active", is_active=True).count(),
-            "total_redemptions": CouponRedemption.objects.filter(
-                coupon__campaign=campaign, status="applied"
-            ).count(),
+            "total_redemptions": CouponRedemption.objects.filter(coupon__campaign=campaign, status="applied").count(),
             "total_discount_cents": campaign.spent_cents,
             "budget_utilization": (
-                (campaign.spent_cents / campaign.budget_cents * 100)
-                if campaign.budget_cents else 0
+                (campaign.spent_cents / campaign.budget_cents * 100) if campaign.budget_cents else 0
             ),
         }
 
@@ -626,14 +688,21 @@ class CampaignCreateView(StaffRequiredMixin, CreateView):
 
     model = PromotionCampaign
     template_name = "promotions/admin/campaign_form.html"
-    fields = [
-        "name", "slug", "description", "campaign_type",
-        "start_date", "end_date", "budget_cents",
-        "utm_source", "utm_medium", "utm_campaign",
+    fields: ClassVar[list[str]] = [
+        "name",
+        "slug",
+        "description",
+        "campaign_type",
+        "start_date",
+        "end_date",
+        "budget_cents",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
     ]
     success_url = reverse_lazy("promotions:campaign_list")
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.created_by = self.request.user
         messages.success(self.request, f"Campaign '{form.instance.name}' created successfully.")
         return super().form_valid(form)
@@ -644,16 +713,25 @@ class CampaignUpdateView(StaffRequiredMixin, UpdateView):
 
     model = PromotionCampaign
     template_name = "promotions/admin/campaign_form.html"
-    fields = [
-        "name", "slug", "description", "campaign_type",
-        "start_date", "end_date", "budget_cents", "status", "is_active",
-        "utm_source", "utm_medium", "utm_campaign",
+    fields: ClassVar[list[str]] = [
+        "name",
+        "slug",
+        "description",
+        "campaign_type",
+        "start_date",
+        "end_date",
+        "budget_cents",
+        "status",
+        "is_active",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
     ]
 
-    def get_success_url(self):
+    def get_success_url(self) -> str:
         return reverse("promotions:campaign_detail", kwargs={"pk": self.object.pk})
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         messages.success(self.request, f"Campaign '{form.instance.name}' updated successfully.")
         return super().form_valid(form)
 
@@ -671,7 +749,7 @@ class CouponListView(StaffRequiredMixin, ListView):
     context_object_name = "coupons"
     paginate_by = 50
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Coupon]:
         queryset = super().get_queryset().select_related("campaign", "currency")
 
         # Filter by status
@@ -692,13 +770,11 @@ class CouponListView(StaffRequiredMixin, ListView):
         # Search
         search = self.request.GET.get("search")
         if search:
-            queryset = queryset.filter(
-                Q(code__icontains=search) | Q(name__icontains=search)
-            )
+            queryset = queryset.filter(Q(code__icontains=search) | Q(name__icontains=search))
 
         return queryset
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         context["statuses"] = Coupon.STATUS_CHOICES
         context["discount_types"] = Coupon.DISCOUNT_TYPES
@@ -713,22 +789,18 @@ class CouponDetailView(StaffRequiredMixin, DetailView):
     template_name = "promotions/admin/coupon_detail.html"
     context_object_name = "coupon"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         coupon = self.object
 
         # Get recent redemptions
-        context["redemptions"] = coupon.redemptions.select_related(
-            "order", "customer"
-        ).order_by("-created_at")[:50]
+        context["redemptions"] = coupon.redemptions.select_related("order", "customer").order_by("-created_at")[:50]
 
         # Calculate stats
         applied_redemptions = coupon.redemptions.filter(status="applied")
         context["stats"] = {
             "total_redemptions": applied_redemptions.count(),
-            "total_discount_cents": applied_redemptions.aggregate(
-                total=Sum("discount_cents")
-            )["total"] or 0,
+            "total_discount_cents": applied_redemptions.aggregate(total=Sum("discount_cents"))["total"] or 0,
             "unique_customers": applied_redemptions.values("customer").distinct().count(),
             "average_discount_cents": (
                 applied_redemptions.aggregate(avg=Sum("discount_cents") / Count("id"))["avg"] or 0
@@ -743,26 +815,41 @@ class CouponCreateView(StaffRequiredMixin, CreateView):
 
     model = Coupon
     template_name = "promotions/admin/coupon_form.html"
-    fields = [
-        "code", "name", "description", "campaign",
-        "discount_type", "discount_percent", "discount_amount_cents",
-        "max_discount_cents", "min_order_cents", "min_order_items",
-        "valid_from", "valid_until",
-        "usage_limit_type", "max_total_uses", "max_uses_per_customer",
-        "customer_target", "first_order_only",
-        "is_stackable", "is_exclusive", "stacking_priority",
-        "is_active", "is_public", "currency",
+    fields: ClassVar[list[str]] = [
+        "code",
+        "name",
+        "description",
+        "campaign",
+        "discount_type",
+        "discount_percent",
+        "discount_amount_cents",
+        "max_discount_cents",
+        "min_order_cents",
+        "min_order_items",
+        "valid_from",
+        "valid_until",
+        "usage_limit_type",
+        "max_total_uses",
+        "max_uses_per_customer",
+        "customer_target",
+        "first_order_only",
+        "is_stackable",
+        "is_exclusive",
+        "stacking_priority",
+        "is_active",
+        "is_public",
+        "currency",
     ]
     success_url = reverse_lazy("promotions:coupon_list")
 
-    def get_form(self, form_class=None):
+    def get_form(self, form_class: Any = None) -> Any:
         form = super().get_form(form_class)
         # Generate a code if not provided
         if not form.data.get("code"):
             form.initial["code"] = Coupon.generate_code()
         return form
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.created_by = self.request.user
         messages.success(self.request, f"Coupon '{form.instance.code}' created successfully.")
         return super().form_valid(form)
@@ -773,21 +860,35 @@ class CouponUpdateView(StaffRequiredMixin, UpdateView):
 
     model = Coupon
     template_name = "promotions/admin/coupon_form.html"
-    fields = [
-        "name", "description", "campaign",
-        "discount_type", "discount_percent", "discount_amount_cents",
-        "max_discount_cents", "min_order_cents", "min_order_items",
-        "valid_from", "valid_until",
-        "usage_limit_type", "max_total_uses", "max_uses_per_customer",
-        "customer_target", "first_order_only",
-        "is_stackable", "is_exclusive", "stacking_priority",
-        "status", "is_active", "is_public",
+    fields: ClassVar[list[str]] = [
+        "name",
+        "description",
+        "campaign",
+        "discount_type",
+        "discount_percent",
+        "discount_amount_cents",
+        "max_discount_cents",
+        "min_order_cents",
+        "min_order_items",
+        "valid_from",
+        "valid_until",
+        "usage_limit_type",
+        "max_total_uses",
+        "max_uses_per_customer",
+        "customer_target",
+        "first_order_only",
+        "is_stackable",
+        "is_exclusive",
+        "stacking_priority",
+        "status",
+        "is_active",
+        "is_public",
     ]
 
-    def get_success_url(self):
+    def get_success_url(self) -> str:
         return reverse("promotions:coupon_detail", kwargs={"pk": self.object.pk})
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         messages.success(self.request, f"Coupon '{form.instance.code}' updated successfully.")
         return super().form_valid(form)
 
@@ -800,7 +901,7 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
 
     def _get_max_batch_size(self) -> int:
         """Get max batch size from SettingsService at runtime."""
-        from apps.settings.services import SettingsService
+        from apps.settings.services import SettingsService  # noqa: PLC0415
 
         return SettingsService.get_integer_setting("promotions.max_coupon_batch_size", self._DEFAULT_MAX_BATCH_SIZE)
 
@@ -822,7 +923,7 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
             messages.error(
                 request,
                 f"Count exceeds maximum batch size of {max_batch_size}. "
-                "Please create multiple batches for larger quantities."
+                "Please create multiple batches for larger quantities.",
             )
             return redirect("promotions:coupon_batch_create")
 
@@ -868,7 +969,7 @@ class GiftCardListView(StaffRequiredMixin, ListView):
     context_object_name = "gift_cards"
     paginate_by = 50
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[GiftCard]:
         queryset = super().get_queryset().select_related("currency", "purchased_by", "redeemed_by")
 
         status = self.request.GET.get("status")
@@ -889,11 +990,11 @@ class GiftCardDetailView(StaffRequiredMixin, DetailView):
     template_name = "promotions/admin/gift_card_detail.html"
     context_object_name = "gift_card"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        context["transactions"] = self.object.transactions.select_related(
-            "order", "customer", "created_by"
-        ).order_by("-created_at")
+        context["transactions"] = self.object.transactions.select_related("order", "customer", "created_by").order_by(
+            "-created_at"
+        )
         return context
 
 
@@ -902,14 +1003,18 @@ class GiftCardCreateView(StaffRequiredMixin, CreateView):
 
     model = GiftCard
     template_name = "promotions/admin/gift_card_form.html"
-    fields = [
-        "initial_value_cents", "currency", "card_type",
-        "recipient_email", "recipient_name", "personal_message",
+    fields: ClassVar[list[str]] = [
+        "initial_value_cents",
+        "currency",
+        "card_type",
+        "recipient_email",
+        "recipient_name",
+        "personal_message",
         "valid_until",
     ]
     success_url = reverse_lazy("promotions:gift_card_list")
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.code = GiftCard.generate_code()
         form.instance.current_balance_cents = form.instance.initial_value_cents
         form.instance.status = "pending"
@@ -930,9 +1035,11 @@ class ReferralListView(StaffRequiredMixin, ListView):
     context_object_name = "referrals"
     paginate_by = 50
 
-    def get_queryset(self):
-        queryset = super().get_queryset().select_related(
-            "referral_code", "referral_code__owner", "referred_customer", "qualifying_order"
+    def get_queryset(self) -> QuerySet[Referral]:
+        queryset = (
+            super()
+            .get_queryset()
+            .select_related("referral_code", "referral_code__owner", "referred_customer", "qualifying_order")
         )
 
         status = self.request.GET.get("status")
@@ -952,7 +1059,7 @@ class LoyaltyDashboardView(StaffRequiredMixin, TemplateView):
 
     template_name = "promotions/admin/loyalty_dashboard.html"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
 
         # Get active program
@@ -960,28 +1067,24 @@ class LoyaltyDashboardView(StaffRequiredMixin, TemplateView):
         context["program"] = program
 
         if program:
-            context["tiers"] = program.tiers.annotate(
-                member_count=Count("members")
-            ).order_by("sort_order")
+            context["tiers"] = program.tiers.annotate(member_count=Count("members")).order_by("sort_order")
 
-            context["total_members"] = CustomerLoyalty.objects.filter(
-                program=program, is_active=True
-            ).count()
+            context["total_members"] = CustomerLoyalty.objects.filter(program=program, is_active=True).count()
 
-            context["total_points_issued"] = CustomerLoyalty.objects.filter(
-                program=program
-            ).aggregate(total=Sum("points_lifetime"))["total"] or 0
+            context["total_points_issued"] = (
+                CustomerLoyalty.objects.filter(program=program).aggregate(total=Sum("points_lifetime"))["total"] or 0
+            )
 
-            context["total_points_redeemed"] = CustomerLoyalty.objects.filter(
-                program=program
-            ).aggregate(total=Sum("points_redeemed"))["total"] or 0
+            context["total_points_redeemed"] = (
+                CustomerLoyalty.objects.filter(program=program).aggregate(total=Sum("points_redeemed"))["total"] or 0
+            )
 
             # Recent transactions
-            context["recent_transactions"] = LoyaltyTransaction.objects.filter(
-                customer_loyalty__program=program
-            ).select_related(
-                "customer_loyalty__customer", "order"
-            ).order_by("-created_at")[:20]
+            context["recent_transactions"] = (
+                LoyaltyTransaction.objects.filter(customer_loyalty__program=program)
+                .select_related("customer_loyalty__customer", "order")
+                .order_by("-created_at")[:20]
+            )
 
         return context
 
@@ -999,7 +1102,7 @@ class PromotionRuleListView(StaffRequiredMixin, ListView):
     context_object_name = "rules"
     paginate_by = 25
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[PromotionRule]:
         return super().get_queryset().select_related("campaign").order_by("priority", "-created_at")
 
 
@@ -1008,16 +1111,26 @@ class PromotionRuleCreateView(StaffRequiredMixin, CreateView):
 
     model = PromotionRule
     template_name = "promotions/admin/rule_form.html"
-    fields = [
-        "name", "description", "campaign", "rule_type",
-        "discount_type", "discount_percent", "discount_amount_cents",
-        "max_discount_cents", "valid_from", "valid_until",
-        "is_stackable", "priority", "is_active",
-        "display_name", "display_badge",
+    fields: ClassVar[list[str]] = [
+        "name",
+        "description",
+        "campaign",
+        "rule_type",
+        "discount_type",
+        "discount_percent",
+        "discount_amount_cents",
+        "max_discount_cents",
+        "valid_from",
+        "valid_until",
+        "is_stackable",
+        "priority",
+        "is_active",
+        "display_name",
+        "display_badge",
     ]
     success_url = reverse_lazy("promotions:rule_list")
 
-    def form_valid(self, form):
+    def form_valid(self, form: Any) -> HttpResponse:
         form.instance.created_by = self.request.user
         messages.success(self.request, f"Promotion rule '{form.instance.name}' created.")
         return super().form_valid(form)
@@ -1028,12 +1141,22 @@ class PromotionRuleUpdateView(StaffRequiredMixin, UpdateView):
 
     model = PromotionRule
     template_name = "promotions/admin/rule_form.html"
-    fields = [
-        "name", "description", "campaign", "rule_type",
-        "discount_type", "discount_percent", "discount_amount_cents",
-        "max_discount_cents", "valid_from", "valid_until",
-        "is_stackable", "priority", "is_active",
-        "display_name", "display_badge",
+    fields: ClassVar[list[str]] = [
+        "name",
+        "description",
+        "campaign",
+        "rule_type",
+        "discount_type",
+        "discount_percent",
+        "discount_amount_cents",
+        "max_discount_cents",
+        "valid_from",
+        "valid_until",
+        "is_stackable",
+        "priority",
+        "is_active",
+        "display_name",
+        "display_badge",
     ]
     success_url = reverse_lazy("promotions:rule_list")
 
@@ -1048,14 +1171,12 @@ class PromotionsDashboardView(StaffRequiredMixin, TemplateView):
 
     template_name = "promotions/admin/dashboard.html"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         now = timezone.now()
 
         # Campaign stats
-        context["active_campaigns"] = PromotionCampaign.objects.filter(
-            status="active", is_active=True
-        ).count()
+        context["active_campaigns"] = PromotionCampaign.objects.filter(status="active", is_active=True).count()
 
         context["campaigns_ending_soon"] = PromotionCampaign.objects.filter(
             status="active",
@@ -1064,9 +1185,7 @@ class PromotionsDashboardView(StaffRequiredMixin, TemplateView):
         ).count()
 
         # Coupon stats
-        context["active_coupons"] = Coupon.objects.filter(
-            status="active", is_active=True
-        ).count()
+        context["active_coupons"] = Coupon.objects.filter(status="active", is_active=True).count()
 
         context["expiring_coupons"] = Coupon.objects.filter(
             status="active",
@@ -1081,26 +1200,33 @@ class PromotionsDashboardView(StaffRequiredMixin, TemplateView):
             status="applied",
         ).count()
 
-        context["todays_discount_cents"] = CouponRedemption.objects.filter(
-            applied_at__date=today,
-            status="applied",
-        ).aggregate(total=Sum("discount_cents"))["total"] or 0
+        context["todays_discount_cents"] = (
+            CouponRedemption.objects.filter(
+                applied_at__date=today,
+                status="applied",
+            ).aggregate(total=Sum("discount_cents"))["total"]
+            or 0
+        )
 
         # Top coupons this week
         week_ago = now - timezone.timedelta(days=7)
-        context["top_coupons"] = Coupon.objects.filter(
-            redemptions__applied_at__gte=week_ago,
-            redemptions__status="applied",
-        ).annotate(
-            week_uses=Count("redemptions"),
-            week_discount=Sum("redemptions__discount_cents"),
-        ).order_by("-week_uses")[:5]
+        context["top_coupons"] = (
+            Coupon.objects.filter(
+                redemptions__applied_at__gte=week_ago,
+                redemptions__status="applied",
+            )
+            .annotate(
+                week_uses=Count("redemptions"),
+                week_discount=Sum("redemptions__discount_cents"),
+            )
+            .order_by("-week_uses")[:5]
+        )
 
         # Recent redemptions
-        context["recent_redemptions"] = CouponRedemption.objects.filter(
-            status="applied"
-        ).select_related(
-            "coupon", "order", "customer"
-        ).order_by("-applied_at")[:10]
+        context["recent_redemptions"] = (
+            CouponRedemption.objects.filter(status="applied")
+            .select_related("coupon", "order", "customer")
+            .order_by("-applied_at")[:10]
+        )
 
         return context

@@ -12,12 +12,12 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Application definition - Portal service apps only 
+# Application definition - Portal service apps only
 DJANGO_APPS: list[str] = [
-    "django.contrib.sessions",     # Session framework (cache-only)
-    "django.contrib.messages",     # Message framework for user feedback
+    "django.contrib.sessions",  # Session framework (cache-only)
+    "django.contrib.messages",  # Message framework for user feedback
     "django.contrib.staticfiles",  # Static file serving
-    "django.contrib.humanize",     # Template humanization
+    "django.contrib.humanize",  # Template humanization
 ]
 
 THIRD_PARTY_APPS: list[str] = [
@@ -26,14 +26,14 @@ THIRD_PARTY_APPS: list[str] = [
 ]
 
 LOCAL_APPS: list[str] = [
-    "apps.common",       # Shared utilities, validators (duplicated from platform)
-    "apps.users",        # Portal user authentication (validates via Platform API)
-    "apps.dashboard",    # Customer dashboard (API-only)
-    "apps.billing",      # Customer billing views (API client)
-    "apps.tickets",      # Customer support tickets (API client)
-    "apps.services",     # Customer service management (API client)
-    "apps.ui",           # Template tags and components
-    "apps.api_client",   # Platform API integration service
+    "apps.common",  # Shared utilities, validators (duplicated from platform)
+    "apps.users",  # Portal user authentication (validates via Platform API)
+    "apps.dashboard",  # Customer dashboard (API-only)
+    "apps.billing",  # Customer billing views (API client)
+    "apps.tickets",  # Customer support tickets (API client)
+    "apps.services",  # Customer service management (API client)
+    "apps.ui",  # Template tags and components
+    "apps.api_client",  # Platform API integration service
 ]
 
 INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -42,20 +42,20 @@ MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
     # 🔒 SECURITY: Rate limiting before sessions to prevent DoS
     "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
-    "apps.common.rate_limiting.APIRateLimitMiddleware",             # API rate limiting
-    "django.contrib.sessions.middleware.SessionMiddleware",         # Cache-only sessions
-    "django.middleware.locale.LocaleMiddleware",                    # After sessions
-    "apps.users.middleware.SessionLanguageMiddleware",              # Activate session language
-    "django.middleware.common.CommonMiddleware",                    # After locale
-    "django.middleware.csrf.CsrfViewMiddleware",                    # CSRF protection
-    "django.contrib.messages.middleware.MessageMiddleware",         # Messages support
+    "apps.common.rate_limiting.APIRateLimitMiddleware",  # API rate limiting
+    "django.contrib.sessions.middleware.SessionMiddleware",  # Cache-only sessions
+    "django.middleware.locale.LocaleMiddleware",  # After sessions
+    "apps.users.middleware.SessionLanguageMiddleware",  # Activate session language
+    "django.middleware.common.CommonMiddleware",  # After locale
+    "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection
+    "django.contrib.messages.middleware.MessageMiddleware",  # Messages support
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # 🔒 SECURITY: Session security after authentication
-    "apps.common.middleware.SessionSecurityMiddleware",             # Session protection
+    "apps.common.middleware.SessionSecurityMiddleware",  # Session protection
     # Custom middleware last
     "apps.common.middleware.RequestIDMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
-    "apps.users.middleware.PortalAuthenticationMiddleware",         # Portal validation
+    "apps.users.middleware.PortalAuthenticationMiddleware",  # Portal validation
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -105,17 +105,17 @@ SESSION_ENGINE = "django.contrib.sessions.backends.db"
 # Keep a local cache for general portal caching (not sessions)
 if os.environ.get("DEBUG", "True").lower() == "true":
     CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'portal-dev-cache',
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "portal-dev-cache",
         }
     }
 else:
     # In production we can still use LocMem or point to Redis later
     CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'portal-prod-cache',
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "portal-prod-cache",
         }
     }
 
@@ -176,32 +176,32 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "portal.pragmatichost.com"]
 # ===============================================================================
 
 # Session duration settings
-SESSION_COOKIE_AGE_DEFAULT = 24 * 60 * 60       # 24 hours (86400 seconds)
+SESSION_COOKIE_AGE_DEFAULT = 24 * 60 * 60  # 24 hours (86400 seconds)
 SESSION_COOKIE_AGE_REMEMBER_ME = 30 * 24 * 60 * 60  # 30 days (2592000 seconds)
 
 # Session behavior
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Use custom age settings
-SESSION_SAVE_EVERY_REQUEST = False       # Only save when modified
-SESSION_COOKIE_NAME = "portal_session"   # Custom session name
+SESSION_SAVE_EVERY_REQUEST = False  # Only save when modified
+SESSION_COOKIE_NAME = "portal_session"  # Custom session name
 
 # Cookie security settings
 SESSION_COOKIE_SECURE = not DEBUG  # HTTPS in production
-SESSION_COOKIE_HTTPONLY = True     # Prevent XSS access
-SESSION_COOKIE_SAMESITE = 'Lax'    # CSRF protection
-CSRF_COOKIE_SECURE = not DEBUG     # HTTPS for CSRF cookies
-CSRF_COOKIE_HTTPONLY = False       # ✅ Allow JS access for AJAX
-CSRF_COOKIE_SAMESITE = 'Lax'       # CSRF protection
+SESSION_COOKIE_HTTPONLY = True  # Prevent XSS access
+SESSION_COOKIE_SAMESITE = "Lax"  # CSRF protection
+CSRF_COOKIE_SECURE = not DEBUG  # HTTPS for CSRF cookies
+CSRF_COOKIE_HTTPONLY = False  # ✅ Allow JS access for AJAX
+CSRF_COOKIE_SAMESITE = "Lax"  # CSRF protection
 
 # CSRF trusted origins (must include scheme + host)
 CSRF_TRUSTED_ORIGINS = [
     "https://portal.pragmatichost.com",
-    "https://www.pragmatichost.com", 
+    "https://www.pragmatichost.com",
 ]
 
 # Security headers
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'  # ✅ Added
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"  # ✅ Added
 X_FRAME_OPTIONS = "DENY"
 
 # HTTPS redirect in production
@@ -214,19 +214,19 @@ SECURE_SSL_REDIRECT = not DEBUG
 # ===============================================================================
 
 # Portal service identification for HMAC authentication
-PORTAL_ID = os.environ.get('PORTAL_ID', 'portal-001')
+PORTAL_ID = os.environ.get("PORTAL_ID", "portal-001")
 
 # Platform API connection settings
 PLATFORM_API_BASE_URL = os.environ.get(
-    'PLATFORM_API_BASE_URL', 
-    'http://localhost:8700/api'  # Default to local development
+    "PLATFORM_API_BASE_URL",
+    "http://localhost:8700/api",  # Default to local development
 )
 PLATFORM_API_SECRET = os.environ.get(
-    'PLATFORM_API_SECRET',
+    "PLATFORM_API_SECRET",
     # Development fallback - MUST be changed in production
-    'dev-shared-secret-change-in-production' 
+    "dev-shared-secret-change-in-production",
 )
-PLATFORM_API_TIMEOUT = int(os.environ.get('PLATFORM_API_TIMEOUT', '30'))
+PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
 # ===============================================================================
 # LOGGING CONFIGURATION

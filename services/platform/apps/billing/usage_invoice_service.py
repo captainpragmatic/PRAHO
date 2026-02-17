@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Result:
     """Result pattern for operations"""
+
     _value: Any
     _error: str | None
 
@@ -75,16 +76,16 @@ class UsageInvoiceService:
         # Use centralized config for defaults
         self.default_vat_rate = billing_config.DEFAULT_VAT_RATE
 
-    def generate_invoice_from_cycle(self, billing_cycle_id: str) -> Result:
+    def generate_invoice_from_cycle(self, billing_cycle_id: str) -> Result:  # noqa: C901, PLR0915
         """
         Generate an invoice from a billing cycle.
 
         The billing cycle must be in 'closed' or 'rated' status.
         All usage aggregations must be rated.
         """
-        from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
-        from .metering_models import BillingCycle, UsageAggregation
-        from .payment_models import CreditLedger
+        from .invoice_models import Invoice, InvoiceLine, InvoiceSequence  # noqa: PLC0415
+        from .metering_models import BillingCycle, UsageAggregation  # noqa: PLC0415
+        from .payment_models import CreditLedger  # noqa: PLC0415
 
         try:
             billing_cycle = BillingCycle.objects.select_related(
@@ -94,9 +95,7 @@ class UsageInvoiceService:
             return Result.err(f"Billing cycle not found: {billing_cycle_id}")
 
         if billing_cycle.status not in ("closed", "accumulating"):
-            return Result.err(
-                f"Billing cycle not ready for invoicing: status is {billing_cycle.status}"
-            )
+            return Result.err(f"Billing cycle not ready for invoicing: status is {billing_cycle.status}")
 
         subscription = billing_cycle.subscription
         customer = subscription.customer
@@ -104,19 +103,17 @@ class UsageInvoiceService:
 
         # Check if invoice already exists
         if billing_cycle.invoice:
-            return Result.err(
-                f"Invoice already exists for billing cycle: {billing_cycle.invoice.number}"
-            )
+            return Result.err(f"Invoice already exists for billing cycle: {billing_cycle.invoice.number}")
 
         # Get unrated aggregations - they need rating first
         unrated = UsageAggregation.objects.filter(
-            billing_cycle=billing_cycle,
-            status__in=("accumulating", "pending_rating")
+            billing_cycle=billing_cycle, status__in=("accumulating", "pending_rating")
         ).exists()
 
         if unrated:
             # Rate them first
-            from .metering_service import RatingEngine
+            from .metering_service import RatingEngine  # noqa: PLC0415
+
             rating_engine = RatingEngine()
             rating_result = rating_engine.rate_billing_cycle(str(billing_cycle_id))
             if rating_result.is_err():
@@ -126,10 +123,9 @@ class UsageInvoiceService:
         billing_cycle.refresh_from_db()
 
         # Get all rated aggregations
-        aggregations = UsageAggregation.objects.filter(
-            billing_cycle=billing_cycle,
-            status="rated"
-        ).select_related("meter")
+        aggregations = UsageAggregation.objects.filter(billing_cycle=billing_cycle, status="rated").select_related(
+            "meter"
+        )
 
         with transaction.atomic():
             # Get invoice sequence (reuse existing billing pattern)
@@ -296,27 +292,24 @@ class UsageInvoiceService:
                 },
             )
 
-        logger.info(
-            f"Generated invoice {invoice.number} for billing cycle {billing_cycle_id}: "
-            f"{total_cents} cents"
-        )
+        logger.info(f"Generated invoice {invoice.number} for billing cycle {billing_cycle_id}: " f"{total_cents} cents")
 
-        return Result.ok({
-            "invoice_id": str(invoice.id),
-            "invoice_number": invoice.number,
-            "total_cents": total_cents,
-            "line_items": invoice.lines.count(),
-        })
+        return Result.ok(
+            {
+                "invoice_id": str(invoice.id),
+                "invoice_number": invoice.number,
+                "total_cents": total_cents,
+                "line_items": invoice.lines.count(),
+            }
+        )
 
     def _get_customer_credit_balance(self, customer: Any) -> int:
         """Get customer's available credit balance in cents"""
-        from django.db.models import Sum
+        from django.db.models import Sum  # noqa: PLC0415
 
-        from .payment_models import CreditLedger
+        from .payment_models import CreditLedger  # noqa: PLC0415
 
-        result = CreditLedger.objects.filter(
-            customer=customer
-        ).aggregate(total=Sum("delta_cents"))
+        result = CreditLedger.objects.filter(customer=customer).aggregate(total=Sum("delta_cents"))
 
         return result["total"] or 0
 
@@ -324,15 +317,15 @@ class UsageInvoiceService:
         """Get the applicable VAT rate for a customer."""
         # Check if customer has tax profile with reverse charge
         try:
-            from apps.customers.models import CustomerTaxProfile
+            from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
             tax_profile = CustomerTaxProfile.objects.get(customer=customer)
 
             # EU B2B reverse charge - 0% VAT if valid EU VAT number
             if tax_profile.is_reverse_charge_eligible and tax_profile.vat_number:
                 country = getattr(customer, "country", billing_config.DEFAULT_COUNTRY_CODE)
                 # Reverse charge applies to EU customers outside provider's country
-                if (billing_config.is_eu_country(country) and
-                        country != billing_config.DEFAULT_COUNTRY_CODE):
+                if billing_config.is_eu_country(country) and country != billing_config.DEFAULT_COUNTRY_CODE:
                     return Decimal("0")
 
         except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
@@ -358,11 +351,10 @@ class UsageInvoiceService:
 
         # Try to get from customer addresses
         try:
-            from apps.customers.models import CustomerAddress
+            from apps.customers.models import CustomerAddress  # noqa: PLC0415
+
             billing_addr = CustomerAddress.objects.filter(
-                customer=customer,
-                address_type="billing",
-                is_current=True
+                customer=customer, address_type="billing", is_current=True
             ).first()
 
             if billing_addr:
@@ -377,7 +369,8 @@ class UsageInvoiceService:
 
         # Try to get tax ID from tax profile
         try:
-            from apps.customers.models import CustomerTaxProfile
+            from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
             tax_profile = CustomerTaxProfile.objects.get(customer=customer)
             address["tax_id"] = tax_profile.cui or tax_profile.vat_number or ""
         except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
@@ -390,7 +383,7 @@ class UsageInvoiceService:
         meter = aggregation.meter
         unit = meter.unit_display or meter.get_unit_display()
 
-        # Format: "Bandwidth Usage: 150 GB (100 GB included, 50 GB overage)"
+        # Format: "Bandwidth Usage: 150 GB (100 GB included, 50 GB overage)"  # noqa: ERA001
         parts = [f"{meter.display_name}:"]
 
         if aggregation.included_allowance > 0:
@@ -414,7 +407,7 @@ class UsageInvoiceService:
         """
         Issue a draft invoice (change status from draft to issued).
         """
-        from .invoice_models import Invoice
+        from .invoice_models import Invoice  # noqa: PLC0415
 
         try:
             invoice = Invoice.objects.get(id=invoice_id)
@@ -457,18 +450,14 @@ class BillingCycleManager:
     - Closing expired cycles
     """
 
-    def create_billing_cycle(
-        self,
-        subscription_id: str,
-        period_start: datetime | None = None
-    ) -> Result:
+    def create_billing_cycle(self, subscription_id: str, period_start: datetime | None = None) -> Result:
         """
         Create a new billing cycle for a subscription.
         """
-        from dateutil.relativedelta import relativedelta
+        from dateutil.relativedelta import relativedelta  # noqa: PLC0415
 
-        from .metering_models import BillingCycle
-        from .subscription_models import Subscription
+        from .metering_models import BillingCycle  # noqa: PLC0415
+        from .subscription_models import Subscription  # noqa: PLC0415
 
         try:
             subscription = Subscription.objects.get(id=subscription_id)
@@ -494,10 +483,7 @@ class BillingCycleManager:
         period_end = period_start + delta
 
         # Check for existing cycle
-        existing = BillingCycle.objects.filter(
-            subscription=subscription,
-            period_start=period_start
-        ).exists()
+        existing = BillingCycle.objects.filter(subscription=subscription, period_start=period_start).exists()
 
         if existing:
             return Result.err(f"Billing cycle already exists for period starting {period_start}")
@@ -540,11 +526,9 @@ class BillingCycleManager:
 
         Returns: (created_count, error_count, errors)
         """
-        from .subscription_models import Subscription
+        from .subscription_models import Subscription  # noqa: PLC0415
 
-        active_subscriptions = Subscription.objects.filter(
-            status__in=("active", "trialing")
-        )
+        active_subscriptions = Subscription.objects.filter(status__in=("active", "trialing"))
 
         created = 0
         errors = 0
@@ -560,13 +544,9 @@ class BillingCycleManager:
                     created += 1
                 else:
                     errors += 1
-                    error_messages.append(
-                        f"Subscription {subscription.id}: {result.error}"
-                    )
+                    error_messages.append(f"Subscription {subscription.id}: {result.error}")
 
-        logger.info(
-            f"Billing cycle advancement: {created} created, {errors} errors"
-        )
+        logger.info(f"Billing cycle advancement: {created} created, {errors} errors")
 
         return created, errors, error_messages
 
@@ -576,14 +556,11 @@ class BillingCycleManager:
 
         Returns: (closed_count, error_count)
         """
-        from .metering_models import BillingCycle
-        from .metering_service import AggregationService
+        from .metering_models import BillingCycle  # noqa: PLC0415
+        from .metering_service import AggregationService  # noqa: PLC0415
 
         now = timezone.now()
-        expired_cycles = BillingCycle.objects.filter(
-            status="active",
-            period_end__lte=now
-        )
+        expired_cycles = BillingCycle.objects.filter(status="active", period_end__lte=now)
 
         aggregation_service = AggregationService()
         closed = 0
@@ -607,12 +584,9 @@ class BillingCycleManager:
 
         Returns: (generated_count, error_count)
         """
-        from .metering_models import BillingCycle
+        from .metering_models import BillingCycle  # noqa: PLC0415
 
-        pending_cycles = BillingCycle.objects.filter(
-            status="closed",
-            invoice__isnull=True
-        )
+        pending_cycles = BillingCycle.objects.filter(status="closed", invoice__isnull=True)
 
         invoice_service = UsageInvoiceService()
         generated = 0

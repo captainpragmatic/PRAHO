@@ -6,11 +6,11 @@
 {% block content %}
 <div class="min-h-screen bg-slate-900 py-8">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         <!-- Header -->
         <div class="mb-8">
             <div class="flex items-center mb-4">
-                <a href="{% url 'users:profile' %}" 
+                <a href="{% url 'users:profile' %}"
                    class="inline-flex items-center text-slate-400 hover:text-white transition-colors mr-4">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -18,7 +18,7 @@
                     {% trans "Back to Profile" %}
                 </a>
             </div>
-            
+
             <h1 class="text-3xl font-bold text-white mb-2">{% trans "Create New Company" %}</h1>
             <p class="text-slate-400">{% trans "Set up a new company profile and become the owner. All fields are optional except company name and contact email." %}</p>
         </div>
@@ -41,7 +41,7 @@
         <!-- Form -->
         <form method="post" class="space-y-8">
             {% csrf_token %}
-            
+
             <!-- Company Basic Information -->
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
@@ -54,7 +54,7 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
+
                         <!-- Company Name (Required) -->
                         <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">
@@ -71,7 +71,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.company_name.help_text }}</p>
                         </div>
-                        
+
                         <!-- VAT Number -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.vat_number.label_tag }}</label>
@@ -85,7 +85,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.vat_number.help_text }}</p>
                         </div>
-                        
+
                         <!-- Trade Registry Number -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.trade_registry_number.label_tag }}</label>
@@ -99,7 +99,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.trade_registry_number.help_text }}</p>
                         </div>
-                        
+
                         <!-- Industry -->
                         <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.industry.label_tag }}</label>
@@ -113,11 +113,11 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.industry.help_text }}</p>
                         </div>
-                        
+
                     </div>
                 </div>
             </div>
-            
+
             <!-- Billing Address -->
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
@@ -131,7 +131,7 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
+
                         <!-- Street Address (Required) -->
                         <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">
@@ -148,7 +148,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.street_address.help_text }}</p>
                         </div>
-                        
+
                         <!-- City (Required) -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">
@@ -165,7 +165,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.city.help_text }}</p>
                         </div>
-                        
+
                         <!-- State/County -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.state.label_tag }}</label>
@@ -179,7 +179,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.state.help_text }}</p>
                         </div>
-                        
+
                         <!-- Postal Code -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.postal_code.label_tag }}</label>
@@ -193,7 +193,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.postal_code.help_text }}</p>
                         </div>
-                        
+
                         <!-- Country -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.country.label_tag }}</label>
@@ -207,11 +207,11 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.country.help_text }}</p>
                         </div>
-                        
+
                     </div>
                 </div>
             </div>
-            
+
             <!-- Business Contact -->
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-700">
@@ -224,7 +224,7 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
+
                         <!-- Primary Email (Required) -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">
@@ -241,7 +241,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.primary_email.help_text }}</p>
                         </div>
-                        
+
                         <!-- Primary Phone -->
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.primary_phone.label_tag }}</label>
@@ -255,7 +255,7 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.primary_phone.help_text }}</p>
                         </div>
-                        
+
                         <!-- Website -->
                         <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">{{ form.website.label_tag }}</label>
@@ -269,11 +269,11 @@
                             {% endif %}
                             <p class="mt-1 text-xs text-slate-500">{{ form.website.help_text }}</p>
                         </div>
-                        
+
                     </div>
                 </div>
             </div>
-            
+
             <!-- Terms and Agreement -->
             <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-xl overflow-hidden">
                 <div class="p-6">
@@ -296,15 +296,15 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Submit Actions -->
             <div class="flex flex-col sm:flex-row gap-4 justify-between">
-                <a href="{% url 'users:profile' %}" 
+                <a href="{% url 'users:profile' %}"
                    class="inline-flex items-center justify-center px-6 py-3 border border-slate-600 text-slate-300 font-medium rounded-lg hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
                     {% trans "Cancel" %}
                 </a>
-                
-                <button type="submit" 
+
+                <button type="submit"
                         class="inline-flex items-center justify-center px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
                     <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
@@ -312,9 +312,9 @@
                     {% trans "Create Company" %}
                 </button>
             </div>
-            
+
         </form>
-        
+
         <!-- Romanian Compliance Notice -->
         <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="flex items-start space-x-3">
@@ -325,7 +325,7 @@
                 </div>
             </div>
         </div>
-        
+
     </div>
 </div>
 {% endblock %}

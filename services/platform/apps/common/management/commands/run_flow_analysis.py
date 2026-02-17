@@ -33,7 +33,6 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.common.flow_analysis import (
-    AnalysisMode,
     AnalysisResult,
     AnalysisSeverity,
     HybridFlowAnalyzer,
@@ -147,10 +146,7 @@ class Command(BaseCommand):
 
         analyzer = HybridFlowAnalyzer(config)
 
-        if path.is_file():
-            result = analyzer.analyze_file(path)
-        else:
-            result = analyzer.analyze_directory(path)
+        result = analyzer.analyze_file(path) if path.is_file() else analyzer.analyze_directory(path)
 
         # Output results
         if options["format"] == "json":
@@ -163,10 +159,7 @@ class Command(BaseCommand):
         # Check for failure condition
         if options["fail_on_issues"]:
             fail_severity = self._get_severity(options["fail_severity"])
-            failing_issues = [
-                i for i in result.issues
-                if i.severity >= fail_severity
-            ]
+            failing_issues = [i for i in result.issues if i.severity >= fail_severity]
             if failing_issues:
                 sys.exit(1)
 
@@ -295,14 +288,10 @@ class Command(BaseCommand):
                     self.stdout.write(f"  {severity}: {counts[severity]}")
 
         if result.has_security_issues:
-            self.stdout.write(
-                self.style.ERROR("\nSECURITY ISSUES DETECTED!")
-            )
+            self.stdout.write(self.style.ERROR("\nSECURITY ISSUES DETECTED!"))
 
         if result.has_critical_issues:
-            self.stdout.write(
-                self.style.ERROR("CRITICAL ISSUES FOUND - IMMEDIATE ACTION REQUIRED")
-            )
+            self.stdout.write(self.style.ERROR("CRITICAL ISSUES FOUND - IMMEDIATE ACTION REQUIRED"))
 
     def _output_json(self, result: AnalysisResult) -> None:
         """Output results as JSON."""

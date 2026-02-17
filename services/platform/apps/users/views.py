@@ -118,7 +118,9 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
         # Don't actually log them in - reject with helpful message
         messages.error(
             request,
-            _("❌ This is the staff administration portal. Customers please use the customer portal to access your account.")
+            _(
+                "❌ This is the staff administration portal. Customers please use the customer portal to access your account."
+            ),
         )
 
         # Handle HTMX requests
@@ -229,7 +231,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
         form = LoginForm()
 
     return render(request, "users/login.html", {"form": form})
-
 
 
 def logout_view(request: HttpRequest) -> HttpResponse:
@@ -671,7 +672,9 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
 
                 # Only show welcome message for staff users since customers will be blocked by middleware
                 if user.is_staff or getattr(user, "staff_role", None):
-                    messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
+                    messages.success(
+                        request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name())
+                    )
 
                 next_url = _get_safe_redirect_target(request, fallback="dashboard")
                 return redirect(next_url)
@@ -777,28 +780,28 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     """User profile view and editing"""
     # User is guaranteed to be authenticated due to @login_required
     user = cast(User, request.user)
-    profile, created = UserProfile.objects.get_or_create(user=user)
+    profile, _created = UserProfile.objects.get_or_create(user=user)
 
     if request.method == "POST":
         # Handle language change if present
-        if 'language' in request.POST:
-            selected_language = request.POST.get('language')
-            from django.conf import settings
-            
+        if "language" in request.POST:
+            selected_language = request.POST.get("language")
+            from django.conf import settings  # noqa: PLC0415
+
             # Set the language in session
-            session_key = getattr(settings, 'LANGUAGE_SESSION_KEY', 'django_language')
+            session_key = getattr(settings, "LANGUAGE_SESSION_KEY", "django_language")
             request.session[session_key] = selected_language
-            
+
             # Also set the cookie for future requests
-            cookie_name = getattr(settings, 'LANGUAGE_COOKIE_NAME', 'django_language')
+            cookie_name = getattr(settings, "LANGUAGE_COOKIE_NAME", "django_language")
             response = redirect("users:user_profile")
             response.set_cookie(
-                cookie_name, 
+                cookie_name,
                 selected_language,
-                max_age=365 * 24 * 60 * 60  # 1 year
+                max_age=365 * 24 * 60 * 60,  # 1 year
             )
             return response
-        
+
         form = UserProfileForm(request.POST, instance=profile)
         if form.is_valid():
             form.save()
@@ -994,8 +997,6 @@ def _log_user_login(request: HttpRequest, user: User, status: str) -> None:
         user.failed_login_attempts = 0  # Reset failed attempts
         user.account_locked_until = None
         user.save(update_fields=["last_login_ip", "failed_login_attempts", "account_locked_until"])
-
-
 
 
 def _get_safe_redirect_target(request: HttpRequest, fallback: str = "dashboard") -> str:

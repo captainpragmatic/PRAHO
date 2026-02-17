@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 from lxml import etree
 
@@ -43,7 +43,7 @@ class ValidationError:
         location_str = f" at {self.location}" if self.location else ""
         return f"[{self.code}] {self.message}{location_str}"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, str]:
         return {
             "code": self.code,
             "message": self.message,
@@ -65,7 +65,7 @@ class ValidationResult:
             return "Valid"
         return f"Invalid: {len(self.errors)} errors, {len(self.warnings)} warnings"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "is_valid": self.is_valid,
             "errors": [e.to_dict() for e in self.errors],
@@ -98,12 +98,12 @@ class CIUSROValidator:
 
     # CIUS-RO version
     CIUS_RO_VERSION: ClassVar[str] = "1.0.1"
-    EXPECTED_CUSTOMIZATION_ID: ClassVar[str] = (
-        "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
-    )
+    EXPECTED_CUSTOMIZATION_ID: ClassVar[
+        str
+    ] = "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
 
     # Romanian CUI validation pattern (8-10 digits)
-    CUI_PATTERN: ClassVar[re.Pattern] = re.compile(r"^(RO)?[0-9]{2,10}$")
+    CUI_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^(RO)?[0-9]{2,10}$")
 
     # Valid ISO 4217 currency codes
     VALID_CURRENCIES: ClassVar[set[str]] = {"RON", "EUR", "USD", "GBP", "CHF", "HUF", "PLN", "CZK", "BGN"}
@@ -179,7 +179,7 @@ class CIUSROValidator:
 
     def _find_all(self, doc: etree._Element, xpath: str) -> list[etree._Element]:
         """Find all elements using XPath with namespaces."""
-        return doc.xpath(xpath, namespaces=NAMESPACES)
+        return cast(list[etree._Element], doc.xpath(xpath, namespaces=NAMESPACES))
 
     def _get_text(self, doc: etree._Element, xpath: str) -> str:
         """Get text content of element."""

@@ -7,7 +7,7 @@
 {% block content %}
 <div class="px-4 py-6">
     <h1 class="text-3xl font-bold text-white mb-6">
-        {% trans 'Ticket' %} 
+        {% trans 'Ticket' %}
         {% if ticket.ticket_number %}
             #{{ ticket.ticket_number }}
         {% else %}
@@ -36,12 +36,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitBtn = document.querySelector('#reply-form button[type="submit"]');
     const submitText = document.getElementById('submit-text');
     const submitSpinner = document.getElementById('submit-spinner');
-    
+
     // Character counter
     if (textarea && charCounter) {
         textarea.addEventListener('input', function() {
             charCounter.textContent = this.value.length;
-            
+
             // Visual feedback for long messages
             if (this.value.length > 1000) {
                 charCounter.className = 'text-xs text-yellow-400';
@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (container) {
             container.scrollTop = container.scrollHeight;
         }
-        
+
         // Update reply count in header
         const comments = container.querySelectorAll('.mb-6:not(.text-center)');
         const countSpan = document.getElementById('reply-count');
@@ -76,28 +76,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const fileInput = document.getElementById('file-input');
     const attachBtn = document.getElementById('attach-btn');
     const fileList = document.getElementById('file-list');
-    
+
     // File attachment handling
     if (attachBtn && fileInput) {
         attachBtn.addEventListener('click', function() {
             fileInput.click();
         });
-        
+
         fileInput.addEventListener('change', function() {
             if (this.files.length > 0) {
                 window.displayFileList(this.files);
             }
         });
     }
-    
+
     // Make these functions global so they can be used after HTMX replacement
     window.displayFileList = function(files) {
         const currentFileList = document.getElementById('file-list');
         if (!currentFileList) return;
-        
+
         currentFileList.innerHTML = '';
         currentFileList.classList.remove('hidden');
-        
+
         Array.from(files).forEach((file, index) => {
             const fileItem = document.createElement('div');
             fileItem.className = 'flex items-center space-x-2 text-xs text-slate-400 bg-slate-700 px-2 py-1 rounded';
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', function() {
             currentFileList.appendChild(fileItem);
         });
     };
-    
+
     window.formatFileSize = function(bytes) {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -116,19 +116,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
-    
+
     window.removeFile = function(index) {
         const currentFileInput = document.getElementById('file-input');
         const currentFileList = document.getElementById('file-list');
         if (!currentFileInput || !currentFileList) return;
-        
+
         // Create new FileList without the removed file
         const dt = new DataTransfer();
         const files = Array.from(currentFileInput.files);
         files.splice(index, 1);
         files.forEach(file => dt.items.add(file));
         currentFileInput.files = dt.files;
-        
+
         if (currentFileInput.files.length === 0) {
             currentFileList.classList.add('hidden');
         } else {
@@ -190,7 +190,7 @@ document.addEventListener('htmx:beforeRequest', function(e) {
         const submitBtn = document.querySelector('#reply-form button[type="submit"]');
         const submitText = document.getElementById('submit-text');
         const submitSpinner = document.getElementById('submit-spinner');
-        
+
         if (submitBtn) submitBtn.disabled = true;
         if (submitText) submitText.textContent = '{% trans "Sending..." %}';
         if (submitSpinner) submitSpinner.classList.remove('hidden');
@@ -203,12 +203,12 @@ document.addEventListener('htmx:afterRequest', function(e) {
         const submitText = document.getElementById('submit-text');
         const submitSpinner = document.getElementById('submit-spinner');
         const charCounter = document.getElementById('char-counter');
-        
+
         if (submitBtn) submitBtn.disabled = false;
         if (submitText) submitText.textContent = '{% trans "Send Reply" %}';
         if (submitSpinner) submitSpinner.classList.add('hidden');
         if (charCounter) charCounter.textContent = '0';
-        
+
         // Clear file attachments
         const fileInput = document.getElementById('file-input');
         const fileList = document.getElementById('file-list');
@@ -217,36 +217,36 @@ document.addEventListener('htmx:afterRequest', function(e) {
             fileList.innerHTML = '';
             fileList.classList.add('hidden');
         }
-        
+
         // Update reply count and scroll
         setTimeout(updateReplyCount, 100);
-        
+
         // Re-bind file handling after HTMX content replacement
         setTimeout(function() {
             const newFileInput = document.getElementById('file-input');
             const newAttachBtn = document.getElementById('attach-btn');
             const newFileList = document.getElementById('file-list');
-            
+
             if (newAttachBtn && newFileInput) {
                 newAttachBtn.addEventListener('click', function() {
                     newFileInput.click();
                 });
-                
+
                 newFileInput.addEventListener('change', function() {
                     if (this.files.length > 0) {
                         window.displayFileList(this.files);
                     }
                 });
             }
-            
+
             // Re-bind character counter after HTMX replacement
             const newTextarea = document.querySelector('textarea[name="message"]');
             const newCharCounter = document.getElementById('char-counter');
-            
+
             if (newTextarea && newCharCounter) {
                 newTextarea.addEventListener('input', function() {
                     newCharCounter.textContent = this.value.length;
-                    
+
                     // Visual feedback for long messages
                     if (this.value.length > 1000) {
                         newCharCounter.className = 'text-xs text-yellow-400';

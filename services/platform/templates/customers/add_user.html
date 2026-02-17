@@ -28,7 +28,7 @@
         <div class="p-6">
             <form method="post" class="space-y-6">
                 {% csrf_token %}
-                
+
                 <!-- User Selection -->
                 <div>
                     <label for="user_email" class="block text-sm font-medium text-slate-300 mb-2">
@@ -43,7 +43,7 @@
                         </option>
                         {% endfor %}
                     </select>
-                    
+
                     {% if not available_users %}
                     <p class="mt-2 text-sm text-slate-500">
                         {% trans 'No available users found. All active users are already assigned to this customer.' %}
@@ -68,7 +68,7 @@
                         </option>
                         {% endfor %}
                     </select>
-                    
+
                     <!-- Role Descriptions -->
                     <div class="mt-3 bg-slate-700/50 rounded-lg p-4 border border-slate-600">
                         <h4 class="text-sm font-medium text-slate-300 mb-2">ℹ️ {% trans "Role Permissions" %}</h4>
@@ -94,13 +94,13 @@
                     {% if available_users %}
                         {% button "👥 Add User to Customer" type="submit" variant="primary" %}
                     {% endif %}
-                    
-                    <a href="{% url 'customers:create_user' customer.id %}" 
+
+                    <a href="{% url 'customers:create_user' customer.id %}"
                        class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
                         🆕 {% trans 'Create New User Instead' %}
                     </a>
-                    
-                    <a href="{% url 'customers:detail' customer.id %}" 
+
+                    <a href="{% url 'customers:detail' customer.id %}"
                        class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
                         ❌ {% trans 'Cancel' %}
                     </a>

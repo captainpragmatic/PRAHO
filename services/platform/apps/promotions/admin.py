@@ -2,8 +2,9 @@
 Django Admin configuration for the Promotions app.
 """
 
+from typing import Any
+
 from django.contrib import admin
-from django.db.models import Count, Sum
 from django.utils.html import format_html
 
 from .models import (
@@ -20,7 +21,6 @@ from .models import (
     Referral,
     ReferralCode,
 )
-
 
 # ===============================================================================
 # Inline Admin Classes
@@ -106,40 +106,31 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
     inlines = [CouponInline]
 
     fieldsets = (
-        (None, {
-            "fields": ("name", "slug", "description", "campaign_type")
-        }),
-        ("Schedule", {
-            "fields": ("start_date", "end_date", "status", "is_active")
-        }),
-        ("Budget", {
-            "fields": ("budget_cents", "spent_cents")
-        }),
-        ("Tracking", {
-            "fields": ("utm_source", "utm_medium", "utm_campaign"),
-            "classes": ("collapse",)
-        }),
-        ("Metadata", {
-            "fields": ("metadata", "created_at", "updated_at", "created_by"),
-            "classes": ("collapse",)
-        }),
+        (None, {"fields": ("name", "slug", "description", "campaign_type")}),
+        ("Schedule", {"fields": ("start_date", "end_date", "status", "is_active")}),
+        ("Budget", {"fields": ("budget_cents", "spent_cents")}),
+        ("Tracking", {"fields": ("utm_source", "utm_medium", "utm_campaign"), "classes": ("collapse",)}),
+        ("Metadata", {"fields": ("metadata", "created_at", "updated_at", "created_by"), "classes": ("collapse",)}),
     )
 
-    def budget_display(self, obj):
+    def budget_display(self, obj: Any) -> str:
         if obj.budget_cents:
             return f"{obj.budget_cents / 100:.2f}"
         return "-"
+
     budget_display.short_description = "Budget"
 
-    def spent_display(self, obj):
+    def spent_display(self, obj: Any) -> str:
         return f"{obj.spent_cents / 100:.2f}"
+
     spent_display.short_description = "Spent"
 
-    def coupon_count(self, obj):
+    def coupon_count(self, obj: Any) -> int:
         return obj.coupons.count()
+
     coupon_count.short_description = "Coupons"
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
@@ -174,66 +165,69 @@ class CouponAdmin(admin.ModelAdmin):
     inlines = [CouponRedemptionInline]
 
     fieldsets = (
-        (None, {
-            "fields": ("code", "name", "description", "internal_notes", "campaign")
-        }),
-        ("Discount", {
-            "fields": (
-                "discount_type",
-                "discount_percent",
-                "discount_amount_cents",
-                "free_months",
-                "max_discount_cents",
-                "currency",
-            )
-        }),
-        ("Requirements", {
-            "fields": ("min_order_cents", "min_order_items")
-        }),
-        ("Validity", {
-            "fields": ("valid_from", "valid_until", "status", "is_active", "is_public")
-        }),
-        ("Usage Limits", {
-            "fields": (
-                "usage_limit_type",
-                "max_total_uses",
-                "max_uses_per_customer",
-                "total_uses",
-                "total_discount_cents",
-            )
-        }),
-        ("Customer Targeting", {
-            "fields": ("customer_target", "first_order_only", "assigned_customer")
-        }),
-        ("Product Restrictions", {
-            "fields": ("applies_to_all_products", "product_restrictions"),
-            "classes": ("collapse",)
-        }),
-        ("Stacking Rules", {
-            "fields": ("is_stackable", "is_exclusive", "stacking_priority", "stacking_config"),
-            "classes": ("collapse",)
-        }),
-        ("Metadata", {
-            "fields": ("metadata", "tags", "created_at", "updated_at", "created_by"),
-            "classes": ("collapse",)
-        }),
+        (None, {"fields": ("code", "name", "description", "internal_notes", "campaign")}),
+        (
+            "Discount",
+            {
+                "fields": (
+                    "discount_type",
+                    "discount_percent",
+                    "discount_amount_cents",
+                    "free_months",
+                    "max_discount_cents",
+                    "currency",
+                )
+            },
+        ),
+        ("Requirements", {"fields": ("min_order_cents", "min_order_items")}),
+        ("Validity", {"fields": ("valid_from", "valid_until", "status", "is_active", "is_public")}),
+        (
+            "Usage Limits",
+            {
+                "fields": (
+                    "usage_limit_type",
+                    "max_total_uses",
+                    "max_uses_per_customer",
+                    "total_uses",
+                    "total_discount_cents",
+                )
+            },
+        ),
+        ("Customer Targeting", {"fields": ("customer_target", "first_order_only", "assigned_customer")}),
+        (
+            "Product Restrictions",
+            {"fields": ("applies_to_all_products", "product_restrictions"), "classes": ("collapse",)},
+        ),
+        (
+            "Stacking Rules",
+            {
+                "fields": ("is_stackable", "is_exclusive", "stacking_priority", "stacking_config"),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Metadata",
+            {"fields": ("metadata", "tags", "created_at", "updated_at", "created_by"), "classes": ("collapse",)},
+        ),
     )
 
-    def discount_display(self, obj):
+    def discount_display(self, obj: Any) -> str:
         if obj.discount_type == "percent":
             return f"{obj.discount_percent}%"
         elif obj.discount_type == "fixed":
             return f"{obj.discount_amount_cents / 100:.2f}"
         return obj.get_discount_type_display()
+
     discount_display.short_description = "Discount"
 
-    def usage_display(self, obj):
+    def usage_display(self, obj: Any) -> str:
         if obj.max_total_uses:
             return f"{obj.total_uses}/{obj.max_total_uses}"
         return str(obj.total_uses)
+
     usage_display.short_description = "Usage"
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
@@ -270,14 +264,15 @@ class CouponRedemptionAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
 
-    def discount_cents_display(self, obj):
+    def discount_cents_display(self, obj: Any) -> str:
         return f"{obj.discount_cents / 100:.2f}"
+
     discount_cents_display.short_description = "Discount"
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: Any) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: Any, obj: Any = None) -> bool:
         return False
 
 
@@ -299,49 +294,40 @@ class PromotionRuleAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at", "created_by")
 
     fieldsets = (
-        (None, {
-            "fields": ("name", "description", "campaign")
-        }),
-        ("Rule Type", {
-            "fields": ("rule_type", "conditions", "tiers")
-        }),
-        ("Discount", {
-            "fields": (
-                "discount_type",
-                "discount_percent",
-                "discount_amount_cents",
-                "max_discount_cents",
-                "currency",
-            )
-        }),
-        ("Product Restrictions", {
-            "fields": ("applies_to_all_products", "product_restrictions"),
-            "classes": ("collapse",)
-        }),
-        ("Validity", {
-            "fields": ("valid_from", "valid_until", "is_active")
-        }),
-        ("Stacking", {
-            "fields": ("is_stackable", "priority")
-        }),
-        ("Display", {
-            "fields": ("display_name", "display_badge")
-        }),
-        ("Metadata", {
-            "fields": ("created_at", "updated_at", "created_by"),
-            "classes": ("collapse",)
-        }),
+        (None, {"fields": ("name", "description", "campaign")}),
+        ("Rule Type", {"fields": ("rule_type", "conditions", "tiers")}),
+        (
+            "Discount",
+            {
+                "fields": (
+                    "discount_type",
+                    "discount_percent",
+                    "discount_amount_cents",
+                    "max_discount_cents",
+                    "currency",
+                )
+            },
+        ),
+        (
+            "Product Restrictions",
+            {"fields": ("applies_to_all_products", "product_restrictions"), "classes": ("collapse",)},
+        ),
+        ("Validity", {"fields": ("valid_from", "valid_until", "is_active")}),
+        ("Stacking", {"fields": ("is_stackable", "priority")}),
+        ("Display", {"fields": ("display_name", "display_badge")}),
+        ("Metadata", {"fields": ("created_at", "updated_at", "created_by"), "classes": ("collapse",)}),
     )
 
-    def discount_display(self, obj):
+    def discount_display(self, obj: Any) -> str:
         if obj.discount_type in ("percent", "tiered_percent"):
             return f"{obj.discount_percent}%"
         elif obj.discount_type in ("fixed", "tiered_fixed"):
             return f"{obj.discount_amount_cents / 100:.2f}"
         return obj.get_discount_type_display()
+
     discount_display.short_description = "Discount"
 
-    def save_model(self, request, obj, form, change):
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
@@ -375,36 +361,23 @@ class GiftCardAdmin(admin.ModelAdmin):
     inlines = [GiftCardTransactionInline]
 
     fieldsets = (
-        (None, {
-            "fields": ("code", "card_type", "status", "is_active")
-        }),
-        ("Value", {
-            "fields": ("initial_value_cents", "current_balance_cents", "currency")
-        }),
-        ("Purchase", {
-            "fields": ("purchased_by", "purchase_order")
-        }),
-        ("Recipient", {
-            "fields": ("recipient_email", "recipient_name", "personal_message", "delivery_date")
-        }),
-        ("Redemption", {
-            "fields": ("redeemed_by",)
-        }),
-        ("Validity", {
-            "fields": ("valid_from", "valid_until", "activated_at")
-        }),
-        ("Metadata", {
-            "fields": ("created_at", "updated_at"),
-            "classes": ("collapse",)
-        }),
+        (None, {"fields": ("code", "card_type", "status", "is_active")}),
+        ("Value", {"fields": ("initial_value_cents", "current_balance_cents", "currency")}),
+        ("Purchase", {"fields": ("purchased_by", "purchase_order")}),
+        ("Recipient", {"fields": ("recipient_email", "recipient_name", "personal_message", "delivery_date")}),
+        ("Redemption", {"fields": ("redeemed_by",)}),
+        ("Validity", {"fields": ("valid_from", "valid_until", "activated_at")}),
+        ("Metadata", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
-    def initial_value_display(self, obj):
+    def initial_value_display(self, obj: Any) -> str:
         return f"{obj.initial_value_cents / 100:.2f}"
+
     initial_value_display.short_description = "Initial Value"
 
-    def balance_display(self, obj):
+    def balance_display(self, obj: Any) -> str:
         return f"{obj.current_balance_cents / 100:.2f}"
+
     balance_display.short_description = "Balance"
 
 
@@ -431,8 +404,9 @@ class ReferralCodeAdmin(admin.ModelAdmin):
     )
     raw_id_fields = ("owner", "referee_coupon")
 
-    def rewards_display(self, obj):
+    def rewards_display(self, obj: Any) -> str:
         return f"{obj.total_rewards_cents / 100:.2f}"
+
     rewards_display.short_description = "Total Rewards"
 
 
@@ -466,8 +440,9 @@ class ReferralAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
 
-    def referrer_reward_display(self, obj):
+    def referrer_reward_display(self, obj: Any) -> str:
         return f"{obj.referrer_reward_cents / 100:.2f}"
+
     referrer_reward_display.short_description = "Referrer Reward"
 
 
@@ -489,8 +464,9 @@ class LoyaltyProgramAdmin(admin.ModelAdmin):
     raw_id_fields = ("currency",)
     inlines = [LoyaltyTierInline]
 
-    def member_count(self, obj):
+    def member_count(self, obj: Any) -> int:
         return obj.memberships.filter(is_active=True).count()
+
     member_count.short_description = "Members"
 
 
@@ -542,8 +518,9 @@ class CustomerLoyaltyAdmin(admin.ModelAdmin):
     date_hierarchy = "enrolled_at"
     inlines = [LoyaltyTransactionInline]
 
-    def total_spend_display(self, obj):
+    def total_spend_display(self, obj: Any) -> str:
         return f"{obj.total_spend_cents / 100:.2f}"
+
     total_spend_display.short_description = "Total Spend"
 
 
@@ -578,17 +555,18 @@ class LoyaltyTransactionAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
 
-    def points_display(self, obj):
+    def points_display(self, obj: Any) -> str:
         color = "green" if obj.points > 0 else "red"
         return format_html(
             '<span style="color: {};">{:+d}</span>',
             color,
             obj.points,
         )
+
     points_display.short_description = "Points"
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: Any) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: Any, obj: Any = None) -> bool:
         return False

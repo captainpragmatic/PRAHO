@@ -36,7 +36,8 @@ from .models import (
 
 # Constants for audit operations
 ONE_HOUR_SECONDS = 3600  # 1 hour in seconds for gap detection
-HIGH_COMPLEXITY_FILTER_THRESHOLD = 5  # Number of filters that indicate high complexity
+_DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD = 5  # Number of filters that indicate high complexity
+HIGH_COMPLEXITY_FILTER_THRESHOLD = _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
 MIN_SEARCH_QUERY_LENGTH = 2  # Minimum length for search queries
 
 # Business logic constants
@@ -45,11 +46,50 @@ SERVER_OVERLOAD_THRESHOLD_PERCENT = 85  # 85% resource usage threshold
 LONG_RUNNING_TASK_THRESHOLD_SECONDS = 1800  # 30 minutes (1800 seconds)
 
 # Webhook health and reliability constants
-WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = 300  # HTTP status < 300 indicates healthy endpoint
+_DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = 300  # HTTP status < 300 indicates healthy endpoint
+WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = _DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD
 WEBHOOK_FAST_RESPONSE_THRESHOLD_MS = 1000  # < 1000ms is considered fast response
 WEBHOOK_MEDIUM_RESPONSE_THRESHOLD_MS = 3000  # < 3000ms is considered medium response
-WEBHOOK_MAX_RETRY_THRESHOLD = 5  # Maximum retry attempts before failure
-WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = 3  # Retry count indicating suspicious behavior
+_DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD = 5  # Maximum retry attempts before failure
+WEBHOOK_MAX_RETRY_THRESHOLD = _DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD
+_DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = 3  # Retry count indicating suspicious behavior
+WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
+
+
+def get_high_complexity_filter_threshold() -> int:
+    """Get high complexity filter threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.high_complexity_filter_threshold", _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
+    )
+
+
+def get_webhook_healthy_response_threshold() -> int:
+    """Get webhook healthy response threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.webhook_healthy_response_threshold", _DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD
+    )
+
+
+def get_webhook_max_retry_threshold() -> int:
+    """Get webhook max retry threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.webhook_max_retry_threshold", _DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD
+    )
+
+
+def get_webhook_suspicious_retry_threshold() -> int:
+    """Get webhook suspicious retry threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.webhook_suspicious_retry_threshold", _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
+    )
 
 
 # Type definitions for security audit service
@@ -1680,7 +1720,7 @@ class GDPRConsentService:
         When user_id is provided with a cookie_id, also links any prior anonymous
         CookieConsent records with the same cookie_id to this user.
         """
-        from .signals import cookie_consent_updated  # noqa: PLC0415  # circular import
+        from .signals import cookie_consent_updated  # circular import  # noqa: PLC0415
 
         try:
             status_map = {
@@ -1717,7 +1757,8 @@ class GDPRConsentService:
                 defaults["user"] = user
 
             consent, _created = CookieConsent.objects.update_or_create(
-                cookie_id=cookie_id, defaults=defaults,
+                cookie_id=cookie_id,
+                defaults=defaults,
             )
 
             # Emit signal → triggers dual audit trail:
@@ -4231,7 +4272,7 @@ class DomainsAuditService:
     """
 
     @staticmethod
-    def log_domain_event(  # noqa: PLR0913  # Domain audit requires multiple domain-specific parameters
+    def log_domain_event(  # Domain audit requires multiple domain-specific parameters  # noqa: PLR0913
         event_type: str,
         domain: Any,
         user: User | None = None,
@@ -4305,7 +4346,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_tld_event(  # noqa: PLR0913  # TLD audit requires multiple configuration parameters
+    def log_tld_event(  # TLD audit requires multiple configuration parameters  # noqa: PLR0913
         event_type: str,
         tld: Any,
         user: User | None = None,
@@ -4373,7 +4414,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_registrar_event(  # noqa: PLR0913  # Registrar audit requires multiple security parameters
+    def log_registrar_event(  # Registrar audit requires multiple security parameters  # noqa: PLR0913
         event_type: str,
         registrar: Any,
         user: User | None = None,
@@ -4445,7 +4486,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_order_event(  # noqa: PLR0913  # Order audit requires multiple order-specific parameters
+    def log_domain_order_event(  # Order audit requires multiple order-specific parameters  # noqa: PLR0913
         event_type: str,
         domain_order_item: Any,
         user: User | None = None,
@@ -4514,7 +4555,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_security_event(  # noqa: PLR0913  # Security audit requires multiple security parameters
+    def log_domain_security_event(  # Security audit requires multiple security parameters  # noqa: PLR0913
         event_type: str,
         domain: Any,
         security_action: str,
@@ -4659,7 +4700,7 @@ class IntegrationsAuditService:
     """
 
     @staticmethod
-    def log_webhook_success(  # noqa: PLR0913  # Webhook audit requires multiple related parameters
+    def log_webhook_success(  # Webhook audit requires multiple related parameters  # noqa: PLR0913
         webhook_event: Any,
         response_time_ms: int,
         response_status: int = 200,
@@ -4745,7 +4786,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_failure(  # noqa: PLR0913  # Webhook failure audit requires multiple error context parameters
+    def log_webhook_failure(  # Webhook failure audit requires multiple error context parameters  # noqa: PLR0913
         webhook_event: Any,
         error_details: dict[str, Any],
         security_flags: dict[str, bool] | None = None,
@@ -4839,7 +4880,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_retry_exhausted(  # noqa: PLR0913  # Webhook retry exhaustion tracking needs comprehensive failure context
+    def log_webhook_retry_exhausted(  # Webhook retry exhaustion tracking needs comprehensive failure context  # noqa: PLR0913
         webhook_event: Any,
         total_attempts: int,
         final_error: str,

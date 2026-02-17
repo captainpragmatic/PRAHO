@@ -7,7 +7,7 @@ The **RefundService** is a critical financial component of the PRAHO Platform th
 ## 🚨 Critical Safety Features
 
 - **Atomic Transactions**: All refund operations use `@transaction.atomic` to prevent partial refunds
-- **Double Refund Prevention**: Validates that entities haven't already been fully refunded  
+- **Double Refund Prevention**: Validates that entities haven't already been fully refunded
 - **Amount Validation**: Ensures refund amounts don't exceed available amounts
 - **Comprehensive Audit Logging**: All operations are logged for regulatory compliance
 - **Strong Typing**: TypedDict and Enums prevent runtime errors
@@ -48,7 +48,7 @@ class RefundData(TypedDict):
 Main service handling all refund operations:
 
 - `refund_order(order_id, refund_data)` - Refund order and associated invoices
-- `refund_invoice(invoice_id, refund_data)` - Refund invoice and associated orders  
+- `refund_invoice(invoice_id, refund_data)` - Refund invoice and associated orders
 - `get_refund_eligibility(entity_type, entity_id, amount?)` - Check refund eligibility
 
 #### RefundQueryService
@@ -125,7 +125,7 @@ result = RefundService.get_refund_eligibility('order', order.id, 5000)
 
 **Orders can be refunded if:**
 - Status is `completed`, `processing`, or `partially_refunded`
-- Not already fully refunded  
+- Not already fully refunded
 - Order total > 0
 
 **Orders CANNOT be refunded if:**
@@ -138,7 +138,7 @@ result = RefundService.get_refund_eligibility('order', order.id, 5000)
 - Not already fully refunded
 - Invoice total > 0
 
-**Invoices CANNOT be refunded if:**  
+**Invoices CANNOT be refunded if:**
 - Status is `draft` or `void`
 - Already fully refunded
 - Invalid or missing invoice
@@ -164,7 +164,7 @@ When refunding an **order**:
 When refunding an **invoice**:
 1. Find associated order(s)
 2. Update invoice status and metadata
-3. Update order status  
+3. Update order status
 4. Process payment refunds if requested
 5. Create audit trail
 
@@ -180,7 +180,7 @@ if result.is_ok():
     refund_result = result.unwrap()
     # Handle success...
 else:
-    # Error case  
+    # Error case
     error_message = result.error
     # Handle error...
 ```
@@ -225,7 +225,7 @@ log_security_event(
     'order_refunded',
     {
         'refund_id': str(refund_id),
-        'order_id': str(order_id), 
+        'order_id': str(order_id),
         'customer_id': str(customer_id),
         'amount_refunded_cents': amount,
         'reason': reason,
@@ -239,7 +239,7 @@ log_security_event(
 - Audit trails are immutable
 - Personal data handling follows GDPR requirements
 
-### Romanian Compliance  
+### Romanian Compliance
 - VAT handling for refunds
 - Sequential numbering preservation
 - Legal refund documentation
@@ -266,7 +266,7 @@ The service integrates with payment processors via:
 if refund_data['process_payment_refund']:
     payment_result = RefundService._process_payment_refund(
         order=order,
-        invoice=invoice, 
+        invoice=invoice,
         refund_amount_cents=amount,
         refund_data=refund_data
     )
@@ -292,7 +292,7 @@ OrderService.update_order_status(order, status_change)
 Comprehensive test suite covers:
 
 - ✅ Full and partial refunds
-- ✅ Bidirectional synchronization  
+- ✅ Bidirectional synchronization
 - ✅ Error cases and validation
 - ✅ Double refund prevention
 - ✅ Edge cases (no invoice, no order)
@@ -342,9 +342,9 @@ def refund_order_view(request, order_id):
         'external_refund_id': request.POST.get('external_refund_id'),
         'process_payment_refund': request.POST.get('process_payment') == 'true'
     }
-    
+
     result = RefundService.refund_order(UUID(order_id), refund_data)
-    
+
     if result.is_ok():
         messages.success(request, "Refund processed successfully")
         return redirect('order_detail', order_id=order_id)
@@ -395,7 +395,7 @@ Generate refund statistics and reports.
    - Check order status (must be completed/processing)
    - Verify order hasn't been fully refunded already
 
-2. **"Refund amount exceeds maximum"**  
+2. **"Refund amount exceeds maximum"**
    - Check available refund amount with `get_refund_eligibility()`
    - Account for previous partial refunds
 
@@ -422,7 +422,7 @@ logging.getLogger('apps.billing.services').setLevel(logging.DEBUG)
 When extending the RefundService:
 
 1. **Maintain Type Safety**: Use TypedDict and proper typing
-2. **Follow Result Pattern**: Return `Result[T, E]` from all methods  
+2. **Follow Result Pattern**: Return `Result[T, E]` from all methods
 3. **Add Comprehensive Tests**: Test success and failure cases
 4. **Update Documentation**: Keep this document current
 5. **Audit Logging**: Log all financial operations

@@ -123,9 +123,7 @@ class FileSecurityScanner:
                 max_file_size = SettingsService.get_integer_setting(
                     "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
                 )
-                return self._reject_file(
-                    f"File too large ({uploaded_file.size} bytes > {max_file_size})", filename
-                )
+                return self._reject_file(f"File too large ({uploaded_file.size} bytes > {max_file_size})", filename)
 
             # Step 4: MIME type validation
             detected_mime = self._detect_mime_type(uploaded_file)
@@ -172,9 +170,7 @@ class FileSecurityScanner:
         """Validate file extension against allowlist"""
         file_ext = Path(filename).suffix.lower()
         allowed_extensions = set(
-            SettingsService.get_list_setting(
-                "tickets.allowed_file_extensions", _DEFAULT_ALLOWED_EXTENSIONS
-            )
+            SettingsService.get_list_setting("tickets.allowed_file_extensions", _DEFAULT_ALLOWED_EXTENSIONS)
         )
 
         if file_ext not in allowed_extensions:
@@ -194,9 +190,7 @@ class FileSecurityScanner:
 
     def _validate_file_size(self, uploaded_file: UploadedFile) -> bool:
         """Validate file size against security limits"""
-        max_file_size = SettingsService.get_integer_setting(
-            "tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES
-        )
+        max_file_size = SettingsService.get_integer_setting("tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES)
         size = uploaded_file.size or 0
         if size > max_file_size:
             logger.warning(f"🚨 [Ticket Security] File too large: {size} bytes")
@@ -346,9 +340,7 @@ def generate_secure_filename(original_filename: str) -> str:
     # Extract safe extension
     file_ext = Path(original_filename).suffix.lower()
     allowed_extensions = set(
-        SettingsService.get_list_setting(
-            "tickets.allowed_file_extensions", _DEFAULT_ALLOWED_EXTENSIONS
-        )
+        SettingsService.get_list_setting("tickets.allowed_file_extensions", _DEFAULT_ALLOWED_EXTENSIONS)
     )
     if file_ext not in allowed_extensions:
         file_ext = ".txt"  # Default to safe extension

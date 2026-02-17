@@ -3,16 +3,16 @@
 <!-- WCAG-Compliant Order Process Breadcrumbs -->
 <nav aria-label="{% trans 'Order process steps' %}" class="mb-8">
   <ol class="flex items-center space-x-4 overflow-x-auto pb-2" role="list">
-    
+
     <!-- Step 1: Product Selection -->
     <li class="flex items-center flex-shrink-0" role="listitem">
       {% if current_step == 'products' %}
       <div class="flex items-center text-sm" aria-current="step">
       {% else %}
-      <a href="{% url 'orders:catalog' %}" 
+      <a href="{% url 'orders:catalog' %}"
          class="flex items-center text-sm hover:text-blue-300 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 rounded p-1">
       {% endif %}
-        <span class="{% if current_step == 'products' %}bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-300{% endif %} 
+        <span class="{% if current_step == 'products' %}bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-300{% endif %}
                      w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mr-3"
               aria-hidden="true">
           1
@@ -27,10 +27,10 @@
       </a>
       {% endif %}
     </li>
-    
+
     <!-- Arrow -->
     <li class="text-slate-500 flex-shrink-0" aria-hidden="true">→</li>
-    
+
     <!-- Step 2: Cart Review -->
     <li class="flex items-center flex-shrink-0" role="listitem">
       {% if current_step == 'cart' %}
@@ -38,7 +38,7 @@
       {% else %}
       <div class="flex items-center text-sm">
       {% endif %}
-        <span class="{% if current_step == 'cart' %}bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-500{% endif %} 
+        <span class="{% if current_step == 'cart' %}bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-500{% endif %}
                      w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mr-3"
               aria-hidden="true">
           2
@@ -51,10 +51,10 @@
       <span class="sr-only">{% trans '(current step)' %}</span>
       {% endif %}
     </li>
-    
+
     <!-- Arrow -->
     <li class="text-slate-500 flex-shrink-0" aria-hidden="true">→</li>
-    
+
     <!-- Step 3: Checkout -->
     <li class="flex items-center flex-shrink-0" role="listitem">
       {% if current_step == 'checkout' %}
@@ -62,7 +62,7 @@
       {% else %}
       <div class="flex items-center text-sm">
       {% endif %}
-        <span class="{% if current_step == 'checkout' %}bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-500{% endif %} 
+        <span class="{% if current_step == 'checkout' %}bg-blue-600 text-white ring-2 ring-blue-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-500{% endif %}
                      w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mr-3"
               aria-hidden="true">
           3
@@ -75,10 +75,10 @@
       <span class="sr-only">{% trans '(current step)' %}</span>
       {% endif %}
     </li>
-    
+
     <!-- Arrow -->
     <li class="text-slate-500 flex-shrink-0" aria-hidden="true">→</li>
-    
+
     <!-- Step 4: Confirmation -->
     <li class="flex items-center flex-shrink-0" role="listitem">
       {% if current_step == 'confirm' %}
@@ -86,7 +86,7 @@
       {% else %}
       <div class="flex items-center text-sm">
       {% endif %}
-        <span class="{% if current_step == 'confirm' %}bg-green-600 text-white ring-2 ring-green-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-500{% endif %} 
+        <span class="{% if current_step == 'confirm' %}bg-green-600 text-white ring-2 ring-green-300 ring-offset-2 ring-offset-slate-900{% else %}bg-slate-600 text-slate-500{% endif %}
                      w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mr-3"
               aria-hidden="true">
           {% if current_step == 'confirm' %}✓{% else %}4{% endif %}
@@ -100,7 +100,7 @@
       {% endif %}
     </li>
   </ol>
-  
+
   <!-- Live region for dynamic step updates -->
   <div id="step-announcements" aria-live="polite" aria-atomic="true" class="sr-only"></div>
 </nav>

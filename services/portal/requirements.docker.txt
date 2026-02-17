@@ -6,7 +6,7 @@
 Django>=5.2,<5.3
 django-environ>=0.11.0
 
-# API framework  
+# API framework
 djangorestframework>=3.14.0
 
 # HTTP client for platform API communication

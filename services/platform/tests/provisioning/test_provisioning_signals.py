@@ -126,12 +126,12 @@ class ServicePlanSignalTestCase(TestCase):
             'is_active': True,
             'is_public': True,
         }
-        
+
         plan = ServicePlan.objects.create(**plan_data)
-        
+
         # Verify logging was called
         mock_logger.info.assert_called()
-        
+
         # Check the log message
         log_calls = [call[0][0] for call in mock_logger.info.call_args_list]
         creation_log = next((call for call in log_calls if 'Created plan:' in call), None)
@@ -150,7 +150,7 @@ class ServicePlanSignalTestCase(TestCase):
             price_monthly=Decimal('600.00'),
             is_active=True
         )
-        
+
         # Should trigger logging for high-value plan
         mock_logger.info.assert_called()
 
@@ -166,7 +166,7 @@ class ServicePlanSignalTestCase(TestCase):
                     price_monthly=Decimal('25.00'),
                     is_active=True
                 )
-                
+
                 # Should log the exception
                 mock_logger.exception.assert_called()
 
@@ -198,12 +198,12 @@ class ServerSignalTestCase(TestCase):
             'monthly_cost': Decimal('300.00'),
             'is_active': True,
         }
-        
+
         server = Server.objects.create(**server_data)
-        
+
         # Verify logging was called
         mock_logger.info.assert_called()
-        
+
         # Check the log message
         log_calls = [call[0][0] for call in mock_logger.info.call_args_list]
         creation_log = next((call for call in log_calls if 'Registered:' in call), None)
@@ -233,14 +233,14 @@ class ServerSignalTestCase(TestCase):
             monthly_cost=Decimal('800.00'),
             is_active=True,
         )
-        
+
         # Clear creation logs
         mock_logger.reset_mock()
-        
+
         # Change status
         server.status = 'maintenance'
         server.save()
-        
+
         # Should trigger logging for status change
         mock_logger.info.assert_called()
 
@@ -267,7 +267,7 @@ class ServerSignalTestCase(TestCase):
             monthly_cost=Decimal('400.00'),
             is_active=True,
         )
-        
+
         # Should trigger logging for server creation
         mock_logger.info.assert_called()
 
@@ -293,7 +293,7 @@ class ServerSignalTestCase(TestCase):
                     monthly_cost=Decimal('250.00'),
                     is_active=True,
                 )
-                
+
                 # Should log the exception
                 mock_logger.exception.assert_called()
 
@@ -337,7 +337,7 @@ class ServiceSignalTestCase(TestCase):
     def test_service_creation_signal(self, mock_logger):
         """Test service creation triggers signal"""
         from django.conf import settings
-        
+
         service_data = {
             'customer': self.customer,
             'service_plan': self.plan,
@@ -349,14 +349,14 @@ class ServiceSignalTestCase(TestCase):
             'price': Decimal('50.00'),
             'status': 'pending'
         }
-        
+
         service = Service.objects.create(**service_data)
-        
+
         # Debug: Check if signals are disabled
         signals_disabled = getattr(settings, 'DISABLE_AUDIT_SIGNALS', False)
         if signals_disabled:
             self.skipTest("Audit signals are disabled - signal won't be triggered")
-        
+
         # Verify logging was called
         mock_logger.info.assert_called()
 
@@ -373,7 +373,7 @@ class ServiceSignalTestCase(TestCase):
             auto_provision=True,
             is_active=True
         )
-        
+
         service = Service.objects.create(
             customer=self.customer,
             service_plan=auto_plan,
@@ -385,7 +385,7 @@ class ServiceSignalTestCase(TestCase):
             price=Decimal('100.00'),
             status='pending'
         )
-        
+
         # Should trigger logging for service creation
         mock_logger.info.assert_called()
 
@@ -405,7 +405,7 @@ class ServiceSignalTestCase(TestCase):
                     price=Decimal('30.00'),
                     status='pending'
                 )
-                
+
                 # Should log the exception
                 mock_logger.exception.assert_called()
 
@@ -432,7 +432,7 @@ class SignalIntegrationTestCase(TestCase):
             auto_provision=True,
             is_active=True
         )
-        
+
         # Create server
         server = Server.objects.create(
             name='Integration Server',
@@ -451,7 +451,7 @@ class SignalIntegrationTestCase(TestCase):
             monthly_cost=Decimal('500.00'),
             is_active=True,
         )
-        
+
         # Create service (should trigger multiple signals)
         with patch('apps.provisioning.signals.logger') as mock_logger:
             service = Service.objects.create(
@@ -465,7 +465,7 @@ class SignalIntegrationTestCase(TestCase):
                 price=Decimal('40.00'),
                 status='pending'
             )
-            
+
             # Should have logged service creation
             self.assertTrue(mock_logger.info.called)
 
@@ -479,16 +479,16 @@ class SignalIntegrationTestCase(TestCase):
             price_monthly=Decimal('80.00'),
             is_active=True
         )
-        
+
         # Should log service plan creation
         mock_logger.info.assert_called()
 
     def test_signal_performance_with_multiple_objects(self):
         """Test signal performance with multiple object creation"""
         import time
-        
+
         start_time = time.time()
-        
+
         # Create multiple plans to test signal performance
         plans = []
         for i in range(10):
@@ -499,13 +499,13 @@ class SignalIntegrationTestCase(TestCase):
                 is_active=True
             )
             plans.append(plan)
-        
+
         end_time = time.time()
-        
+
         # Should complete relatively quickly (adjust threshold as needed)
         execution_time = end_time - start_time
         self.assertLess(execution_time, 5.0)  # 5 seconds threshold
-        
+
         # All plans should be created
         self.assertEqual(len(plans), 10)
 
@@ -518,7 +518,7 @@ class SignalIntegrationTestCase(TestCase):
             price_monthly=Decimal('90.00'),
             is_active=True
         )
-        
+
         server = Server.objects.create(
             name='Concurrent Server',
             hostname='concurrent.example.com',
@@ -536,7 +536,7 @@ class SignalIntegrationTestCase(TestCase):
             monthly_cost=Decimal('800.00'),
             is_active=True,
         )
-        
+
         # Create multiple services simultaneously to test signal handling
         services = []
         for i in range(5):
@@ -552,10 +552,10 @@ class SignalIntegrationTestCase(TestCase):
                 status='pending'
             )
             services.append(service)
-        
+
         # All services should be created successfully
         self.assertEqual(len(services), 5)
-        
+
         # All should be in database
         db_services = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(db_services, 5)
@@ -577,14 +577,14 @@ class VirtualminAccountSignalsTest(TestCase):
             fiscal_code="RO12345678",
             customer_type="company"
         )
-        
+
         # Create service
         self.service_plan = ServicePlan.objects.create(
             name="Test Plan",
             plan_type="shared_hosting",
             price_monthly=Decimal("29.99")
         )
-        
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
@@ -593,7 +593,7 @@ class VirtualminAccountSignalsTest(TestCase):
             username="testuser",
             price=Decimal("29.99")
         )
-        
+
         # Create Virtualmin server
         from apps.provisioning.virtualmin_models import VirtualminServer
         self.server = VirtualminServer.objects.create(
@@ -607,7 +607,7 @@ class VirtualminAccountSignalsTest(TestCase):
     def test_virtualmin_account_creation_signal(self, mock_audit):
         """Test that Virtualmin account creation triggers audit signal"""
         from apps.provisioning.virtualmin_models import VirtualminAccount
-        
+
         # Create Virtualmin account
         account = VirtualminAccount.objects.create(
             domain="example.com",
@@ -618,15 +618,15 @@ class VirtualminAccountSignalsTest(TestCase):
             praho_customer_id=self.customer.id,
             praho_service_id=self.service.id
         )
-        
+
         # Verify signal was triggered
         mock_audit.assert_called()
-        
+
         # Find the account creation call
-        account_calls = [call for call in mock_audit.call_args_list 
+        account_calls = [call for call in mock_audit.call_args_list
                         if call[0][0].event_type == "virtualmin_account_created"]
         self.assertEqual(len(account_calls), 1)
-        
+
         # Verify audit data
         call_args = account_calls[0][0][0]  # AuditEventData
         context_args = account_calls[0][1]['context']  # AuditContext
@@ -634,7 +634,7 @@ class VirtualminAccountSignalsTest(TestCase):
         self.assertEqual(call_args.new_values["domain"], "example.com")
         self.assertEqual(call_args.new_values["status"], "provisioning")
         self.assertEqual(call_args.new_values["customer_id"], str(self.customer.id))
-        
+
         # Verify metadata (in context)
         metadata = context_args.metadata
         self.assertTrue(metadata["compliance_event"])
@@ -646,7 +646,7 @@ class VirtualminAccountSignalsTest(TestCase):
     def test_virtualmin_account_status_change_signal(self, mock_audit):
         """Test that account status changes trigger audit signals"""
         from apps.provisioning.virtualmin_models import VirtualminAccount
-        
+
         # Create account
         account = VirtualminAccount.objects.create(
             domain="example.com",
@@ -655,23 +655,23 @@ class VirtualminAccountSignalsTest(TestCase):
             virtualmin_username="testuser",
             status="provisioning"
         )
-        
+
         # Clear creation signal
         mock_audit.reset_mock()
-        
+
         # Change status with update_fields
         account.status = "active"
         account.save(update_fields=["status"])
-        
+
         # Verify signal was triggered
         mock_audit.assert_called_once()
-        
+
         # Verify audit data
         call_args = mock_audit.call_args[0][0]  # AuditEventData
         context_args = mock_audit.call_args[1]['context']  # AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_account_status_changed")
         self.assertEqual(call_args.new_values["status"], "active")
-        
+
         # Verify metadata (in context)
         metadata = context_args.metadata
         self.assertTrue(metadata["status_change"])
@@ -681,7 +681,7 @@ class VirtualminAccountSignalsTest(TestCase):
     def test_virtualmin_account_deletion_signal(self, mock_audit):
         """Test that account deletion triggers audit signals"""
         from apps.provisioning.virtualmin_models import VirtualminAccount
-        
+
         # Create account
         account = VirtualminAccount.objects.create(
             domain="example.com",
@@ -692,22 +692,22 @@ class VirtualminAccountSignalsTest(TestCase):
             praho_customer_id=self.customer.id,
             praho_service_id=self.service.id
         )
-        
+
         # Clear creation signal
         mock_audit.reset_mock()
-        
+
         # Delete account
         account.delete()
-        
+
         # Verify signal was triggered
         mock_audit.assert_called_once()
-        
+
         # Verify audit data
         call_args = mock_audit.call_args[0][0]  # AuditEventData
         context_args = mock_audit.call_args[1]['context']  # AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_account_deleted")
         self.assertEqual(call_args.old_values["domain"], "example.com")
-        
+
         # Verify metadata (in context)
         metadata = context_args.metadata
         self.assertTrue(metadata["account_termination"])
@@ -718,7 +718,7 @@ class VirtualminAccountSignalsTest(TestCase):
     def test_virtualmin_signals_can_be_disabled(self, mock_audit):
         """Test that Virtualmin signals can be disabled for testing"""
         from apps.provisioning.virtualmin_models import VirtualminAccount
-        
+
         # Create account with signals disabled
         VirtualminAccount.objects.create(
             domain="example.com",
@@ -727,7 +727,7 @@ class VirtualminAccountSignalsTest(TestCase):
             virtualmin_username="testuser",
             status="provisioning"
         )
-        
+
         # Verify no signal was triggered
         mock_audit.assert_not_called()
 
@@ -743,13 +743,13 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
             fiscal_code="RO12345678",
             customer_type="company"
         )
-        
+
         self.service_plan = ServicePlan.objects.create(
             name="Test Plan",
             plan_type="shared_hosting",
             price_monthly=Decimal("29.99")
         )
-        
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
@@ -758,16 +758,16 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
             username="testuser",
             price=Decimal("29.99")
         )
-        
+
         # Create Virtualmin server and account
         from apps.provisioning.virtualmin_models import VirtualminServer, VirtualminAccount
-        
+
         self.server = VirtualminServer.objects.create(
             hostname="vm1.example.com",
             capacity=1000,
             status="healthy"
         )
-        
+
         self.account = VirtualminAccount.objects.create(
             domain="example.com",
             service=self.service,
@@ -781,7 +781,7 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
     def test_provisioning_job_creation_signal(self, mock_audit):
         """Test that provisioning job creation triggers audit signals"""
         from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
-        
+
         # Create provisioning job
         job = VirtualminProvisioningJob.objects.create(
             operation="create_domain",
@@ -790,19 +790,19 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
             correlation_id="test-123",
             status="pending"
         )
-        
+
         # Find the job creation call (account creation also triggers audit)
-        job_creation_calls = [call for call in mock_audit.call_args_list 
+        job_creation_calls = [call for call in mock_audit.call_args_list
                              if call[0][0].event_type == "virtualmin_provisioning_job_created"]
         self.assertEqual(len(job_creation_calls), 1)
-        
+
         # Verify audit data
         call_args = job_creation_calls[0][0][0]  # AuditEventData
         context_args = job_creation_calls[0][1]['context']  # AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_provisioning_job_created")
         self.assertEqual(call_args.new_values["operation"], "create_domain")
         self.assertEqual(call_args.new_values["correlation_id"], "test-123")
-        
+
         # Verify metadata (in context)
         metadata = context_args.metadata
         self.assertTrue(metadata["operational_event"])
@@ -813,7 +813,7 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
     def test_provisioning_job_failure_monitoring_alert(self, mock_audit):
         """Test that job failures trigger monitoring alerts"""
         from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
-        
+
         # Create job
         job = VirtualminProvisioningJob.objects.create(
             operation="create_domain",
@@ -822,18 +822,18 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
             correlation_id="test-123",
             status="pending"
         )
-        
+
         # Clear previous signals
         mock_audit.reset_mock()
-        
+
         # Change job status to failed
         job.status = "failed"
         job.status_message = "Server connection failed"
         job.save(update_fields=["status", "status_message"])
-        
+
         # Verify signal was triggered
         mock_audit.assert_called_once()
-        
+
         # Verify monitoring alert is flagged
         call_args = mock_audit.call_args[0][0]  # AuditEventData
         context_args = mock_audit.call_args[1]['context']  # AuditContext
@@ -848,7 +848,7 @@ class SecurityEventSignalsTest(TestCase):
     def test_virtualmin_security_event_logging(self, mock_log_security):
         """Test security event logging helper function"""
         from apps.provisioning.signals import log_virtualmin_security_event
-        
+
         # Log a security event
         log_virtualmin_security_event(
             "virtualmin_auth_failure",
@@ -859,19 +859,19 @@ class SecurityEventSignalsTest(TestCase):
             },
             "192.168.1.100"
         )
-        
+
         # Verify security logging was called
         mock_log_security.assert_called_once()
-        
+
         # Verify call arguments
         call_args = mock_log_security.call_args[0]
         self.assertEqual(call_args[0], "virtualmin_auth_failure")
-        
+
         details = call_args[1]
         self.assertEqual(details["server"], "vm1.example.com")
         self.assertEqual(details["source_app"], "provisioning")
         self.assertTrue(details["virtualmin_integration"])
-        
+
         self.assertEqual(call_args[2], "192.168.1.100")  # IP address
 
     @patch('apps.provisioning.signals.log_security_event')
@@ -879,17 +879,17 @@ class SecurityEventSignalsTest(TestCase):
     def test_security_event_error_handling(self, mock_logger, mock_log_security):
         """Test that security event logging errors are handled gracefully"""
         from apps.provisioning.signals import log_virtualmin_security_event
-        
+
         # Make security logging raise an exception
         mock_log_security.side_effect = Exception("Security logging failed")
-        
+
         # Should not raise exception
         log_virtualmin_security_event(
             "virtualmin_auth_failure",
             {"server": "vm1.example.com"},
             "192.168.1.100"
         )
-        
+
         # Verify error was logged
         mock_logger.error.assert_called_once()
 
@@ -905,13 +905,13 @@ class ProvisioningCompletionSignalsTest(TestCase):
             fiscal_code="RO12345678",
             customer_type="company"
         )
-        
+
         self.service_plan = ServicePlan.objects.create(
             name="Test Plan",
             plan_type="shared_hosting",
             price_monthly=Decimal("29.99")
         )
-        
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
@@ -920,16 +920,16 @@ class ProvisioningCompletionSignalsTest(TestCase):
             username="testuser",
             price=Decimal("29.99")
         )
-        
+
         # Create Virtualmin server and account
         from apps.provisioning.virtualmin_models import VirtualminServer, VirtualminAccount
-        
+
         self.server = VirtualminServer.objects.create(
             hostname="vm1.example.com",
             capacity=1000,
             status="healthy"
         )
-        
+
         self.account = VirtualminAccount.objects.create(
             domain="example.com",
             service=self.service,
@@ -942,10 +942,10 @@ class ProvisioningCompletionSignalsTest(TestCase):
     def test_provisioning_completion_notification(self, mock_audit):
         """Test provisioning completion notification helper"""
         from apps.provisioning.signals import notify_provisioning_completion
-        
+
         # Clear account creation signals
         mock_audit.reset_mock()
-        
+
         # Notify successful completion
         notify_provisioning_completion(
             self.account,
@@ -956,17 +956,17 @@ class ProvisioningCompletionSignalsTest(TestCase):
                 "features_enabled": ["web", "dns", "mail"]
             }
         )
-        
+
         # Verify audit logging was called
         mock_audit.assert_called_once()
-        
+
         # Verify audit data
         call_args = mock_audit.call_args[0][0]  # AuditEventData
         context_args = mock_audit.call_args[1]['context']  # AuditContext
         self.assertEqual(call_args.event_type, "virtualmin_provisioning_completed")
         self.assertTrue(call_args.new_values["success"])
         self.assertEqual(call_args.new_values["domain"], "example.com")
-        
+
         # Verify metadata (in context)
         metadata = context_args.metadata
         self.assertTrue(metadata["provisioning_completion"])
@@ -977,16 +977,16 @@ class ProvisioningCompletionSignalsTest(TestCase):
     def test_provisioning_completion_error_handling(self, mock_logger, mock_audit):
         """Test that provisioning completion notification errors are handled"""
         from apps.provisioning.signals import notify_provisioning_completion
-        
+
         # Make audit service raise an exception
         mock_audit.side_effect = Exception("Audit service error")
-        
+
         # Should not raise exception
         notify_provisioning_completion(
             self.account,
             success=True,
             details={"server": "vm1.example.com"}
         )
-        
+
         # Verify error was logged
         mock_logger.error.assert_called_once()

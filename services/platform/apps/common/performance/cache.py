@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import json
 import logging
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.core.cache import cache, caches
@@ -26,10 +26,42 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 # Cache timeout constants (seconds)
-CACHE_TIMEOUT_SHORT = 60  # 1 minute
-CACHE_TIMEOUT_MEDIUM = 300  # 5 minutes
-CACHE_TIMEOUT_LONG = 3600  # 1 hour
-CACHE_TIMEOUT_VERY_LONG = 86400  # 24 hours
+_DEFAULT_CACHE_TIMEOUT_SHORT = 60  # 1 minute
+CACHE_TIMEOUT_SHORT = _DEFAULT_CACHE_TIMEOUT_SHORT
+_DEFAULT_CACHE_TIMEOUT_MEDIUM = 300  # 5 minutes
+CACHE_TIMEOUT_MEDIUM = _DEFAULT_CACHE_TIMEOUT_MEDIUM
+_DEFAULT_CACHE_TIMEOUT_LONG = 3600  # 1 hour
+CACHE_TIMEOUT_LONG = _DEFAULT_CACHE_TIMEOUT_LONG
+_DEFAULT_CACHE_TIMEOUT_VERY_LONG = 86400  # 24 hours
+CACHE_TIMEOUT_VERY_LONG = _DEFAULT_CACHE_TIMEOUT_VERY_LONG
+
+
+def get_cache_timeout_short() -> int:
+    """Get cache timeout short from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_short", _DEFAULT_CACHE_TIMEOUT_SHORT)
+
+
+def get_cache_timeout_medium() -> int:
+    """Get cache timeout medium from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_medium", _DEFAULT_CACHE_TIMEOUT_MEDIUM)
+
+
+def get_cache_timeout_long() -> int:
+    """Get cache timeout long from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_long", _DEFAULT_CACHE_TIMEOUT_LONG)
+
+
+def get_cache_timeout_very_long() -> int:
+    """Get cache timeout very long from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_very_long", _DEFAULT_CACHE_TIMEOUT_VERY_LONG)
 
 
 class CacheService:
@@ -176,7 +208,7 @@ class CacheService:
         """Generate a cache key for a queryset count."""
         # Create a hash of the query SQL
         sql = str(queryset.query)
-        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]
+        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]  # noqa: S324
         model = queryset.model._meta.label
         return f"{self.PREFIX_QUERYSET}:count:{model}:{query_hash}"
 
@@ -187,7 +219,7 @@ _cache_service: CacheService | None = None
 
 def get_cache_service() -> CacheService:
     """Get the global cache service instance."""
-    global _cache_service
+    global _cache_service  # noqa: PLW0603
     if _cache_service is None:
         _cache_service = CacheService()
     return _cache_service
@@ -221,6 +253,7 @@ def cached_model_property(
             def calculate_total_spend(self) -> Decimal:
                 return self.invoices.aggregate(total=Sum("total_cents"))["total"] or 0
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(self: models.Model, *args: Any, **kwargs: Any) -> T:
@@ -236,6 +269,7 @@ def cached_model_property(
             return value
 
         return wrapper
+
     return decorator
 
 
@@ -254,6 +288,7 @@ def cached_queryset(
         def get_active_products() -> QuerySet[Product]:
             return Product.objects.filter(is_active=True)
     """
+
     def decorator(func: Callable[..., models.QuerySet[T]]) -> Callable[..., list[T]]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> list[T]:
@@ -275,7 +310,7 @@ def cached_queryset(
                     key_parts.append(f"{k}={str(v)[:50]}")
 
             key = f"{CacheService.PREFIX_QUERYSET}:{':'.join(key_parts)}"
-            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]
+            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]  # noqa: S324
             cache_key = f"qs:{func.__name__}:{key_hash}"
 
             cached_result = cache.get(cache_key)
@@ -293,6 +328,7 @@ def cached_queryset(
             return result
 
         return wrapper
+
     return decorator
 
 
@@ -307,7 +343,7 @@ class CacheInvalidationMixin:
     """
 
     # Override in subclass to specify related models that should be invalidated
-    cache_dependencies: list[str] = []
+    cache_dependencies: ClassVar[list[str]] = []
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         super().save(*args, **kwargs)  # type: ignore[misc]
@@ -332,6 +368,7 @@ class CacheInvalidationMixin:
 
 
 # Customer-specific caching utilities
+
 
 def get_customer_cache_key(customer_id: int, data_type: str) -> str:
     """Generate a cache key for customer-specific data."""

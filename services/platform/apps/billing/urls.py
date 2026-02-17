@@ -43,22 +43,17 @@ urlpatterns = [
     # Reports
     path("reports/", views.billing_reports, name="reports"),
     path("reports/vat/", views.vat_report, name="vat_report"),
-
     # ===============================================================================
     # PAYMENT API ENDPOINTS FOR PORTAL CONSUMPTION
     # ===============================================================================
-
     # Payment Intent Management
     path("create-payment-intent/", views.api_create_payment_intent, name="api_create_payment_intent"),
     path("confirm-payment/", views.api_confirm_payment, name="api_confirm_payment"),
-
     # Subscription Management
     path("create-subscription/", views.api_create_subscription, name="api_create_subscription"),
-
     # Payment Methods & Configuration
     path("payment-methods/<str:customer_id>/", views.api_payment_methods, name="api_payment_methods"),
     path("stripe-config/", views.api_stripe_config, name="api_stripe_config"),
-
     # Refund Processing
     path("process-refund/", views.api_process_refund, name="api_process_refund"),
 ]

@@ -6,7 +6,7 @@
 
 {% block content %}
 <div class="px-4 py-6 max-w-4xl mx-auto">
-  
+
   <!-- Header -->
   <div class="text-center mb-8">
     <h1 class="text-3xl font-bold text-white mb-4">
@@ -43,12 +43,12 @@
     {% endif %}
 
     <div class="flex justify-center space-x-4">
-      <a href="{% url 'billing:invoices_list' %}" 
+      <a href="{% url 'billing:invoices_list' %}"
          class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
         ← {% trans 'Back to Billing' %}
       </a>
-      
-      <a href="{% url 'dashboard:dashboard' %}" 
+
+      <a href="{% url 'dashboard:dashboard' %}"
          class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
         🏠 {% trans 'Dashboard' %}
       </a>

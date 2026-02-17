@@ -9,7 +9,7 @@ tests/
 ├── users/                         # User authentication, 2FA, password reset
 │   ├── test_users_2fa.py         # Two-factor authentication tests
 │   └── test_users_password_reset.py # Password reset security tests
-├── billing/                       # All billing-related functionality  
+├── billing/                       # All billing-related functionality
 │   ├── test_billing_creditledger.py
 │   ├── test_billing_currency.py
 │   ├── test_billing_invoice.py
@@ -34,7 +34,7 @@ pytest tests/
 ### App-Specific Tests
 ```bash
 pytest tests/users/           # User management tests
-pytest tests/billing/         # Billing functionality tests  
+pytest tests/billing/         # Billing functionality tests
 pytest tests/integration-tests/  # Cross-app integration tests
 ```
 
@@ -50,21 +50,21 @@ pytest -m "romanian_compliance"  # Romanian regulation tests
 
 ### 🗑️ Soft Delete Infrastructure (3 tests)
 - **Customer soft delete preserves audit trail**: Tests soft_delete() method preserves deleted_at, deleted_by for Romanian compliance
-- **Customer restore functionality**: Tests restore() method properly clears deletion markers  
+- **Customer restore functionality**: Tests restore() method properly clears deletion markers
 - **CASCADE behavior on hard delete**: Tests related profiles are properly deleted when customer is hard deleted
 
 ### 👥 Customer Creation & Management (2 tests)
 - **Complete customer profile creation**: Tests full normalized structure with tax profile, billing profile, addresses, memberships
 - **Customer validation rules**: Tests business rule validation (company type requires company_name)
 
-### 🔐 User Management & Roles (2 tests) 
+### 🔐 User Management & Roles (2 tests)
 - **System user creation**: Tests creating internal staff with system_role
 - **Customer user relationships**: Tests customer user creation and membership access patterns
 
 ### 🗑️ Deletion Scenarios & Compliance (4 tests)
 - **Customer deletion preserves compliance data**: Tests soft delete preserves audit trail for regulatory requirements
 - **User deletion with single customer**: Tests user deletion when user belongs to only one customer
-- **User deletion with multiple customers**: Tests user deletion when user has access to multiple customers  
+- **User deletion with multiple customers**: Tests user deletion when user has access to multiple customers
 - **Orphan user deletion**: Tests clean deletion of users with no customer relationships
 
 ### 🚀 Query Performance & Budget (2 tests)
@@ -91,7 +91,7 @@ pytest -m "romanian_compliance"  # Romanian regulation tests
 
 ### ✅ User-Customer Relationships
 - System users vs customer users
-- Primary customer designation  
+- Primary customer designation
 - Role-based access (owner, billing, tech, viewer)
 - Multi-customer user support
 - Romanian notification preferences (language, contact method)
@@ -99,7 +99,7 @@ pytest -m "romanian_compliance"  # Romanian regulation tests
 ### ✅ Compliance & Audit
 - GDPR consent tracking
 - Romanian VAT number validation
-- CUI (company ID) validation  
+- CUI (company ID) validation
 - Audit trail preservation
 - Data retention for regulatory compliance
 
@@ -146,7 +146,7 @@ Tests confirm the normalized structure works correctly:
 
 ### 📝 Additional Coverage Recommended
 - Form validation with new structure (existing tests need updates)
-- API endpoints (if applicable) 
+- API endpoints (if applicable)
 - Email notification dispatch
 - Stripe payment integration
 - Invoice generation with tax profiles
@@ -163,7 +163,7 @@ Tests confirm the normalized structure works correctly:
 ### New Test Files
 - `tests/test_customer_user_comprehensive.py` - Complete test suite (719 lines)
 
-### Updated Fixtures  
+### Updated Fixtures
 - `tests/conftest.py` - Updated for normalized structure
 
 ## Business Value

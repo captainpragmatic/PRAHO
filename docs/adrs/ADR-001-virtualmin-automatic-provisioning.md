@@ -1,10 +1,10 @@
 # ADR-001: VirtualMin Automatic Provisioning System
 
 ## Status
-**Status:** Accepted  
-**Date:** 2025-09-04  
-**Decision Makers:** PRAHO Development Team  
-**Stakeholders:** Operations Team, Customer Support, Romanian Hosting Partners  
+**Status:** Accepted
+**Date:** 2025-09-04
+**Decision Makers:** PRAHO Development Team
+**Stakeholders:** Operations Team, Customer Support, Romanian Hosting Partners
 
 ## Context
 
@@ -167,7 +167,7 @@ def audit_service_lifecycle_events(sender, instance, created, **kwargs):
 ```python
 class VirtualminAccount(models.Model):
     domain = models.CharField(
-        max_length=255, 
+        max_length=255,
         unique=True,  # Database-level uniqueness
         db_index=True
     )
@@ -377,7 +377,7 @@ New Features:
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** 2025-09-04  
-**Next Review:** 2025-12-04  
-**Author:** PRAHO Development Team  
+**Document Version:** 1.0
+**Last Updated:** 2025-09-04
+**Next Review:** 2025-12-04
+**Author:** PRAHO Development Team

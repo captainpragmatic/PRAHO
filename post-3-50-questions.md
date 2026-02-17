@@ -17,7 +17,7 @@ author: Claudiu
 
 Think of this as a menu. Pick what matters to you right now:
 - Worried about security? Start with Security questions
-- Site feels slow? Jump to Performance questions  
+- Site feels slow? Jump to Performance questions
 - Costs climbing? Check Cost & Efficiency questions
 
 **Want objective data first?** [Scan your site](link) - shows SSL, speed, security, mobile issues in 60 seconds
@@ -618,7 +618,7 @@ Less common, but happens.
 - NOT: "Why didn't you do X?" or "Prove to me that Y works"
 
 **Make it collaborative:**
-- "Can we go through these together?" 
+- "Can we go through these together?"
 - "I'd like to understand the thinking behind our current setup"
 
 You're the business owner. You don't need to apologize for wanting to understand your infrastructure.
@@ -628,23 +628,23 @@ You're the business owner. You don't need to apologize for wanting to understand
 ## Decision Tree: What To Do Next
 
 ### Your Developer Answered Confidently and Thoroughly
-→ You're in good shape  
-→ Schedule quarterly reviews  
+→ You're in good shape
+→ Schedule quarterly reviews
 → [Run scanner](link) to verify publicly visible issues
 
 ### Your Developer Answered Some But Not Others
-→ Normal - nobody knows everything  
-→ Ask them to investigate the unknowns  
+→ Normal - nobody knows everything
+→ Ask them to investigate the unknowns
 → Consider infrastructure audit if many unknowns
 
 ### Your Developer Got Defensive or Couldn't Answer Basics
-→ Potential issue  
-→ Get second opinion before making decisions  
+→ Potential issue
+→ Get second opinion before making decisions
 → [Book consultation](link) - I'll help you evaluate objectively
 
 ### You're Still Confused After Getting Answers
-→ Translation problem, not technical problem  
-→ You need someone who speaks both business and technical  
+→ Translation problem, not technical problem
+→ You need someone who speaks both business and technical
 → [Book consultation](link) - I specialize in translating technical to business
 
 ---

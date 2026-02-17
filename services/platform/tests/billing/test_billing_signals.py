@@ -23,7 +23,7 @@ class BillingSignalsTest(TestCase):
             symbol='€',
             decimals=2
         )
-        
+
         # Create customer
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -43,7 +43,7 @@ class BillingSignalsTest(TestCase):
             total_cents=10000,  # €100.00
             status="issued"
         )
-        
+
         # Verify audit logging was called
         mock_audit.assert_called()
 
@@ -58,10 +58,10 @@ class BillingSignalsTest(TestCase):
             total_cents=5000,  # €50.00
             status="issued"
         )
-        
+
         # Clear invoice creation signals
         mock_audit.reset_mock()
-        
+
         # Create successful payment (should trigger signal)
         Payment.objects.create(
             invoice=invoice,
@@ -72,6 +72,6 @@ class BillingSignalsTest(TestCase):
             reference_number="txn_128",
             currency=self.currency
         )
-        
+
         # Verify audit logging was called
         mock_audit.assert_called()

@@ -14,12 +14,11 @@ import functools
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
@@ -31,6 +30,7 @@ T = TypeVar("T")
 
 class TaskPriority(Enum):
     """Task priority levels."""
+
     CRITICAL = 1
     HIGH = 2
     NORMAL = 3
@@ -40,6 +40,7 @@ class TaskPriority(Enum):
 
 class TaskStatus(Enum):
     """Task execution status."""
+
     PENDING = "pending"
     QUEUED = "queued"
     RUNNING = "running"
@@ -52,6 +53,7 @@ class TaskStatus(Enum):
 @dataclass
 class TaskResult:
     """Result of an async task execution."""
+
     task_id: str
     status: TaskStatus
     result: Any = None
@@ -101,16 +103,18 @@ class TaskProgressTracker:
         self._cache_key = f"{self.CACHE_PREFIX}:{task_id}"
 
         # Initialize progress in cache
-        self._update_cache({
-            "task_id": task_id,
-            "status": TaskStatus.RUNNING.value,
-            "progress": 0,
-            "total_steps": total_steps,
-            "current_step": "Initializing...",
-            "started_at": self._start_time.isoformat(),
-            "completed_at": None,
-            "error": None,
-        })
+        self._update_cache(
+            {
+                "task_id": task_id,
+                "status": TaskStatus.RUNNING.value,
+                "progress": 0,
+                "total_steps": total_steps,
+                "current_step": "Initializing...",
+                "started_at": self._start_time.isoformat(),
+                "completed_at": None,
+                "error": None,
+            }
+        )
 
     def update(
         self,
@@ -120,16 +124,16 @@ class TaskProgressTracker:
     ) -> None:
         """Update task progress."""
         data = self._get_cache() or {}
-        data.update({
-            "progress": min(progress, self.total_steps),
-            "current_step": current_step,
-            "status": status.value,
-        })
+        data.update(
+            {
+                "progress": min(progress, self.total_steps),
+                "current_step": current_step,
+                "status": status.value,
+            }
+        )
         self._update_cache(data)
 
-        logger.debug(
-            f"Task {self.task_id}: {progress}/{self.total_steps} - {current_step}"
-        )
+        logger.debug(f"Task {self.task_id}: {progress}/{self.total_steps} - {current_step}")
 
     def increment(self, steps: int = 1, current_step: str = "") -> None:
         """Increment progress by steps."""
@@ -142,13 +146,15 @@ class TaskProgressTracker:
         """Mark task as completed."""
         completed_at = timezone.now()
         data = self._get_cache() or {}
-        data.update({
-            "status": TaskStatus.COMPLETED.value,
-            "progress": self.total_steps,
-            "current_step": "Completed",
-            "completed_at": completed_at.isoformat(),
-            "result": result,
-        })
+        data.update(
+            {
+                "status": TaskStatus.COMPLETED.value,
+                "progress": self.total_steps,
+                "current_step": "Completed",
+                "completed_at": completed_at.isoformat(),
+                "result": result,
+            }
+        )
         self._update_cache(data)
 
         return TaskResult(
@@ -165,12 +171,14 @@ class TaskProgressTracker:
         """Mark task as failed."""
         completed_at = timezone.now()
         data = self._get_cache() or {}
-        data.update({
-            "status": TaskStatus.FAILED.value,
-            "current_step": f"Failed: {error}",
-            "completed_at": completed_at.isoformat(),
-            "error": error,
-        })
+        data.update(
+            {
+                "status": TaskStatus.FAILED.value,
+                "current_step": f"Failed: {error}",
+                "completed_at": completed_at.isoformat(),
+                "error": error,
+            }
+        )
         self._update_cache(data)
 
         logger.error(f"Task {self.task_id} failed: {error}")
@@ -189,11 +197,13 @@ class TaskProgressTracker:
         """Mark task as cancelled."""
         completed_at = timezone.now()
         data = self._get_cache() or {}
-        data.update({
-            "status": TaskStatus.CANCELLED.value,
-            "current_step": "Cancelled",
-            "completed_at": completed_at.isoformat(),
-        })
+        data.update(
+            {
+                "status": TaskStatus.CANCELLED.value,
+                "current_step": "Cancelled",
+                "completed_at": completed_at.isoformat(),
+            }
+        )
         self._update_cache(data)
 
         return TaskResult(
@@ -261,6 +271,7 @@ def get_task_status(task_id: str) -> TaskResult:
 
 # Task execution utilities
 
+
 def generate_task_id(prefix: str = "task") -> str:
     """Generate a unique task ID."""
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
@@ -289,6 +300,7 @@ def async_task(
         # Check status
         status = get_task_status(task_id)
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., str]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> str:
@@ -303,7 +315,7 @@ def async_task(
 
             # Queue the task with Django-Q2
             try:
-                from django_q.tasks import async_task as q_async_task
+                from django_q.tasks import async_task as q_async_task  # noqa: PLC0415
 
                 q_async_task(
                     _execute_tracked_task,
@@ -328,6 +340,7 @@ def async_task(
         wrapper.sync = func  # type: ignore[attr-defined]
 
         return wrapper
+
     return decorator
 
 
@@ -358,6 +371,7 @@ def _execute_tracked_task(
 
 
 # Bulk operation utilities
+
 
 class BulkOperationProcessor:
     """
@@ -421,9 +435,7 @@ class BulkOperationProcessor:
             "processed_items": self.processed_items,
             "failed_items": self.failed_items,
             "success_rate": (
-                (self.processed_items - self.failed_items) / self.total_items * 100
-                if self.total_items > 0
-                else 0
+                (self.processed_items - self.failed_items) / self.total_items * 100 if self.total_items > 0 else 0
             ),
             "elapsed_seconds": round(elapsed, 2),
             "items_per_second": round(self.total_items / elapsed, 2) if elapsed > 0 else 0,
@@ -486,6 +498,7 @@ class BulkOperationProcessor:
 
 
 # Lock management for distributed task coordination
+
 
 class DistributedLock:
     """
@@ -551,7 +564,7 @@ class DistributedLock:
         # Use cache.add for atomic set-if-not-exists
         return cache.add(self._cache_key, self._lock_id, self.timeout)
 
-    def __enter__(self) -> "DistributedLock":
+    def __enter__(self) -> DistributedLock:
         if not self.acquire():
             raise RuntimeError(f"Failed to acquire lock: {self.lock_name}")
         return self
@@ -578,6 +591,7 @@ def with_lock(
         def provision_server(server_id: int) -> None:
             ...
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> T:
@@ -588,10 +602,12 @@ def with_lock(
                 return func(*args, **kwargs)
 
         return wrapper
+
     return decorator
 
 
 # Task scheduling utilities
+
 
 def schedule_task(
     func: Callable[..., Any],
@@ -608,7 +624,7 @@ def schedule_task(
     task_id = generate_task_id(f"scheduled_{func.__name__}")
 
     try:
-        from django_q.tasks import schedule
+        from django_q.tasks import schedule  # noqa: PLC0415
 
         schedule(
             func,
@@ -631,7 +647,7 @@ def schedule_task(
 def cancel_scheduled_task(task_id: str) -> bool:
     """Cancel a scheduled task by ID."""
     try:
-        from django_q.models import Schedule
+        from django_q.models import Schedule  # noqa: PLC0415
 
         deleted, _ = Schedule.objects.filter(name=task_id).delete()
         return deleted > 0

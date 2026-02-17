@@ -154,7 +154,7 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
                                     </svg>
                                 </div>
-                                
+
                                 <div>
                                     <h3 class="font-medium text-white">{{ membership.user.get_full_name|default:membership.user.email }}</h3>
                                     <p class="text-sm text-slate-400">{{ membership.user.email }}</p>
@@ -165,7 +165,7 @@
                                     {% endif %}
                                 </div>
                             </div>
-                            
+
                             <!-- User Status & Activity -->
                             <div class="mt-3 flex flex-wrap gap-2 text-xs">
                                 {% if membership.user.is_active %}
@@ -177,13 +177,13 @@
                                         🔴 {% trans "Inactive" %}
                                     </span>
                                 {% endif %}
-                                
+
                                 {% if membership.user.two_factor_enabled %}
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-blue-400 bg-blue-900/30">
                                         🔐 {% trans "2FA Enabled" %}
                                     </span>
                                 {% endif %}
-                                
+
                                 {% if membership.user.last_login %}
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-slate-400 bg-slate-700">
                                         {% trans "Last login:" %} {{ membership.user.last_login|timesince }} {% trans "ago" %}
@@ -195,12 +195,12 @@
                                 {% endif %}
                             </div>
                         </div>
-                        
+
                         <!-- Role and Actions -->
                         <div class="flex flex-col sm:items-end gap-2">
                             <!-- Role Badge with Dropdown -->
                             <div class="relative" x-data="{ open: false }">
-                                <button @click="open = !open" @click.away="open = false" 
+                                <button @click="open = !open" @click.away="open = false"
                                     class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
                                            {% if membership.role == 'owner' %}bg-purple-900 text-purple-200 hover:bg-purple-800
                                            {% elif membership.role == 'billing' %}bg-green-900 text-green-200 hover:bg-green-800
@@ -215,34 +215,34 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                                     </svg>
                                 </button>
-                                
+
                                 <!-- Role Change Dropdown -->
                                 <div x-show="open" x-transition
                                      class="absolute right-0 mt-2 w-48 bg-slate-700 border border-slate-600 rounded-lg shadow-lg z-10">
                                     <form method="post" action="{% url 'customers:change_user_role' customer.pk membership.id %}" class="py-1">
                                         {% csrf_token %}
-                                        <button type="submit" name="role" value="owner" 
+                                        <button type="submit" name="role" value="owner"
                                                 class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                        {% if membership.role == 'owner' %}bg-slate-600{% endif %}">
                                             👑 {% trans "Owner" %}
                                             <span class="block text-xs text-slate-400">{% trans "Full control" %}</span>
                                         </button>
-                                        
+
                                         <!-- Non-owner roles - disabled if this is the last owner -->
                                         {% if not is_last_owner or membership.role != 'owner' %}
-                                            <button type="submit" name="role" value="billing" 
+                                            <button type="submit" name="role" value="billing"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'billing' %}bg-slate-600{% endif %}">
                                                 💳 {% trans "Billing" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Invoices & payments" %}</span>
                                             </button>
-                                            <button type="submit" name="role" value="tech" 
+                                            <button type="submit" name="role" value="tech"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'tech' %}bg-slate-600{% endif %}">
                                                 🔧 {% trans "Technical" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Services & support" %}</span>
                                             </button>
-                                            <button type="submit" name="role" value="viewer" 
+                                            <button type="submit" name="role" value="viewer"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'viewer' %}bg-slate-600{% endif %}">
                                                 👁️ {% trans "Viewer" %}
@@ -262,14 +262,14 @@
                                     </form>
                                 </div>
                             </div>
-                            
+
                             <!-- Action Buttons -->
                             <div class="flex gap-2">
                                 {% if membership.user.is_active %}
                                     <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="false">
-                                        <button type="submit" 
+                                        <button type="submit"
                                                 class="text-xs px-2 py-1 text-yellow-400 hover:text-yellow-300 border border-yellow-600 rounded hover:border-yellow-500 transition-colors"
                                                 onclick="return confirm('Are you sure you want to suspend this user?')">
                                             ⏸️ {% trans "Suspend" %}
@@ -279,14 +279,14 @@
                                     <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="true">
-                                        <button type="submit" 
+                                        <button type="submit"
                                                 class="text-xs px-2 py-1 text-green-400 hover:text-green-300 border border-green-600 rounded hover:border-green-500 transition-colors"
                                                 onclick="return confirm('Are you sure you want to activate this user?')">
                                             ▶️ {% trans "Activate" %}
                                         </button>
                                     </form>
                                 {% endif %}
-                                
+
                                 <!-- Remove Button with Safeguards -->
                                 {% if is_last_user %}
                                     <!-- Cannot remove - last user -->
@@ -306,7 +306,7 @@
                                     <!-- Can remove -->
                                     <form method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" style="display: inline;">
                                         {% csrf_token %}
-                                        <button type="submit" 
+                                        <button type="submit"
                                                 class="text-xs px-2 py-1 text-red-400 hover:text-red-300 border border-red-600 rounded hover:border-red-500 transition-colors"
                                                 onclick="return confirm('Are you sure you want to remove this user from the customer? They will lose all access to this customer\'s data.')">
                                             🗑️ {% trans "Remove" %}
@@ -319,7 +319,7 @@
                 </div>
                 {% endfor %}
             </div>
-            
+
             <!-- User Management Tips -->
             <div class="mt-6 space-y-4">
                 <!-- Role Permissions -->
@@ -340,7 +340,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Safeguard Notices -->
                 {% if is_last_user or is_last_owner %}
                 <div class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4">
@@ -362,7 +362,7 @@
                 </div>
                 {% endif %}
             </div>
-            
+
             {% else %}
             <div class="text-center py-8">
                 <div class="text-6xl mb-4">👤</div>
@@ -370,15 +370,15 @@
                 <p class="text-sm text-slate-500 mb-6 max-w-md mx-auto">
                     {% trans 'This customer needs at least one user account to access services, receive communications, and manage their account.' %}
                 </p>
-                
+
                 <div class="flex flex-col sm:flex-row gap-3 justify-center items-center">
                     {% url 'customers:add_user' customer.pk as add_user_url %}
                     {% button "➕ Add Existing User" variant="primary" href=add_user_url %}
-                    
+
                     {% url 'customers:create_user' customer.pk as create_user_url %}
                     {% button "👤 Create New User" variant="outline" href=create_user_url %}
                 </div>
-                
+
                 <p class="text-xs text-slate-500 mt-4">
                     {% trans 'You can link an existing user account or create a new one for this customer' %}
                 </p>
@@ -566,7 +566,7 @@
                                 {{ invoice.invoice_number }}
                             </h3>
                             <p class="text-sm text-slate-400">
-                                {{ invoice.created_at|date:"d M Y" }} • 
+                                {{ invoice.created_at|date:"d M Y" }} •
                                 {% if invoice.total %}{{ invoice.total|floatformat:2 }} {% trans 'RON' %}{% endif %}
                             </p>
                         </div>

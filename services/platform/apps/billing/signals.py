@@ -13,12 +13,15 @@ Includes:
 
 import logging
 from datetime import datetime
+from decimal import Decimal
+from enum import Enum
 from typing import Any
+from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
-from django.db.models.signals import post_delete, post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -32,15 +35,36 @@ from apps.audit.services import (
 from apps.common.validators import log_security_event
 
 from .models import (
+    CreditLedger,
     Invoice,
+    OAuthToken,
     Payment,
     PaymentRetryAttempt,
+    PriceGrandfathering,
     ProformaInvoice,
+    Refund,
+    Subscription,
     TaxRule,
     VATValidation,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_value_for_audit(value: Any) -> Any:
+    """Convert non-JSON-safe values to JSON-safe primitives."""
+    serialized = value
+    if isinstance(value, datetime):
+        serialized = value.isoformat()
+    elif isinstance(value, Enum):
+        serialized = value.value
+    elif isinstance(value, Decimal | UUID):
+        serialized = str(value)
+    elif isinstance(value, dict):
+        serialized = {str(k): _serialize_value_for_audit(v) for k, v in value.items()}
+    elif isinstance(value, list | tuple | set):
+        serialized = [_serialize_value_for_audit(v) for v in value]
+    return serialized
 
 
 def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
@@ -53,14 +77,7 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dictionary with datetime objects converted to ISO strings
     """
-    serialized = {}
-    for key, value in values.items():
-        if isinstance(value, datetime):
-            # Convert datetime to ISO format string
-            serialized[key] = value.isoformat()
-        else:
-            serialized[key] = value
-    return serialized
+    return {key: _serialize_value_for_audit(value) for key, value in values.items()}
 
 
 # ===============================================================================
@@ -70,6 +87,240 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
 # Financial thresholds in cents (Romanian business context)
 LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR - requires finance team notification
 E_FACTURA_MINIMUM_AMOUNT = 100  # 100 RON - minimum for mandatory e-Factura
+
+# ===============================================================================
+# MODEL LIFECYCLE COVERAGE SIGNALS
+# ===============================================================================
+
+
+def _log_billing_model_event(  # noqa: PLR0913
+    *,
+    event_type: str,
+    instance: Any,
+    description: str,
+    new_values: dict[str, Any] | None = None,
+    old_values: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Log a lightweight lifecycle audit event for billing models."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    try:
+        event_metadata = {
+            "source_app": "billing",
+            "model_lifecycle": True,
+        }
+        if metadata:
+            event_metadata.update(metadata)
+
+        AuditService.log_event(
+            AuditEventData(
+                event_type=event_type,
+                content_object=instance,
+                old_values=_serialize_values_for_audit(old_values or {}),
+                new_values=_serialize_values_for_audit(new_values or {}),
+                description=description,
+            ),
+            context=AuditContext(actor_type="system", metadata=event_metadata),
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Billing Lifecycle] Failed to log {event_type}: {e}")
+
+
+@receiver(post_save, sender=Subscription)
+def audit_subscription_lifecycle(
+    sender: type[Subscription], instance: Subscription, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for Subscription model."""
+    event_type = "subscription_model_created" if created else "subscription_model_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Subscription {instance.subscription_number} {'created' if created else 'updated'}",
+        new_values={
+            "subscription_id": str(instance.id),
+            "subscription_number": instance.subscription_number,
+            "customer_id": str(instance.customer_id),
+            "product_id": str(instance.product_id),
+            "status": instance.status,
+            "billing_cycle": instance.billing_cycle,
+        },
+        metadata={"model": "Subscription"},
+    )
+
+
+@receiver(pre_delete, sender=Subscription)
+def audit_subscription_deleted(sender: type[Subscription], instance: Subscription, **kwargs: Any) -> None:
+    """Audit deletion events for Subscription model."""
+    _log_billing_model_event(
+        event_type="subscription_model_deleted",
+        instance=instance,
+        description=f"Subscription {instance.subscription_number} deleted",
+        old_values={
+            "subscription_id": str(instance.id),
+            "subscription_number": instance.subscription_number,
+            "customer_id": str(instance.customer_id),
+            "status": instance.status,
+        },
+        metadata={"model": "Subscription"},
+    )
+
+
+@receiver(post_save, sender=PriceGrandfathering)
+def audit_price_grandfathering_lifecycle(
+    sender: type[PriceGrandfathering], instance: PriceGrandfathering, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for PriceGrandfathering model."""
+    event_type = "price_grandfathering_created" if created else "price_grandfathering_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Price grandfathering {'created' if created else 'updated'} for customer {instance.customer_id}",
+        new_values={
+            "grandfathering_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "product_id": str(instance.product_id),
+            "locked_price_cents": instance.locked_price_cents,
+            "is_active": instance.is_active,
+        },
+        metadata={"model": "PriceGrandfathering"},
+    )
+
+
+@receiver(pre_delete, sender=PriceGrandfathering)
+def audit_price_grandfathering_deleted(
+    sender: type[PriceGrandfathering], instance: PriceGrandfathering, **kwargs: Any
+) -> None:
+    """Audit deletion events for PriceGrandfathering model."""
+    _log_billing_model_event(
+        event_type="price_grandfathering_deleted",
+        instance=instance,
+        description=f"Price grandfathering deleted for customer {instance.customer_id}",
+        old_values={
+            "grandfathering_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "product_id": str(instance.product_id),
+            "locked_price_cents": instance.locked_price_cents,
+            "is_active": instance.is_active,
+        },
+        metadata={"model": "PriceGrandfathering"},
+    )
+
+
+@receiver(post_save, sender=Refund)
+def audit_refund_lifecycle(sender: type[Refund], instance: Refund, created: bool, **kwargs: Any) -> None:
+    """Audit lifecycle events for Refund model."""
+    event_type = "refund_model_created" if created else "refund_model_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Refund {instance.reference_number} {'created' if created else 'updated'}",
+        new_values={
+            "refund_id": str(instance.id),
+            "reference_number": instance.reference_number,
+            "customer_id": str(instance.customer_id),
+            "status": instance.status,
+            "refund_type": instance.refund_type,
+            "amount_cents": instance.amount_cents,
+        },
+        metadata={"model": "Refund"},
+    )
+
+
+@receiver(pre_delete, sender=Refund)
+def audit_refund_deleted(sender: type[Refund], instance: Refund, **kwargs: Any) -> None:
+    """Audit deletion events for Refund model."""
+    _log_billing_model_event(
+        event_type="refund_model_deleted",
+        instance=instance,
+        description=f"Refund {instance.reference_number} deleted",
+        old_values={
+            "refund_id": str(instance.id),
+            "reference_number": instance.reference_number,
+            "customer_id": str(instance.customer_id),
+            "status": instance.status,
+            "amount_cents": instance.amount_cents,
+        },
+        metadata={"model": "Refund"},
+    )
+
+
+@receiver(post_save, sender=CreditLedger)
+def audit_credit_ledger_lifecycle(
+    sender: type[CreditLedger], instance: CreditLedger, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for CreditLedger model."""
+    event_type = "credit_ledger_created" if created else "credit_ledger_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Credit ledger entry {'created' if created else 'updated'} for customer {instance.customer_id}",
+        new_values={
+            "credit_entry_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "invoice_id": str(instance.invoice_id) if instance.invoice_id else None,
+            "payment_id": str(instance.payment_id) if instance.payment_id else None,
+            "delta_cents": instance.delta_cents,
+            "reason": instance.reason,
+        },
+        metadata={"model": "CreditLedger"},
+    )
+
+
+@receiver(pre_delete, sender=CreditLedger)
+def audit_credit_ledger_deleted(sender: type[CreditLedger], instance: CreditLedger, **kwargs: Any) -> None:
+    """Audit deletion events for CreditLedger model."""
+    _log_billing_model_event(
+        event_type="credit_ledger_deleted",
+        instance=instance,
+        description=f"Credit ledger entry deleted for customer {instance.customer_id}",
+        old_values={
+            "credit_entry_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "delta_cents": instance.delta_cents,
+            "reason": instance.reason,
+        },
+        metadata={"model": "CreditLedger"},
+    )
+
+
+@receiver(post_save, sender=OAuthToken)
+def audit_oauth_token_lifecycle(sender: type[OAuthToken], instance: OAuthToken, created: bool, **kwargs: Any) -> None:
+    """Audit lifecycle events for OAuthToken model (without token material)."""
+    event_type = "efactura_oauth_token_created" if created else "efactura_oauth_token_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"e-Factura OAuth token {'created' if created else 'updated'} for CUI {instance.cui}",
+        new_values={
+            "token_id": str(instance.id),
+            "cui": instance.cui,
+            "environment": instance.environment,
+            "is_active": instance.is_active,
+            "expires_at": instance.expires_at.isoformat(),
+        },
+        metadata={"model": "OAuthToken"},
+    )
+
+
+@receiver(pre_delete, sender=OAuthToken)
+def audit_oauth_token_deleted(sender: type[OAuthToken], instance: OAuthToken, **kwargs: Any) -> None:
+    """Audit deletion events for OAuthToken model (without token material)."""
+    _log_billing_model_event(
+        event_type="efactura_oauth_token_deleted",
+        instance=instance,
+        description=f"e-Factura OAuth token deleted for CUI {instance.cui}",
+        old_values={
+            "token_id": str(instance.id),
+            "cui": instance.cui,
+            "environment": instance.environment,
+            "is_active": instance.is_active,
+            "expires_at": instance.expires_at.isoformat(),
+        },
+        metadata={"model": "OAuthToken"},
+    )
+
 
 # ===============================================================================
 # CORE INVOICE LIFECYCLE SIGNALS
@@ -107,7 +358,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             # Use specialized billing audit service for richer metadata
-            from apps.audit.services import BusinessEventData  # noqa: PLC0415
+            from apps.audit.services import BusinessEventData
 
             event_data = BusinessEventData(
                 event_type=event_type,
@@ -177,7 +428,7 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
     try:
         if not created and instance.status == "issued" and instance.number.startswith("TMP-"):
             # Generate proper invoice number
-            from .services import InvoiceNumberingService  # noqa: PLC0415
+            from .services import InvoiceNumberingService
 
             sequence = InvoiceNumberingService.get_or_create_sequence("default")  # type: ignore[attr-defined]
             new_number = sequence.get_next_number("INV")
@@ -271,7 +522,7 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
             # Determine specific event type based on status change
             audit_event_type = "payment_initiated" if created else f"payment_{instance.status}"
 
-            from apps.audit.services import BusinessEventData  # noqa: PLC0415
+            from apps.audit.services import BusinessEventData
 
             event_data = BusinessEventData(
                 event_type=audit_event_type,
@@ -376,7 +627,7 @@ def handle_proforma_invoice_conversion(
         )
 
         if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-            from apps.audit.services import BusinessEventData  # noqa: PLC0415
+            from apps.audit.services import BusinessEventData
 
             event_data = BusinessEventData(
                 event_type=event_type,
@@ -395,7 +646,7 @@ def handle_proforma_invoice_conversion(
             # Auto-convert proforma to invoice when paid
             if instance.status == "paid" and old_status != "paid" and not hasattr(instance, "converted_invoice"):
                 try:
-                    from apps.billing.services import (  # noqa: PLC0415
+                    from apps.billing.services import (
                         ProformaConversionService,
                     )
 
@@ -583,7 +834,7 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
         if not invoice.orders.exists():
             return
 
-        from apps.orders.services import OrderService, StatusChangeData  # noqa: PLC0415
+        from apps.orders.services import OrderService, StatusChangeData
 
         if new_status == "paid" and old_status != "paid":
             # Invoice paid - advance orders to processing
@@ -624,7 +875,7 @@ def _activate_payment_services(payment: Payment) -> None:
         if not payment.invoice:
             return
 
-        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415
+        from apps.provisioning.services import ServiceActivationService
 
         for order in payment.invoice.orders.all():
             for item in order.items.filter(service__isnull=False):
@@ -643,7 +894,7 @@ def _activate_payment_services(payment: Payment) -> None:
 def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     """Update customer credit score based on payment events"""
     try:
-        from apps.customers.services import CustomerCreditService  # noqa: PLC0415
+        from apps.customers.services import CustomerCreditService
 
         event_type = None
         if payment.status == "succeeded" and old_status != "succeeded":
@@ -948,7 +1199,7 @@ def _handle_retry_completion(retry_attempt: PaymentRetryAttempt) -> None:
 def _update_billing_analytics(invoice: Invoice, created: bool) -> None:
     """Update billing analytics and KPIs when invoices change"""
     try:
-        from apps.billing.services import BillingAnalyticsService  # noqa: PLC0415
+        from apps.billing.services import BillingAnalyticsService
 
         # Update billing metrics
         BillingAnalyticsService.update_invoice_metrics(
@@ -970,7 +1221,7 @@ def _update_billing_analytics(invoice: Invoice, created: bool) -> None:
 def _update_billing_refund_metrics(invoice: Invoice) -> None:
     """Update billing-specific refund metrics"""
     try:
-        from apps.billing.services import BillingAnalyticsService  # noqa: PLC0415
+        from apps.billing.services import BillingAnalyticsService
 
         BillingAnalyticsService.record_invoice_refund(invoice=invoice, refund_date=invoice.updated_at)
 
@@ -991,7 +1242,7 @@ def _update_billing_refund_metrics(invoice: Invoice) -> None:
 def _send_invoice_created_email(invoice: Invoice) -> None:
     """Send invoice created notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="invoice_created",
@@ -1005,7 +1256,7 @@ def _send_invoice_created_email(invoice: Invoice) -> None:
 def _send_invoice_issued_email(invoice: Invoice) -> None:
     """Send invoice issued notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="invoice_issued",
@@ -1020,7 +1271,7 @@ def _send_invoice_issued_email(invoice: Invoice) -> None:
 def _send_payment_received_email(invoice: Invoice) -> None:
     """Send payment received confirmation"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="payment_received",
@@ -1034,7 +1285,7 @@ def _send_payment_received_email(invoice: Invoice) -> None:
 def _send_invoice_overdue_email(invoice: Invoice) -> None:
     """Send overdue invoice notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="invoice_overdue",
@@ -1053,7 +1304,7 @@ def _send_invoice_overdue_email(invoice: Invoice) -> None:
 def _send_invoice_voided_email(invoice: Invoice) -> None:
     """Send invoice voided notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="invoice_voided",
@@ -1067,7 +1318,7 @@ def _send_invoice_voided_email(invoice: Invoice) -> None:
 def _send_payment_success_email(payment: Payment) -> None:
     """Send payment success notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="payment_success",
@@ -1081,7 +1332,7 @@ def _send_payment_success_email(payment: Payment) -> None:
 def _send_payment_failed_email(payment: Payment) -> None:
     """Send payment failure notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="payment_failed",
@@ -1096,7 +1347,7 @@ def _send_payment_failed_email(payment: Payment) -> None:
 def _send_payment_refund_email(payment: Payment) -> None:
     """Send payment refund notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="payment_refund",
@@ -1110,7 +1361,7 @@ def _send_payment_refund_email(payment: Payment) -> None:
 def _send_invoice_refund_confirmation(invoice: Invoice) -> None:
     """Send customer confirmation about invoice refund"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="invoice_refund_confirmation",
@@ -1128,7 +1379,7 @@ def _send_invoice_refund_confirmation(invoice: Invoice) -> None:
 def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
     """Send retry success notification"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="payment_retry_success",
@@ -1146,7 +1397,7 @@ def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
 def _notify_finance_team_large_refund(invoice: Invoice) -> None:
     """Notify finance team about large refunds"""
     try:
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         EmailService.send_template_email(
             template_key="finance_large_refund_alert",
@@ -1181,7 +1432,7 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 def _trigger_efactura_submission(invoice: Invoice) -> None:
     """Trigger e-Factura submission for Romanian compliance"""
     try:
-        from apps.billing.efactura.tasks import queue_efactura_submission  # noqa: PLC0415
+        from apps.billing.efactura.tasks import queue_efactura_submission
 
         task_id = queue_efactura_submission(str(invoice.id))
         if task_id:
@@ -1196,7 +1447,7 @@ def _schedule_payment_reminders(invoice: Invoice) -> None:
     """Schedule payment reminder emails"""
     try:
         if invoice.due_at:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             async_task("apps.billing.tasks.schedule_payment_reminders", str(invoice.id))
     except ImportError:
@@ -1206,7 +1457,7 @@ def _schedule_payment_reminders(invoice: Invoice) -> None:
 def _cancel_payment_reminders(invoice: Invoice) -> None:
     """Cancel scheduled payment reminders"""
     try:
-        from django_q.tasks import async_task  # noqa: PLC0415
+        from django_q.tasks import async_task
 
         async_task("apps.billing.tasks.cancel_payment_reminders", str(invoice.id))
     except ImportError:
@@ -1216,7 +1467,7 @@ def _cancel_payment_reminders(invoice: Invoice) -> None:
 def _trigger_dunning_process(invoice: Invoice) -> None:
     """Start automated dunning process for overdue invoice"""
     try:
-        from django_q.tasks import async_task  # noqa: PLC0415
+        from django_q.tasks import async_task
 
         async_task("apps.billing.tasks.start_dunning_process", str(invoice.id))
     except ImportError:
@@ -1226,7 +1477,7 @@ def _trigger_dunning_process(invoice: Invoice) -> None:
 def _schedule_payment_retry(payment: Payment) -> None:
     """Schedule payment retry according to policy"""
     try:
-        from apps.billing.services import PaymentRetryService  # noqa: PLC0415
+        from apps.billing.services import PaymentRetryService
 
         policy = PaymentRetryService.get_customer_retry_policy(payment.customer)  # type: ignore[attr-defined]
         if policy and policy.is_active:
@@ -1255,7 +1506,7 @@ def _update_customer_billing_stats(customer: Any) -> None:
 def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
     """Update customer invoice payment patterns"""
     try:
-        from apps.customers.services import CustomerAnalyticsService  # noqa: PLC0415
+        from apps.customers.services import CustomerAnalyticsService
 
         CustomerAnalyticsService.record_invoice_event(  # type: ignore[attr-defined]
             customer=invoice.customer,
@@ -1273,7 +1524,7 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
 def _activate_pending_services(invoice: Invoice) -> None:
     """Activate services that were pending payment"""
     try:
-        from apps.provisioning.services import ServiceActivationService  # noqa: PLC0415
+        from apps.provisioning.services import ServiceActivationService
 
         orders = invoice.orders.all()
         for order in orders:
@@ -1289,7 +1540,7 @@ def _activate_pending_services(invoice: Invoice) -> None:
 def _handle_overdue_service_suspension(invoice: Invoice) -> None:
     """Handle service suspension for overdue invoices"""
     try:
-        from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415
+        from apps.provisioning.services import ServiceManagementService
 
         # Find all services related to overdue invoice orders
         services = [
@@ -1391,7 +1642,7 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
         # Check if this invoice has an e-Factura document that was accepted
         if invoice.bill_to_country == "RO":
             try:
-                from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus  # noqa: PLC0415
+                from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
 
                 efactura_doc = getattr(invoice, "efactura_document", None)
                 if efactura_doc and efactura_doc.status == EFacturaStatus.ACCEPTED.value:
@@ -1498,7 +1749,7 @@ def _invalidate_invoice_caches(invoice: Invoice) -> None:
 def _cancel_invoice_webhooks(invoice: Invoice) -> None:
     """Cancel pending webhooks for deleted invoice"""
     try:
-        from apps.integrations.models import WebhookDelivery  # noqa: PLC0415
+        from apps.integrations.models import WebhookDelivery
 
         # Use customer and event type since WebhookDelivery doesn't use GenericForeignKey
         cancelled_count = WebhookDelivery.objects.filter(
@@ -1517,7 +1768,7 @@ def _cancel_invoice_webhooks(invoice: Invoice) -> None:
 def _revert_customer_credit_score(customer: Any, event_type: str) -> None:
     """Revert customer credit score changes"""
     try:
-        from apps.customers.services import CustomerCreditService  # noqa: PLC0415
+        from apps.customers.services import CustomerCreditService
 
         CustomerCreditService.revert_credit_change(customer=customer, event_type=event_type, event_date=timezone.now())
 
@@ -1538,9 +1789,9 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
     """
     try:
         # Import here to avoid circular imports
-        from django_q.tasks import async_task  # noqa: PLC0415
+        from django_q.tasks import async_task
 
-        from apps.orders.models import OrderItem  # noqa: PLC0415
+        from apps.orders.models import OrderItem
 
         # Find hosting services in the paid invoice
         order_items = OrderItem.objects.filter(order__invoice=invoice).select_related("service")

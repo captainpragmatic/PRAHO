@@ -47,43 +47,45 @@ MAX_TIMEOUT_SECONDS = 3600
 MIN_DOMAIN_LENGTH = 3
 BULK_OPERATION_THRESHOLD = 10
 
+
 def performance_monitor(operation_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator to monitor performance of critical parsing operations.
-    
+
     Tracks execution time, memory usage patterns, and call frequency
     for production optimization and debugging.
-    
+
     Args:
         operation_name: Human-readable operation name for logging
-        
+
     Performance Impact:
         - Minimal overhead (~0.1ms per call)
         - Only logs slow operations (>100ms)
         - Aggregates metrics for operational monitoring
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             if not PERFORMANCE_MONITORING_ENABLED:
                 return func(*args, **kwargs)
-                
+
             start_time = time.perf_counter()
             correlation_id = str(uuid.uuid4())[:8]
-            
+
             try:
                 result = func(*args, **kwargs)
                 execution_time = (time.perf_counter() - start_time) * 1000  # ms
-                
+
                 # Only log slow operations to reduce noise
                 if execution_time > PERFORMANCE_THRESHOLD_MS:
                     logger.info(
                         f"⚡ [Performance] {operation_name} took {execution_time:.2f}ms "
                         f"(correlation_id: {correlation_id})"
                     )
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = (time.perf_counter() - start_time) * 1000
                 logger.error(
@@ -91,31 +93,30 @@ def performance_monitor(operation_name: str) -> Callable[[Callable[..., Any]], C
                     f"(correlation_id: {correlation_id}): {e}"
                 )
                 raise
-                
+
         return wrapper
+
     return decorator
 
+
 def create_error_context(
-    operation: str, 
-    params: dict[str, Any], 
-    server: VirtualminServer,
-    correlation_id: str | None = None
+    operation: str, params: dict[str, Any], server: VirtualminServer, correlation_id: str | None = None
 ) -> dict[str, Any]:
     """
     Create enhanced error context for debugging and operational monitoring.
-    
+
     Provides structured error information without exposing sensitive data.
     Includes correlation IDs for distributed tracing and debugging.
-    
+
     Args:
         operation: The operation being performed
         params: Operation parameters (will be sanitized)
         server: VirtualminServer instance
         correlation_id: Optional correlation ID for request tracking
-        
+
     Returns:
         Dictionary containing sanitized error context for logging and debugging.
-        
+
     Security:
         - Automatically sanitizes sensitive parameters
         - Never includes passwords, keys, or credentials
@@ -123,29 +124,30 @@ def create_error_context(
     """
     if correlation_id is None:
         correlation_id = str(uuid.uuid4())[:8]
-        
+
     # Sanitize parameters to remove sensitive data
     sanitized_params = {}
-    sensitive_keys = {'password', 'passwd', 'key', 'token', 'secret', 'credential'}
-    
+    sensitive_keys = {"password", "passwd", "key", "token", "secret", "credential"}
+
     for key, value in params.items():
         key_lower = key.lower()
         if any(sensitive_key in key_lower for sensitive_key in sensitive_keys):
-            sanitized_params[key] = '[REDACTED]'
+            sanitized_params[key] = "[REDACTED]"
         elif isinstance(value, str | int | float | bool):
             sanitized_params[key] = str(value)
         else:
             sanitized_params[key] = str(type(value).__name__)
-    
+
     return {
-        'operation': operation,
-        'server_id': str(server.id),
-        'server_hostname': server.hostname,
-        'timestamp': datetime.now(UTC).isoformat(),
-        'correlation_id': correlation_id,
-        'sanitized_params': sanitized_params,
-        'version': 'v2.0',  # For tracking error context format evolution
+        "operation": operation,
+        "server_id": str(server.id),
+        "server_hostname": server.hostname,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "correlation_id": correlation_id,
+        "sanitized_params": sanitized_params,
+        "version": "v2.0",  # For tracking error context format evolution
     }
+
 
 # ===============================================================================
 # CONSTANTS
@@ -156,27 +158,29 @@ PERFORMANCE_MONITORING_ENABLED = True
 LRU_CACHE_SIZE = 256
 PARSING_BATCH_SIZE = 100
 
+
 # Compiled regex patterns for performance optimization
 # 🚨 Complexity: O(1) - Pre-compiled patterns eliminate regex compilation overhead
 @lru_cache(maxsize=1)
 def get_compiled_patterns() -> dict[str, re.Pattern[str]]:
     """Get cached compiled regex patterns for parsing operations.
-    
+
     Returns:
         Dictionary of compiled regex patterns keyed by pattern name.
-        
+
     Performance:
         - O(1) access after first compilation
         - Reduces regex compilation overhead by ~80%
     """
     return {
-        'size': re.compile(r'([0-9.]+)\s*([KMGT]?)B?', re.IGNORECASE),
-        'domain': re.compile(r'^([a-zA-Z0-9.-]+)$'),
-        'bandwidth_csv': re.compile(r'^([^,]+),(.+)$'),
-        'disk_field': re.compile(r'(disk|size|usage)', re.IGNORECASE),
-        'quota_field': re.compile(r'(quota|limit)', re.IGNORECASE),
-        'bytes_value': re.compile(r'^\d+$'),
+        "size": re.compile(r"([0-9.]+)\s*([KMGT]?)B?", re.IGNORECASE),
+        "domain": re.compile(r"^([a-zA-Z0-9.-]+)$"),
+        "bandwidth_csv": re.compile(r"^([^,]+),(.+)$"),
+        "disk_field": re.compile(r"(disk|size|usage)", re.IGNORECASE),
+        "quota_field": re.compile(r"(quota|limit)", re.IGNORECASE),
+        "bytes_value": re.compile(r"^\d+$"),
     }
+
 
 # Domain parsing constants
 DOMAIN_PARTS_MIN = 2  # Minimum parts required for domain line parsing
@@ -228,63 +232,61 @@ def get_virtualmin_config() -> dict[str, Any]:
 # TIMEOUT CONFIGURATIONS - Externalized for Production Optimization
 # ===============================================================================
 
+
 def get_virtualmin_timeouts() -> dict[str, int]:
     """
     Get timeout configurations from Django settings with runtime updates capability.
-    
+
     This centralized timeout configuration system allows for:
     - Hot-reloading of timeout values without service restart
     - Environment-specific timeout optimization
     - Operational tuning based on network conditions
     - Comprehensive validation with reasonable defaults
-    
+
     Returns:
         Dictionary containing all timeout configurations in seconds.
-        
+
     Configuration Sources (in priority order):
         1. Environment variables (VIRTUALMIN_*_TIMEOUT)
         2. Django settings (VIRTUALMIN_TIMEOUTS)
         3. SettingsService database values
         4. Hardcoded defaults (fallback)
-        
+
     Example Environment Variables:
         VIRTUALMIN_API_TIMEOUT=45
         VIRTUALMIN_HEALTH_CHECK_TIMEOUT=15
         VIRTUALMIN_BACKUP_TIMEOUT=600
     """
-    
+
     # Default timeout configurations with operational guidance
     defaults = {
         # API request timeouts
-        'API_REQUEST_TIMEOUT': 30,      # Standard API operations
-        'API_HEALTH_CHECK_TIMEOUT': 10, # Quick health checks
-        'API_BACKUP_TIMEOUT': 300,      # Backup operations (5 min)
-        'API_BULK_TIMEOUT': 600,        # Bulk operations (10 min)
-        
+        "API_REQUEST_TIMEOUT": 30,  # Standard API operations
+        "API_HEALTH_CHECK_TIMEOUT": 10,  # Quick health checks
+        "API_BACKUP_TIMEOUT": 300,  # Backup operations (5 min)
+        "API_BULK_TIMEOUT": 600,  # Bulk operations (10 min)
         # Connection timeouts
-        'CONNECTION_TIMEOUT': 15,       # Initial connection establishment
-        'READ_TIMEOUT': 30,             # Data read operations
-        'WRITE_TIMEOUT': 30,            # Data write operations
-        
+        "CONNECTION_TIMEOUT": 15,  # Initial connection establishment
+        "READ_TIMEOUT": 30,  # Data read operations
+        "WRITE_TIMEOUT": 30,  # Data write operations
         # Task-specific timeouts
-        'PROVISIONING_TIMEOUT': 180,    # Account provisioning (3 min)
-        'DOMAIN_SYNC_TIMEOUT': 120,     # Domain synchronization (2 min)
-        'USAGE_SYNC_TIMEOUT': 60,       # Usage data sync (1 min)
-        
+        "PROVISIONING_TIMEOUT": 180,  # Account provisioning (3 min)
+        "DOMAIN_SYNC_TIMEOUT": 120,  # Domain synchronization (2 min)
+        "USAGE_SYNC_TIMEOUT": 60,  # Usage data sync (1 min)
         # Retry and rate limiting
-        'RETRY_DELAY': 5,               # Delay between retries
-        'MAX_RETRIES': 3,               # Maximum retry attempts
-        'RATE_LIMIT_WINDOW': 3600,      # Rate limit window (1 hour)
-        'RATE_LIMIT_MAX_CALLS': 100,    # Max calls per hour per server
-        'CONNECTION_POOL_SIZE': 10,     # HTTP connection pool size
+        "RETRY_DELAY": 5,  # Delay between retries
+        "MAX_RETRIES": 3,  # Maximum retry attempts
+        "RATE_LIMIT_WINDOW": 3600,  # Rate limit window (1 hour)
+        "RATE_LIMIT_MAX_CALLS": 100,  # Max calls per hour per server
+        "CONNECTION_POOL_SIZE": 10,  # HTTP connection pool size
     }
-    
+
     # Try to get configuration from Django settings
-    timeout_config = getattr(settings, 'VIRTUALMIN_TIMEOUTS', {})
-    
+    timeout_config = getattr(settings, "VIRTUALMIN_TIMEOUTS", {})
+
     # Merge with defaults
     result = {**defaults, **timeout_config}
-    
+
     # Override with environment variables if present
     for key in result:
         env_var = f"VIRTUALMIN_{key}"
@@ -293,7 +295,7 @@ def get_virtualmin_timeouts() -> dict[str, int]:
                 result[key] = int(env_value)
             except ValueError:
                 logger.warning(f"⚠️ [Config] Invalid timeout value for {env_var}: {env_value}")
-    
+
     # Validate timeout values
     for key, value in result.items():
         if not isinstance(value, int) or value <= 0:
@@ -301,8 +303,9 @@ def get_virtualmin_timeouts() -> dict[str, int]:
             result[key] = defaults[key]
         elif value > MAX_TIMEOUT_SECONDS:  # Warn about very long timeouts
             logger.warning(f"⚠️ [Config] Very long timeout configured: {key}={value}s")
-    
+
     return result
+
 
 # Legacy constants for backward compatibility - will be deprecated
 VIRTUALMIN_API_TIMEOUT = 30  # seconds - DEPRECATED: Use get_virtualmin_timeouts()['API_REQUEST_TIMEOUT']
@@ -876,8 +879,8 @@ class VirtualminGateway:
         """Execute the HTTP request and return response."""
         # Get current timeout configuration (supports hot-reloading)
         timeout_config = get_virtualmin_timeouts()
-        request_timeout = timeout_config.get('API_REQUEST_TIMEOUT', self.config.timeout)
-        
+        request_timeout = timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
+
         return self._session.get(
             self.server.api_url,
             params=params,
@@ -1049,12 +1052,12 @@ class VirtualminGateway:
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
         """
         Get detailed domain information including usage statistics.
-        
+
         Uses list-domains with multiline=1 for disk usage and list-bandwidth for bandwidth usage.
-        
+
         Args:
             domain: Domain name to get information for
-            
+
         Returns:
             Result with domain information or error message
         """
@@ -1062,59 +1065,57 @@ class VirtualminGateway:
         disk_result = self._fetch_domain_disk_info(domain)
         if disk_result.is_err():
             return disk_result
-        
+
         domain_info = disk_result.unwrap()
-        
+
         # Get bandwidth information
         bandwidth_info = self._fetch_domain_bandwidth_info(domain)
         domain_info.update(bandwidth_info)
-        
+
         return Ok(domain_info)
-    
+
     def _fetch_domain_disk_info(self, domain: str) -> Result[dict[str, Any], str]:
         """Fetch disk usage and quota information for domain."""
         disk_result = self.call("list-domains", {"domain": domain, "multiline": ""})
-        
+
         if disk_result.is_err():
             return Err(f"Disk usage API call failed: {disk_result.unwrap_err()}")
-            
+
         response = disk_result.unwrap()
         if not response.success:
             return Err(f"Failed to get disk usage: {response.data.get('error', 'Unknown error')}")
-        
+
         disk_info = self._parse_multiline_domain_response(response.data)
-        return Ok({
-            "disk_usage_mb": disk_info.get("disk_usage_mb", 0),
-            "disk_quota_mb": disk_info.get("disk_quota_mb"),
-            "bandwidth_usage_mb": 0,
-            "bandwidth_quota_mb": None,
-        })
-    
+        return Ok(
+            {
+                "disk_usage_mb": disk_info.get("disk_usage_mb", 0),
+                "disk_quota_mb": disk_info.get("disk_quota_mb"),
+                "bandwidth_usage_mb": 0,
+                "bandwidth_quota_mb": None,
+            }
+        )
+
     def _fetch_domain_bandwidth_info(self, domain: str) -> dict[str, Any]:
         """Fetch bandwidth usage information using multiple strategies."""
         # Strategy 1: Try list-bandwidth command
         bandwidth_info = self._try_bandwidth_api_call(domain)
         if bandwidth_info["bandwidth_usage_mb"] > 0:
             return bandwidth_info
-        
+
         # Strategy 2: Extract from domain data
         return self._try_bandwidth_from_domain_data(domain)
-    
+
     def _try_bandwidth_api_call(self, domain: str) -> dict[str, Any]:
         """Try to get bandwidth using list-bandwidth API call."""
         bandwidth_info = {"bandwidth_usage_mb": 0, "bandwidth_quota_mb": None}
-        
+
         try:
             current_date = datetime.now()
             start_date = current_date.replace(day=1).strftime("%Y-%m-%d")
             end_date = current_date.strftime("%Y-%m-%d")
-            
-            bandwidth_result = self.call("list-bandwidth", {
-                "domain": domain,
-                "start": start_date,
-                "end": end_date
-            })
-            
+
+            bandwidth_result = self.call("list-bandwidth", {"domain": domain, "start": start_date, "end": end_date})
+
             if bandwidth_result.is_ok():
                 response = bandwidth_result.unwrap()
                 if response.success:
@@ -1123,13 +1124,13 @@ class VirtualminGateway:
                         bandwidth_info["bandwidth_usage_mb"] = bandwidth_usage
         except Exception as e:
             logger.debug(f"Bandwidth query failed for {domain}: {e}")
-        
+
         return bandwidth_info
-    
+
     def _try_bandwidth_from_domain_data(self, domain: str) -> dict[str, Any]:
         """Try to extract bandwidth from domain info data."""
         bandwidth_info = {"bandwidth_usage_mb": 0, "bandwidth_quota_mb": None}
-        
+
         disk_result = self.call("list-domains", {"domain": domain, "multiline": ""})
         if disk_result.is_ok():
             response = disk_result.unwrap()
@@ -1137,57 +1138,58 @@ class VirtualminGateway:
                 bandwidth_usage = self._extract_bandwidth_from_domain_data(response.data)
                 if bandwidth_usage > 0:
                     bandwidth_info["bandwidth_usage_mb"] = bandwidth_usage
-                    
+
                 bandwidth_quota = self._extract_bandwidth_quota_from_domain_data(response.data)
                 if bandwidth_quota != 0:  # Include -1 for unlimited and positive values
                     bandwidth_info["bandwidth_quota_mb"] = bandwidth_quota
-        
+
         return bandwidth_info
-    
+
     def _extract_bandwidth_from_domain_data(self, data: dict[str, Any]) -> int:
         """Extract bandwidth usage from domain data if available."""
         bandwidth_mb = 0
-        
-        if isinstance(data, dict) and 'data' in data:
-            for domain_item in data['data']:
-                if 'values' in domain_item:
-                    values = domain_item['values']
-                    
+
+        if isinstance(data, dict) and "data" in data:
+            for domain_item in data["data"]:
+                if "values" in domain_item:
+                    values = domain_item["values"]
+
                     # Look for bandwidth-related fields (usage and quotas)
                     for key, value in values.items():
                         key_lower = key.lower()
                         value_str = value[0] if isinstance(value, list) and value else str(value)
-                        
+
                         # Check for bandwidth usage fields
-                        if (any(term in key_lower for term in ['bandwidth', 'traffic', 'transfer']) and
-                            ('size' in key_lower or 'usage' in key_lower or 'used' in key_lower)):
+                        if any(term in key_lower for term in ["bandwidth", "traffic", "transfer"]) and (
+                            "size" in key_lower or "usage" in key_lower or "used" in key_lower
+                        ):
                             try:
                                 bandwidth_mb = self._parse_size_to_mb(value_str)
                                 if bandwidth_mb > 0:
                                     break
                             except ValueError:
-                                    continue
-                    
+                                continue
+
                     if bandwidth_mb > 0:
                         break
-                    
+
         return bandwidth_mb
 
     def _extract_bandwidth_quota_from_domain_data(self, data: dict[str, Any]) -> int:
         """Extract bandwidth quota from domain data."""
         quota_mb = 0
-        
-        if isinstance(data, dict) and 'data' in data:
-            for domain_item in data['data']:
-                if 'values' in domain_item:
-                    values = domain_item['values']
-                    
+
+        if isinstance(data, dict) and "data" in data:
+            for domain_item in data["data"]:
+                if "values" in domain_item:
+                    values = domain_item["values"]
+
                     # Look for bandwidth quota fields
                     for key, value in values.items():
                         key_lower = key.lower()
-                        
+
                         # Check for bandwidth limit/quota fields
-                        if 'bandwidth' in key_lower and ('limit' in key_lower or 'quota' in key_lower):
+                        if "bandwidth" in key_lower and ("limit" in key_lower or "quota" in key_lower):
                             value_str = value[0] if isinstance(value, list) and value else str(value)
                             try:
                                 # Handle "Unlimited" case
@@ -1195,20 +1197,20 @@ class VirtualminGateway:
                                     quota_mb = -1  # Use -1 to represent unlimited
                                     break
                                 # Handle both regular size format and byte format
-                                elif 'byte' in key_lower:
+                                elif "byte" in key_lower:
                                     # Convert bytes to MB
                                     quota_mb = int(value_str) // (1024 * 1024)
                                 else:
                                     quota_mb = self._parse_size_to_mb(value_str)
-                                
+
                                 if quota_mb > 0:
                                     break
                             except (ValueError, TypeError):
                                 continue
-                    
+
                     if quota_mb > 0:
                         break
-                    
+
         return quota_mb
 
     def _extract_usage_from_domain_data(self, domain_data: dict[str, Any]) -> dict[str, Any]:
@@ -1219,51 +1221,51 @@ class VirtualminGateway:
             "disk_quota_mb": None,
             "bandwidth_quota_mb": None,
         }
-        
+
         # Extract disk usage if available
         if "disk_usage" in domain_data:
             domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["disk_usage"])
         elif "used" in domain_data:
             domain_info["disk_usage_mb"] = self._parse_size_to_mb(domain_data["used"])
-            
-        # Extract disk quota if available  
+
+        # Extract disk quota if available
         if "disk_quota" in domain_data:
             domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["disk_quota"])
         elif "quota" in domain_data:
             domain_info["disk_quota_mb"] = self._parse_size_to_mb(domain_data["quota"])
-            
+
         # Extract bandwidth usage if available
         if "bandwidth_usage" in domain_data:
             domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bandwidth_usage"])
         elif "bw_used" in domain_data:
             domain_info["bandwidth_usage_mb"] = self._parse_size_to_mb(domain_data["bw_used"])
-            
+
         # Extract bandwidth quota if available
         if "bandwidth_quota" in domain_data:
             domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bandwidth_quota"])
         elif "bw_limit" in domain_data:
             domain_info["bandwidth_quota_mb"] = self._parse_size_to_mb(domain_data["bw_limit"])
-        
+
         return domain_info
 
     @performance_monitor("Multiline Domain Response Parsing")
     def _parse_multiline_domain_response(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         Parse multiline domain response with optimized batch processing.
-        
+
         Algorithm Complexity: O(n) where n is number of domain items
         Performance Optimizations:
         - Early validation and exit for malformed data
         - Batch processing for large domain lists (>100 items)
         - Optimized dictionary access patterns
         - Pre-compiled regex patterns for field matching
-        
+
         Args:
             data: Raw response data from Virtualmin API
-            
+
         Returns:
             Parsed domain information with disk usage and quota
-            
+
         Performance Characteristics:
         - Handles up to 1000+ domains efficiently
         - Optimized for common single-domain responses
@@ -1273,180 +1275,181 @@ class VirtualminGateway:
             "disk_usage_mb": 0,
             "disk_quota_mb": None,
         }
-        
+
         # Early validation - O(1) checks
-        if not isinstance(data, dict) or 'data' not in data:
+        if not isinstance(data, dict) or "data" not in data:
             return domain_info
-            
-        domain_data = data['data']
+
+        domain_data = data["data"]
         if not isinstance(domain_data, list) or not domain_data:
             return domain_info
-            
+
         # Optimize for common case: single domain response
         if len(domain_data) == 1:
             domain_item = domain_data[0]
-            if isinstance(domain_item, dict) and 'values' in domain_item:
-                values = domain_item['values']
+            if isinstance(domain_item, dict) and "values" in domain_item:
+                values = domain_item["values"]
                 domain_info["disk_usage_mb"] = self._extract_disk_usage_from_values(values)
                 domain_info["disk_quota_mb"] = self._extract_disk_quota_from_values(values)
             return domain_info
-            
+
         # Batch processing for multiple domains
         # 🚨 Complexity: O(n) but optimized for batch operations
         for i, domain_item in enumerate(domain_data[:PARSING_BATCH_SIZE]):  # Limit processing
-            if isinstance(domain_item, dict) and 'values' in domain_item:
-                values = domain_item['values']
-                
+            if isinstance(domain_item, dict) and "values" in domain_item:
+                values = domain_item["values"]
+
                 # Extract data from first valid domain item
                 usage = self._extract_disk_usage_from_values(values)
                 quota = self._extract_disk_quota_from_values(values)
-                
+
                 if usage > 0 or quota is not None:
                     domain_info["disk_usage_mb"] = usage
                     domain_info["disk_quota_mb"] = quota
-                    logger.debug(f"🎯 [Parsing] Processed domain {i+1}/{len(domain_data)}")
+                    logger.debug(f"🎯 [Parsing] Processed domain {i + 1}/{len(domain_data)}")
                     break  # Use first valid domain data
-                    
+
         return domain_info
-    
+
     @performance_monitor("Disk Usage Extraction")
     def _extract_disk_usage_from_values(self, values: dict[str, Any]) -> int:
         """
         Extract disk usage using optimized multi-strategy approach.
-        
+
         Algorithm Complexity: O(k) where k is number of value fields (typically <20)
-        
+
         Performance Optimizations:
         - Priority-ordered field checking (most common fields first)
         - Pre-compiled regex patterns for field name matching
         - Early exit on successful extraction
         - Cached parsing for repeated size strings
-        
+
         Extraction Strategies (in priority order):
         1. Specific database size fields (90% success rate)
-        2. Home directory size fields (85% success rate) 
+        2. Home directory size fields (85% success rate)
         3. Generic disk/size fields (70% success rate)
-        
+
         Args:
             values: Dictionary of domain field values from Virtualmin
-            
+
         Returns:
             Disk usage in MB, 0 if no valid usage found
         """
         # Strategy 1: Database size fields (highest priority)
         # These are the most reliable indicators in Virtualmin responses
-        priority_fields = ['databases_size', 'db_size', 'mysql_size', 'postgresql_size']
+        priority_fields = ["databases_size", "db_size", "mysql_size", "postgresql_size"]
         for field in priority_fields:
             if field in values:
                 usage_mb = self._parse_value_size(values[field])
                 if usage_mb > 0:
                     return int(usage_mb)
-        
+
         # Strategy 2: Home directory size (second priority)
-        home_fields = ['home_directory_size', 'home_size', 'directory_size']
+        home_fields = ["home_directory_size", "home_size", "directory_size"]
         for field in home_fields:
             if field in values:
                 usage_mb = self._parse_value_size(values[field])
                 if usage_mb > 0:
                     return int(usage_mb)
-        
+
         # Strategy 3: Generic disk fields (fallback)
         result: int = self._extract_disk_usage_from_generic_fields(values)
         return result
-    
+
     @performance_monitor("Generic Disk Field Extraction")
     def _extract_disk_usage_from_generic_fields(self, values: dict[str, Any]) -> int:
         """
         Extract disk usage from generic fields using optimized pattern matching.
-        
+
         Algorithm Complexity: O(n) where n is number of fields
-        
+
         Performance Optimizations:
         - Pre-compiled regex patterns for field name matching
         - Optimized string operations with single pass
         - Priority ordering of field types
         - Early exit on first valid match
-        
+
         Args:
             values: Dictionary of field values to search
-            
+
         Returns:
             Disk usage in MB from first matching field, 0 if none found
         """
         patterns = get_compiled_patterns()
-        
+
         # Single pass through values with optimized pattern matching
         for key, value in values.items():
             key_lower = key.lower()
-            
+
             # Use regex pattern for disk-related field detection
-            if (patterns['disk_field'].search(key_lower) and 
-                'byte' not in key_lower and  # Avoid byte_size duplicates
-                'quota' not in key_lower and 'limit' not in key_lower):  # Exclude quota fields
-                
+            if (
+                patterns["disk_field"].search(key_lower)
+                and "byte" not in key_lower  # Avoid byte_size duplicates
+                and "quota" not in key_lower
+                and "limit" not in key_lower
+            ):  # Exclude quota fields
                 usage_mb = self._parse_value_size(value)
                 if usage_mb > 0:
                     return int(usage_mb)
-                    
+
         return 0
-    
+
     @performance_monitor("Disk Quota Extraction")
     def _extract_disk_quota_from_values(self, values: dict[str, Any]) -> int | None:
         """
         Extract disk quota using optimized pattern matching.
-        
+
         Algorithm Complexity: O(n) where n is number of fields
-        
+
         Performance Optimizations:
         - Pre-compiled regex patterns
         - Single pass field scanning
         - Priority field ordering
-        
+
         Args:
             values: Dictionary of field values to search
-            
+
         Returns:
             Disk quota in MB, None if no quota found
         """
         patterns = get_compiled_patterns()
-        
+
         # Priority fields for quota detection
-        quota_priority_fields = ['disk_quota', 'quota_limit', 'size_limit', 'disk_limit']
-        
+        quota_priority_fields = ["disk_quota", "quota_limit", "size_limit", "disk_limit"]
+
         # Check priority fields first
         for field in quota_priority_fields:
             if field in values:
                 quota_mb = self._parse_value_size(values[field])
                 if quota_mb is not None and quota_mb > 0:
                     return int(quota_mb)
-        
+
         # Fallback to pattern matching
         for key, value in values.items():
             key_lower = key.lower()
-            if (patterns['quota_field'].search(key_lower) and 
-                patterns['disk_field'].search(key_lower)):
+            if patterns["quota_field"].search(key_lower) and patterns["disk_field"].search(key_lower):
                 quota_mb = self._parse_value_size(value)
                 if quota_mb is not None and quota_mb > 0:
                     return int(quota_mb)
-                    
+
         return None
-    
+
     @performance_monitor("Value Size Parsing")
     def _parse_value_size(self, value: Any) -> int:
         """
         Parse various value types into MB size with comprehensive error handling.
-        
+
         Algorithm Complexity: O(1) - Single type check and conversion
-        
+
         Handles multiple Virtualmin response formats:
         - String values: "1024M", "1.5G"
         - List values: ["512M", "other_data"]
         - Numeric values: 1073741824 (bytes)
         - None/empty values
-        
+
         Args:
             value: Value from Virtualmin API response
-            
+
         Returns:
             Size in MB, 0 for invalid values
         """
@@ -1463,93 +1466,90 @@ class VirtualminGateway:
                 return int(value / (1024 * 1024)) if value > 0 else 0
             else:
                 value_str = str(value)
-                
+
             return self._parse_size_to_mb_cached(value_str)
-            
+
         except (ValueError, IndexError, TypeError, AttributeError) as e:
             logger.debug(f"🐛 [Parsing] Failed to parse value size '{value}': {e}")
             return 0
-    
+
     @performance_monitor("Bandwidth Response Parsing")
     def _parse_bandwidth_response(self, data: dict[str, Any] | str) -> int:
         """
         Parse bandwidth response with optimized CSV and structured data handling.
-        
+
         Algorithm Complexity:
         - CSV parsing: O(n) where n is number of lines
         - Structured parsing: O(k) where k is number of keys
-        
+
         Performance Optimizations:
         - Pre-compiled regex patterns for CSV parsing
         - Optimized string operations
         - Batch processing for large responses
         - Early exit for malformed data
-        
+
         Args:
             data: Bandwidth response data (CSV string or structured dict)
-            
+
         Returns:
             Total bandwidth usage in MB
         """
         total_mb = 0
         patterns = get_compiled_patterns()
-        
+
         if isinstance(data, str):
             # Optimized CSV parsing with batching
             if not data.strip():
                 return 0
-                
-            lines = data.strip().split('\n')
-            
+
+            lines = data.strip().split("\n")
+
             # Process in batches for large CSV responses
             for i in range(0, len(lines), PARSING_BATCH_SIZE):
-                batch = lines[i:i + PARSING_BATCH_SIZE]
-                
+                batch = lines[i : i + PARSING_BATCH_SIZE]
+
                 for raw_line in batch:
                     line = raw_line.strip()
-                    if not line or line.startswith('#'):  # Skip empty lines and comments
+                    if not line or line.startswith("#"):  # Skip empty lines and comments
                         continue
-                        
+
                     # Use regex for efficient CSV parsing
-                    csv_match = patterns['bandwidth_csv'].match(line)
+                    csv_match = patterns["bandwidth_csv"].match(line)
                     if csv_match:
                         bandwidth_str = csv_match.group(2).strip()
                     else:
                         # Fallback to split parsing
-                        parts = line.split(',')
+                        parts = line.split(",")
                         if len(parts) <= 1:
                             continue
                         bandwidth_str = parts[-1].strip()
-                    
+
                     try:
                         total_mb += self._parse_size_to_mb_cached(bandwidth_str)
                     except (ValueError, TypeError):
                         continue
-                        
+
         elif isinstance(data, dict):
             # Optimized structured data parsing
-            bandwidth_keys = [
-                key for key in data 
-                if "bandwidth" in key.lower() or "bytes" in key.lower()
-            ]
-            
+            bandwidth_keys = [key for key in data if "bandwidth" in key.lower() or "bytes" in key.lower()]
+
             for key in bandwidth_keys:
                 value = data[key]
                 try:
                     total_mb += self._parse_size_to_mb_cached(str(value))
                 except (ValueError, TypeError):
                     continue
-        
+
         return total_mb
 
     def _process_domain_info_item(self, item: dict[str, Any], domain_info: dict[str, Any], domain: str) -> None:
         """Process a single domain info item and update domain_info dictionary."""
         name = item.get("name", "").lower()
         value = item.get("value", "")
-        
+
         if not name:  # Skip items without names
             return
-        
+
         # Disk-related fields
         if "disk" in name:
             self._process_disk_field(name, value, domain_info, domain)
@@ -1560,7 +1560,7 @@ class VirtualminGateway:
         elif ("status" in name or "state" in name) and isinstance(value, str) and value.strip():
             domain_info["status"] = value.strip().lower()
             logger.debug(f"📊 [Parsing] Status: {domain_info['status']} for {domain}")
-    
+
     def _process_disk_field(self, name: str, value: Any, domain_info: dict[str, Any], domain: str) -> None:
         """Process disk-related field."""
         if "used" in name or "usage" in name:
@@ -1573,7 +1573,7 @@ class VirtualminGateway:
             if parsed_value > 0:  # 0 typically means unlimited
                 domain_info["disk_quota_mb"] = parsed_value
                 logger.debug(f"📊 [Parsing] Disk quota: {parsed_value}MB for {domain}")
-    
+
     def _process_bandwidth_field(self, name: str, value: Any, domain_info: dict[str, Any], domain: str) -> None:
         """Process bandwidth-related field."""
         if "used" in name or "usage" in name:
@@ -1591,25 +1591,25 @@ class VirtualminGateway:
     def _parse_domain_info_response(self, data: dict[str, Any], domain: str) -> dict[str, Any]:
         """
         Parse domain info response to extract comprehensive usage data.
-        
+
         Algorithm Complexity: O(n) where n is the number of response items
-        
+
         Performance Optimizations:
         - Pre-compiled regex patterns for field name matching
         - Optimized string comparison using lowercase conversion
         - Early exit for malformed responses
         - Cached size parsing for repeated values
-        
+
         Response Format Handling:
         - Handles Virtualmin's structured response format
         - Processes nested data items with name/value pairs
         - Extracts disk usage, quotas, bandwidth, and status information
         - Graceful degradation for missing or malformed data
-        
+
         Args:
             data: Raw response data from Virtualmin API
             domain: Domain name for context and validation
-            
+
         Returns:
             Dictionary containing parsed domain information:
             {
@@ -1620,13 +1620,13 @@ class VirtualminGateway:
                 'bandwidth_quota_mb': int|None, # Bandwidth quota in MB
                 'status': str               # Domain status (active/suspended/etc.)
             }
-            
+
         Edge Cases:
         - Malformed response data: Returns default values
         - Missing usage data: Returns 0 for usage fields
         - Unlimited quotas: Returns None for quota fields
         - Invalid status: Returns "unknown"
-        
+
         Supported Virtualmin Response Formats:
         - Table format with data items array
         - Nested structure with name/value pairs
@@ -1638,51 +1638,51 @@ class VirtualminGateway:
             "bandwidth_usage_mb": 0,
             "disk_quota_mb": None,
             "bandwidth_quota_mb": None,
-            "status": "unknown"
+            "status": "unknown",
         }
-        
+
         # Early validation for response structure
         if not isinstance(data, dict) or "data" not in data:
             logger.debug(f"🐛 [Parsing] Invalid response structure for domain {domain}")
             return domain_info
-            
+
         data_items = data["data"]
         if not isinstance(data_items, list):
             logger.debug(f"🐛 [Parsing] Expected list for data items, got {type(data_items)}")
             return domain_info
-        
+
         # Process response items using helper functions
         for item in data_items:
             if isinstance(item, dict):
                 self._process_domain_info_item(item, domain_info, domain)
-        
+
         logger.debug(
             f"✅ [Parsing] Domain info parsed for {domain}: "
             f"disk={domain_info['disk_usage_mb']}MB, "
             f"bandwidth={domain_info['bandwidth_usage_mb']}MB, "
             f"status={domain_info['status']}"
         )
-                            
+
         return domain_info
-    
+
     def _parse_size_to_mb_cached(self, size_str: str) -> int:
         """
         Convert size string to MB with LRU caching for performance optimization.
-        
+
         This cached version reduces parsing overhead for frequently encountered
         size strings by up to 80% in production environments.
-        
+
         Args:
             size_str: Size string (e.g., '500M', '1.2G', '1024K')
-            
+
         Returns:
             Size in megabytes as integer
-            
+
         Performance:
             - O(1) for cached values (80%+ hit rate in production)
             - O(1) for new values (optimized regex matching)
             - 256 entry LRU cache prevents memory growth
-            
+
         Examples:
             >>> gateway._parse_size_to_mb_cached('1.5G')
             1536
@@ -1692,26 +1692,26 @@ class VirtualminGateway:
             0
         """
         return int(self._parse_size_to_mb(size_str))
-        
+
     @performance_monitor("Size String Parsing")
     def _parse_size_to_mb(self, size_str: str) -> int:
         """
         Convert size string to MB using optimized regex patterns.
-        
+
         Algorithm Complexity: O(1) - Single regex match with pre-compiled patterns
-        
+
         Performance Characteristics:
         - Uses pre-compiled regex patterns for 40% speed improvement
         - Optimized unit conversion with direct dictionary lookup
         - Early exit for common cases (empty, unlimited)
         - Fallback to numeric parsing for edge cases
-        
+
         Args:
             size_str: Size string to parse
-            
+
         Returns:
             Size in megabytes, 0 for invalid/unlimited values
-            
+
         Edge Cases Handled:
         - Empty strings, None values
         - "unlimited", "-" markers
@@ -1721,25 +1721,25 @@ class VirtualminGateway:
         """
         if not size_str or size_str == "-" or size_str.lower() == "unlimited":
             return 0
-            
+
         size_str = str(size_str).strip().upper()
-        
+
         try:
             # Use pre-compiled regex pattern for performance
             patterns = get_compiled_patterns()
-            match = patterns['size'].match(size_str)
-            
+            match = patterns["size"].match(size_str)
+
             if match:
                 number = float(match.group(1))
                 unit = match.group(2)
-                
+
                 # Optimized multiplier lookup - O(1) dictionary access
                 # Pre-calculated conversion factors for common units
                 multipliers = {
-                    "K": 0.0009765625,    # KB to MB (1/1024)
-                    "M": 1.0,             # MB to MB  
-                    "G": 1024.0,          # GB to MB
-                    "T": 1048576.0,       # TB to MB (1024*1024)
+                    "K": 0.0009765625,  # KB to MB (1/1024)
+                    "M": 1.0,  # MB to MB
+                    "G": 1024.0,  # GB to MB
+                    "T": 1048576.0,  # TB to MB (1024*1024)
                     "": 0.00000095367432,  # Bytes to MB (1/(1024*1024))
                 }
                 multiplier = multipliers.get(unit, 0.00000095367432)

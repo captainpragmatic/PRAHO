@@ -7,16 +7,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
 from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
-    from apps.customers.models import Customer
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +40,24 @@ _DEFAULT_CREDIT_ADJUSTMENTS = {
 # Module-level alias kept for backward compatibility
 BASE_CREDIT_SCORE = _DEFAULT_BASE_CREDIT_SCORE
 CREDIT_ADJUSTMENTS = _DEFAULT_CREDIT_ADJUSTMENTS
+
+
+def get_base_credit_score() -> int:
+    """Get base credit score from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting("customers.base_credit_score", _DEFAULT_BASE_CREDIT_SCORE)
+
+
+def get_credit_adjustments() -> dict[str, int]:
+    """Get credit score adjustments from SettingsService (runtime)."""
+    val = SettingsService.get_setting("customers.credit_adjustments", _DEFAULT_CREDIT_ADJUSTMENTS)
+    return val if isinstance(val, dict) else _DEFAULT_CREDIT_ADJUSTMENTS
+
+
+CONSECUTIVE_PAYMENTS_TIER_2 = 12
+CONSECUTIVE_PAYMENTS_TIER_1 = 6
+MAX_CREDIT_HISTORY_EVENTS = 100
+GOOD_CREDIT_THRESHOLD = 700
+FAIR_CREDIT_THRESHOLD = 600
 
 
 class CustomerCreditService:
@@ -80,9 +96,9 @@ class CustomerCreditService:
                 consecutive_on_time = CustomerCreditService._get_consecutive_on_time_payments(customer)
                 consecutive_bonus_6 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_6", 10)
                 consecutive_bonus_12 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_12", 20)
-                if consecutive_on_time >= 12:
+                if consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_2:
                     adjustment += consecutive_bonus_12  # Larger bonus for 12+ consecutive
-                elif consecutive_on_time >= 6:
+                elif consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_1:
                     adjustment += consecutive_bonus_6  # Bonus for 6+ consecutive on-time payments
 
             # Calculate new score (clamped to valid range)
@@ -101,8 +117,8 @@ class CustomerCreditService:
             credit_history.append(credit_event)
 
             # Keep only last 100 events
-            if len(credit_history) > 100:
-                credit_history = credit_history[-100:]
+            if len(credit_history) > MAX_CREDIT_HISTORY_EVENTS:
+                credit_history = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]
 
             if hasattr(customer, "meta"):
                 customer.meta["credit_history"] = credit_history
@@ -181,7 +197,7 @@ class CustomerCreditService:
                     "recorded_at": timezone.now().isoformat(),
                 }
                 credit_history.append(reversion_event)
-                customer.meta["credit_history"] = credit_history[-100:]  # Keep last 100
+                customer.meta["credit_history"] = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]  # Keep last 100
                 customer.meta["credit_score"] = new_score
                 customer.meta["credit_updated_at"] = timezone.now().isoformat()
                 customer.save(update_fields=["meta", "updated_at"])
@@ -296,9 +312,9 @@ class CustomerCreditService:
         """Get a human-readable credit rating from score."""
         if score >= EXCELLENT_CREDIT_THRESHOLD:
             return "Excellent"
-        elif score >= 700:
+        elif score >= GOOD_CREDIT_THRESHOLD:
             return "Good"
-        elif score >= 600:
+        elif score >= FAIR_CREDIT_THRESHOLD:
             return "Fair"
         elif score >= POOR_CREDIT_THRESHOLD:
             return "Poor"
@@ -318,9 +334,11 @@ class CustomerCreditService:
             failed = payments.filter(status="failed").count()
 
             # Calculate on-time payments (payments made before or on due date)
-            on_time = payments.filter(
-                status="succeeded", created_at__lte=models.F("invoice__due_date")
-            ).count() if hasattr(Payment, "invoice") else successful
+            on_time = (
+                payments.filter(status="succeeded", created_at__lte=models.F("invoice__due_date")).count()
+                if hasattr(Payment, "invoice")
+                else successful
+            )
 
             return {
                 "total_payments": total,
@@ -354,9 +372,7 @@ class CustomerCreditService:
             from apps.billing.models import Payment  # noqa: PLC0415
 
             # Get recent payments ordered by date
-            recent_payments = Payment.objects.filter(
-                invoice__customer=customer
-            ).order_by("-created_at")[:20]
+            recent_payments = Payment.objects.filter(invoice__customer=customer).order_by("-created_at")[:20]
 
             consecutive = 0
             for payment in recent_payments:

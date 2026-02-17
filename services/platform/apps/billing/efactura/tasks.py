@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Expose imports at module scope for patching in tests
 try:
     from apps.billing.invoice_models import Invoice  # type: ignore
+
     InvoiceDoesNotExist = Invoice.DoesNotExist  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
     Invoice = None  # type: ignore
@@ -41,6 +42,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 try:
     from .models import EFacturaDocument  # type: ignore
+
     EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
     EFacturaDocument = None  # type: ignore
@@ -53,6 +55,8 @@ except Exception:  # pragma: no cover - import guard for test/runtime isolation
 
 # Task timeout in seconds
 TASK_TIMEOUT = 300  # 5 minutes
+
+CRITICAL_DEADLINE_HOURS = 12
 
 
 def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
@@ -147,6 +151,7 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
 
     if EFacturaService is None:
@@ -198,6 +203,7 @@ def process_pending_submissions_task() -> dict[str, Any]:
     logger.info("[e-Factura Task] Processing pending submissions")
 
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
 
     if EFacturaService is None:
@@ -225,6 +231,7 @@ def check_efactura_deadlines_task() -> dict[str, Any]:
     logger.info("[e-Factura Task] Checking e-Factura deadlines")
 
     from apps.settings.services import SettingsService  # noqa: PLC0415
+
     warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
 
     if EFacturaService is None:
@@ -256,7 +263,7 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
     Returns:
         Dict with download result
     """
-    from .models import EFacturaStatus
+    from .models import EFacturaStatus  # noqa: PLC0415
 
     logger.info(f"[e-Factura Task] Downloading response for document {document_id}")
 
@@ -288,7 +295,7 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
 def _create_deadline_alerts(approaching_documents: list) -> None:
     """Create audit alerts for approaching deadlines."""
     try:
-        from apps.audit.models import AuditAlert
+        from apps.audit.models import AuditAlert  # noqa: PLC0415
 
         for document in approaching_documents:
             deadline = document.submission_deadline
@@ -298,7 +305,7 @@ def _create_deadline_alerts(approaching_documents: list) -> None:
                 alert_type="compliance_violation",
                 title=f"e-Factura Deadline: {document.invoice.number}",
                 defaults={
-                    "severity": "critical" if hours_remaining < 12 else "high",
+                    "severity": "critical" if hours_remaining < CRITICAL_DEADLINE_HOURS else "high",
                     "description": (
                         f"Invoice {document.invoice.number} must be submitted to e-Factura "
                         f"within {hours_remaining:.1f} hours (deadline: {deadline})"

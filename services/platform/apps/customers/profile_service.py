@@ -30,9 +30,12 @@ class ProfileService:
     ) -> CustomerTaxProfile:
         """Create tax profile for customer."""
 
-        from .profile_models import CustomerTaxProfile  # noqa: PLC0415
+        from .profile_models import CustomerTaxProfile
 
-        tax_profile = CustomerTaxProfile.objects.create(customer=customer, cui=cui, **kwargs)  # type: ignore[misc]
+        tax_profile, _ = CustomerTaxProfile.objects.update_or_create(
+            customer=customer,
+            defaults={"cui": cui, **kwargs},
+        )
 
         logger.info(
             f"✅ [Profile] Created tax profile for customer: {customer.name}",
@@ -49,9 +52,12 @@ class ProfileService:
     ) -> CustomerBillingProfile:
         """Create billing profile for customer."""
 
-        from .profile_models import CustomerBillingProfile  # noqa: PLC0415
+        from .profile_models import CustomerBillingProfile
 
-        billing_profile = CustomerBillingProfile.objects.create(customer=customer, **kwargs)  # type: ignore[misc]
+        billing_profile, _ = CustomerBillingProfile.objects.update_or_create(
+            customer=customer,
+            defaults=kwargs,
+        )
 
         logger.info(
             f"✅ [Profile] Created billing profile for customer: {customer.name}",

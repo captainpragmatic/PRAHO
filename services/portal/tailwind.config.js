@@ -5,10 +5,10 @@ module.exports = {
     // Portal templates
     './services/portal/templates/**/*.html',
     './services/portal/portal/**/templates/**/*.html',
-    
+
     // Portal Python files with Tailwind classes
     './services/portal/**/*.py',
-    
+
     // Portal JavaScript files
     './services/portal/static/js/**/*.js',
     './services/portal/assets/js/**/*.js',

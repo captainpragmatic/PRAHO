@@ -872,7 +872,7 @@ class RefundService:
 
         # Process order updates - SIMPLIFIED to avoid transaction issues
         if order:
-            result["order_status_updated"] = True  
+            result["order_status_updated"] = True
             result["order_id"] = order.id
 
         # Process invoice updates - SIMPLIFIED to avoid transaction issues

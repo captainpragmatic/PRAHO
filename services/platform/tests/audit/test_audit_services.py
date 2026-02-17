@@ -34,7 +34,7 @@ class TestBillingAuditService(TestCase):
         """Set up test fixtures"""
         # Create test currency
         self.currency = Currency.objects.create(code='RON', symbol='RON', decimals=2)
-        
+
         # Create test customer
         from apps.customers.models import Customer, CustomerTaxProfile
         self.customer = Customer.objects.create(
@@ -42,7 +42,7 @@ class TestBillingAuditService(TestCase):
             customer_type='business',
             status='active'
         )
-        
+
         # Create tax profile with Romanian business details
         CustomerTaxProfile.objects.create(
             customer=self.customer,
@@ -50,7 +50,7 @@ class TestBillingAuditService(TestCase):
             vat_number='RO12345678',
             is_vat_payer=True
         )
-        
+
         # Create test invoice
         self.invoice = Invoice.objects.create(
             customer=self.customer,
@@ -64,7 +64,7 @@ class TestBillingAuditService(TestCase):
             bill_to_tax_id='RO12345678',
             bill_to_country='RO'
         )
-        
+
         # Create test payment
         self.payment = Payment.objects.create(
             customer=self.customer,
@@ -75,7 +75,7 @@ class TestBillingAuditService(TestCase):
             payment_method='stripe',
             gateway_txn_id='txn_123456789'
         )
-        
+
         # Create test proforma
         self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
@@ -112,7 +112,7 @@ class TestBillingAuditService(TestCase):
         self.assertEqual(audit_event.category, 'business_operation')
         self.assertEqual(audit_event.severity, 'low')
         self.assertFalse(audit_event.is_sensitive)
-        
+
         # Check rich metadata
         metadata = audit_event.metadata
         self.assertEqual(metadata['invoice_number'], self.invoice.number)
@@ -142,7 +142,7 @@ class TestBillingAuditService(TestCase):
         # Assert
         assert audit_event.action == 'payment_succeeded'
         assert audit_event.severity == 'medium'
-        
+
         metadata = audit_event.metadata
         assert metadata['payment_method'] == self.payment.payment_method
         assert metadata['amount'] == str(self.payment.amount)
@@ -209,7 +209,7 @@ class TestBillingAuditService(TestCase):
         assert audit_event.requires_review is False  # payment_failed not in review list
 
 
-@pytest.mark.django_db 
+@pytest.mark.django_db
 class TestOrdersAuditService:
     """Test suite for OrdersAuditService"""
 
@@ -288,7 +288,7 @@ class TestOrdersAuditService:
         assert audit_event.action == 'order_created'
         assert audit_event.category == 'business_operation'
         assert audit_event.severity == 'medium'
-        
+
         metadata = audit_event.metadata
         assert metadata['order_number'] == order.order_number
         assert metadata['order_status'] == order.status
@@ -298,7 +298,7 @@ class TestOrdersAuditService:
         assert metadata['currency'] == order.currency.code
         assert metadata['is_draft'] == order.is_draft
         assert metadata['is_paid'] == order.is_paid
-        
+
         # Source tracking metadata
         source_tracking = metadata['source_tracking']
         assert source_tracking['source_ip'] == order.source_ip
@@ -454,7 +454,7 @@ class TestAuditEventCategorization:
                 mock_payment.reference_number = 'ref_123'
                 mock_payment.received_at = timezone.now()
                 mock_payment.invoice = mock_invoice
-                
+
                 audit_event = BillingAuditService.log_payment_event(
                     event_type=event_type,
                     payment=mock_payment
@@ -523,7 +523,7 @@ class TestAuditEventCategorization:
                 mock_item.provisioning_status = 'pending'
                 mock_item.provisioning_notes = ''
                 mock_item.config = {}
-                
+
                 audit_event = OrdersAuditService.log_provisioning_event(
                     event_type=event_type,
                     order_item=mock_item
@@ -584,7 +584,7 @@ class TestAuditEventPerformance:
     def test_metadata_serialization_performance(self):
         """Test that metadata serialization handles complex objects efficiently"""
         from apps.audit.services import serialize_metadata
-        
+
         # Setup complex metadata with various object types
         complex_metadata = {
             'uuid_field': uuid.uuid4(),

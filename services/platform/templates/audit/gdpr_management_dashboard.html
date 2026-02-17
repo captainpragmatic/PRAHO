@@ -99,14 +99,14 @@ Professional interface for staff to manage all user GDPR requests
         <!-- Filter Section -->
         <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-6">
             <h2 class="text-lg font-medium text-white mb-4">🔧 {% trans "Filters" %}</h2>
-            
+
             <!-- Filter Form -->
-            <form id="gdpr-filters" 
+            <form id="gdpr-filters"
                   hx-get="{% url 'audit:gdpr_export_requests_list' %}"
                   hx-trigger="change, keyup delay:500ms"
                   hx-target="#gdpr-results"
                   hx-indicator="#loading-spinner">
-                
+
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <!-- Status Filter -->
                     <div class="relative">
@@ -128,8 +128,8 @@ Professional interface for staff to manage all user GDPR requests
                         <label class="block text-sm font-medium text-slate-300 mb-2">
                             {% trans "User Email" %}
                         </label>
-                        <input type="text" 
-                               name="user_email" 
+                        <input type="text"
+                               name="user_email"
                                placeholder="{% trans 'Search by user email...' %}"
                                class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     </div>
@@ -157,11 +157,11 @@ Professional interface for staff to manage all user GDPR requests
                             {% trans "Date Range" %}
                         </label>
                         <div class="flex gap-2">
-                            <input type="date" 
-                                   name="start_date" 
+                            <input type="date"
+                                   name="start_date"
                                    class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            <input type="date" 
-                                   name="end_date" 
+                            <input type="date"
+                                   name="end_date"
                                    class="bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                         </div>
                     </div>
@@ -247,16 +247,16 @@ document.addEventListener('DOMContentLoaded', function() {
 function resetFilters() {
     const form = document.getElementById('gdpr-filters');
     const resetBtn = event.target;
-    
+
     if (form) {
         // Add loading state
         const originalText = resetBtn.innerHTML;
         resetBtn.innerHTML = '⏳ {% trans "Resetting..." %}';
         resetBtn.disabled = true;
-        
+
         // Reset all form fields
         form.reset();
-        
+
         // Trigger HTMX request to reload with empty filters
         htmx.ajax('GET', '{% url 'audit:gdpr_export_requests_list' %}', {
             target: '#gdpr-results',

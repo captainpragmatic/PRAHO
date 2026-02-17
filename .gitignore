@@ -72,6 +72,7 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pre-commit-cache/
 
 # Node.js
 node_modules/

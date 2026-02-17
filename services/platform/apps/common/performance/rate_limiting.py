@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
@@ -37,7 +37,7 @@ class CustomerRateThrottle(SimpleRateThrottle):
     cache_format = "throttle_customer_%(scope)s_%(ident)s"
 
     # Default rates by customer tier
-    TIER_RATES = {
+    TIER_RATES: ClassVar[dict] = {
         "basic": "100/minute",
         "professional": "500/minute",
         "enterprise": "2000/minute",
@@ -80,10 +80,7 @@ class BurstRateThrottle(SimpleRateThrottle):
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         """Generate cache key based on user or IP for burst limiting."""
-        if request.user and request.user.is_authenticated:
-            ident = str(request.user.pk)
-        else:
-            ident = self.get_ident(request)
+        ident = str(request.user.pk) if request.user and request.user.is_authenticated else self.get_ident(request)
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
     def parse_rate(self, rate: str) -> tuple[int, int]:
@@ -99,7 +96,7 @@ class BurstRateThrottle(SimpleRateThrottle):
             duration = int(period[:-1])
         elif period == "sec":
             duration = 1
-        elif period == "min" or period == "minute":
+        elif period in {"min", "minute"}:
             duration = 60
         elif period == "hour":
             duration = 3600
@@ -137,7 +134,7 @@ class ServiceRateThrottle(BaseThrottle):
     """
 
     # Tokens per operation type
-    OPERATION_COSTS = {
+    OPERATION_COSTS: ClassVar[dict] = {
         "provision": 10,
         "backup": 5,
         "sync": 2,
@@ -213,7 +210,7 @@ class ServiceRateThrottle(BaseThrottle):
         remote_addr = request.META.get("REMOTE_ADDR")
         return (xff.split(",")[0].strip() if xff else remote_addr) or "unknown"
 
-    def _get_operation(self, request: Request, view: Any) -> str:
+    def _get_operation(self, request: Request, view: Any) -> str:  # noqa: PLR0911
         """Determine the operation type from the request."""
         # Check view action
         if hasattr(view, "action"):
@@ -278,6 +275,7 @@ class WriteOperationThrottle(SimpleRateThrottle):
 
 # Rate limit header utilities
 
+
 def get_rate_limit_headers(request: Request) -> dict[str, str]:
     """
     Generate rate limit headers for API responses.
@@ -314,22 +312,18 @@ ENDPOINT_THROTTLE_RATES = {
     "login": "5/minute",
     "password_reset": "3/minute",
     "2fa_verify": "10/minute",
-
     # Financial operations - moderately restrictive
     "payment": "30/minute",
     "invoice": "60/minute",
     "refund": "10/minute",
-
     # Provisioning - resource-intensive
     "provision": "10/minute",
     "backup": "5/minute",
-
     # Standard CRUD - less restrictive
     "list": "100/minute",
     "detail": "200/minute",
     "create": "50/minute",
     "update": "100/minute",
-
     # Read-heavy operations - permissive
     "search": "60/minute",
     "export": "10/minute",

@@ -47,6 +47,7 @@ PRICE_SEAL_TTL_SECONDS
 
 # ── HTTP status code boundaries ──────────────────────────────────────────────
 HTTP_CLIENT_ERROR_THRESHOLD
+HTTP_SUCCESS_THRESHOLD
 
 # ── Protocol parsing ─────────────────────────────────────────────────────────
 EXPECTED_KEY_VALUE_PARTS
@@ -54,6 +55,19 @@ SETTING_KEY_PARTS_COUNT
 
 # ── Logging infrastructure ───────────────────────────────────────────────────
 REDACTION_TEXT
+
+# ── Validation format / protocol boundaries ──────────────────────────────────
+MAX_VAT_NUMBER_LENGTH
+MAX_RO_PREFIXED_ID_LENGTH
+DEFAULT_TOKEN_TYPE
+MAX_DOMAIN_LENGTH
+MAX_USERNAME_LENGTH
+MAX_TEMPLATE_NAME_LENGTH
+MAX_PASSWORD_LENGTH
+MAX_EMAIL_LENGTH
+MAX_EMAIL_LOCAL_LENGTH
+MAX_PARAMETER_VALUE_LENGTH
+XML_ERROR_LEVEL_THRESHOLD
 
 # ── Django/framework internals ───────────────────────────────────────────────
 DEFAULT_AUTO_FIELD

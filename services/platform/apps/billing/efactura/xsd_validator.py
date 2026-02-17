@@ -85,7 +85,6 @@ class XSDSchemaNotFoundError(Exception):
     """Raised when XSD schema files are not found."""
 
 
-
 class XSDValidator:
     """
     XSD Schema Validator for e-Factura XML documents.

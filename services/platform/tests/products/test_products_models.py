@@ -17,14 +17,14 @@ User = get_user_model()
 
 class ProductSecurityTests(TestCase):
     """🔒 Tests for Product model security"""
-    
+
     def setUp(self):
         self.user = User.objects.create_user(
             email="admin@test.com",
             password="testpass123",
             is_staff=True
         )
-    
+
     def test_json_field_size_validation(self):
         """🔒 Test that JSON fields reject oversized data"""
         product = Product(
@@ -33,10 +33,10 @@ class ProductSecurityTests(TestCase):
             product_type="shared_hosting",
             tags=["x" * 5000] * 10  # Large JSON array
         )
-        
+
         with self.assertRaises(ValidationError):
             product.clean()
-    
+
     def test_json_field_depth_validation(self):
         """🔒 Test that JSON fields reject deeply nested data"""
         # Create 12 levels deep (over 10 limit)
@@ -45,17 +45,17 @@ class ProductSecurityTests(TestCase):
         for i in range(12):
             current[f"level{i}"] = {}
             current = current[f"level{i}"]
-        
+
         product = Product(
             slug="test-product",
             name="Test Product",
             product_type="shared_hosting",
             module_config=deep_config
         )
-        
+
         with self.assertRaises(ValidationError):
             product.clean()
-    
+
     def test_dangerous_config_patterns_blocked(self):
         """🔒 Test that dangerous patterns in config are blocked"""
         dangerous_configs = [
@@ -64,7 +64,7 @@ class ProductSecurityTests(TestCase):
             {"shell": "os.system('rm -rf /')"},
             {"import": "__import__('subprocess')"}
         ]
-        
+
         for config in dangerous_configs:
             product = Product(
                 slug="test-dangerous",
@@ -72,10 +72,10 @@ class ProductSecurityTests(TestCase):
                 product_type="shared_hosting",
                 module_config=config
             )
-            
+
             with self.assertRaises(ValidationError, msg=f"Failed to block: {config}"):
                 product.clean()
-    
+
     def test_sensitive_config_keys_blocked(self):
         """🔒 Test that sensitive keys are blocked in configuration"""
         sensitive_configs = [
@@ -84,7 +84,7 @@ class ProductSecurityTests(TestCase):
             {"private_token": "token123"},
             {"admin_pass": "admin123"}
         ]
-        
+
         for config in sensitive_configs:
             product = Product(
                 slug="test-sensitive",
@@ -92,10 +92,10 @@ class ProductSecurityTests(TestCase):
                 product_type="shared_hosting",
                 module_config=config
             )
-            
+
             with self.assertRaises(ValidationError, msg=f"Failed to block: {config}"):
                 product.clean()
-    
+
     def test_text_field_length_validation(self):
         """🔒 Test that text fields have length limits"""
         product = Product(
@@ -104,10 +104,10 @@ class ProductSecurityTests(TestCase):
             product_type="shared_hosting",
             description="x" * 15000  # Over 10KB limit
         )
-        
+
         with self.assertRaises(ValidationError):
             product.clean()
-    
+
     def test_safe_product_passes_validation(self):
         """✅ Test that safe product passes validation"""
         product = Product(
@@ -119,12 +119,12 @@ class ProductSecurityTests(TestCase):
             tags=["hosting", "shared", "cpanel"],
             meta={"category": "basic", "popularity": 5}
         )
-        
+
         try:
             product.clean()  # Should not raise ValidationError
         except ValidationError as e:
             self.fail(f"Safe product failed validation: {e}")
-    
+
     @patch('apps.products.models.logger')
     def test_security_logging_on_validation(self, mock_logger):
         """🔒 Test that product validation is logged"""
@@ -133,9 +133,9 @@ class ProductSecurityTests(TestCase):
             name="Test Product",
             product_type="vps"
         )
-        
+
         product.clean()
-        
+
         # Should log security validation
         mock_logger.info.assert_called()
         call_args = str(mock_logger.info.call_args)
@@ -144,20 +144,20 @@ class ProductSecurityTests(TestCase):
 
 class ProductPriceSecurityTests(TestCase):
     """🔒 Tests for ProductPrice model security"""
-    
+
     def setUp(self):
         self.product = Product.objects.create(
             slug="test-product",
             name="Test Product",
             product_type="shared_hosting"
         )
-        
+
         self.currency = Currency.objects.create(
             code="RON",
             name="Romanian Leu",
             symbol="RON"
         )
-    
+
     def test_negative_prices_blocked(self):
         """🔒 Test that negative prices are blocked"""
         price = ProductPrice(
@@ -165,10 +165,10 @@ class ProductPriceSecurityTests(TestCase):
             currency=self.currency,
             monthly_price_cents=-1000  # Negative price
         )
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-    
+
     def test_extremely_large_prices_blocked(self):
         """🔒 Test that unrealistic prices are blocked"""
         price = ProductPrice(
@@ -176,10 +176,10 @@ class ProductPriceSecurityTests(TestCase):
             currency=self.currency,
             monthly_price_cents=200000000  # 2 million - too large
         )
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-    
+
     def test_invalid_discount_percentage_blocked(self):
         """🔒 Test that invalid discount percentages are blocked"""
         # Test negative semiannual discount
@@ -215,7 +215,7 @@ class ProductPriceSecurityTests(TestCase):
 
         with self.assertRaises(ValidationError):
             price.clean()
-    
+
     def test_invalid_quantity_limits_blocked(self):
         """🔒 Test that invalid quantity limits are blocked"""
         price = ProductPrice(
@@ -224,17 +224,17 @@ class ProductPriceSecurityTests(TestCase):
             monthly_price_cents=10000,
             minimum_quantity=0  # Less than 1
         )
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-            
+
         # Test max less than min
         price.minimum_quantity = 5
         price.maximum_quantity = 3
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-    
+
     def test_promotional_pricing_validation(self):
         """🔒 Test that promotional pricing logic is validated"""
         from django.utils import timezone
@@ -248,16 +248,16 @@ class ProductPriceSecurityTests(TestCase):
             promo_price_cents=8000
             # Missing promo_valid_until
         )
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-            
+
         # Test past promo valid until date
         price.promo_valid_until = timezone.now() - timedelta(days=1)
-        
+
         with self.assertRaises(ValidationError):
             price.clean()
-    
+
     def test_safe_price_passes_validation(self):
         """✅ Test that safe price passes validation"""
         from django.utils import timezone
@@ -275,12 +275,12 @@ class ProductPriceSecurityTests(TestCase):
             promo_price_cents=2499,  # 24.99 promo
             promo_valid_until=timezone.now() + timedelta(days=30)
         )
-        
+
         try:
             price.clean()  # Should not raise ValidationError
         except ValidationError as e:
             self.fail(f"Safe price failed validation: {e}")
-    
+
     @patch('apps.products.models.logger')
     def test_security_logging_on_validation(self, mock_logger):
         """🔒 Test that price validation is logged"""
@@ -289,9 +289,9 @@ class ProductPriceSecurityTests(TestCase):
             currency=self.currency,
             monthly_price_cents=10000
         )
-        
+
         price.clean()
-        
+
         # Should log security validation
         mock_logger.info.assert_called()
         call_args = str(mock_logger.info.call_args)
@@ -372,16 +372,16 @@ class ProductPriceSecurityTests(TestCase):
 
 class SecurityValidationFunctionTests(TestCase):
     """🔒 Tests for security validation functions"""
-    
+
     def test_validate_json_field_size_limits(self):
         """🔒 Test JSON size validation"""
         large_data = {"data": "x" * 15000}  # Over 10KB
-        
+
         with self.assertRaises(ValidationError) as cm:
             validate_json_field(large_data, "test field")
-        
+
         self.assertIn("too large", str(cm.exception))
-    
+
     def test_validate_json_field_depth_limits(self):
         """🔒 Test JSON depth validation"""
         # Create 12 levels deep
@@ -390,32 +390,32 @@ class SecurityValidationFunctionTests(TestCase):
         for i in range(12):
             current[f"level{i}"] = {}
             current = current[f"level{i}"]
-        
+
         with self.assertRaises(ValidationError) as cm:
             validate_json_field(deep_data, "test field")
-        
+
         self.assertIn("too deep", str(cm.exception))
-    
+
     def test_validate_product_config_dangerous_patterns(self):
         """🔒 Test product config dangerous pattern detection"""
         dangerous_config = {
             "command": "eval('malicious')",
             "script": "os.system('rm -rf /')"
         }
-        
+
         with self.assertRaises(ValidationError):
             validate_product_config(dangerous_config)
-    
+
     def test_validate_product_config_sensitive_keys(self):
         """🔒 Test product config sensitive key detection"""
         sensitive_config = {
             "mysql_password": "secret123",
             "api_key": "key123"
         }
-        
+
         with self.assertRaises(ValidationError):
             validate_product_config(sensitive_config)
-    
+
     def test_safe_data_passes_validation(self):
         """✅ Test that safe data passes all validations"""
         safe_json = {
@@ -424,13 +424,13 @@ class SecurityValidationFunctionTests(TestCase):
             "bandwidth": "unlimited",
             "features": ["email", "mysql", "php"]
         }
-        
+
         safe_config = {
             "panel": "cpanel",
             "php_version": "8.1",
             "mysql_version": "8.0"
         }
-        
+
         try:
             validate_json_field(safe_json, "safe JSON")
             validate_product_config(safe_config)

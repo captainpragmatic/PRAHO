@@ -11,13 +11,13 @@ from .base import *  # noqa: F403
 DEBUG = False
 
 # 🔒 SECURITY: Strict secret validation for production
-from apps.common.security_validation import validate_all_secrets
+from apps.common.security_validation import validate_all_secrets  # noqa: E402
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError(
         "SECURITY ERROR: SECRET_KEY environment variable must be set in production.\n"
-        "Generate one with: python -c \"from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())\""
+        'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )
 
 # Allowed hosts from environment
@@ -28,7 +28,9 @@ PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://platfor
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 # Escape hatch for controlled environments; keep secure-by-default behavior.
 PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_HTTP", "False").lower() in {
-    "1", "true", "yes"
+    "1",
+    "true",
+    "yes",
 }
 if not PLATFORM_API_ALLOW_INSECURE_HTTP and urlsplit(PLATFORM_API_BASE_URL).scheme.lower() != "https":
     raise ValueError(
@@ -38,7 +40,7 @@ if not PLATFORM_API_ALLOW_INSECURE_HTTP and urlsplit(PLATFORM_API_BASE_URL).sche
 if not PLATFORM_API_SECRET:
     raise ValueError(
         "SECURITY ERROR: PLATFORM_API_SECRET must be set in production.\n"
-        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
@@ -49,8 +51,8 @@ try:
 except ImportError as e:
     # Handle case where security_validation module isn't available yet
     import logging
+
     logging.getLogger(__name__).warning(f"⚠️ [Security] Could not import security validation: {e}")
-    pass
 
 # Security settings
 SESSION_COOKIE_SECURE = True
@@ -58,7 +60,7 @@ CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 X_FRAME_OPTIONS = "DENY"
 
 # HSTS settings
@@ -72,12 +74,12 @@ STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesSto
 
 # Cache configuration for production
 CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'portal-prod-cache',
-        'OPTIONS': {
-            'MAX_ENTRIES': 10000,
-        }
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "portal-prod-cache",
+        "OPTIONS": {
+            "MAX_ENTRIES": 10000,
+        },
     }
 }
 

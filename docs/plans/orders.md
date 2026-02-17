@@ -114,7 +114,7 @@ Draft as an initial state is correct: it allows staff to verify legal/billing co
 
 ### **What's Missing:**
 1. **Product/Service Catalog**: No integrated product selection system
-2. **Order Creation Form**: The form shows placeholder content  
+2. **Order Creation Form**: The form shows placeholder content
 3. **Shopping Cart**: No cart/basket functionality
 4. **Product-Order Integration**: Limited connection to provisioning system
 
@@ -138,7 +138,7 @@ service = models.ForeignKey('provisioning.Service', ...)  # Active customer serv
 ### **2. Order Creation Process**
 The intended flow appears to be:
 1. **Browse Products** → View available hosting plans, domains, add-ons
-2. **Add to Cart** → Select products with quantities and configurations  
+2. **Add to Cart** → Select products with quantities and configurations
 3. **Customer Details** → Billing address, VAT info (Romanian compliance)
 4. **Review & Place** → Confirm order with VAT calculations
 5. **Payment & Provisioning** → Convert to invoice and provision services
@@ -181,17 +181,17 @@ class OrderItem(models.Model):
         on_delete=models.PROTECT,
         help_text=_("Product being ordered")
     )
-    
+
     # Product snapshot fields
     product_name = models.CharField(...)     # Snapshot of product name
     product_type = models.CharField(...)     # Snapshot of product type
     billing_period = models.CharField(...)   # Billing frequency
-    
+
     # Pricing snapshot (protects against price changes)
     unit_price_cents = models.BigIntegerField(...)
     setup_cents = models.BigIntegerField(...)
     tax_cents = models.BigIntegerField(...)
-    
+
     # Configuration for provisioning
     config = models.JSONField(...)           # Product-specific config
     domain_name = models.CharField(...)      # Associated domain
@@ -206,14 +206,14 @@ To complete the order placement functionality, you would need:
 2. **Product Detail View** - Show specifications, pricing options, configure
 3. **Product API/HTMX** - Dynamic pricing based on billing period selection
 
-### **Phase 2: Shopping Cart System**  
+### **Phase 2: Shopping Cart System**
 1. **Cart Model/Session** - Store selected products before order creation
 2. **Cart Management** - Add/remove items, quantity updates
 3. **Cart UI** - Review items, see totals with VAT
 
 ### **Phase 3: Complete Order Form**
 1. **Replace Placeholder Form** - Real product selection interface
-2. **Customer Selection** (staff) or auto-populate (customers)  
+2. **Customer Selection** (staff) or auto-populate (customers)
 3. **Billing Address Form** - Romanian VAT fields with validation
 4. **Real-time Calculations** - VAT, totals, discounts
 
@@ -228,7 +228,7 @@ To complete the order placement functionality, you would need:
 
 ### **Priority 1: Product Integration in Orders** ⭐
 1. Update order creation service to fetch products from `apps.products`
-2. Use `Product.get_price_for_period()` method for current pricing  
+2. Use `Product.get_price_for_period()` method for current pricing
 3. Create product selection interface in order form
 4. Test with a few sample products
 
@@ -248,7 +248,7 @@ The fastest path to working order placement:
 
 1. **Populate Product Catalog** - Add sample products via Django admin
 2. **Product Selection Dropdown** - Replace order form placeholder with real product list
-3. **Price Lookup** - Use `ProductPrice` model to get current pricing  
+3. **Price Lookup** - Use `ProductPrice` model to get current pricing
 4. **Basic Order Creation** - Connect form to existing order service
 
 This would give you a functional order system in ~1-2 hours of focused development.
@@ -265,7 +265,7 @@ The foundation is solid - just need to connect the UI layer to the existing prod
 
 ## ✅ **Analysis Complete & Documented**
 
-Perfect! I've discovered the key insight: 
+Perfect! I've discovered the key insight:
 
 **Orders ARE connected to products** - the `OrderItem` model has a foreign key to `apps.products.Product`, but the **frontend integration is missing**.
 

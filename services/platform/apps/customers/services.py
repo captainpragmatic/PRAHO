@@ -6,11 +6,10 @@ Maintains backward compatibility after ADR-0012 feature-based reorganization.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Sum
 from django.utils import timezone
 
 # Core customer service
@@ -25,6 +24,86 @@ from .customer_service import CustomerService
 from .profile_service import ProfileService
 
 logger = logging.getLogger(__name__)
+
+# Engagement scoring thresholds
+DAYS_YEAR = 365
+DAYS_HALF_YEAR = 180
+DAYS_QUARTER = 90
+DAYS_MONTH = 30
+_DEFAULT_ORDERS_HIGH_THRESHOLD = 10
+ORDERS_HIGH_THRESHOLD = _DEFAULT_ORDERS_HIGH_THRESHOLD
+_DEFAULT_ORDERS_MEDIUM_THRESHOLD = 5
+ORDERS_MEDIUM_THRESHOLD = _DEFAULT_ORDERS_MEDIUM_THRESHOLD
+_DEFAULT_ORDERS_LOW_THRESHOLD = 2
+ORDERS_LOW_THRESHOLD = _DEFAULT_ORDERS_LOW_THRESHOLD
+_DEFAULT_PAYMENT_RATE_EXCELLENT = 95
+PAYMENT_RATE_EXCELLENT = _DEFAULT_PAYMENT_RATE_EXCELLENT
+_DEFAULT_PAYMENT_RATE_GOOD = 80
+PAYMENT_RATE_GOOD = _DEFAULT_PAYMENT_RATE_GOOD
+_DEFAULT_PAYMENT_RATE_FAIR = 60
+PAYMENT_RATE_FAIR = _DEFAULT_PAYMENT_RATE_FAIR
+_DEFAULT_SERVICES_HIGH_THRESHOLD = 3
+SERVICES_HIGH_THRESHOLD = _DEFAULT_SERVICES_HIGH_THRESHOLD
+_DEFAULT_SERVICES_MEDIUM_THRESHOLD = 2
+SERVICES_MEDIUM_THRESHOLD = _DEFAULT_SERVICES_MEDIUM_THRESHOLD
+
+
+def get_orders_high_threshold() -> int:
+    """Get orders high threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_high_threshold", _DEFAULT_ORDERS_HIGH_THRESHOLD)
+
+
+def get_orders_medium_threshold() -> int:
+    """Get orders medium threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_medium_threshold", _DEFAULT_ORDERS_MEDIUM_THRESHOLD)
+
+
+def get_orders_low_threshold() -> int:
+    """Get orders low threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_low_threshold", _DEFAULT_ORDERS_LOW_THRESHOLD)
+
+
+def get_payment_rate_excellent() -> int:
+    """Get payment rate excellent from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_excellent", _DEFAULT_PAYMENT_RATE_EXCELLENT)
+
+
+def get_payment_rate_good() -> int:
+    """Get payment rate good from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_good", _DEFAULT_PAYMENT_RATE_GOOD)
+
+
+def get_payment_rate_fair() -> int:
+    """Get payment rate fair from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_fair", _DEFAULT_PAYMENT_RATE_FAIR)
+
+
+def get_services_high_threshold() -> int:
+    """Get services high threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.services_high_threshold", _DEFAULT_SERVICES_HIGH_THRESHOLD)
+
+
+def get_services_medium_threshold() -> int:
+    """Get services medium threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "customers.services_medium_threshold", _DEFAULT_SERVICES_MEDIUM_THRESHOLD
+    )
 
 
 class CustomerAnalyticsService:
@@ -189,46 +268,46 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _calculate_engagement_score(customer: Any, metrics: dict[str, Any]) -> int:
+    def _calculate_engagement_score(customer: Any, metrics: dict[str, Any]) -> int:  # noqa: C901, PLR0912
         """Calculate customer engagement score (0-100)."""
         score = 0
 
         # Account age factor (max 20 points)
         account_age_days = metrics.get("account_age_days", 0)
-        if account_age_days > 365:
+        if account_age_days > DAYS_YEAR:
             score += 20
-        elif account_age_days > 180:
+        elif account_age_days > DAYS_HALF_YEAR:
             score += 15
-        elif account_age_days > 90:
+        elif account_age_days > DAYS_QUARTER:
             score += 10
-        elif account_age_days > 30:
+        elif account_age_days > DAYS_MONTH:
             score += 5
 
         # Order activity factor (max 30 points)
         total_orders = metrics.get("total_orders", 0)
-        if total_orders >= 10:
+        if total_orders >= ORDERS_HIGH_THRESHOLD:
             score += 30
-        elif total_orders >= 5:
+        elif total_orders >= ORDERS_MEDIUM_THRESHOLD:
             score += 20
-        elif total_orders >= 2:
+        elif total_orders >= ORDERS_LOW_THRESHOLD:
             score += 10
         elif total_orders >= 1:
             score += 5
 
         # Payment behavior factor (max 25 points)
         payment_rate = metrics.get("payment_rate", 100)
-        if payment_rate >= 95:
+        if payment_rate >= PAYMENT_RATE_EXCELLENT:
             score += 25
-        elif payment_rate >= 80:
+        elif payment_rate >= PAYMENT_RATE_GOOD:
             score += 15
-        elif payment_rate >= 60:
+        elif payment_rate >= PAYMENT_RATE_FAIR:
             score += 5
 
         # Active services factor (max 25 points)
         active_services = metrics.get("active_services", 0)
-        if active_services >= 3:
+        if active_services >= SERVICES_HIGH_THRESHOLD:
             score += 25
-        elif active_services >= 2:
+        elif active_services >= SERVICES_MEDIUM_THRESHOLD:
             score += 15
         elif active_services >= 1:
             score += 10
@@ -319,6 +398,8 @@ class CustomerStatsService:
         """
         from apps.customers.models import Customer  # noqa: PLC0415
 
+        # Engagement scoring thresholds
+
         try:
             # Update oldest first
             customers = Customer.objects.order_by("updated_at")[:limit]
@@ -331,10 +412,12 @@ class CustomerStatsService:
                     if update_result.get("success"):
                         results["updated"] += 1
                     else:
-                        results["errors"].append({
-                            "customer_id": str(customer.id),
-                            "error": update_result.get("error"),
-                        })
+                        results["errors"].append(
+                            {
+                                "customer_id": str(customer.id),
+                                "error": update_result.get("error"),
+                            }
+                        )
                 except Exception as e:
                     results["errors"].append({"customer_id": str(customer.id), "error": str(e)})
 

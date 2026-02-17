@@ -316,33 +316,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const cnpField = document.getElementById('cnp-field');
     const vatInput = document.getElementById('id_vat_number');
     const cnpInput = document.getElementById('id_cnp');
-    
+
     function toggleIndividualFields(customerType) {
         if (customerType === 'individual') {
             // Show CNP field, hide VAT field
             vatField.style.display = 'none';
             cnpField.style.display = 'block';
-            
+
             // Auto-fill company name with full name for individuals
             updateIndividualCompanyName();
-            
+
             // Clear VAT number for individuals
             vatInput.value = '';
         } else {
             // Show VAT field, hide CNP field
             vatField.style.display = 'block';
             cnpField.style.display = 'none';
-            
+
             // Clear CNP for companies
             cnpInput.value = '';
-            
+
             // Clear auto-filled company name for companies
             if (companyNameField.value === getFullName()) {
                 companyNameField.value = '';
             }
         }
     }
-    
+
     function getFullName() {
         const firstName = firstNameField.value.trim();
         const lastName = lastNameField.value.trim();
@@ -351,7 +351,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return '';
     }
-    
+
     function updateIndividualCompanyName() {
         if (customerTypeField.value === 'individual') {
             const fullName = getFullName();
@@ -360,19 +360,19 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
     // Set initial state based on current selection
     toggleIndividualFields(customerTypeField.value);
-    
+
     // Handle customer type changes
     customerTypeField.addEventListener('change', function() {
         toggleIndividualFields(this.value);
     });
-    
+
     // Update individual company name when name fields change
     firstNameField.addEventListener('input', updateIndividualCompanyName);
     lastNameField.addEventListener('input', updateIndividualCompanyName);
-    
+
     // Make toggleIndividualFields available globally for form onchange
     window.toggleIndividualFields = toggleIndividualFields;
 });

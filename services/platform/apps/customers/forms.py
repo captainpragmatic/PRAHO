@@ -55,6 +55,19 @@ class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
     Only essential identifying information.
     """
 
+    website = forms.URLField(
+        required=False,
+        label=_("Website"),
+        assume_scheme="https",
+        validators=[validate_safe_url_wrapper],
+        widget=forms.URLInput(
+            attrs={
+                "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
+                "placeholder": _("https://example.com"),
+            }
+        ),
+    )
+
     class Meta:
         model = Customer
         fields: ClassVar[tuple[str, ...]] = (
@@ -98,12 +111,6 @@ class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
                 attrs={
                     "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
                     "placeholder": _("IT & Software"),
-                }
-            ),
-            "website": forms.URLInput(
-                attrs={
-                    "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500",
-                    "placeholder": _("https://example.com"),
                 }
             ),
         }
@@ -491,6 +498,7 @@ class CustomerCreationForm(forms.Form):
     website = forms.URLField(
         required=False,
         label=_("Website"),
+        assume_scheme="https",
         validators=[validate_safe_url_wrapper],
         widget=forms.URLInput(
             attrs={
@@ -826,6 +834,7 @@ class CustomerEditForm(forms.Form):
     website = forms.URLField(
         required=False,
         label=_("Website"),
+        assume_scheme="https",
         validators=[validate_safe_url_wrapper],
         widget=forms.URLInput(
             attrs={
@@ -1126,78 +1135,91 @@ class CustomerEditForm(forms.Form):
             customer.get_billing_address()
 
             # Core customer fields
-            self.initial.update({
-                'name': customer.name,
-                'customer_type': customer.customer_type,
-                'company_name': customer.company_name,
-                'primary_email': customer.primary_email,
-                'primary_phone': customer.primary_phone,
-                'industry': customer.industry,
-                'website': customer.website,
-                'data_processing_consent': customer.data_processing_consent,
-                'marketing_consent': customer.marketing_consent,
-            })
+            self.initial.update(
+                {
+                    "name": customer.name,
+                    "customer_type": customer.customer_type,
+                    "company_name": customer.company_name,
+                    "primary_email": customer.primary_email,
+                    "primary_phone": customer.primary_phone,
+                    "industry": customer.industry,
+                    "website": customer.website,
+                    "data_processing_consent": customer.data_processing_consent,
+                    "marketing_consent": customer.marketing_consent,
+                }
+            )
 
             # Tax profile fields
             if tax_profile:
-                self.initial.update({
-                    'cui': tax_profile.cui,
-                    'registration_number': tax_profile.registration_number,
-                    'is_vat_payer': tax_profile.is_vat_payer,
-                    'vat_number': tax_profile.vat_number,
-                    'vat_rate': tax_profile.vat_rate,
-                })
+                self.initial.update(
+                    {
+                        "cui": tax_profile.cui,
+                        "registration_number": tax_profile.registration_number,
+                        "is_vat_payer": tax_profile.is_vat_payer,
+                        "vat_number": tax_profile.vat_number,
+                        "vat_rate": tax_profile.vat_rate,
+                    }
+                )
 
             # Billing profile fields
             if billing_profile:
-                self.initial.update({
-                    'payment_terms': billing_profile.payment_terms,
-                    'credit_limit': billing_profile.credit_limit,
-                    'preferred_currency': billing_profile.preferred_currency,
-                    'invoice_delivery_method': billing_profile.invoice_delivery_method,
-                    'auto_payment_enabled': billing_profile.auto_payment_enabled,
-                })
+                self.initial.update(
+                    {
+                        "payment_terms": billing_profile.payment_terms,
+                        "credit_limit": billing_profile.credit_limit,
+                        "preferred_currency": billing_profile.preferred_currency,
+                        "invoice_delivery_method": billing_profile.invoice_delivery_method,
+                        "auto_payment_enabled": billing_profile.auto_payment_enabled,
+                    }
+                )
 
             # Primary address fields
             if primary_address:
-                self.initial.update({
-                    'address_line1': primary_address.address_line1,
-                    'address_line2': primary_address.address_line2,
-                    'city': primary_address.city,
-                    'county': primary_address.county,
-                    'postal_code': primary_address.postal_code,
-                    'country': primary_address.country,
-                })
+                self.initial.update(
+                    {
+                        "address_line1": primary_address.address_line1,
+                        "address_line2": primary_address.address_line2,
+                        "city": primary_address.city,
+                        "county": primary_address.county,
+                        "postal_code": primary_address.postal_code,
+                        "country": primary_address.country,
+                    }
+                )
 
             # Billing address logic
             # Check if customer has a separate billing address
             from .contact_models import CustomerAddress  # noqa: PLC0415
+
             separate_billing_address = CustomerAddress.objects.filter(
                 customer=customer, address_type="billing", is_current=True
             ).first()
 
             if separate_billing_address:
                 # Customer has a separate billing address
-                self.initial.update({
-                    'billing_same_as_primary': False,
-                    'billing_address_line1': separate_billing_address.address_line1,
-                    'billing_address_line2': separate_billing_address.address_line2,
-                    'billing_city': separate_billing_address.city,
-                    'billing_county': separate_billing_address.county,
-                    'billing_postal_code': separate_billing_address.postal_code,
-                    'billing_country': separate_billing_address.country,
-                })
+                self.initial.update(
+                    {
+                        "billing_same_as_primary": False,
+                        "billing_address_line1": separate_billing_address.address_line1,
+                        "billing_address_line2": separate_billing_address.address_line2,
+                        "billing_city": separate_billing_address.city,
+                        "billing_county": separate_billing_address.county,
+                        "billing_postal_code": separate_billing_address.postal_code,
+                        "billing_country": separate_billing_address.country,
+                    }
+                )
             else:
                 # Billing address is same as primary (default)
-                self.initial.update({
-                    'billing_same_as_primary': True,
-                    'billing_address_line1': '',
-                    'billing_address_line2': '',
-                    'billing_city': '',
-                    'billing_county': '',
-                    'billing_postal_code': '',
-                    'billing_country': 'Romania',
-                })
+                self.initial.update(
+                    {
+                        "billing_same_as_primary": True,
+                        "billing_address_line1": "",
+                        "billing_address_line2": "",
+                        "billing_city": "",
+                        "billing_county": "",
+                        "billing_postal_code": "",
+                        "billing_country": "Romania",
+                    }
+                )
 
     def clean_company_name(self) -> str:
         """Require company name for companies"""
@@ -1261,7 +1283,11 @@ class CustomerEditForm(forms.Form):
         billing_postal_code: str | None = self.cleaned_data.get("billing_postal_code")
         billing_country: str | None = self.cleaned_data.get("billing_country")
 
-        if billing_country in ["România", "Romania"] and billing_postal_code and not re.match(r"^\d{6}$", billing_postal_code):
+        if (
+            billing_country in ["România", "Romania"]
+            and billing_postal_code
+            and not re.match(r"^\d{6}$", billing_postal_code)
+        ):
             raise ValidationError(_("Romanian postal codes must be 6 digits"))
 
         return billing_postal_code or ""
@@ -1279,15 +1305,15 @@ class CustomerEditForm(forms.Form):
         # If billing address is different from primary, validate billing fields
         if not billing_same_as_primary:
             required_billing_fields = [
-                'billing_address_line1',
-                'billing_city', 
-                'billing_county',
-                'billing_postal_code',
+                "billing_address_line1",
+                "billing_city",
+                "billing_county",
+                "billing_postal_code",
             ]
 
             for field_name in required_billing_fields:
                 if not cleaned_data.get(field_name):
-                    field_label = self.fields[field_name].label or field_name.replace('_', ' ').title()
+                    field_label = self.fields[field_name].label or field_name.replace("_", " ").title()
                     raise ValidationError(
                         _("'{field_label}' is required when billing address is different from primary address.").format(
                             field_label=field_label
@@ -1296,7 +1322,7 @@ class CustomerEditForm(forms.Form):
 
         return cleaned_data
 
-    def save(self, user: User | None = None) -> Customer:
+    def save(self, user: User | None = None) -> Customer:  # noqa: PLR0915
         """Update customer and all related profiles"""
         data = self.cleaned_data
 
@@ -1318,7 +1344,7 @@ class CustomerEditForm(forms.Form):
         tax_profile = self.customer.get_tax_profile()
         if not tax_profile:
             tax_profile = CustomerTaxProfile.objects.create(customer=self.customer)
-        
+
         tax_profile.cui = data["cui"]
         tax_profile.registration_number = data["registration_number"]
         tax_profile.is_vat_payer = data["is_vat_payer"]
@@ -1330,7 +1356,7 @@ class CustomerEditForm(forms.Form):
         billing_profile = self.customer.get_billing_profile()
         if not billing_profile:
             billing_profile = CustomerBillingProfile.objects.create(customer=self.customer)
-        
+
         billing_profile.payment_terms = data["payment_terms"]
         billing_profile.credit_limit = data["credit_limit"]
         billing_profile.preferred_currency = data["preferred_currency"]
@@ -1342,12 +1368,11 @@ class CustomerEditForm(forms.Form):
         primary_address = self.customer.get_primary_address()
         if not primary_address:
             from .contact_models import CustomerAddress  # noqa: PLC0415
+
             primary_address = CustomerAddress.objects.create(
-                customer=self.customer,
-                address_type="primary",
-                is_current=True
+                customer=self.customer, address_type="primary", is_current=True
             )
-        
+
         primary_address.address_line1 = data["address_line1"]
         primary_address.address_line2 = data["address_line2"]
         primary_address.city = data["city"]
@@ -1358,6 +1383,7 @@ class CustomerEditForm(forms.Form):
 
         # Handle billing address
         from .contact_models import CustomerAddress  # noqa: PLC0415
+
         billing_same_as_primary = data.get("billing_same_as_primary", True)
         existing_billing_address = CustomerAddress.objects.filter(
             customer=self.customer, address_type="billing", is_current=True
@@ -1371,11 +1397,9 @@ class CustomerEditForm(forms.Form):
             # Create or update separate billing address
             if not existing_billing_address:
                 existing_billing_address = CustomerAddress.objects.create(
-                    customer=self.customer,
-                    address_type="billing",
-                    is_current=True
+                    customer=self.customer, address_type="billing", is_current=True
                 )
-            
+
             existing_billing_address.address_line1 = data["billing_address_line1"]
             existing_billing_address.address_line2 = data["billing_address_line2"]
             existing_billing_address.city = data["billing_city"]

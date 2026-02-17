@@ -172,12 +172,12 @@ def handle_failed_provisioning_ticket_creation(
                     subject=f"Service Provisioning Failed - Order {instance.order.order_number}",
                     description=f"""
                     Service provisioning failed for order item:
-                    
+
                     Order: {instance.order.order_number}
                     Product: {instance.product_name}
                     Service ID: {instance.service.id}
                     Error: {instance.provisioning_notes or "No details provided"}
-                    
+
                     Please investigate and resolve this issue.
                     """,
                     priority="high",

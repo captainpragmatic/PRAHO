@@ -1,8 +1,8 @@
 # PRAHO Queue & Task Management Methodology
 
-**Status:** Active  
-**Version:** 1.0  
-**Last Updated:** 2025-09-02  
+**Status:** Active
+**Version:** 1.0
+**Last Updated:** 2025-09-02
 **Related ADR:** [ADR-003: Async Task Processing Architecture](./ADR-003-async-task-processing-architecture.md)
 
 ## Overview
@@ -99,36 +99,36 @@ from django_q.models import Schedule
 def my_business_operation(param1: str, param2: int) -> dict[str, Any]:
     """
     Synchronous task function that does the actual work.
-    
+
     Args:
         param1: Description
         param2: Description
-        
+
     Returns:
         Dictionary with operation result
-        
+
     Raises:
         Exception: On operation failure (triggers retry)
     """
     logger.info(f"🔄 [MyApp] Starting operation {param1}")
-    
+
     try:
         # Do the work
         result = do_business_logic(param1, param2)
-        
+
         if result.is_ok():
             logger.info(f"✅ [MyApp] Operation {param1} successful")
             return {"success": True, "data": result.unwrap()}
         else:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [MyApp] Operation {param1} failed: {error_msg}")
-            
+
             # Check if retryable
             if _is_retryable_error(error_msg):
                 raise Exception(error_msg)  # Trigger retry
-                
+
             return {"success": False, "error": error_msg}
-            
+
     except Exception as e:
         logger.exception(f"💥 [MyApp] Unexpected error in {param1}: {e}")
         raise  # Re-raise to trigger retry
@@ -146,7 +146,7 @@ def my_business_operation_async(param1: str, param2: int) -> str:
 def setup_myapp_scheduled_tasks() -> dict[str, str]:
     """Set up all MyApp scheduled tasks."""
     tasks_created = {}
-    
+
     # Daily cleanup
     cleanup_schedule = schedule(
         'apps.myapp.tasks.daily_cleanup',
@@ -155,7 +155,7 @@ def setup_myapp_scheduled_tasks() -> dict[str, str]:
         name='myapp-daily-cleanup'
     )
     tasks_created['cleanup'] = str(cleanup_schedule) if cleanup_schedule else 'already_exists'
-    
+
     return tasks_created
 ```
 
@@ -183,14 +183,14 @@ class Command(BaseCommand):
             if existing > 0:
                 self.stdout.write("✅ Scheduled tasks already exist, skipping...")
                 return
-        
+
         self.stdout.write('🚀 Setting up MyApp scheduled tasks...')
-        
+
         try:
             results = setup_myapp_scheduled_tasks()
-            
+
             self.stdout.write(self.style.SUCCESS('✅ MyApp scheduled tasks configured:'))
-            
+
             for task_name, result in results.items():
                 if result == 'already_exists':
                     self.stdout.write(
@@ -200,7 +200,7 @@ class Command(BaseCommand):
                     self.stdout.write(
                         self.style.SUCCESS(f'  - {task_name}: Created')
                     )
-            
+
         except Exception as e:
             raise CommandError(f'❌ Failed to set up scheduled tasks: {e}')
 ```
@@ -215,7 +215,7 @@ make dev
 
 **What happens:**
 1. 🗄️ Database migrations
-2. 🔧 Test data setup  
+2. 🔧 Test data setup
 3. ⚙️ **Scheduled task creation** (runs setup commands)
 4. 🚀 Django-Q2 workers start in background
 5. 🌐 Development server starts on port 8001
@@ -339,7 +339,7 @@ Q_CLUSTER = {
 ```python
 # All tasks use structured logging
 logger.info("🔄 [AppName] Starting operation X")
-logger.info("✅ [AppName] Operation X successful")  
+logger.info("✅ [AppName] Operation X successful")
 logger.error("❌ [AppName] Operation X failed: reason")
 logger.exception("💥 [AppName] Unexpected error: details")
 ```
@@ -376,7 +376,7 @@ def periodic_task_with_lock():
     lock_key = "my_task_lock"
     if cache.get(lock_key):
         return {"success": True, "message": "Already running"}
-        
+
     cache.set(lock_key, True, 3600)  # 1 hour lock
     try:
         # Do work
@@ -391,14 +391,14 @@ def business_task(entity_id: str):
     """Task with automatic audit logging."""
     try:
         result = do_business_operation(entity_id)
-        
+
         # Audit successful operation
         AuditService.log_event(
             event_type='task.completed',
             resource_id=entity_id,
             details={'result': result}
         )
-        
+
         return result
     except Exception as e:
         # Audit failed operation
@@ -419,10 +419,10 @@ def secure_task(user_input: str):
     # Validate input before processing
     if not user_input or len(user_input) > 255:
         raise ValueError("Invalid input parameter")
-    
+
     # Sanitize if needed
     clean_input = bleach.clean(user_input)
-    
+
     # Process with validated input
     return process_business_logic(clean_input)
 ```
@@ -443,7 +443,7 @@ def secure_error_handling():
     except Exception as e:
         # Log full details internally
         logger.exception("Full error details for debugging")
-        
+
         # Return sanitized error to client
         return {"success": False, "error": "Operation failed"}
 ```
@@ -535,7 +535,7 @@ python manage.py shell
 # Development
 make dev                                    # Start everything
 
-# Task Management  
+# Task Management
 python manage.py setup_virtualmin_tasks    # Setup Virtualmin schedules
 python manage.py qcluster                   # Start workers only
 

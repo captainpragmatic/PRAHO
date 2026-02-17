@@ -5,7 +5,7 @@ COMPREHENSIVE GDPR COMPLIANCE TESTS 🛡️
 
 Tests for GDPR compliance implementation covering:
 - Data export (Article 20 - Right to data portability)
-- Data deletion/anonymization (Article 17 - Right to erasure)  
+- Data deletion/anonymization (Article 17 - Right to erasure)
 - Consent management (Articles 6, 7 - Lawful basis and consent)
 - Romanian Law 190/2018 compliance
 - Security and access controls
@@ -365,7 +365,7 @@ class GDPRSecurityTest(TestCase):
             response = self.client.get(url)
             # Should redirect to login
             self.assertEqual(response.status_code, 302)
-            self.assertIn('/users/login/', response.url)
+            self.assertIn('/auth/login/', response.url)
 
     def test_export_data_sanitization(self):
         """Test exported data doesn't contain sensitive system information"""

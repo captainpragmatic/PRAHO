@@ -23,7 +23,7 @@ class VirtualminServerModelTest(TestCase):
             hostname="test.example.com",
             api_username="test_api_user"
         )
-        
+
         self.assertEqual(server.name, "test-server")
         self.assertEqual(server.hostname, "test.example.com")
         self.assertEqual(server.api_username, "test_api_user")

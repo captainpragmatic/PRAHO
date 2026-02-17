@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.db.models.signals import post_save, pre_delete, pre_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from .audit_service import InfrastructureAuditContext, InfrastructureAuditService
@@ -213,16 +213,15 @@ def node_region_post_save(
         return
 
     # Log region toggle if is_active changed
-    if hasattr(instance, "_previous_is_active"):
-        if instance._previous_is_active != instance.is_active:
-            InfrastructureAuditService.log_region_toggled(
-                region=instance,
-                context=InfrastructureAuditContext(
-                    metadata={"signal": "post_save"},
-                ),
-            )
-            action = "enabled" if instance.is_active else "disabled"
-            logger.info(f"[Signal] NodeRegion {action}: {instance.name}")
+    if hasattr(instance, "_previous_is_active") and instance._previous_is_active != instance.is_active:
+        InfrastructureAuditService.log_region_toggled(
+            region=instance,
+            context=InfrastructureAuditContext(
+                metadata={"signal": "post_save"},
+            ),
+        )
+        action = "enabled" if instance.is_active else "disabled"
+        logger.info(f"[Signal] NodeRegion {action}: {instance.name}")
 
 
 @receiver(pre_save, sender=NodeRegion)

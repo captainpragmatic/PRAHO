@@ -191,7 +191,9 @@ class SystemSetting(models.Model):
         if self.is_required and self.value is None:
             raise ValidationError({"value": _("Required settings must have a value")})
 
-    def _validate_value(self, value: Any, field_name: str) -> None:  # noqa: PLR0912,C901 # Setting validation requires checking all data types
+    def _validate_value(  # noqa: C901, PLR0912 - Setting validation requires checking all data types
+        self, value: Any, field_name: str
+    ) -> None:
         """Validate value against data type"""
         if value is None:
             return

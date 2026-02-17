@@ -260,7 +260,7 @@ class TypeSuggestionEngine:
         """Suggest Romanian business domain types"""
         business_type_map = {
             "cui": "CUIString",
-            "vat_number": "VATString", 
+            "vat_number": "VATString",
             "email": "EmailAddress",
             "phone": "PhoneNumber",
             "domain": "DomainName",
@@ -278,22 +278,22 @@ class TypeSuggestionEngine:
             "pk": "int",
             "template_name": "TemplateName",
         }
-        
+
         multi_value_patterns = {
             ("name", "title", "description", "content", "message", "subject"): "str",
             ("data", "params", "kwargs", "context", "config"): "dict[str, Any]",
             ("css_class", "css_classes"): "CSSClass | CSSClasses",
         }
-        
+
         # Check exact patterns first
         if arg_name in exact_patterns:
             return exact_patterns[arg_name]
-        
+
         # Check multi-value patterns
         for pattern_group, type_hint in multi_value_patterns.items():
             if arg_name in pattern_group:
                 return type_hint
-        
+
         # Check prefix/suffix patterns with consolidated returns
         pattern_checks = [
             (arg_name.endswith("_id"), "int"),
@@ -301,11 +301,11 @@ class TypeSuggestionEngine:
             ("date" in arg_name or "time" in arg_name, "datetime"),
             (arg_name.endswith("s") and arg_name not in ("cls", "args", "address"), "list[Any]"),
         ]
-        
+
         for condition, type_hint in pattern_checks:
             if condition:
                 return type_hint
-        
+
         return None
 
     def suggest_parameter_types(self, node: ast.FunctionDef) -> list[tuple[str, str]]:
@@ -325,9 +325,9 @@ class TypeSuggestionEngine:
 
             # Try different type suggestion strategies
             suggested_type = (
-                self._suggest_django_types(arg_name) or
-                self._suggest_business_domain_types(arg_name) or
-                self._suggest_common_types(arg_name)
+                self._suggest_django_types(arg_name)
+                or self._suggest_business_domain_types(arg_name)
+                or self._suggest_common_types(arg_name)
             )
 
             if suggested_type:
@@ -644,9 +644,9 @@ class InteractiveTypeAdder:
                 approved_changes.append(suggestion)
             else:
                 choice = input("\nApply this change? [y/N/q/a]: ").lower().strip()
-                remaining_suggestions = self.engine.suggestions[i - 1:]
+                remaining_suggestions = self.engine.suggestions[i - 1 :]
                 action = self._process_user_choice(choice, i, approved_changes, remaining_suggestions)
-                
+
                 if action == "break":
                     break
 
@@ -722,7 +722,10 @@ class InteractiveTypeAdder:
             import subprocess  # noqa: PLC0415
 
             result = subprocess.run(  # noqa: S603
-                ["ruff", "format", str(self.file_path)], capture_output=True, text=True, check=False  # noqa: S607
+                [sys.executable, "-m", "ruff", "format", str(self.file_path)],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if result.returncode == 0:
                 logger.info(f"✅ Formatted {self.file_path} with ruff")
@@ -776,7 +779,7 @@ The tool analyzes Python files and suggests type annotations based on:
 
 🔄 SERVICE LAYER PATTERNS:
 - create_* -> Result[Any, str]
-- update_* -> Result[Any, str] 
+- update_* -> Result[Any, str]
 - delete_* -> Result[bool, str]
 - find_* -> Result[Any | None, str]
 - list_* -> Result[list[Any], str]

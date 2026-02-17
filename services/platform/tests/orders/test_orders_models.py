@@ -25,14 +25,14 @@ class OrderModelTestCase(TestCase):
             symbol="lei",
             decimals=2
         )
-        
+
         self.customer = Customer.objects.create(
             name="Test Company SRL",
             customer_type="company",
             status="active",
             primary_email="contact@testcompany.ro"
         )
-        
+
         self.user = User.objects.create_user(
             email="admin@pragmatichost.com",
             password="testpass123",
@@ -51,7 +51,7 @@ class OrderModelTestCase(TestCase):
             tax_cents=1900,       # 19.00 RON (19% VAT)
             total_cents=11900     # 119.00 RON
         )
-        
+
         order2 = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-12345678-0002",
@@ -62,7 +62,7 @@ class OrderModelTestCase(TestCase):
             tax_cents=3800,
             total_cents=23800
         )
-        
+
         self.assertEqual(order1.customer, self.customer)
         self.assertEqual(order2.customer, self.customer)
         self.assertNotEqual(order1.order_number, order2.order_number)
@@ -78,7 +78,7 @@ class OrderModelTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name
         )
-        
+
         self.assertIsInstance(order.id, uuid.UUID)
         self.assertTrue(len(str(order.id)) == 36)  # Standard UUID format
 
@@ -93,10 +93,10 @@ class OrderModelTestCase(TestCase):
             billing_address={},  # Empty dict for default billing address
             status="draft"
         )
-        
+
         # Test default status
         self.assertEqual(order.status, "draft")
-        
+
         # Test valid status changes
         valid_statuses = ["draft", "pending", "confirmed", "processing", "completed", "cancelled", "failed"]
         for status in valid_statuses:
@@ -108,7 +108,7 @@ class OrderModelTestCase(TestCase):
         subtotal_cents = 10000  # 100.00 RON
         expected_vat = int(subtotal_cents * Decimal('0.19'))  # 19% VAT
         total_cents = subtotal_cents + expected_vat
-        
+
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-VAT-0001",
@@ -119,11 +119,11 @@ class OrderModelTestCase(TestCase):
             tax_cents=expected_vat,
             total_cents=total_cents
         )
-        
+
         # Verify VAT calculation
         self.assertEqual(order.tax_cents, 1900)  # 19.00 RON
         self.assertEqual(order.total_cents, 11900)  # 119.00 RON
-        
+
         # Test VAT percentage calculation
         vat_percentage = (order.tax_cents / order.subtotal_cents) * 100
         self.assertEqual(vat_percentage, 19.0)
@@ -150,7 +150,7 @@ class OrderModelTestCase(TestCase):
                 "fiscal_code": "RO12345678"
             }
         )
-        
+
         # Verify billing address is saved as JSON
         self.assertEqual(order.billing_address["company_name"], "Test Company SRL")
         self.assertEqual(order.billing_address["fiscal_code"], "RO12345678")
@@ -165,7 +165,7 @@ class OrderModelTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name
         )
-        
+
         expected_str = f"Order ORD-2024-STR-0001 - {self.customer.primary_email}"
         self.assertEqual(str(order), expected_str)
 
@@ -180,7 +180,7 @@ class OrderModelTestCase(TestCase):
                 "deadline": "2024-06-01"
             }
         }
-        
+
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-META-0001",
@@ -189,7 +189,7 @@ class OrderModelTestCase(TestCase):
             customer_name=self.customer.name,
             meta=meta_data
         )
-        
+
         # Retrieve and verify JSON data
         saved_order = Order.objects.get(id=order.id)
         self.assertEqual(saved_order.meta["source"], "website")
@@ -207,19 +207,19 @@ class OrderItemModelTestCase(TestCase):
             status="active",
             primary_email="contact@testcompany.ro"
         )
-        
+
         self.currency = Currency.objects.create(
             code="RON",
             symbol="lei",
             decimals=2
         )
-        
+
         self.product = Product.objects.create(
             slug="test-product",
             name="Test Product",
             product_type="shared_hosting"
         )
-        
+
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-ITEMS-0001",
@@ -240,7 +240,7 @@ class OrderItemModelTestCase(TestCase):
             line_total_cents=10000,  # 100.00 RON
             config={}  # Empty dict for default config
         )
-        
+
         self.assertEqual(item.order, self.order)
         self.assertEqual(item.quantity, 2)
         self.assertEqual(item.unit_price_cents, 5000)
@@ -251,7 +251,7 @@ class OrderItemModelTestCase(TestCase):
         quantity = 3
         unit_price_cents = 2500  # 25.00 RON
         expected_line_total = quantity * unit_price_cents
-        
+
         item = OrderItem.objects.create(
             order=self.order,
             product=self.product,
@@ -262,7 +262,7 @@ class OrderItemModelTestCase(TestCase):
             line_total_cents=expected_line_total,
             config={}  # Empty dict for default config
         )
-        
+
         self.assertEqual(item.line_total_cents, expected_line_total)
 
     def test_order_item_provisioning_status(self):
@@ -278,7 +278,7 @@ class OrderItemModelTestCase(TestCase):
             config={},  # Empty dict for default config
             provisioning_status="pending"
         )
-        
+
         # Test valid provisioning statuses
         valid_statuses = ["pending", "in_progress", "completed", "failed", "cancelled"]
         for status in valid_statuses:
@@ -297,7 +297,7 @@ class OrderItemModelTestCase(TestCase):
             line_total_cents=1000,
             config={}  # Empty dict for default config
         )
-        
+
         self.assertIsInstance(item.id, uuid.UUID)
 
     def test_order_item_config_field(self):
@@ -311,7 +311,7 @@ class OrderItemModelTestCase(TestCase):
             "duration": "12 months",
             "renewal": True
         }
-        
+
         item = OrderItem.objects.create(
             order=self.order,
             product=self.product,
@@ -322,7 +322,7 @@ class OrderItemModelTestCase(TestCase):
             line_total_cents=15000,
             config=config_data
         )
-        
+
         saved_item = OrderItem.objects.get(id=item.id)
         self.assertEqual(saved_item.config["configuration"]["cpu"], "2 cores")
         self.assertEqual(saved_item.config["duration"], "12 months")
@@ -340,13 +340,13 @@ class OrderStatusHistoryModelTestCase(TestCase):
             status="active",
             primary_email="contact@testcompany.ro"
         )
-        
+
         self.currency = Currency.objects.create(
             code="RON",
             symbol="lei",
             decimals=2
         )
-        
+
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-HISTORY-0001",
@@ -355,7 +355,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             customer_name=self.customer.name,
             status="draft"
         )
-        
+
         self.user = User.objects.create_user(
             email="staff@pragmatichost.com",
             password="testpass123",
@@ -371,7 +371,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             notes="Order created",
             changed_by=self.user
         )
-        
+
         self.assertEqual(history.order, self.order)
         self.assertEqual(history.old_status, "")  # Empty string for initial creation
         self.assertEqual(history.new_status, "draft")
@@ -389,7 +389,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
         # Verify initial history was created
         self.assertIsNotNone(initial_history)
         self.assertEqual(initial_history.new_status, "draft")
-        
+
         # Create status change
         transition_history = OrderStatusHistory.objects.create(
             order=self.order,
@@ -398,7 +398,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             notes="Order submitted for processing",
             changed_by=self.user
         )
-        
+
         # Verify transition tracking
         self.assertEqual(transition_history.old_status, "draft")
         self.assertEqual(transition_history.new_status, "pending")
@@ -413,24 +413,24 @@ class OrderStatusHistoryModelTestCase(TestCase):
             new_status="draft",
             notes="Created"
         )
-        
+
         history2 = OrderStatusHistory.objects.create(
             order=self.order,
             old_status="draft",
             new_status="pending",
             notes="Submitted"
         )
-        
+
         history3 = OrderStatusHistory.objects.create(
             order=self.order,
             old_status="pending",
             new_status="confirmed",
             notes="Confirmed"
         )
-        
+
         # Get history in default order (most recent first)
         history_list = list(self.order.status_history.all())
-        
+
         self.assertEqual(history_list[0], history3)  # Most recent
         self.assertEqual(history_list[1], history2)
         self.assertEqual(history_list[2], history1)  # Oldest
@@ -444,7 +444,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             ("confirmed", "processing", "Processing started"),
             ("processing", "completed", "Order fulfilled")
         ]
-        
+
         for old_status, new_status, notes in statuses:
             OrderStatusHistory.objects.create(
                 order=self.order,
@@ -453,11 +453,11 @@ class OrderStatusHistoryModelTestCase(TestCase):
                 notes=notes,
                 changed_by=self.user
             )
-        
+
         # Verify complete audit trail
         history_count = self.order.status_history.count()
         self.assertEqual(history_count, 5)
-        
+
         # Verify final status in history matches order
         latest_history = self.order.status_history.first()
         self.assertEqual(latest_history.new_status, "completed")
@@ -471,6 +471,6 @@ class OrderStatusHistoryModelTestCase(TestCase):
             notes="Status changed",
             changed_by=self.user
         )
-        
+
         expected_str = "ORD-2024-HISTORY-0001: draft → pending"
         self.assertEqual(str(history), expected_str)

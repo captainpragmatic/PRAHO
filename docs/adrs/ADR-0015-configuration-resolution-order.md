@@ -1,9 +1,9 @@
 # ADR-0015: Configuration Resolution Order (CRO)
 
-**Status:** Accepted  
-**Date:** 2026-02-12  
-**Authors:** Development Team  
-**Supersedes:** N/A  
+**Status:** Accepted
+**Date:** 2026-02-12
+**Authors:** Development Team
+**Supersedes:** N/A
 **Related:** ADR-0005 (Single Constants File Architecture)
 
 ## Context

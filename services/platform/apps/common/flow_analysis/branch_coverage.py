@@ -18,7 +18,6 @@ from __future__ import annotations
 import ast
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from apps.common.flow_analysis.base import (
     AnalysisContext,
@@ -123,10 +122,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         parent_id: int | None = None,
     ) -> Branch:
         """Create a new branch."""
-        if self.context is None:
-            file_path = "<unknown>"
-        else:
-            file_path = self.context.file_path
+        file_path = "<unknown>" if self.context is None else self.context.file_path
 
         branch = Branch(
             id=self.branch_id_counter,
@@ -146,10 +142,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         node: ast.AST,
     ) -> BranchPoint:
         """Create a new branch point."""
-        if self.context is None:
-            file_path = "<unknown>"
-        else:
-            file_path = self.context.file_path
+        file_path = "<unknown>" if self.context is None else self.context.file_path
 
         point = BranchPoint(
             id=self.branch_point_id_counter,
@@ -209,8 +202,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         """Get remediation advice for incomplete branch point."""
         if point.point_type == "if-chain":
             return (
-                "Add an 'else' branch to handle all cases explicitly, "
-                "or document why the else case is impossible."
+                "Add an 'else' branch to handle all cases explicitly, " "or document why the else case is impossible."
             )
         elif point.point_type == "try-except":
             return (
@@ -355,10 +347,8 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                 break
 
         # Check if we need an else
-        if not point.has_default:
-            # Check if this is in a function that always returns in all branches
-            if self._should_require_else(node):
-                point.total_branches += 1  # Account for missing else
+        if not point.has_default and self._should_require_else(node):
+            point.total_branches += 1  # Account for missing else
 
     def _analyze_try_except(self, node: ast.Try) -> None:
         """Analyze try-except for exception coverage."""
@@ -391,9 +381,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                 )
             elif isinstance(handler.type, ast.Tuple):
                 # Multiple exception types
-                exc_names = [
-                    e.id for e in handler.type.elts if isinstance(e, ast.Name)
-                ]
+                exc_names = [e.id for e in handler.type.elts if isinstance(e, ast.Name)]
                 if "Exception" in exc_names or "BaseException" in exc_names:
                     has_base_exception = True
                 branch = self._create_branch(
@@ -508,10 +496,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         """Check if all branches in an if chain terminate (return/raise)."""
 
         def terminates(stmts: list[ast.stmt]) -> bool:
-            for stmt in stmts:
-                if isinstance(stmt, (ast.Return, ast.Raise)):
-                    return True
-            return False
+            return any(isinstance(stmt, (ast.Return, ast.Raise)) for stmt in stmts)
 
         if not terminates(node.body):
             return False
@@ -528,7 +513,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
 
         return True
 
-    def _get_condition_str(self, node: ast.expr) -> str:
+    def _get_condition_str(self, node: ast.expr) -> str:  # noqa: PLR0911
         """Get a string representation of a condition."""
         if isinstance(node, ast.Compare):
             return self._format_compare(node)
@@ -548,10 +533,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
 
     def _format_compare(self, node: ast.Compare) -> str:
         """Format a comparison expression."""
-        if isinstance(node.left, ast.Name):
-            left = node.left.id
-        else:
-            left = "..."
+        left = node.left.id if isinstance(node.left, ast.Name) else "..."
 
         if len(node.ops) == 1 and len(node.comparators) == 1:
             op = self._format_cmpop(node.ops[0])
@@ -581,7 +563,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         }
         return ops.get(type(op), "?")
 
-    def _get_pattern_str(self, pattern: ast.pattern) -> str:
+    def _get_pattern_str(self, pattern: ast.pattern) -> str:  # noqa: PLR0911
         """Get a string representation of a match pattern."""
         if isinstance(pattern, ast.MatchValue):
             if isinstance(pattern.value, ast.Constant):

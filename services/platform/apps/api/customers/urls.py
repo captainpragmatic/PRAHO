@@ -17,27 +17,22 @@ from .views import (
 
 # Create router for customer API endpoints
 router = DefaultRouter()
-router.register('search', CustomerSearchViewSet, basename='customer-search')
-router.register('', CustomerServicesViewSet, basename='customer-services')
+router.register("search", CustomerSearchViewSet, basename="customer-search")
+router.register("", CustomerServicesViewSet, basename="customer-services")
 
-app_name = 'customers'
+app_name = "customers"
 
 urlpatterns = [
     # Customer registration endpoint (public)
-    path('register/', customer_register_api, name='customer-register'),
-
+    path("register/", customer_register_api, name="customer-register"),
     # Customer creation endpoint (HMAC authenticated, for Portal)
-    path('create/', customer_create_api, name='customer-create'),
-
+    path("create/", customer_create_api, name="customer-create"),
     # Customer profile management (authenticated)
-    path('profile/', CustomerProfileAPIView.as_view(), name='customer-profile'),
-    
+    path("profile/", CustomerProfileAPIView.as_view(), name="customer-profile"),
     # Customer billing address update for checkout UX (HMAC authenticated)
-    path('billing-address/', update_customer_billing_address, name='customer-billing-address'),
-    
+    path("billing-address/", update_customer_billing_address, name="customer-billing-address"),
     # Customer detail endpoint (HMAC authenticated)
-    path('details/', customer_detail_api, name='customer-detail'),
-    
+    path("details/", customer_detail_api, name="customer-detail"),
     # Router-based endpoints
-    path('', include(router.urls)),
+    path("", include(router.urls)),
 ]

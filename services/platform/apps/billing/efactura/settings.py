@@ -81,13 +81,13 @@ ROMANIA_TIMEZONE = zoneinfo.ZoneInfo("Europe/Bucharest")
 class VATCategory(StrEnum):
     """VAT category codes per UNCL5305."""
 
-    STANDARD = "S"          # Standard rate
-    ZERO = "Z"              # Zero rated goods
-    EXEMPT = "E"            # Exempt from tax
-    REVERSE_CHARGE = "AE"   # VAT Reverse Charge
-    NOT_SUBJECT = "O"       # Services outside scope of tax
-    INTRA_COMMUNITY = "K"   # Intra-community supply
-    EXPORT = "G"            # Free export item
+    STANDARD = "S"  # Standard rate
+    ZERO = "Z"  # Zero rated goods
+    EXEMPT = "E"  # Exempt from tax
+    REVERSE_CHARGE = "AE"  # VAT Reverse Charge
+    NOT_SUBJECT = "O"  # Services outside scope of tax
+    INTRA_COMMUNITY = "K"  # Intra-community supply
+    EXPORT = "G"  # Free export item
 
     @classmethod
     def choices(cls) -> list[tuple[str, str]]:
@@ -116,6 +116,7 @@ class EFacturaEnvironment(StrEnum):
 # ===============================================================================
 # SETTING KEYS - All configurable e-Factura settings
 # ===============================================================================
+
 
 class EFacturaSettingKeys:
     """Setting keys for e-Factura configuration."""
@@ -202,12 +203,10 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     # General
     EFacturaSettingKeys.ENABLED: True,
     EFacturaSettingKeys.ENVIRONMENT: "test",
-
     # OAuth2 (must be configured)
     EFacturaSettingKeys.CLIENT_ID: "",
     EFacturaSettingKeys.CLIENT_SECRET: "",
     EFacturaSettingKeys.REDIRECT_URI: "",
-
     # Company (must be configured)
     EFacturaSettingKeys.COMPANY_CUI: "",
     EFacturaSettingKeys.COMPANY_NAME: "",
@@ -220,54 +219,45 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.COMPANY_PHONE: "",
     EFacturaSettingKeys.COMPANY_BANK_ACCOUNT: "",
     EFacturaSettingKeys.COMPANY_BANK_NAME: "",
-
     # Romanian VAT rates (updated Aug 2025 — Emergency Ordinance 156/2024)
-    EFacturaSettingKeys.VAT_RATE_STANDARD: "21.00",    # Standard rate (was 19%)
-    EFacturaSettingKeys.VAT_RATE_REDUCED_1: "11.00",   # Consolidated reduced rate (was 9%)
-    EFacturaSettingKeys.VAT_RATE_REDUCED_2: "11.00",   # Consolidated reduced rate (was 5%)
-    EFacturaSettingKeys.VAT_RATE_ZERO: "0.00",         # Exports, intra-EU supplies
-
+    EFacturaSettingKeys.VAT_RATE_STANDARD: "21.00",  # Standard rate (was 19%)
+    EFacturaSettingKeys.VAT_RATE_REDUCED_1: "11.00",  # Consolidated reduced rate (was 9%)
+    EFacturaSettingKeys.VAT_RATE_REDUCED_2: "11.00",  # Consolidated reduced rate (was 5%)
+    EFacturaSettingKeys.VAT_RATE_ZERO: "0.00",  # Exports, intra-EU supplies
     # B2B/B2C
     EFacturaSettingKeys.B2B_ENABLED: True,
     EFacturaSettingKeys.B2C_ENABLED: False,  # Mandatory from Jan 2025
     EFacturaSettingKeys.B2C_MINIMUM_AMOUNT: 0,
     EFacturaSettingKeys.B2B_MINIMUM_AMOUNT: 0,
-
     # Submission (5 calendar days per Romanian law)
     EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS: 5,
     EFacturaSettingKeys.DEADLINE_WARNING_HOURS: 24,
     EFacturaSettingKeys.AUTO_SUBMIT_ENABLED: True,
-
     # Retry with exponential backoff
     EFacturaSettingKeys.MAX_RETRIES: 5,
-    EFacturaSettingKeys.RETRY_DELAY_1: 300,     # 5 minutes
-    EFacturaSettingKeys.RETRY_DELAY_2: 900,     # 15 minutes
-    EFacturaSettingKeys.RETRY_DELAY_3: 3600,    # 1 hour
-    EFacturaSettingKeys.RETRY_DELAY_4: 7200,    # 2 hours
-    EFacturaSettingKeys.RETRY_DELAY_5: 21600,   # 6 hours
-
+    EFacturaSettingKeys.RETRY_DELAY_1: 300,  # 5 minutes
+    EFacturaSettingKeys.RETRY_DELAY_2: 900,  # 15 minutes
+    EFacturaSettingKeys.RETRY_DELAY_3: 3600,  # 1 hour
+    EFacturaSettingKeys.RETRY_DELAY_4: 7200,  # 2 hours
+    EFacturaSettingKeys.RETRY_DELAY_5: 21600,  # 6 hours
     # ANAF API rate limits (per official documentation)
     EFacturaSettingKeys.RATE_LIMIT_GLOBAL_PER_MINUTE: 1000,
     EFacturaSettingKeys.RATE_LIMIT_STATUS_PER_MESSAGE_DAY: 100,
     EFacturaSettingKeys.RATE_LIMIT_LIST_SIMPLE_PER_DAY: 1500,
     EFacturaSettingKeys.RATE_LIMIT_LIST_PAGINATED_PER_DAY: 100000,
     EFacturaSettingKeys.RATE_LIMIT_DOWNLOAD_PER_MESSAGE_DAY: 10,
-
     # Polling
     EFacturaSettingKeys.POLL_INTERVAL_SECONDS: 300,  # 5 minutes
     EFacturaSettingKeys.POLL_BATCH_SIZE: 100,
     EFacturaSettingKeys.STALE_SUBMISSION_HOURS: 24,
-
     # Validation
     EFacturaSettingKeys.XSD_VALIDATION_ENABLED: True,
     EFacturaSettingKeys.SCHEMATRON_VALIDATION_ENABLED: True,
     EFacturaSettingKeys.STRICT_MODE: False,
-
     # Storage
     EFacturaSettingKeys.XML_STORAGE_PATH: "efactura/xml/%Y/%m/",
     EFacturaSettingKeys.PDF_STORAGE_PATH: "efactura/pdf/%Y/%m/",
     EFacturaSettingKeys.ARCHIVE_RETENTION_YEARS: 10,  # Romanian law requires 10 years
-
     # Metrics
     EFacturaSettingKeys.METRICS_ENABLED: True,
     EFacturaSettingKeys.METRICS_PREFIX: "efactura",
@@ -277,6 +267,7 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
 # ===============================================================================
 # VAT RATE CONFIGURATION
 # ===============================================================================
+
 
 @dataclass
 class VATRateConfig:
@@ -313,7 +304,17 @@ ROMANIAN_VAT_RATES: dict[str, VATRateConfig] = {
         category=VATCategory.STANDARD,
         name="Reduced Rate (11%)",
         description="Consolidated reduced rate: hospitality, food, books, medicine, housing",
-        applies_to=["hospitality", "culture", "sports", "food_service", "food", "books", "medicine", "housing", "prosthetics"],
+        applies_to=[
+            "hospitality",
+            "culture",
+            "sports",
+            "food_service",
+            "food",
+            "books",
+            "medicine",
+            "housing",
+            "prosthetics",
+        ],
     ),
     "zero": VATRateConfig(
         rate=Decimal("0.00"),
@@ -343,6 +344,7 @@ ROMANIAN_VAT_RATES: dict[str, VATRateConfig] = {
 # SETTINGS SERVICE
 # ===============================================================================
 
+
 class EFacturaSettings:
     """
     Production-grade e-Factura settings service.
@@ -367,7 +369,8 @@ class EFacturaSettings:
         """Lazy load SettingsService to avoid circular imports."""
         if self._settings_service is None:
             try:
-                from apps.settings.services import SettingsService
+                from apps.settings.services import SettingsService  # noqa: PLC0415
+
                 self._settings_service = SettingsService
             except ImportError:
                 logger.warning("SettingsService not available, using Django settings fallback")
@@ -538,8 +541,8 @@ class EFacturaSettings:
         rate_key_map = {
             "standard": EFacturaSettingKeys.VAT_RATE_STANDARD,
             "reduced": EFacturaSettingKeys.VAT_RATE_REDUCED_1,
-            "reduced_9": EFacturaSettingKeys.VAT_RATE_REDUCED_1,   # legacy alias
-            "reduced_5": EFacturaSettingKeys.VAT_RATE_REDUCED_2,   # legacy alias
+            "reduced_9": EFacturaSettingKeys.VAT_RATE_REDUCED_1,  # legacy alias
+            "reduced_5": EFacturaSettingKeys.VAT_RATE_REDUCED_2,  # legacy alias
             "zero": EFacturaSettingKeys.VAT_RATE_ZERO,
         }
 

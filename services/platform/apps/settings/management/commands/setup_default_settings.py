@@ -47,7 +47,7 @@ class Command(BaseCommand):
 
             try:
                 # Parse key for category and setting name
-                category, setting_name = key.split(".", 1)
+                category, _setting_name = key.split(".", 1)
 
                 # Check if setting exists
                 setting, created = SystemSetting.objects.get_or_create(

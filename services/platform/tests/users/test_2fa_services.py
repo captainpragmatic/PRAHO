@@ -4,7 +4,7 @@ COMPREHENSIVE MFA (MULTI-FACTOR AUTHENTICATION) TESTS 🔐
 ===============================================================================
 
 Tests for apps/users/mfa.py covering:
-- TOTP (Time-based One-Time Passwords) 
+- TOTP (Time-based One-Time Passwords)
 - Backup codes
 - WebAuthn/Passkeys
 - MFA Service orchestration

@@ -17,14 +17,13 @@ class BillingConfig(AppConfig):
     def ready(self) -> None:
         """Import signals and schedule e-Factura tasks when Django starts."""
         from django.conf import settings
+        from . import signals  # noqa: F401
 
         # Schedule e-Factura recurring tasks if enabled
         if getattr(settings, "EFACTURA_ENABLED", False):
             try:
-                from apps.billing.efactura.tasks import schedule_efactura_tasks  # noqa: PLC0415
+                from apps.billing.efactura.tasks import schedule_efactura_tasks
 
                 schedule_efactura_tasks()
             except Exception:
-                logger.warning(
-                    "⚠️ [Billing] Failed to schedule e-Factura tasks during startup"
-                )
+                logger.warning("⚠️ [Billing] Failed to schedule e-Factura tasks during startup")

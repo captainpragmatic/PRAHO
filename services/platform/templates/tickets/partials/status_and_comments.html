@@ -29,7 +29,7 @@
               {% else %}
                 {% badge ticket.get_status_display variant="default" %}
               {% endif %}
-              
+
               <!-- Customer replied badge -->
               {% if ticket.customer_replied_recently %}
                 <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
@@ -92,7 +92,7 @@
             <span class="ml-2 text-sm font-normal text-slate-400">({{ ticket.comments.count }} {% trans 'replies' %})</span>
         </h3>
     </div>
-    
+
     <div class="px-6 py-4 max-h-96 overflow-y-auto" id="comments-container">
         {% include 'tickets/partials/comments_list.html' with comments=comments %}
     </div>
@@ -108,23 +108,23 @@
                         {{ request.user.get_full_name|first|upper }}
                     </div>
                 </div>
-                
+
                 <!-- Reply Form -->
                 <div class="flex-1">
                     <div class="relative">
-                        <textarea 
-                            name="reply" 
-                            rows="3" 
-                            class="block w-full rounded-lg border-0 bg-slate-700 py-3 px-4 text-white placeholder-slate-400 ring-1 ring-inset ring-slate-600 focus:ring-2 focus:ring-inset focus:ring-blue-500 resize-none" 
-                            placeholder="{% trans 'Write a reply...' %}" 
+                        <textarea
+                            name="reply"
+                            rows="3"
+                            class="block w-full rounded-lg border-0 bg-slate-700 py-3 px-4 text-white placeholder-slate-400 ring-1 ring-inset ring-slate-600 focus:ring-2 focus:ring-inset focus:ring-blue-500 resize-none"
+                            placeholder="{% trans 'Write a reply...' %}"
                             required></textarea>
-                        
+
                         <!-- Character Counter -->
                         <div class="absolute bottom-2 right-2">
                             <span class="text-xs text-slate-400" id="char-counter">0</span>
                         </div>
                     </div>
-                    
+
                     <!-- Form Actions -->
                     <div class="mt-3 space-y-3">
                         <div class="flex flex-wrap items-center gap-3">
@@ -136,11 +136,11 @@
                                 </svg>
                                 {% trans 'Attach' %}
                             </button>
-                            
+
                             <!-- File list display -->
                             <div id="file-list" class="hidden"></div>
                         </div>
-                        
+
                         <!-- Staff Reply Actions -->
                         {% if user.is_staff or user.staff_role %}
                         <div class="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -153,7 +153,7 @@
                                     <option value="close_with_resolution">{% trans 'Close with resolution' %}</option>
                                 </select>
                             </div>
-                            
+
                             <!-- Resolution Code (hidden by default) -->
                             <div id="resolution_code_container" class="hidden flex-1 min-w-0">
                                 <select name="resolution_code" class="block w-full rounded border-slate-600 bg-slate-700 text-white text-sm px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
@@ -169,7 +169,7 @@
                             </div>
                         </div>
                         {% endif %}
-                        
+
                         <!-- Submit Button -->
                         <div class="flex flex-col-reverse sm:flex-row sm:justify-end items-stretch sm:items-center gap-2">
                             <button type="button" class="px-3 py-2 text-sm text-slate-400 hover:text-slate-300 text-center sm:text-left" onclick="document.getElementById('reply-form').reset();">
@@ -183,7 +183,7 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <!-- Help Text -->
                     <div class="mt-2 flex items-center space-x-1 text-xs text-slate-500">
                         <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -119,7 +119,7 @@
         </label>
         {% input_field "search" placeholder="Search orders by number, company name..." input_type="search" value=current_search %}
       </div>
-      
+
       <!-- Status Filter and Actions Row -->
       <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
         <!-- Status Filter -->
@@ -139,11 +139,11 @@
             <option value="partially_refunded" {% if current_status == "partially_refunded" %}selected{% endif %}>💸 {% trans "Partially Refunded" %}</option>
           </select>
         </div>
-        
+
         <!-- Action Buttons -->
         <div class="flex gap-2 sm:flex-shrink-0">
           {% button "🔍 Search" type="submit" variant="primary" size="sm" %}
-          
+
           {% if search_query or current_status %}
           <a href="{% url 'orders:order_list' %}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
             ❌ {% trans "Clear" %}
@@ -170,7 +170,7 @@
                       {{ order.order_number }}
                     </a>
                   </h3>
-                  
+
                   <!-- Order Status Badge -->
                   {% if order.status == "draft" %}
                     {% badge "📝 Draft" variant="secondary" %}
@@ -190,7 +190,7 @@
                     {% badge "💸 Partially Refunded" variant="warning" %}
                   {% endif %}
                 </div>
-                
+
                 <!-- Customer Info -->
                 <div class="flex items-center space-x-4 text-sm text-slate-400 mb-3">
                   <div class="flex items-center">
@@ -206,7 +206,7 @@
                     {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}
                   </div>
                 </div>
-                
+
                 <!-- Billing Company if different -->
                 {% if order.billing_company_name != order.customer.company_name %}
                 <div class="text-sm text-slate-500 mb-2">
@@ -214,7 +214,7 @@
                   {% trans "Bill to:" %} {{ order.billing_company_name }}
                 </div>
                 {% endif %}
-                
+
                 <!-- Order Total -->
                 <div class="text-lg font-semibold text-white">
                   {% if order.total_cents %}
@@ -227,19 +227,19 @@
                   {% endif %}
                 </div>
               </div>
-              
+
               <!-- Action Buttons -->
               <div class="flex space-x-2 ml-4">
                 {% url 'orders:order_detail' pk=order.id as order_detail_url %}
                 {% button "👁️ View" variant="outline" size="sm" href=order_detail_url %}
-                
+
                 {% if is_staff and order.status not in "cancelled,refunded" %}
                   {% url 'orders:order_edit' pk=order.id as order_edit_url %}
                   {% button "✏️ Edit" variant="outline" size="sm" href=order_edit_url %}
                 {% endif %}
               </div>
             </div>
-            
+
             <!-- Notes (if any) -->
             {% if order.notes %}
             <div class="mt-3 pt-3 border-t border-slate-700">
@@ -268,7 +268,7 @@
                   </a>
                 </h3>
               </div>
-              
+
               <!-- Order Status Badge -->
               <div class="flex-shrink-0">
                 {% if order.status == "draft" %}
@@ -290,7 +290,7 @@
                 {% endif %}
               </div>
             </div>
-            
+
             <!-- Customer and Details Grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <!-- Customer Info -->
@@ -299,7 +299,7 @@
                 <div class="text-white text-sm mb-1">
                   🏢 {{ order.customer.company_name }}
                 </div>
-                
+
                 <!-- Billing Company if different -->
                 {% if order.billing_company_name != order.customer.company_name %}
                 <div class="text-sm text-slate-400">
@@ -307,7 +307,7 @@
                 </div>
                 {% endif %}
               </div>
-              
+
               <!-- Order Details -->
               <div>
                 <h4 class="text-slate-300 font-medium text-sm mb-1">{% trans "Details" %}</h4>
@@ -317,7 +317,7 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- Order Total -->
             <div class="bg-slate-700 rounded-lg p-3">
               <div class="text-center">
@@ -334,7 +334,7 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- Notes (if any) -->
             {% if order.notes %}
             <div class="bg-slate-900 rounded-lg p-3">
@@ -344,12 +344,12 @@
               </div>
             </div>
             {% endif %}
-            
+
             <!-- Action Buttons -->
             <div class="flex gap-2 pt-2 border-t border-slate-700">
               {% url 'orders:order_detail' pk=order.id as order_detail_url %}
               {% button "👁️ View Details" variant="outline" size="sm" href=order_detail_url %}
-              
+
               {% if is_staff and order.status not in "cancelled,refunded" %}
                 {% url 'orders:order_edit' pk=order.id as order_edit_url %}
                 {% button "✏️ Edit Order" variant="outline" size="sm" href=order_edit_url %}
@@ -359,7 +359,7 @@
         </div>
       {% endfor %}
     </div>
-    
+
     <!-- Pagination -->
     {% if orders.has_other_pages %}
       <div class="mt-6 lg:mt-8">
@@ -370,7 +370,7 @@
               Page {{ page_number }} of {{ num_pages }}
               {% endblocktrans %}
             </div>
-    
+
             <div class="flex justify-center sm:justify-end space-x-2">
               {% if orders.has_previous %}
                 {% if search_query or current_status %}
@@ -384,7 +384,7 @@
                   </a>
                 {% endif %}
               {% endif %}
-    
+
               {% if orders.has_next %}
                 {% if search_query or current_status %}
                   {% url 'orders:order_list' as base_url %}
@@ -402,7 +402,7 @@
         </div>
       </div>
     {% endif %}
-    
+
   {% else %}
     <!-- Empty State -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-8 lg:p-12 text-center">
@@ -423,14 +423,14 @@
           {% trans "Orders will appear here once they are created for your account." %}
         {% endif %}
       </p>
-      
+
       <!-- Action Buttons -->
       <div class="flex flex-col sm:flex-row gap-3 justify-center items-center">
         {% if is_staff and not search_query and not current_status %}
           {% url 'orders:order_create' as create_order_url %}
           {% button "📦 Create First Order" variant="primary" href=create_order_url %}
         {% endif %}
-        
+
         {% if search_query or current_status %}
           <a href="{% url 'orders:order_list' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
             🔄 {% trans "Show All Orders" %}

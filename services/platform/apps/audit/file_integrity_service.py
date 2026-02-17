@@ -19,17 +19,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import stat
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import models
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -79,7 +76,7 @@ class FileMetadata:
         }
 
     @classmethod
-    def from_path(cls, file_path: Path) -> "FileMetadata":
+    def from_path(cls, file_path: Path) -> FileMetadata:
         """Create metadata from a file path."""
         stat_info = file_path.stat()
         file_hash = cls._calculate_hash(file_path)
@@ -134,44 +131,52 @@ class FIMConfig:
     """Configuration for File Integrity Monitoring."""
 
     # Directories to monitor (relative to BASE_DIR)
-    monitored_paths: list[str] = field(default_factory=lambda: [
-        "config/settings",
-        "apps/common",
-        "apps/users",
-        "apps/audit",
-    ])
+    monitored_paths: list[str] = field(
+        default_factory=lambda: [
+            "config/settings",
+            "apps/common",
+            "apps/users",
+            "apps/audit",
+        ]
+    )
 
     # File patterns to include
-    include_patterns: list[str] = field(default_factory=lambda: [
-        "*.py",
-        "*.yml",
-        "*.yaml",
-        "*.json",
-        "*.conf",
-    ])
+    include_patterns: list[str] = field(
+        default_factory=lambda: [
+            "*.py",
+            "*.yml",
+            "*.yaml",
+            "*.json",
+            "*.conf",
+        ]
+    )
 
     # File patterns to exclude
-    exclude_patterns: list[str] = field(default_factory=lambda: [
-        "*.pyc",
-        "__pycache__/*",
-        "*.log",
-        ".git/*",
-        "migrations/*",
-    ])
+    exclude_patterns: list[str] = field(
+        default_factory=lambda: [
+            "*.pyc",
+            "__pycache__/*",
+            "*.log",
+            ".git/*",
+            "migrations/*",
+        ]
+    )
 
     # Critical files (always monitored, highest severity)
-    critical_files: list[str] = field(default_factory=lambda: [
-        "config/settings/base.py",
-        "config/settings/prod.py",
-        "apps/common/middleware.py",
-        "apps/common/security_decorators.py",
-        "apps/common/validators.py",
-        "apps/common/encryption.py",
-        "apps/common/credential_vault.py",
-        "apps/users/mfa.py",
-        "apps/users/views.py",
-        "apps/audit/services.py",
-    ])
+    critical_files: list[str] = field(
+        default_factory=lambda: [
+            "config/settings/base.py",
+            "config/settings/prod.py",
+            "apps/common/middleware.py",
+            "apps/common/security_decorators.py",
+            "apps/common/validators.py",
+            "apps/common/encryption.py",
+            "apps/common/credential_vault.py",
+            "apps/users/mfa.py",
+            "apps/users/views.py",
+            "apps/audit/services.py",
+        ]
+    )
 
     # Cache timeout for baselines (30 days)
     baseline_cache_timeout: int = 86400 * 30
@@ -247,18 +252,19 @@ class FileIntegrityMonitoringService:
                 logger.debug(f"[FIM] Baseline established: {relative_path}")
 
             except Exception as e:
-                results["errors"].append({
-                    "path": str(file_path),
-                    "error": str(e),
-                })
+                results["errors"].append(
+                    {
+                        "path": str(file_path),
+                        "error": str(e),
+                    }
+                )
                 logger.error(f"[FIM] Failed to baseline {file_path}: {e}")
 
         # Store last check time
         cache.set(LAST_CHECK_CACHE_KEY, timezone.now().isoformat())
 
         logger.info(
-            f"[FIM] Baseline established: {results['files_baselined']} files, "
-            f"{results['skipped_existing']} skipped"
+            f"[FIM] Baseline established: {results['files_baselined']} files, " f"{results['skipped_existing']} skipped"
         )
 
         return results
@@ -287,14 +293,16 @@ class FileIntegrityMonitoringService:
                     metadata = FileMetadata.from_path(file_path)
                     severity = self._get_file_severity(relative_path)
 
-                    changes.append(FileChange(
-                        path=relative_path,
-                        change_type=FileChangeType.CREATED,
-                        severity=severity,
-                        detected_at=timezone.now(),
-                        current_metadata=metadata,
-                        details={"note": "New file detected, not in baseline"},
-                    ))
+                    changes.append(
+                        FileChange(
+                            path=relative_path,
+                            change_type=FileChangeType.CREATED,
+                            severity=severity,
+                            detected_at=timezone.now(),
+                            current_metadata=metadata,
+                            details={"note": "New file detected, not in baseline"},
+                        )
+                    )
 
                     # Add to baseline
                     cache.set(
@@ -340,8 +348,7 @@ class FileIntegrityMonitoringService:
         # Log summary
         if changes:
             logger.warning(
-                f"[FIM] Integrity check found {len(changes)} changes: "
-                f"{[c.change_type.value for c in changes]}"
+                f"[FIM] Integrity check found {len(changes)} changes: " f"{[c.change_type.value for c in changes]}"
             )
         else:
             logger.info("[FIM] Integrity check completed: no changes detected")
@@ -381,12 +388,9 @@ class FileIntegrityMonitoringService:
 
     def _is_excluded(self, relative_path: str) -> bool:
         """Check if a path should be excluded."""
-        from fnmatch import fnmatch
+        from fnmatch import fnmatch  # noqa: PLC0415
 
-        for pattern in self.config.exclude_patterns:
-            if fnmatch(relative_path, pattern):
-                return True
-        return False
+        return any(fnmatch(relative_path, pattern) for pattern in self.config.exclude_patterns)
 
     def _get_file_severity(self, relative_path: str) -> FileSeverity:
         """Determine severity level for a file."""
@@ -474,13 +478,15 @@ class FileIntegrityMonitoringService:
                 if not file_path.exists():
                     cache_key = f"{BASELINE_CACHE_PREFIX}{critical_file}"
                     if cache.get(cache_key):
-                        changes.append(FileChange(
-                            path=critical_file,
-                            change_type=FileChangeType.DELETED,
-                            severity=FileSeverity.CRITICAL,
-                            detected_at=timezone.now(),
-                            details={"note": "Critical file has been deleted"},
-                        ))
+                        changes.append(
+                            FileChange(
+                                path=critical_file,
+                                change_type=FileChangeType.DELETED,
+                                severity=FileSeverity.CRITICAL,
+                                detected_at=timezone.now(),
+                                details={"note": "Critical file has been deleted"},
+                            )
+                        )
                         # Remove from baseline
                         cache.delete(cache_key)
                         logger.error(f"[FIM] Critical file deleted: {critical_file}")
@@ -535,11 +541,13 @@ class FileIntegrityMonitoringService:
 
             if not file_path.exists():
                 results["files_missing"] += 1
-                results["changes"].append({
-                    "path": critical_file,
-                    "status": "missing",
-                    "severity": "critical",
-                })
+                results["changes"].append(
+                    {
+                        "path": critical_file,
+                        "status": "missing",
+                        "severity": "critical",
+                    }
+                )
                 continue
 
             cache_key = f"{BASELINE_CACHE_PREFIX}{critical_file}"
@@ -564,13 +572,15 @@ class FileIntegrityMonitoringService:
                 results["files_ok"] += 1
             else:
                 results["files_changed"] += 1
-                results["changes"].append({
-                    "path": critical_file,
-                    "status": "modified",
-                    "severity": "critical",
-                    "previous_hash": baseline["hash"][:16] + "...",
-                    "current_hash": current_hash[:16] + "...",
-                })
+                results["changes"].append(
+                    {
+                        "path": critical_file,
+                        "status": "modified",
+                        "severity": "critical",
+                        "previous_hash": baseline["hash"][:16] + "...",
+                        "current_hash": current_hash[:16] + "...",
+                    }
+                )
 
         return results
 

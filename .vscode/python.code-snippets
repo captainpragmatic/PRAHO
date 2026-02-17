@@ -3,11 +3,11 @@
   // PRAHO PLATFORM - PYTHON CODE SNIPPETS
   // Common Django typing patterns for fast development
   // ===============================================================================
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ DJANGO ADMIN TYPING PATTERNS                                              │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Django Admin Display Method": {
     "prefix": "admin_display",
     "body": [
@@ -18,7 +18,7 @@
     ],
     "description": "Django admin display method with proper typing"
   },
-  
+
   "Django Admin Display Method with HTML": {
     "prefix": "admin_display_html",
     "body": [
@@ -30,7 +30,7 @@
     ],
     "description": "Django admin display method with HTML output and SafeString return type"
   },
-  
+
   "Django Admin Permission Method": {
     "prefix": "admin_permission",
     "body": [
@@ -41,11 +41,11 @@
     ],
     "description": "Django admin permission method with proper typing"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ DJANGO VIEW TYPING PATTERNS                                               │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Django Function-Based View": {
     "prefix": "django_view",
     "body": [
@@ -59,7 +59,7 @@
     ],
     "description": "Django function-based view with proper typing"
   },
-  
+
   "Django HTMX View": {
     "prefix": "htmx_view",
     "body": [
@@ -79,7 +79,7 @@
     ],
     "description": "Django HTMX view with conditional rendering"
   },
-  
+
   "Django JSON API View": {
     "prefix": "json_view",
     "body": [
@@ -100,11 +100,11 @@
     ],
     "description": "Django JSON API view with error handling"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ DJANGO MODEL TYPING PATTERNS                                              │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Django Model __str__ Method": {
     "prefix": "model_str",
     "body": [
@@ -115,7 +115,7 @@
     ],
     "description": "Django model __str__ method with proper typing"
   },
-  
+
   "Django Model Save Method": {
     "prefix": "model_save",
     "body": [
@@ -127,7 +127,7 @@
     ],
     "description": "Django model save method with proper typing"
   },
-  
+
   "Django Model Clean Method": {
     "prefix": "model_clean",
     "body": [
@@ -139,7 +139,7 @@
     ],
     "description": "Django model clean method with proper typing"
   },
-  
+
   "Django Model Property": {
     "prefix": "model_property",
     "body": [
@@ -151,11 +151,11 @@
     ],
     "description": "Django model property with proper typing"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ ROMANIAN BUSINESS DOMAIN PATTERNS                                         │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "CUI Validation Function": {
     "prefix": "cui_validation",
     "body": [
@@ -173,7 +173,7 @@
     ],
     "description": "Romanian CUI validation with Result pattern"
   },
-  
+
   "VAT Calculation Function": {
     "prefix": "vat_calculation",
     "body": [
@@ -192,7 +192,7 @@
     ],
     "description": "Romanian VAT calculation function"
   },
-  
+
   "Invoice Number Generator": {
     "prefix": "invoice_generator",
     "body": [
@@ -214,11 +214,11 @@
     ],
     "description": "Romanian sequential invoice number generator"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ SERVICE LAYER & RESULT PATTERNS                                           │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Service Method with Result Pattern": {
     "prefix": "service_result",
     "body": [
@@ -237,7 +237,7 @@
     ],
     "description": "Service method with Result pattern for error handling"
   },
-  
+
   "Repository Method": {
     "prefix": "repo_method",
     "body": [
@@ -251,11 +251,11 @@
     ],
     "description": "Repository method with proper return type annotation"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ FORM TYPING PATTERNS                                                      │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Django Form Clean Method": {
     "prefix": "form_clean",
     "body": [
@@ -273,7 +273,7 @@
     ],
     "description": "Django form field clean method with proper typing"
   },
-  
+
   "Django Form Save Method": {
     "prefix": "form_save",
     "body": [
@@ -291,11 +291,11 @@
     ],
     "description": "Django form save method with proper typing"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ COMMON TYPE IMPORTS                                                       │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Import Django Types": {
     "prefix": "import_django",
     "body": [
@@ -307,7 +307,7 @@
     ],
     "description": "Common Django type imports"
   },
-  
+
   "Import PRAHO Common Types": {
     "prefix": "import_praho",
     "body": [
@@ -321,7 +321,7 @@
     ],
     "description": "Import PRAHO Platform common types"
   },
-  
+
   "Import Typing Essentials": {
     "prefix": "import_typing",
     "body": [
@@ -334,11 +334,11 @@
     ],
     "description": "Essential typing imports with TYPE_CHECKING block"
   },
-  
+
   // ┌─────────────────────────────────────────────────────────────────────────┐
   // │ TESTING PATTERNS                                                          │
   // └─────────────────────────────────────────────────────────────────────────┘
-  
+
   "Django Test Method": {
     "prefix": "test_method",
     "body": [
@@ -356,7 +356,7 @@
     ],
     "description": "Django test method with AAA pattern and proper typing"
   },
-  
+
   "Django Test Setup": {
     "prefix": "test_setup",
     "body": [

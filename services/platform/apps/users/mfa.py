@@ -524,7 +524,7 @@ class WebAuthnService:
         return options
 
     @staticmethod
-    def verify_authentication(user: "User", authentication_data: dict[str, Any]) -> bool:
+    def verify_authentication(user: "User", authentication_data: dict[str, Any]) -> bool:  # noqa: PLR0911
         """
         Verify WebAuthn authentication
 

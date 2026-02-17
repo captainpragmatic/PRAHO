@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
+from http import HTTPStatus
 from typing import Any, ClassVar
 from urllib.parse import urlencode
 
@@ -143,7 +144,7 @@ class UploadResponse:
         except json.JSONDecodeError:
             data = {"raw_text": response.text}
 
-        if response.status_code == 200:
+        if response.status_code == HTTPStatus.OK:
             return cls(
                 success=True,
                 upload_index=data.get("index_incarcare", ""),
@@ -252,25 +253,20 @@ class EFacturaClientError(Exception):
     """Base exception for e-Factura client errors."""
 
 
-
 class AuthenticationError(EFacturaClientError):
     """Authentication failed."""
-
 
 
 class NetworkError(EFacturaClientError):
     """Network communication failed."""
 
 
-
 class ValidationError(EFacturaClientError):
     """XML validation failed."""
 
 
-
 class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
-
 
 
 class EFacturaClient:
@@ -303,10 +299,12 @@ class EFacturaClient:
         """Get or create HTTP session."""
         if self._session is None:
             self._session = requests.Session()
-            self._session.headers.update({
-                "Accept": "application/json",
-                "User-Agent": "PRAHO-EFactura/1.0",
-            })
+            self._session.headers.update(
+                {
+                    "Accept": "application/json",
+                    "User-Agent": "PRAHO-EFactura/1.0",
+                }
+            )
         return self._session
 
     def close(self) -> None:
@@ -436,9 +434,7 @@ class EFacturaClient:
         if manual_token:
             return manual_token
 
-        raise AuthenticationError(
-            "No valid access token. User must complete OAuth2 authorization flow."
-        )
+        raise AuthenticationError("No valid access token. User must complete OAuth2 authorization flow.")
 
     def _cache_token(self, token: TokenResponse) -> None:
         """Cache token with expiration."""
@@ -594,7 +590,7 @@ class EFacturaClient:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
 
-            if response.status_code == 200:
+            if response.status_code == HTTPStatus.OK:
                 logger.info(f"e-Factura response downloaded: {download_id}")
                 return response.content
             else:
@@ -719,7 +715,7 @@ class EFacturaClient:
                 },
             )
 
-            if response.status_code == 200:
+            if response.status_code == HTTPStatus.OK:
                 return response.content
             else:
                 raise NetworkError(f"PDF conversion failed with status {response.status_code}")
@@ -747,7 +743,7 @@ class EFacturaClient:
                 response = self.session.request(method, url, **kwargs)
 
                 # Check for rate limiting
-                if response.status_code == 429:
+                if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
                     retry_after = int(response.headers.get("Retry-After", 60))
                     logger.warning(f"Rate limited, waiting {retry_after}s")
                     time.sleep(retry_after)

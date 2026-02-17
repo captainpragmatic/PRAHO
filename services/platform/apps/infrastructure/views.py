@@ -20,7 +20,6 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from apps.common.credential_vault import get_credential_vault
 from apps.settings.services import SettingsService
 
-from .audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from .forms import (
     CloudProviderForm,
     DeploymentDestroyForm,
@@ -33,16 +32,9 @@ from .models import (
     NodeDeploymentLog,
     NodeRegion,
     NodeSize,
-    PanelType,
 )
 from .permissions import (
-    can_deploy_nodes,
-    can_destroy_nodes,
     can_manage_deployments,
-    can_manage_providers,
-    can_manage_regions,
-    can_manage_sizes,
-    can_view_infrastructure,
     require_deploy_permission,
     require_deployment_management,
     require_destroy_permission,
@@ -126,9 +118,7 @@ def deployment_dashboard(request: HttpRequest) -> HttpResponse:
     ).order_by("-created_at")[:5]
 
     # Provider statistics
-    providers = CloudProvider.objects.filter(is_active=True).annotate(
-        deployment_count=models.Count("deployments")
-    )
+    providers = CloudProvider.objects.filter(is_active=True).annotate(deployment_count=models.Count("deployments"))
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -202,7 +192,9 @@ def deployment_list(request: HttpRequest) -> HttpResponse:
             "node_type": deployment.get_node_type_display(),
             "node_type_code": deployment.node_type,
             "provider": deployment.provider.name if deployment.provider else "N/A",
-            "region": f"{deployment.region.country_code.upper()} / {deployment.region.normalized_code}" if deployment.region else "N/A",
+            "region": f"{deployment.region.country_code.upper()} / {deployment.region.normalized_code}"
+            if deployment.region
+            else "N/A",
             "status": {
                 "text": deployment.get_status_display(),
                 "variant": _get_status_variant(deployment.status),
@@ -355,7 +347,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_infrastructure_view
-def deployment_detail(request: HttpRequest, pk) -> HttpResponse:
+def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """Deployment detail view with logs and actions."""
 
     deployment = get_object_or_404(
@@ -402,7 +394,8 @@ def deployment_detail(request: HttpRequest, pk) -> HttpResponse:
         "can_retry": deployment.status == "failed",
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
         "can_manage": can_manage_deployments(request.user),
-        "is_in_progress": deployment.status in (
+        "is_in_progress": deployment.status
+        in (
             "pending",
             "provisioning_node",
             "configuring_dns",
@@ -418,7 +411,7 @@ def deployment_detail(request: HttpRequest, pk) -> HttpResponse:
 
 @login_required
 @require_infrastructure_view
-def deployment_logs(request: HttpRequest, pk) -> HttpResponse:
+def deployment_logs(request: HttpRequest, pk: int) -> HttpResponse:
     """Full deployment logs view."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -445,7 +438,7 @@ def deployment_logs(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deploy_permission
 @require_POST
-def deployment_retry(request: HttpRequest, pk) -> HttpResponse:
+def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
     """Retry a failed deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -480,7 +473,7 @@ def deployment_retry(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_destroy_permission
 @require_http_methods(["GET", "POST"])
-def deployment_destroy(request: HttpRequest, pk) -> HttpResponse:
+def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
     """Destroy a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -510,7 +503,9 @@ def deployment_destroy(request: HttpRequest, pk) -> HttpResponse:
             )
 
             messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
-            logger.info(f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")
+            logger.info(
+                f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}"
+            )
 
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
     else:
@@ -544,7 +539,7 @@ def deployment_destroy(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_http_methods(["GET", "POST"])
-def deployment_upgrade(request: HttpRequest, pk) -> HttpResponse:
+def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
     """Upgrade a deployment to a new size."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -554,10 +549,14 @@ def deployment_upgrade(request: HttpRequest, pk) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get available sizes for this provider (larger than current)
-    available_sizes = NodeSize.objects.filter(
-        provider=deployment.provider,
-        is_active=True,
-    ).exclude(id=deployment.node_size_id).order_by("monthly_cost_eur")
+    available_sizes = (
+        NodeSize.objects.filter(
+            provider=deployment.provider,
+            is_active=True,
+        )
+        .exclude(id=deployment.node_size_id)
+        .order_by("monthly_cost_eur")
+    )
 
     if request.method == "POST":
         new_size_id = request.POST.get("new_size")
@@ -620,7 +619,7 @@ def deployment_upgrade(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
-def deployment_stop(request: HttpRequest, pk) -> HttpResponse:
+def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
     """Stop (power off) a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -652,7 +651,7 @@ def deployment_stop(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
-def deployment_start(request: HttpRequest, pk) -> HttpResponse:
+def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
     """Start (power on) a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -684,7 +683,7 @@ def deployment_start(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
-def deployment_reboot(request: HttpRequest, pk) -> HttpResponse:
+def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
     """Reboot a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -716,7 +715,7 @@ def deployment_reboot(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_http_methods(["GET", "POST"])
-def deployment_maintenance(request: HttpRequest, pk) -> HttpResponse:
+def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
     """Run maintenance tasks on a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -729,7 +728,11 @@ def deployment_maintenance(request: HttpRequest, pk) -> HttpResponse:
     playbook_options = [
         {"id": "update", "name": "System Update", "description": "Update system packages and security patches"},
         {"id": "security", "name": "Security Hardening", "description": "Apply security hardening configurations"},
-        {"id": "ssl_renew", "name": "SSL Certificate Renewal", "description": "Renew SSL certificates via Let's Encrypt"},
+        {
+            "id": "ssl_renew",
+            "name": "SSL Certificate Renewal",
+            "description": "Renew SSL certificates via Let's Encrypt",
+        },
         {"id": "backup", "name": "Backup Now", "description": "Trigger immediate backup"},
         {"id": "cleanup", "name": "Disk Cleanup", "description": "Clean up temporary files and logs"},
     ]
@@ -786,7 +789,7 @@ def deployment_maintenance(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_infrastructure_view
 @require_GET
-def deployment_status_partial(request: HttpRequest, pk) -> HttpResponse:
+def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
     """HTMX partial for deployment status updates."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -809,7 +812,8 @@ def deployment_status_partial(request: HttpRequest, pk) -> HttpResponse:
         "progress_percentage": progress_stages.get(deployment.status, 0),
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "is_in_progress": deployment.status in (
+        "is_in_progress": deployment.status
+        in (
             "pending",
             "provisioning_node",
             "configuring_dns",
@@ -826,7 +830,7 @@ def deployment_status_partial(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_infrastructure_view
 @require_GET
-def deployment_logs_partial(request: HttpRequest, pk) -> HttpResponse:
+def deployment_logs_partial(request: HttpRequest, pk: int) -> HttpResponse:
     """HTMX partial for deployment logs."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -874,18 +878,20 @@ def hostname_preview_api(request: HttpRequest) -> JsonResponse:
         dns_zone = SettingsService.get_setting("node_deployment.dns_default_zone", "")
         fqdn = f"{hostname}.{dns_zone}" if dns_zone else hostname
 
-        return JsonResponse({
-            "hostname": hostname,
-            "fqdn": fqdn,
-            "next_number": next_number,
-        })
+        return JsonResponse(
+            {
+                "hostname": hostname,
+                "fqdn": fqdn,
+                "next_number": next_number,
+            }
+        )
 
     except (CloudProvider.DoesNotExist, NodeRegion.DoesNotExist) as e:
         return JsonResponse({"hostname": "---", "error": str(e)})
 
 
 # ===============================================================================
-# CONFIGURATION: PROVIDERS
+# CONFIGURATION: PROVIDERS  # noqa: ERA001
 # ===============================================================================
 
 
@@ -959,7 +965,7 @@ def provider_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_provider_management
-def provider_edit(request: HttpRequest, pk) -> HttpResponse:
+def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit cloud provider."""
 
     provider = get_object_or_404(CloudProvider, id=pk)
@@ -1002,7 +1008,7 @@ def provider_edit(request: HttpRequest, pk) -> HttpResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: SIZES
+# CONFIGURATION: SIZES  # noqa: ERA001
 # ===============================================================================
 
 
@@ -1063,7 +1069,7 @@ def size_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_size_management
-def size_edit(request: HttpRequest, pk) -> HttpResponse:
+def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit node size."""
 
     size = get_object_or_404(NodeSize, id=pk)
@@ -1097,7 +1103,7 @@ def size_edit(request: HttpRequest, pk) -> HttpResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: REGIONS
+# CONFIGURATION: REGIONS  # noqa: ERA001
 # ===============================================================================
 
 
@@ -1134,7 +1140,7 @@ def region_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_region_management
 @require_POST
-def region_toggle(request: HttpRequest, pk) -> HttpResponse:
+def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     """Toggle region active status."""
 
     region = get_object_or_404(NodeRegion, id=pk)
@@ -1160,10 +1166,10 @@ def region_toggle(request: HttpRequest, pk) -> HttpResponse:
 @require_infrastructure_view
 def cost_dashboard(request: HttpRequest) -> HttpResponse:
     """Cost tracking dashboard with summary and trends."""
-    from datetime import datetime
-    from decimal import Decimal
+    from datetime import datetime  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     service = get_cost_tracking_service()
 
@@ -1181,9 +1187,7 @@ def cost_dashboard(request: HttpRequest) -> HttpResponse:
     # Calculate month-over-month change
     if prev_month_summary.total_eur > 0:
         mom_change = (
-            (current_month_summary.total_eur - prev_month_summary.total_eur)
-            / prev_month_summary.total_eur
-            * 100
+            (current_month_summary.total_eur - prev_month_summary.total_eur) / prev_month_summary.total_eur * 100
         )
     else:
         mom_change = Decimal("0")
@@ -1233,10 +1237,9 @@ def cost_dashboard(request: HttpRequest) -> HttpResponse:
 @require_infrastructure_view
 def cost_history(request: HttpRequest) -> HttpResponse:
     """Monthly cost history view."""
-    from calendar import month_name
-    from datetime import datetime
+    from calendar import month_name  # noqa: PLC0415
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     service = get_cost_tracking_service()
     now = timezone.now()
@@ -1252,12 +1255,14 @@ def cost_history(request: HttpRequest) -> HttpResponse:
             month = 12 + (now.month - i)
 
         summary = service.get_monthly_summary(year, month)
-        history.append({
-            "year": year,
-            "month": month,
-            "month_name": month_name[month],
-            "summary": summary,
-        })
+        history.append(
+            {
+                "year": year,
+                "month": month,
+                "month_name": month_name[month],
+                "summary": summary,
+            }
+        )
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -1280,7 +1285,7 @@ def cost_history(request: HttpRequest) -> HttpResponse:
 @require_GET
 def cost_api_summary(request: HttpRequest) -> JsonResponse:
     """API endpoint for cost summary data."""
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
     year = request.GET.get("year")
     month = request.GET.get("month")
@@ -1296,12 +1301,14 @@ def cost_api_summary(request: HttpRequest) -> JsonResponse:
     service = get_cost_tracking_service()
     summary = service.get_monthly_summary(year, month)
 
-    return JsonResponse({
-        "year": year,
-        "month": month,
-        "total_eur": str(summary.total_eur),
-        "compute_eur": str(summary.compute_eur),
-        "bandwidth_eur": str(summary.bandwidth_eur),
-        "storage_eur": str(summary.storage_eur),
-        "node_count": summary.node_count,
-    })
+    return JsonResponse(
+        {
+            "year": year,
+            "month": month,
+            "total_eur": str(summary.total_eur),
+            "compute_eur": str(summary.compute_eur),
+            "bandwidth_eur": str(summary.bandwidth_eur),
+            "storage_eur": str(summary.storage_eur),
+            "node_count": summary.node_count,
+        }
+    )

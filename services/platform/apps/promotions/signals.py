@@ -22,7 +22,6 @@ from .models import (
     GiftCard,
     GiftCardTransaction,
     LoyaltyProgram,
-    LoyaltyTier,
     LoyaltyTransaction,
     PromotionCampaign,
     PromotionRule,
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 
-def create_audit_event(
+def create_audit_event(  # noqa: PLR0913
     action: str,
     instance: Any,
     category: str = "business_operation",
@@ -69,9 +68,9 @@ def create_audit_event(
 
 def _serialize_value(value: Any) -> Any:
     """Serialize a value for JSON storage in audit events."""
-    from datetime import date, datetime
-    from decimal import Decimal
-    from uuid import UUID
+    from datetime import date, datetime  # noqa: PLC0415
+    from decimal import Decimal  # noqa: PLC0415
+    from uuid import UUID  # noqa: PLC0415
 
     if value is None:
         return None
@@ -233,9 +232,8 @@ def coupon_post_save(
         )
         if old_values:
             severity = "low"
-            if "status" in new_values:
-                if new_values["status"] == "cancelled":
-                    severity = "medium"
+            if "status" in new_values and new_values["status"] == "cancelled":
+                severity = "medium"
 
             create_audit_event(
                 action="coupon_updated",
@@ -331,7 +329,9 @@ def redemption_post_save(
             elif instance.status == "reversed":
                 action = "coupon_redemption_reversed"
                 severity = "medium"
-                description = f"Coupon '{instance.coupon.code}' redemption reversed on order {instance.order.order_number}"
+                description = (
+                    f"Coupon '{instance.coupon.code}' redemption reversed on order {instance.order.order_number}"
+                )
             else:
                 description = f"Coupon redemption status changed to {instance.status}"
 

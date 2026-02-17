@@ -23,7 +23,6 @@ from .models import (
     LoyaltyProgram,
     LoyaltyTier,
     LoyaltyTransaction,
-    PromotionCampaign,
     PromotionRule,
     Referral,
     ReferralCode,
@@ -41,7 +40,20 @@ logger = logging.getLogger(__name__)
 # Constants
 # ===============================================================================
 
-MAX_CODE_GENERATION_ATTEMPTS = 100  # Prevent infinite loops in code generation (structural safety limit)
+_DEFAULT_MAX_CODE_GENERATION_ATTEMPTS = 100  # Prevent infinite loops in code generation (structural safety limit)
+MAX_CODE_GENERATION_ATTEMPTS = _DEFAULT_MAX_CODE_GENERATION_ATTEMPTS
+
+
+def get_max_code_generation_attempts() -> int:
+    """Get max code generation attempts from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "promotions.max_code_generation_attempts", _DEFAULT_MAX_CODE_GENERATION_ATTEMPTS
+    )
+
+
+COUPON_EXPIRY_WARNING_DAYS = 3
 
 
 # ===============================================================================
@@ -136,9 +148,7 @@ class CouponService:
         """Get coupon by code (case-insensitive)."""
         normalized_code = cls.normalize_code(code)
         try:
-            return Coupon.objects.select_related("campaign", "currency", "assigned_customer").get(
-                code=normalized_code
-            )
+            return Coupon.objects.select_related("campaign", "currency", "assigned_customer").get(code=normalized_code)
         except Coupon.DoesNotExist:
             return None
 
@@ -172,7 +182,7 @@ class CouponService:
         return cls._validate_coupon_instance(coupon, order, customer, cached_items)
 
     @classmethod
-    def _validate_coupon_instance(
+    def _validate_coupon_instance(  # noqa: C901, PLR0911, PLR0912
         cls,
         coupon: Coupon,
         order: Order,
@@ -216,13 +226,12 @@ class CouponService:
             )
 
         # Minimum items check
-        if coupon.min_order_items:
-            if len(cached_items) < coupon.min_order_items:
-                return ValidationResult(
-                    is_valid=False,
-                    error_message=f"Minimum {coupon.min_order_items} items required",
-                    error_code="MIN_ITEMS_NOT_MET",
-                )
+        if coupon.min_order_items and len(cached_items) < coupon.min_order_items:
+            return ValidationResult(
+                is_valid=False,
+                error_message=f"Minimum {coupon.min_order_items} items required",
+                error_code="MIN_ITEMS_NOT_MET",
+            )
 
         # Product restrictions check
         if not coupon.applies_to_all_products:
@@ -235,13 +244,17 @@ class CouponService:
                 )
 
         # Currency check for fixed discounts
-        if coupon.discount_type == "fixed" and coupon.currency:
-            if order.currency and order.currency.code != coupon.currency.code:
-                return ValidationResult(
-                    is_valid=False,
-                    error_message=f"Coupon only valid for {coupon.currency.code} orders",
-                    error_code="CURRENCY_MISMATCH",
-                )
+        if (
+            coupon.discount_type == "fixed"
+            and coupon.currency
+            and order.currency
+            and order.currency.code != coupon.currency.code
+        ):
+            return ValidationResult(
+                is_valid=False,
+                error_message=f"Coupon only valid for {coupon.currency.code} orders",
+                error_code="CURRENCY_MISMATCH",
+            )
 
         # Check if already applied to this order
         if CouponRedemption.objects.filter(coupon=coupon, order=order).exists():
@@ -296,7 +309,7 @@ class CouponService:
         warnings = []
         if coupon.valid_until:
             days_left = (coupon.valid_until - timezone.now()).days
-            if days_left <= 3:
+            if days_left <= COUPON_EXPIRY_WARNING_DAYS:
                 warnings.append(f"Coupon expires in {days_left} day(s)")
 
         return ValidationResult(is_valid=True, warnings=warnings or None)
@@ -372,10 +385,7 @@ class CouponService:
             return DiscountResult()
 
         # Calculate base amount to apply discount to
-        base_amount_cents = sum(
-            item.quantity * item.unit_price_cents + item.setup_cents
-            for item in items
-        )
+        base_amount_cents = sum(item.quantity * item.unit_price_cents + item.setup_cents for item in items)
 
         discount_cents = 0
         discount_description = ""
@@ -458,7 +468,7 @@ class CouponService:
 
     @classmethod
     @transaction.atomic
-    def apply_coupon(
+    def apply_coupon(  # noqa: PLR0913
         cls,
         code: str,
         order: Order,
@@ -638,19 +648,14 @@ class CouponService:
             is_active=True,
             status="active",
             valid_from__lte=now,
-        ).filter(
-            models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now)
-        )
+        ).filter(models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now))
 
         if not include_private:
             queryset = queryset.filter(is_public=True)
 
         # Include personal coupons for this customer
         if customer:
-            queryset = queryset.filter(
-                models.Q(assigned_customer__isnull=True) |
-                models.Q(assigned_customer=customer)
-            )
+            queryset = queryset.filter(models.Q(assigned_customer__isnull=True) | models.Q(assigned_customer=customer))
         else:
             queryset = queryset.filter(assigned_customer__isnull=True)
 
@@ -702,17 +707,17 @@ class PromotionRuleService:
         if cached_items is None:
             cached_items = list(order.items.select_related("product").all())
 
-        queryset = PromotionRule.objects.filter(
-            is_active=True,
-            valid_from__lte=now,
-        ).filter(
-            models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now)
-        ).select_related("campaign", "currency").order_by("priority")
+        queryset = (
+            PromotionRule.objects.filter(
+                is_active=True,
+                valid_from__lte=now,
+            )
+            .filter(models.Q(valid_until__isnull=True) | models.Q(valid_until__gte=now))
+            .select_related("campaign", "currency")
+            .order_by("priority")
+        )
 
-        applicable = []
-        for rule in queryset:
-            if cls._rule_matches_order(rule, order, cached_items):
-                applicable.append(rule)
+        applicable = [rule for rule in queryset if cls._rule_matches_order(rule, order, cached_items)]
 
         return applicable
 
@@ -750,9 +755,8 @@ class PromotionRuleService:
 
         # Customer type
         customer_types = conditions.get("customer_types")
-        if customer_types and order.customer:
-            if order.customer.customer_type not in customer_types:
-                return False
+        if customer_types and order.customer and order.customer.customer_type not in customer_types:
+            return False
 
         # Product type requirements - use cached items
         required_product_types = conditions.get("required_product_types")
@@ -789,10 +793,7 @@ class PromotionRuleService:
         if not items:
             return DiscountResult()
 
-        base_amount_cents = sum(
-            item.quantity * item.unit_price_cents + item.setup_cents
-            for item in items
-        )
+        base_amount_cents = sum(item.quantity * item.unit_price_cents + item.setup_cents for item in items)
 
         discount_cents = 0
         breakdown: dict[str, Any] = {}
@@ -807,9 +808,7 @@ class PromotionRuleService:
             breakdown = {"type": "fixed", "amount": discount_cents}
 
         elif rule.discount_type in ("tiered_percent", "tiered_fixed"):
-            discount_cents = cls._calculate_tiered_discount(
-                rule, cached_items, base_amount_cents
-            )
+            discount_cents = cls._calculate_tiered_discount(rule, cached_items, base_amount_cents)
             breakdown = {"type": "tiered", "tiers": rule.tiers}
 
         # Apply cap
@@ -890,10 +889,9 @@ class PromotionRuleService:
                 if base_amount_cents >= threshold:
                     applicable_tier = tier
                     break
-            elif threshold_type == "quantity":
-                if total_quantity >= threshold:
-                    applicable_tier = tier
-                    break
+            elif threshold_type == "quantity" and total_quantity >= threshold:
+                applicable_tier = tier
+                break
 
         if not applicable_tier:
             return 0
@@ -1086,9 +1084,7 @@ class ReferralService:
         )
 
         # Update referral code stats atomically to prevent race conditions
-        ReferralCode.objects.filter(pk=referral_code.pk).update(
-            total_referrals=F("total_referrals") + 1
-        )
+        ReferralCode.objects.filter(pk=referral_code.pk).update(total_referrals=F("total_referrals") + 1)
         referral_code.refresh_from_db()
 
         return referral
@@ -1162,7 +1158,7 @@ class LoyaltyService:
         program: LoyaltyProgram | None = None,
     ) -> CustomerLoyalty:
         """Get or create loyalty membership for a customer."""
-        from .models import LoyaltyProgram
+        from .models import LoyaltyProgram  # noqa: PLC0415
 
         if program is None:
             program = LoyaltyProgram.objects.filter(is_active=True).first()
@@ -1184,12 +1180,15 @@ class LoyaltyService:
     @classmethod
     def _assign_initial_tier(cls, membership: CustomerLoyalty) -> None:
         """Assign initial tier to new member."""
-        from .models import LoyaltyTier
 
-        initial_tier = LoyaltyTier.objects.filter(
-            program=membership.program,
-            min_points_lifetime=0,
-        ).order_by("sort_order").first()
+        initial_tier = (
+            LoyaltyTier.objects.filter(
+                program=membership.program,
+                min_points_lifetime=0,
+            )
+            .order_by("sort_order")
+            .first()
+        )
 
         if initial_tier:
             membership.current_tier = initial_tier
@@ -1258,8 +1257,7 @@ class LoyaltyService:
         program = membership.program
 
         # Validate points
-        if points > membership.points_balance:
-            points = membership.points_balance
+        points = min(points, membership.points_balance)
 
         if points < program.min_points_to_redeem:
             return DiscountResult()
@@ -1303,15 +1301,18 @@ class LoyaltyService:
     @classmethod
     def _check_tier_upgrade(cls, membership: CustomerLoyalty) -> None:
         """Check and apply tier upgrade if eligible."""
-        from .models import LoyaltyTier
 
         current_tier_order = membership.current_tier.sort_order if membership.current_tier else -1
 
-        eligible_tier = LoyaltyTier.objects.filter(
-            program=membership.program,
-            min_points_lifetime__lte=membership.points_lifetime,
-            sort_order__gt=current_tier_order,
-        ).order_by("-sort_order").first()
+        eligible_tier = (
+            LoyaltyTier.objects.filter(
+                program=membership.program,
+                min_points_lifetime__lte=membership.points_lifetime,
+                sort_order__gt=current_tier_order,
+            )
+            .order_by("-sort_order")
+            .first()
+        )
 
         if eligible_tier:
             membership.current_tier = eligible_tier

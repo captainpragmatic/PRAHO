@@ -27,6 +27,16 @@ from apps.audit.compliance import (
 )
 from apps.audit.siem import SIEMFormat, get_siem_service
 
+_DEFAULT_MAX_VIOLATIONS_DISPLAYED = 10
+MAX_VIOLATIONS_DISPLAYED = _DEFAULT_MAX_VIOLATIONS_DISPLAYED
+
+
+def get_max_violations_displayed() -> int:
+    """Get max violations displayed from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("audit.max_violations_displayed", _DEFAULT_MAX_VIOLATIONS_DISPLAYED)
+
 
 class Command(BaseCommand):
     help = "Audit and compliance management operations"
@@ -35,10 +45,7 @@ class Command(BaseCommand):
         subparsers = parser.add_subparsers(dest="subcommand", help="Sub-commands")
 
         # Generate report command
-        report_parser = subparsers.add_parser(
-            "report",
-            help="Generate compliance reports"
-        )
+        report_parser = subparsers.add_parser("report", help="Generate compliance reports")
         report_parser.add_argument(
             "--type",
             choices=[rt.value for rt in ReportType],
@@ -68,10 +75,7 @@ class Command(BaseCommand):
         )
 
         # Verify integrity command
-        verify_parser = subparsers.add_parser(
-            "verify-integrity",
-            help="Verify audit log integrity"
-        )
+        verify_parser = subparsers.add_parser("verify-integrity", help="Verify audit log integrity")
         verify_parser.add_argument(
             "--days",
             type=int,
@@ -85,10 +89,7 @@ class Command(BaseCommand):
         )
 
         # Apply retention policies command
-        retention_parser = subparsers.add_parser(
-            "apply-retention",
-            help="Apply log retention policies"
-        )
+        retention_parser = subparsers.add_parser("apply-retention", help="Apply log retention policies")
         retention_parser.add_argument(
             "--dry-run",
             action="store_true",
@@ -100,10 +101,7 @@ class Command(BaseCommand):
         )
 
         # Check retention status command
-        status_parser = subparsers.add_parser(
-            "retention-status",
-            help="Check log retention status"
-        )
+        status_parser = subparsers.add_parser("retention-status", help="Check log retention status")
         status_parser.add_argument(
             "--json",
             action="store_true",
@@ -111,10 +109,7 @@ class Command(BaseCommand):
         )
 
         # Export to SIEM command
-        export_parser = subparsers.add_parser(
-            "export-siem",
-            help="Export audit logs for SIEM ingestion"
-        )
+        export_parser = subparsers.add_parser("export-siem", help="Export audit logs for SIEM ingestion")
         export_parser.add_argument(
             "--days",
             type=int,
@@ -140,10 +135,7 @@ class Command(BaseCommand):
         )
 
         # Compliance check command
-        check_parser = subparsers.add_parser(
-            "check",
-            help="Run compliance checks"
-        )
+        check_parser = subparsers.add_parser("check", help="Run compliance checks")
         check_parser.add_argument(
             "--framework",
             choices=[cf.value for cf in ComplianceFramework],
@@ -222,12 +214,12 @@ class Command(BaseCommand):
         if report.violations:
             self.stdout.write("")
             self.stdout.write(self.style.WARNING("VIOLATIONS:"))
-            for v in report.violations[:10]:  # Show first 10
+            for v in report.violations[:MAX_VIOLATIONS_DISPLAYED]:  # Show first 10
                 severity_style = self._get_severity_style(v.severity)
                 self.stdout.write(f"  [{severity_style}] {v.framework} {v.control_id}: {v.description}")
 
-            if len(report.violations) > 10:
-                self.stdout.write(f"  ... and {len(report.violations) - 10} more")
+            if len(report.violations) > MAX_VIOLATIONS_DISPLAYED:
+                self.stdout.write(f"  ... and {len(report.violations) - MAX_VIOLATIONS_DISPLAYED} more")
 
     def handle_verify_integrity(self, options: dict[str, Any]) -> None:
         """Verify audit log integrity"""
@@ -301,10 +293,7 @@ class Command(BaseCommand):
         self.stdout.write("")
 
         for category, info in status.items():
-            status_color = (
-                self.style.SUCCESS if info["compliance_status"] == "compliant"
-                else self.style.WARNING
-            )
+            status_color = self.style.SUCCESS if info["compliance_status"] == "compliant" else self.style.WARNING
             self.stdout.write(f"{category.upper()}")
             self.stdout.write(f"  Retention: {info['retention_days']} days")
             self.stdout.write(f"  Action: {info['action']}")
@@ -316,8 +305,8 @@ class Command(BaseCommand):
 
     def handle_export_siem(self, options: dict[str, Any]) -> None:
         """Export audit logs for SIEM"""
-        from apps.audit.models import AuditEvent
-        from apps.audit.siem import (
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.audit.siem import (  # noqa: PLC0415
             CEFFormatter,
             JSONFormatter,
             LEEFFormatter,
@@ -343,10 +332,7 @@ class Command(BaseCommand):
         ).select_related("user", "content_type")
 
         # Filter by severity
-        events = [
-            e for e in events
-            if severity_order.index(e.severity) >= min_severity_idx
-        ]
+        events = [e for e in events if severity_order.index(e.severity) >= min_severity_idx]
 
         # Get formatter
         formatters = {

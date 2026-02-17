@@ -41,9 +41,7 @@ class PaymentService:
 
     @staticmethod
     def create_payment_intent(
-        order_id: str,
-        gateway: str = 'stripe',
-        metadata: dict[str, Any] | None = None
+        order_id: str, gateway: str = "stripe", metadata: dict[str, Any] | None = None
     ) -> PaymentIntentResult:
         """
         Create payment intent for order
@@ -58,35 +56,34 @@ class PaymentService:
         """
         try:
             # Get order details
-            order = Order.objects.select_related('customer').get(id=order_id)
+            order = Order.objects.select_related("customer").get(id=order_id)
 
             # Calculate total amount in cents (Romanian VAT included)
             amount_cents = order.total_cents
-            currency = order.currency or 'RON'
+            currency = order.currency or "RON"
 
-            logger.info(f"💳 Creating payment intent for order {order.order_number} "
-                       f"({amount_cents} {currency}) via {gateway}")
+            logger.info(
+                f"💳 Creating payment intent for order {order.order_number} "
+                f"({amount_cents} {currency}) via {gateway}"
+            )
 
             # Get payment gateway
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
 
             # Prepare metadata
             payment_metadata = {
-                'order_number': order.order_number,
-                'customer_id': str(order.customer.id),
-                'platform': 'PRAHO',
-                **(metadata or {})
+                "order_number": order.order_number,
+                "customer_id": str(order.customer.id),
+                "platform": "PRAHO",
+                **(metadata or {}),
             }
 
             # Create payment intent
             result = payment_gateway.create_payment_intent(
-                order_id=str(order.id),
-                amount_cents=amount_cents,
-                currency=currency,
-                metadata=payment_metadata
+                order_id=str(order.id), amount_cents=amount_cents, currency=currency, metadata=payment_metadata
             )
 
-            if result.get('success', False):
+            if result.get("success", False):
                 # Create Payment record with pending status
                 with transaction.atomic():
                     # Get or create currency object
@@ -95,14 +92,14 @@ class PaymentService:
                         currency_obj, _ = Currency.objects.get_or_create(
                             code=currency.upper(),
                             defaults={
-                                'name': currency.upper(),
-                                'symbol': 'RON' if currency.upper() == 'RON' else currency.upper(),
-                                'decimals': 2
-                            }
+                                "name": currency.upper(),
+                                "symbol": "RON" if currency.upper() == "RON" else currency.upper(),
+                                "decimals": 2,
+                            },
                         )
 
-                    payment_intent_id = result.get('payment_intent_id', '')
-                    client_secret = result.get('client_secret', '')
+                    payment_intent_id = result.get("payment_intent_id", "")
+                    client_secret = result.get("client_secret", "")
 
                     payment = Payment.objects.create(
                         invoice=None,  # Will be linked when order is processed
@@ -110,15 +107,15 @@ class PaymentService:
                         payment_method=gateway,
                         amount_cents=amount_cents,
                         currency=currency_obj,
-                        status='pending',
+                        status="pending",
                         gateway_txn_id=payment_intent_id,
                         meta={
-                            'payment_intent_id': payment_intent_id,
-                            'client_secret': client_secret,
-                            'order_id': str(order.id),
-                            'gateway': gateway,
-                            **payment_metadata
-                        }
+                            "payment_intent_id": payment_intent_id,
+                            "client_secret": client_secret,
+                            "order_id": str(order.id),
+                            "gateway": gateway,
+                            **payment_metadata,
+                        },
                     )
 
                 logger.info(f"✅ Created payment {payment.id} for order {order.order_number}")
@@ -141,29 +138,23 @@ class PaymentService:
         except Order.DoesNotExist:
             logger.error(f"❌ Order {order_id} not found")
             return PaymentIntentResult(
-                success=False,
-                payment_intent_id='',
-                client_secret=None,
-                error=f"Order {order_id} not found"
+                success=False, payment_intent_id="", client_secret=None, error=f"Order {order_id} not found"
             )
         except Exception as e:
             logger.error(f"🔥 Error creating payment intent: {e}")
             return PaymentIntentResult(
-                success=False,
-                payment_intent_id='',
-                client_secret=None,
-                error=f"Payment creation failed: {e}"
+                success=False, payment_intent_id="", client_secret=None, error=f"Payment creation failed: {e}"
             )
 
     @staticmethod
-    def create_payment_intent_direct(
+    def create_payment_intent_direct(  # noqa: PLR0913
         order_id: str,
         amount_cents: int,
-        currency: str = 'RON',
+        currency: str = "RON",
         customer_id: str | int | None = None,
         order_number: str | None = None,
-        gateway: str = 'stripe',
-        metadata: dict[str, Any] | None = None
+        gateway: str = "stripe",
+        metadata: dict[str, Any] | None = None,
     ) -> PaymentIntentResult:
         """
         Create payment intent with direct order details (for cross-service calls)
@@ -181,37 +172,38 @@ class PaymentService:
             PaymentIntentResult with client_secret for frontend integration
         """
         try:
-            logger.info(f"💳 Creating payment intent for Portal order {order_id} "
-                       f"({amount_cents} {currency}) via {gateway}")
+            logger.info(
+                f"💳 Creating payment intent for Portal order {order_id} " f"({amount_cents} {currency}) via {gateway}"
+            )
 
             # Get payment gateway
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
 
             # Prepare metadata
             payment_metadata = {
-                'order_number': order_number or order_id,
-                'customer_id': str(customer_id) if customer_id else 'unknown',
-                'platform': 'PRAHO',
-                'source': 'portal_api',
-                **(metadata or {})
+                "order_number": order_number or order_id,
+                "customer_id": str(customer_id) if customer_id else "unknown",
+                "platform": "PRAHO",
+                "source": "portal_api",
+                **(metadata or {}),
             }
 
             # Create payment intent
             result = payment_gateway.create_payment_intent(
-                order_id=str(order_id),
-                amount_cents=amount_cents,
-                currency=currency,
-                metadata=payment_metadata
+                order_id=str(order_id), amount_cents=amount_cents, currency=currency, metadata=payment_metadata
             )
 
-            if result.get('success', False):
+            if result.get("success", False):
                 # Create Payment record with pending status (without linking to invoice)
                 with transaction.atomic():
                     # Try to get customer from Platform database if customer_id provided
                     customer_obj = None
                     if customer_id:
                         try:
-                            from apps.customers.models import Customer
+                            from apps.customers.models import (  # noqa: PLC0415
+                                Customer,
+                            )
+
                             customer_obj = Customer.objects.get(id=customer_id)
                         except Customer.DoesNotExist:
                             logger.warning(f"⚠️ Customer {customer_id} not found in Platform database")
@@ -222,14 +214,14 @@ class PaymentService:
                         currency_obj, _ = Currency.objects.get_or_create(
                             code=currency.upper(),
                             defaults={
-                                'name': currency.upper(),
-                                'symbol': 'RON' if currency.upper() == 'RON' else currency.upper(),
-                                'decimals': 2
-                            }
+                                "name": currency.upper(),
+                                "symbol": "RON" if currency.upper() == "RON" else currency.upper(),
+                                "decimals": 2,
+                            },
                         )
 
-                    payment_intent_id = result.get('payment_intent_id', '')
-                    client_secret = result.get('client_secret', '')
+                    payment_intent_id = result.get("payment_intent_id", "")
+                    client_secret = result.get("client_secret", "")
 
                     payment = Payment.objects.create(
                         invoice=None,  # Will be linked when order is processed
@@ -237,14 +229,14 @@ class PaymentService:
                         payment_method=gateway,
                         amount_cents=amount_cents,
                         currency=currency_obj,
-                        status='pending',
+                        status="pending",
                         gateway_txn_id=payment_intent_id,
                         meta={
-                            'client_secret': client_secret,
-                            'order_id': str(order_id),
-                            'gateway': gateway,
-                            **payment_metadata
-                        }
+                            "client_secret": client_secret,
+                            "order_id": str(order_id),
+                            "gateway": gateway,
+                            **payment_metadata,
+                        },
                     )
 
                 logger.info(f"✅ Created payment {payment.id} for Portal order {order_id}")
@@ -267,17 +259,11 @@ class PaymentService:
         except Exception as e:
             logger.error(f"🔥 Error creating payment intent for Portal order {order_id}: {e}")
             return PaymentIntentResult(
-                success=False,
-                payment_intent_id='',
-                client_secret=None,
-                error=f"Payment creation failed: {e}"
+                success=False, payment_intent_id="", client_secret=None, error=f"Payment creation failed: {e}"
             )
 
     @staticmethod
-    def confirm_payment(
-        payment_intent_id: str,
-        gateway: str = 'stripe'
-    ) -> PaymentConfirmResult:
+    def confirm_payment(payment_intent_id: str, gateway: str = "stripe") -> PaymentConfirmResult:
         """
         Confirm payment status
 
@@ -292,28 +278,28 @@ class PaymentService:
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
             result = payment_gateway.confirm_payment(payment_intent_id)
 
-            if result.get('success', False):
+            if result.get("success", False):
                 # Update payment record status
                 try:
                     payment = Payment.objects.get(gateway_txn_id=payment_intent_id)
 
                     # Map gateway status to our status
                     status_mapping = {
-                        'succeeded': 'succeeded',
-                        'requires_payment_method': 'pending',
-                        'requires_confirmation': 'pending',
-                        'requires_action': 'pending',
-                        'processing': 'pending',
-                        'canceled': 'failed',
+                        "succeeded": "succeeded",
+                        "requires_payment_method": "pending",
+                        "requires_confirmation": "pending",
+                        "requires_action": "pending",
+                        "processing": "pending",
+                        "canceled": "failed",
                     }
 
-                    result_status = result.get('status', 'unknown')
-                    new_status = status_mapping.get(result_status, 'pending')
+                    result_status = result.get("status", "unknown")
+                    new_status = status_mapping.get(result_status, "pending")
 
                     if payment.status != new_status:
                         old_status = payment.status
                         payment.status = new_status
-                        payment.save(update_fields=['status'])
+                        payment.save(update_fields=["status"])
 
                         logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
 
@@ -335,18 +321,11 @@ class PaymentService:
 
         except Exception as e:
             logger.error(f"🔥 Error confirming payment: {e}")
-            return PaymentConfirmResult(
-                success=False,
-                status='error',
-                error=f"Payment confirmation failed: {e}"
-            )
+            return PaymentConfirmResult(success=False, status="error", error=f"Payment confirmation failed: {e}")
 
     @staticmethod
     def create_subscription(
-        customer_id: str,
-        price_id: str,
-        gateway: str = 'stripe',
-        metadata: dict[str, Any] | None = None
+        customer_id: str, price_id: str, gateway: str = "stripe", metadata: dict[str, Any] | None = None
     ) -> SubscriptionResult:
         """
         Create recurring subscription
@@ -361,12 +340,11 @@ class PaymentService:
             SubscriptionResult with subscription details
         """
         try:
-            from apps.customers.models import Customer
+            from apps.customers.models import Customer  # noqa: PLC0415
 
             customer = Customer.objects.get(id=customer_id)
 
-            logger.info(f"🔄 Creating subscription for customer {customer.name} "
-                       f"(price: {price_id}) via {gateway}")
+            logger.info(f"🔄 Creating subscription for customer {customer.name} " f"(price: {price_id}) via {gateway}")
 
             # Get payment gateway
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
@@ -377,24 +355,21 @@ class PaymentService:
 
             # Prepare metadata
             subscription_metadata = {
-                'customer_id': str(customer.id),
-                'customer_name': customer.name,
-                'platform': 'PRAHO',
-                **(metadata or {})
+                "customer_id": str(customer.id),
+                "customer_name": customer.name,
+                "platform": "PRAHO",
+                **(metadata or {}),
             }
 
             # Create subscription
             result = payment_gateway.create_subscription(
-                customer_id=gateway_customer_id,
-                price_id=price_id,
-                metadata=subscription_metadata
+                customer_id=gateway_customer_id, price_id=price_id, metadata=subscription_metadata
             )
 
-            if result.get('success', False):
+            if result.get("success", False):
                 # TODO: Create subscription record in database
-                subscription_id = result.get('subscription_id', 'unknown')
-                logger.info(f"✅ Created subscription {subscription_id} "
-                           f"for customer {customer.name}")
+                subscription_id = result.get("subscription_id", "unknown")
+                logger.info(f"✅ Created subscription {subscription_id} " f"for customer {customer.name}")
 
                 log_security_event(
                     "gateway_subscription_created",
@@ -412,25 +387,17 @@ class PaymentService:
         except Customer.DoesNotExist:
             logger.error(f"❌ Customer {customer_id} not found")
             return SubscriptionResult(
-                success=False,
-                subscription_id=None,
-                status=None,
-                error=f"Customer {customer_id} not found"
+                success=False, subscription_id=None, status=None, error=f"Customer {customer_id} not found"
             )
         except Exception as e:
             logger.error(f"🔥 Error creating subscription: {e}")
             return SubscriptionResult(
-                success=False,
-                subscription_id=None,
-                status=None,
-                error=f"Subscription creation failed: {e}"
+                success=False, subscription_id=None, status=None, error=f"Subscription creation failed: {e}"
             )
 
     @staticmethod
     def handle_webhook_payment(
-        event_type: str,
-        event_data: dict[str, Any],
-        gateway: str = 'stripe'
+        event_type: str, event_data: dict[str, Any], gateway: str = "stripe"
     ) -> tuple[bool, str]:
         """
         Handle webhook payment events
@@ -448,7 +415,7 @@ class PaymentService:
         try:
             logger.info(f"🔔 Processing {gateway} webhook: {event_type}")
 
-            if gateway == 'stripe' and event_type.startswith('payment_intent.'):
+            if gateway == "stripe" and event_type.startswith("payment_intent."):
                 return PaymentService._handle_stripe_payment_intent(event_type, event_data)
 
             # Add other gateway handlers here
@@ -462,8 +429,8 @@ class PaymentService:
     @staticmethod
     def _handle_stripe_payment_intent(event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
         """Handle Stripe payment_intent webhook events"""
-        payment_intent = event_data.get('object', {})
-        payment_intent_id = payment_intent.get('id')
+        payment_intent = event_data.get("object", {})
+        payment_intent_id = payment_intent.get("id")
 
         if not payment_intent_id:
             return False, "Missing payment intent ID"
@@ -471,15 +438,17 @@ class PaymentService:
         try:
             payment = Payment.objects.get(gateway_txn_id=payment_intent_id)
 
-            if event_type == 'payment_intent.succeeded':
+            if event_type == "payment_intent.succeeded":
                 # Payment succeeded - update status
-                payment.status = 'succeeded'
-                payment.meta.update({
-                    'stripe_payment_method': payment_intent.get('payment_method'),
-                    'stripe_amount_received': payment_intent.get('amount_received'),
-                    'succeeded_at': timezone.now().isoformat()
-                })
-                payment.save(update_fields=['status', 'meta'])
+                payment.status = "succeeded"
+                payment.meta.update(
+                    {
+                        "stripe_payment_method": payment_intent.get("payment_method"),
+                        "stripe_amount_received": payment_intent.get("amount_received"),
+                        "succeeded_at": timezone.now().isoformat(),
+                    }
+                )
+                payment.save(update_fields=["status", "meta"])
 
                 logger.info(f"💰 Payment {payment.id} marked as succeeded")
 
@@ -487,7 +456,7 @@ class PaymentService:
                     "payment_succeeded",
                     {
                         "payment_id": str(payment.id),
-                        "amount_received": payment_intent.get('amount_received'),
+                        "amount_received": payment_intent.get("amount_received"),
                         "gateway": "stripe",
                         "critical_financial_operation": True,
                     },
@@ -496,16 +465,13 @@ class PaymentService:
                 # TODO: Trigger order completion workflow
                 return True, f"Payment {payment.id} succeeded"
 
-            elif event_type == 'payment_intent.payment_failed':
+            elif event_type == "payment_intent.payment_failed":
                 # Payment failed - update status
-                failure_reason = payment_intent.get('last_payment_error', {}).get('message', 'Unknown error')
+                failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
 
-                payment.status = 'failed'
-                payment.meta.update({
-                    'stripe_failure_reason': failure_reason,
-                    'failed_at': timezone.now().isoformat()
-                })
-                payment.save(update_fields=['status', 'meta'])
+                payment.status = "failed"
+                payment.meta.update({"stripe_failure_reason": failure_reason, "failed_at": timezone.now().isoformat()})
+                payment.save(update_fields=["status", "meta"])
 
                 logger.warning(f"❌ Payment {payment.id} marked as failed: {failure_reason}")
 
@@ -541,23 +507,25 @@ class PaymentService:
         """
         methods = [
             {
-                'gateway': 'stripe',
-                'name': 'Card Payment',
-                'description': 'Visa, Mastercard, American Express',
-                'enabled': True,
-                'supports_recurring': True
+                "gateway": "stripe",
+                "name": "Card Payment",
+                "description": "Visa, Mastercard, American Express",
+                "enabled": True,
+                "supports_recurring": True,
             }
         ]
 
         # Add Romanian-specific methods
-        if getattr(settings, 'ENABLE_BANK_TRANSFER', False):
-            methods.append({
-                'gateway': 'bank',
-                'name': 'Bank Transfer',
-                'description': 'Romanian bank transfer (IBAN)',
-                'enabled': True,
-                'supports_recurring': False
-            })
+        if getattr(settings, "ENABLE_BANK_TRANSFER", False):
+            methods.append(
+                {
+                    "gateway": "bank",
+                    "name": "Bank Transfer",
+                    "description": "Romanian bank transfer (IBAN)",
+                    "enabled": True,
+                    "supports_recurring": False,
+                }
+            )
 
         return methods
 
@@ -576,13 +544,7 @@ class PaymentService:
         """
         logger.info("🔄 Processing recurring billing...")
 
-        results = {
-            'processed': 0,
-            'succeeded': 0,
-            'failed': 0,
-            'suspended': 0,
-            'errors': []
-        }
+        results = {"processed": 0, "succeeded": 0, "failed": 0, "suspended": 0, "errors": []}
 
         try:
             # TODO: Query active subscriptions that need billing
@@ -595,5 +557,5 @@ class PaymentService:
 
         except Exception as e:
             logger.error(f"🔥 Error processing recurring billing: {e}")
-            results['errors'].append(str(e))
+            results["errors"].append(str(e))
             return results

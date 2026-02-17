@@ -152,12 +152,13 @@ class TaxRule(models.Model):
             return Decimal("0.00")
 
 
-def _invalidate_tax_cache(sender, instance, **kwargs):
+def _invalidate_tax_cache(sender: type, instance: object, **kwargs: object) -> None:
     """Invalidate TaxService cache when TaxRule is saved or deleted."""
     try:
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
+
         TaxService.invalidate_cache(instance.country_code)
-    except Exception:
+    except Exception:  # noqa: S110
         pass  # Cache invalidation is best-effort
 
 

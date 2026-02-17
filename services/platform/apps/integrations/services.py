@@ -115,12 +115,14 @@ class ExternalSyncService:
             sync_targets = []
 
             # Sync to accounting system
-            sync_targets.append({
-                "target": "accounting",
-                "invoice_number": invoice.number,
-                "amount": float(invoice.total_cents) / 100,
-                "status": "synced",
-            })
+            sync_targets.append(
+                {
+                    "target": "accounting",
+                    "invoice_number": invoice.number,
+                    "amount": float(invoice.total_cents) / 100,
+                    "status": "synced",
+                }
+            )
 
             # Sync to e-Factura for Romanian invoices if applicable
             if invoice.customer and hasattr(invoice.customer, "country") and invoice.customer.country == "RO":
@@ -141,12 +143,14 @@ class ExternalSyncService:
             sync_targets = []
 
             # Sync to accounting system
-            sync_targets.append({
-                "target": "accounting",
-                "payment_id": str(payment.id),
-                "amount": float(payment.amount_cents) / 100,
-                "status": "synced",
-            })
+            sync_targets.append(
+                {
+                    "target": "accounting",
+                    "payment_id": str(payment.id),
+                    "amount": float(payment.amount_cents) / 100,
+                    "status": "synced",
+                }
+            )
 
             return {"sync_targets": sync_targets}
 
@@ -163,11 +167,13 @@ class ExternalSyncService:
             sync_targets = []
 
             # Sync to monitoring system
-            sync_targets.append({
-                "target": "monitoring",
-                "service_id": str(service.id),
-                "status": service.status,
-            })
+            sync_targets.append(
+                {
+                    "target": "monitoring",
+                    "service_id": str(service.id),
+                    "status": service.status,
+                }
+            )
 
             return {"sync_targets": sync_targets, "service_status": service.status}
 
@@ -184,11 +190,13 @@ class ExternalSyncService:
             sync_targets = []
 
             # Sync to DNS management system
-            sync_targets.append({
-                "target": "dns_management",
-                "domain_name": domain.name,
-                "status": "synced",
-            })
+            sync_targets.append(
+                {
+                    "target": "dns_management",
+                    "domain_name": domain.name,
+                    "status": "synced",
+                }
+            )
 
             return {"sync_targets": sync_targets, "domain_name": domain.name}
 
@@ -198,4 +206,3 @@ class ExternalSyncService:
 
 def placeholder_function() -> None:
     """Placeholder function to satisfy imports until integration services are implemented."""
-    pass

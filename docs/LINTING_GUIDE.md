@@ -10,7 +10,7 @@ This document provides a quick reference for developers working with PRAHO Platf
 make lint                 # Standard development checks
 make lint-fix            # Apply safe auto-fixes
 
-# Focused security checks  
+# Focused security checks
 make lint-security        # Security vulnerabilities
 make lint-credentials     # Hardcoded password detection
 
@@ -51,7 +51,7 @@ for item in items:
     results.append(transform(item))
 ```
 
-### Bulk Operations  
+### Bulk Operations
 ```python
 # ⚡ PREFER: Single extend operation
 stack.extend(rel.child_service for rel in relationships)
@@ -81,7 +81,7 @@ for rel in relationships:
 ```python
 # Allowed in tests:
 - Hardcoded test credentials
-- Magic numbers for assertions  
+- Magic numbers for assertions
 - Import star usage (fixtures)
 ```
 
@@ -108,7 +108,7 @@ The following commands are auto-approved in terminals:
 - `make test`, `make test-fast` - Testing commands
 - `.venv/bin/ruff` - Direct Ruff commands
 - `head`, `tail` - File viewing
-- `cat`, `ls` - Directory listing  
+- `cat`, `ls` - Directory listing
 - `grep` - Text searching
 
 ### Performance Monitoring
@@ -125,7 +125,7 @@ for user in users:
     for permission in user.permissions.all():  # N+1 query
         process(permission)
 
-# Solution: Prefetch optimization  
+# Solution: Prefetch optimization
 users = User.objects.prefetch_related('permissions')
 for user in users:
     for permission in user.permissions.all():  # Cached
@@ -180,7 +180,7 @@ if not API_KEY:
 ### Performance Issues
 If you encounter performance anti-patterns:
 1. Check for list comprehension opportunities (PERF401)
-2. Look for O(N²) nested operations  
+2. Look for O(N²) nested operations
 3. Consider bulk operations with `list.extend()`
 4. Add performance comments with `# ⚡ PERFORMANCE:`
 
@@ -193,6 +193,6 @@ If security warnings appear:
 
 ---
 
-**Last Updated**: 2025-08-25  
-**Framework Version**: Ruff 0.6.8 + MyPy 1.17.1  
+**Last Updated**: 2025-08-25
+**Framework Version**: Ruff 0.6.8 + MyPy 1.17.1
 **Documentation**: ADR-0002 Strategic Linting Framework

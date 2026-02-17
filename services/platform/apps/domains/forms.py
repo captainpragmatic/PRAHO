@@ -10,6 +10,10 @@ from .models import TLD, Registrar
 
 
 class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
+    website_url = forms.URLField(assume_scheme="https")
+    api_endpoint = forms.URLField(assume_scheme="https")
+    webhook_endpoint = forms.URLField(required=False, assume_scheme="https")
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Do not prefill sensitive fields

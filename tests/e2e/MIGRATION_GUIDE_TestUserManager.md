@@ -7,7 +7,7 @@ This guide shows how to migrate existing E2E tests to use the new `TestUserManag
 The new `TestUserManager` replaces hardcoded test users with dynamic user creation, providing:
 
 - **Random credentials** for each test run
-- **Guaranteed cleanup** using context managers and atexit handlers  
+- **Guaranteed cleanup** using context managers and atexit handlers
 - **Customer organization creation** with proper relationships
 - **Thread-safe operations** for parallel testing
 - **Integration with existing utilities** like `login_user()` and `ComprehensivePageMonitor`
@@ -19,7 +19,7 @@ The new `TestUserManager` replaces hardcoded test users with dynamic user creati
 **❌ OLD APPROACH (Hardcoded Users):**
 ```python
 from tests.e2e.utils import (
-    SUPERUSER_EMAIL, 
+    SUPERUSER_EMAIL,
     SUPERUSER_PASSWORD,
     login_user,
     navigate_to_dashboard
@@ -47,7 +47,7 @@ def test_admin_functionality(page: Page) -> None:
     # Creates fresh admin user with random credentials
     with TestUserManager() as user_mgr:
         admin = user_mgr.create_admin_user()
-        
+
         ensure_fresh_session(page)
         assert login_test_user(page, admin)
         assert navigate_to_dashboard(page)
@@ -94,10 +94,10 @@ def test_customer_functionality(page: Page) -> None:
     with TestUserManager() as user_mgr:
         # Creates customer user AND associated organization
         customer_user, customer_org = user_mgr.create_customer_with_org()
-        
+
         print(f"Testing with customer: {customer_user['email']}")
         print(f"Organization: {customer_org['company_name']}")
-        
+
         ensure_fresh_session(page)
         assert login_test_user(page, customer_user)
         # Test customer functionality...
@@ -129,7 +129,7 @@ def test_support_staff_functionality(page: Page) -> None:
     with TestUserManager() as user_mgr:
         # Create specific staff role
         support_staff = user_mgr.create_staff_user(role='support')
-        
+
         ensure_fresh_session(page)
         assert login_test_user(page, support_staff)
         # Test support-specific functionality...
@@ -138,7 +138,7 @@ def test_support_staff_functionality(page: Page) -> None:
 def test_billing_staff_functionality(page: Page) -> None:
     with TestUserManager() as user_mgr:
         billing_staff = user_mgr.create_staff_user(role='billing')
-        
+
         ensure_fresh_session(page)
         assert login_test_user(page, billing_staff)
         # Test billing-specific functionality...
@@ -154,9 +154,9 @@ def test_multi_user_workflow(page: Page) -> None:
     ensure_fresh_session(page)
     assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
     # Do admin stuff...
-    
+
     page.goto(f"{BASE_URL}/auth/logout/")
-    assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)  
+    assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
     # Do customer stuff...
     # No proper cleanup, users may have leftover state
 ```
@@ -170,24 +170,24 @@ def test_multi_user_workflow(page: Page) -> None:
         ('customer', {'company_name': 'Test Corp'}),
         ('staff', {'role': 'billing'})
     ) as (admin, customer_data, billing_staff):
-        
+
         customer_user, customer_org = customer_data
-        
+
         # Test admin workflow
         ensure_fresh_session(page)
         assert login_test_user(page, admin)
         # Do admin stuff...
-        
+
         # Test customer workflow
-        ensure_fresh_session(page) 
+        ensure_fresh_session(page)
         assert login_test_user(page, customer_user)
         # Do customer stuff with proper organization...
-        
+
         # Test staff workflow
         ensure_fresh_session(page)
         assert login_test_user(page, billing_staff)
         # Do billing staff stuff...
-        
+
         # All users and organizations cleaned up automatically
 ```
 
@@ -200,7 +200,7 @@ def test_multi_user_workflow(page: Page) -> None:
 # Remove these
 from tests.e2e.utils import (
     SUPERUSER_EMAIL,
-    SUPERUSER_PASSWORD, 
+    SUPERUSER_PASSWORD,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
 )
@@ -231,7 +231,7 @@ assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 with TestUserManager() as user_mgr:
     admin = user_mgr.create_admin_user()
     assert login_test_user(page, admin)
-    
+
     # OR for customers:
     customer_user, customer_org = user_mgr.create_customer_with_org()
     assert login_test_user(page, customer_user)
@@ -257,7 +257,7 @@ For tests that need multiple users or complex setup, consider using the convenie
 ```python
 def test_complex_workflow(page: Page) -> None:
     with test_users(
-        ('admin',), 
+        ('admin',),
         ('customer',),
         ('staff', {'role': 'support'})
     ) as (admin, customer_data, support):
@@ -302,7 +302,7 @@ def test_customer_billing(page: Page) -> None:
     with TestUserManager() as user_mgr:
         ensure_fresh_session(page)
         customer_user, customer_org = create_and_login_customer(page, user_mgr)
-        
+
         # Guaranteed to have proper organization with known data
         print(f"Testing billing for: {customer_org['company_name']}")
         print(f"Customer ID: {customer_org['id']}")
@@ -323,7 +323,7 @@ def test_support_features(page: Page) -> None:
 def test_support_features(page: Page) -> None:
     with TestUserManager() as user_mgr:
         support_staff = user_mgr.create_staff_user(role='support')
-        
+
         ensure_fresh_session(page)
         assert login_test_user(page, support_staff)
         # Actually testing support staff role
@@ -413,7 +413,7 @@ navigate_to_dashboard(page)
 # Works with ComprehensivePageMonitor
 with TestUserManager() as user_mgr:
     admin = user_mgr.create_admin_user()
-    
+
     with ComprehensivePageMonitor(page, "admin workflow"):
         assert login_test_user(page, admin)
         # Test logic with full monitoring

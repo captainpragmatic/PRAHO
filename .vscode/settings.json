@@ -28,7 +28,7 @@
       "source.fixAll.ruff": "explicit"
     }
   },
-  // JavaScript/CSS (safe to format)  
+  // JavaScript/CSS (safe to format)
   "[javascript]": {
     "editor.formatOnSave": true,
     "editor.defaultFormatter": "vscode.typescript-language-features"
@@ -68,7 +68,7 @@
     "html"
   ],
   "makefile.configureOnOpen": false,
-  
+
   // Terminal auto-approve settings for common development commands
   "chat.tools.terminal.autoApprove": {
     "/^make\\s+test(\\s|$)/": true,
@@ -113,11 +113,11 @@
     "--show-column-numbers",
     "--show-error-context"
   ],
-  
+
   // Python interpreter and environment
   "python.defaultInterpreterPath": ".venv/bin/python",
   "python.terminal.activateEnvironment": true,
-  
+
   // Type checking enhancements
   "python.analysis.typeCheckingMode": "off",
   "python.analysis.diagnosticMode": "workspace",
@@ -127,29 +127,29 @@
     "./apps",
     "./config"
   ],
-  
+
   // Django-specific configuration
   "python.analysis.django.enabled": true,
   "python.linting.pylintArgs": [
     "--load-plugins=pylint_django",
     "--django-settings-module=config.settings.dev"
   ],
-  
+
   // Ruff integration (strategic linting only)
   "python.linting.ruffEnabled": true,
   "python.linting.ruffPath": ".venv/bin/ruff",
-  
+
   // Type hint visibility and inline hints
   "editor.inlayHints.enabled": "on",
   "python.analysis.inlayHints.functionReturnTypes": true,
   "python.analysis.inlayHints.variableTypes": false,
   "python.analysis.inlayHints.parameterNames": true,
-  
+
   // Error and warning display
   "problems.showCurrentInStatus": true,
   "editor.showDeprecated": true,
   "editor.showUnused": true,
-  
+
   // Enhanced testing configuration
   "python.testing.unittestEnabled": true,
   "python.testing.unittestArgs": [
@@ -160,7 +160,7 @@
     "test_*.py"
   ],
   "python.testing.autoTestDiscoverOnSaveEnabled": false,
-  
+
   // PRAHO Platform specific enhancements
   "todo-tree.general.tags": [
     "TODO",

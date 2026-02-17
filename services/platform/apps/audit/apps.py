@@ -8,6 +8,6 @@ class AuditConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signal handlers when app is ready."""
-        from . import signals  # noqa: PLC0415
+        from . import signals
 
         signals.register_audit_signals()

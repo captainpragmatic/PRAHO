@@ -22,4 +22,4 @@ class SystemSettingsConfig(AppConfig):
         """Initialize app when Django starts"""
         # Import signals to register them
         with contextlib.suppress(ImportError):
-            from . import signals  # noqa: F401,PLC0415  # Signals must be imported after Django ready
+            from . import signals  # Signals must be imported after Django ready  # noqa: F401

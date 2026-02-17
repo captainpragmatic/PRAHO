@@ -42,7 +42,7 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Get or create tax profile
-    tax_profile, created = CustomerTaxProfile.objects.get_or_create(customer=customer)
+    tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
 
     if request.method == "POST":
         form = CustomerTaxProfileForm(request.POST, instance=tax_profile)
@@ -83,7 +83,7 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Get or create billing profile
-    billing_profile, created = CustomerBillingProfile.objects.get_or_create(customer=customer)
+    billing_profile, _created = CustomerBillingProfile.objects.get_or_create(customer=customer)
 
     if request.method == "POST":
         form = CustomerBillingProfileForm(request.POST, instance=billing_profile)

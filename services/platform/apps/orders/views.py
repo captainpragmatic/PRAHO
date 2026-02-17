@@ -47,9 +47,36 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 # Constants for validation and limits
-MAX_SEARCH_QUERY_LENGTH = 100
-MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
-MAX_PRICE_OVERRIDE_MULTIPLIER = 10
+_DEFAULT_MAX_SEARCH_QUERY_LENGTH = 100
+MAX_SEARCH_QUERY_LENGTH = _DEFAULT_MAX_SEARCH_QUERY_LENGTH
+_DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
+MAX_PRICE_OVERRIDE_CENTS = _DEFAULT_MAX_PRICE_OVERRIDE_CENTS
+_DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
+MAX_PRICE_OVERRIDE_MULTIPLIER = _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
+
+
+def get_max_search_query_length() -> int:
+    """Get max search query length from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("orders.max_search_query_length", _DEFAULT_MAX_SEARCH_QUERY_LENGTH)
+
+
+def get_max_price_override_cents() -> int:
+    """Get max price override cents from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("orders.max_price_override_cents", _DEFAULT_MAX_PRICE_OVERRIDE_CENTS)
+
+
+def get_max_price_override_multiplier() -> int:
+    """Get max price override multiplier from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "orders.max_price_override_multiplier", _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
+    )
+
 
 # ===============================================================================
 # SECURITY VALIDATION FUNCTIONS
@@ -160,14 +187,14 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     DEPRECATED: Use OrderVATCalculator.calculate_vat() instead for full compliance.
     """
     try:
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         tax_profile = customer.get_tax_profile()
 
         # Determine customer country
-        country_code = 'RO'  # Default to Romania
+        country_code = "RO"  # Default to Romania
         if tax_profile and tax_profile.cui and tax_profile.cui.startswith("RO"):
-            country_code = 'RO'
+            country_code = "RO"
 
         # Get VAT rate as decimal (0.21 for 21%)
         vat_rate = TaxService.get_vat_rate(country_code, as_decimal=True)
@@ -178,8 +205,9 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     except Exception as e:
         logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
         # Fall back to centralized Romanian VAT rate
-        from apps.common.tax_service import TaxService
-        return TaxService.get_vat_rate('RO', as_decimal=True)
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+        return TaxService.get_vat_rate("RO", as_decimal=True)
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -550,10 +578,14 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         (request.POST.get("first_domain_name") or "").strip()
 
         if not (customer_id and product_id):
-            return render(request, "orders/partials/create_preview_totals.html", {
-                "error": True,
-                "message": "Select a customer and product to preview totals",
-            })
+            return render(
+                request,
+                "orders/partials/create_preview_totals.html",
+                {
+                    "error": True,
+                    "message": "Select a customer and product to preview totals",
+                },
+            )
 
         customer = get_object_or_404(Customer, id=customer_id)
         product = get_object_or_404(Product, id=product_id)
@@ -561,17 +593,21 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         # Resolve price for selected period + currency
         price = product.get_price_for_period(currency_code, billing_period)
         if price is None:
-            return render(request, "orders/partials/create_preview_totals.html", {
-                "error": True,
-                "message": f"No price for {currency_code} / {billing_period}",
-            })
+            return render(
+                request,
+                "orders/partials/create_preview_totals.html",
+                {
+                    "error": True,
+                    "message": f"No price for {currency_code} / {billing_period}",
+                },
+            )
 
         unit_cents = int(price.effective_price_cents)
         setup_cents = int(price.setup_cents)
         subtotal_cents = (unit_cents * quantity) + setup_cents
 
         # VAT calc per rules
-        from .vat_rules import CustomerVATInfo, OrderVATCalculator
+        from .vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
         billing = customer.get_billing_address()
         tax_profile = customer.get_tax_profile()
@@ -580,16 +616,13 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         is_business = bool(getattr(customer, "company_name", ""))
 
         customer_vat_info: CustomerVATInfo = {
-            'country': country,
-            'is_business': is_business,
-            'vat_number': vat_number,
-            'customer_id': str(customer.id),
-            'order_id': None,
+            "country": country,
+            "is_business": is_business,
+            "vat_number": vat_number,
+            "customer_id": str(customer.id),
+            "order_id": None,
         }
-        vat_result = OrderVATCalculator.calculate_vat(
-            subtotal_cents=subtotal_cents,
-            customer_info=customer_vat_info
-        )
+        vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
         context = {
             "error": False,
@@ -608,10 +641,14 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
 
     except Exception as e:
         logger.error(f"🔥 [Orders] Preview error: {e}")
-        return render(request, "orders/partials/create_preview_totals.html", {
-            "error": True,
-            "message": "Failed to calculate preview",
-        })
+        return render(
+            request,
+            "orders/partials/create_preview_totals.html",
+            {
+                "error": True,
+                "message": "Failed to calculate preview",
+            },
+        )
 
 
 @staff_required_strict
@@ -689,6 +726,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
 
                 # Build item
                 from .models import OrderItem  # noqa: PLC0415
+
                 item = OrderItem(
                     order=order,
                     product=product,
@@ -1430,6 +1468,7 @@ def order_export(request: HttpRequest) -> HttpResponse:
 # CART OPERATIONS - CUSTOMER SHOPPING CART 🛒
 # ===============================================================================
 
+
 @login_required
 def cart_view(request: HttpRequest) -> HttpResponse:
     """
@@ -1452,10 +1491,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
         return redirect("dashboard")
 
     # Get current cart order (draft)
-    cart_order = Order.objects.filter(
-        customer=customer,
-        status=Order.Status.DRAFT
-    ).first()
+    cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
 
     context = {
         "cart_order": cart_order,
@@ -1482,10 +1518,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
             return HttpResponse("No customer profile", status=400)
 
         # Get current cart order
-        cart_order = Order.objects.filter(
-            customer=customer,
-            status=Order.Status.DRAFT
-        ).first()
+        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
 
         if not cart_order:
             return HttpResponse("Empty cart", status=400)
@@ -1508,7 +1541,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def cart_update(request: HttpRequest) -> HttpResponse:
+def cart_update(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     📝 Update cart item quantity via HTMX
     """
@@ -1531,10 +1564,7 @@ def cart_update(request: HttpRequest) -> HttpResponse:
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(
-            customer=customer,
-            status=Order.Status.DRAFT
-        ).first()
+        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)
@@ -1562,7 +1592,7 @@ def cart_update(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def cart_remove(request: HttpRequest) -> HttpResponse:
+def cart_remove(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     🗑️ Remove item from cart via HTMX
     """
@@ -1583,16 +1613,13 @@ def cart_remove(request: HttpRequest) -> HttpResponse:
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(
-            customer=customer,
-            status=Order.Status.DRAFT
-        ).first()
+        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)
 
         cart_item = get_object_or_404(OrderItem, id=item_id, order=cart_order)
-        
+
         # Remove item
         cart_item.delete()
 

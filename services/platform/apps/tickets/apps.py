@@ -12,4 +12,4 @@ class TicketsConfig(AppConfig):
 
     def ready(self) -> None:
         """Register signals when app is ready"""
-        import apps.tickets.signals  # noqa: F401, PLC0415
+        import apps.tickets.signals  # noqa: F401

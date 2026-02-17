@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
@@ -35,7 +35,7 @@ class Command(BaseCommand):
     help = "Run audit data integrity checks and file integrity monitoring"
 
     # Check types supported
-    CHECK_TYPES = [
+    CHECK_TYPES: ClassVar[list] = [
         "hash_verification",
         "sequence_check",
         "gdpr_compliance",
@@ -43,7 +43,7 @@ class Command(BaseCommand):
     ]
 
     # Period shortcuts
-    PERIOD_MAP = {
+    PERIOD_MAP: ClassVar[dict] = {
         "1h": timedelta(hours=1),
         "6h": timedelta(hours=6),
         "12h": timedelta(hours=12),
@@ -131,7 +131,7 @@ class Command(BaseCommand):
     def _parse_period(self, options: dict[str, Any]) -> tuple[Any, Any]:
         """Parse the time period from options."""
         if options.get("start") and options.get("end"):
-            from django.utils.dateparse import parse_datetime
+            from django.utils.dateparse import parse_datetime  # noqa: PLC0415
 
             period_start = parse_datetime(options["start"])
             period_end = parse_datetime(options["end"])
@@ -151,10 +151,8 @@ class Command(BaseCommand):
                         days = int(period_str.rstrip("d"))
                         delta = timedelta(days=days)
                     except ValueError:
-                        self.stderr.write(
-                            self.style.ERROR(f"Invalid period format: {period_str}")
-                        )
-                        raise SystemExit(1)
+                        self.stderr.write(self.style.ERROR(f"Invalid period format: {period_str}"))
+                        raise SystemExit(1) from None
 
             period_end = timezone.now()
             period_start = period_end - delta
@@ -192,7 +190,7 @@ class Command(BaseCommand):
             )
 
             if verbose and check.findings:
-                self.stdout.write(f"\n  Findings:")
+                self.stdout.write("\n  Findings:")
                 for finding in check.findings[:10]:  # Limit output
                     self.stdout.write(
                         f"    - [{finding.get('severity', 'unknown')}] "
@@ -232,13 +230,7 @@ class Command(BaseCommand):
 
     def _print_summary(self, results: list[dict[str, Any]], send_alerts: bool) -> None:
         """Print summary of all checks."""
-        self.stdout.write(
-            self.style.HTTP_INFO(
-                f"\n{'='*60}\n"
-                f"INTEGRITY CHECK SUMMARY\n"
-                f"{'='*60}"
-            )
-        )
+        self.stdout.write(self.style.HTTP_INFO(f"\n{'='*60}\n" f"INTEGRITY CHECK SUMMARY\n" f"{'='*60}"))
 
         total_issues = 0
         compromised = False
@@ -264,28 +256,19 @@ class Command(BaseCommand):
 
         if compromised:
             self.stdout.write(
-                self.style.ERROR(
-                    "\nCRITICAL: Compromised audit data detected!\n"
-                    "Immediate investigation required."
-                )
+                self.style.ERROR("\nCRITICAL: Compromised audit data detected!\n" "Immediate investigation required.")
             )
             if send_alerts:
                 self.stdout.write("  Alerts have been sent to security team.")
         elif total_issues > 0:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"\nWARNING: {total_issues} issues require attention."
-                )
-            )
+            self.stdout.write(self.style.WARNING(f"\nWARNING: {total_issues} issues require attention."))
         else:
-            self.stdout.write(
-                self.style.SUCCESS("\nAll integrity checks passed successfully.")
-            )
+            self.stdout.write(self.style.SUCCESS("\nAll integrity checks passed successfully."))
 
     def _setup_scheduled_tasks(self) -> None:
         """Configure scheduled integrity check tasks using Django-Q2."""
         try:
-            from django_q.models import Schedule
+            from django_q.models import Schedule  # noqa: PLC0415
 
             # Hourly hash verification for critical events
             Schedule.objects.update_or_create(
@@ -297,9 +280,7 @@ class Command(BaseCommand):
                     "repeats": -1,  # Run forever
                 },
             )
-            self.stdout.write(
-                self.style.SUCCESS("Created hourly hash verification schedule")
-            )
+            self.stdout.write(self.style.SUCCESS("Created hourly hash verification schedule"))
 
             # Daily comprehensive check
             Schedule.objects.update_or_create(
@@ -311,9 +292,7 @@ class Command(BaseCommand):
                     "repeats": -1,
                 },
             )
-            self.stdout.write(
-                self.style.SUCCESS("Created daily comprehensive check schedule")
-            )
+            self.stdout.write(self.style.SUCCESS("Created daily comprehensive check schedule"))
 
             # Weekly deep analysis
             Schedule.objects.update_or_create(
@@ -325,9 +304,7 @@ class Command(BaseCommand):
                     "repeats": -1,
                 },
             )
-            self.stdout.write(
-                self.style.SUCCESS("Created weekly deep analysis schedule")
-            )
+            self.stdout.write(self.style.SUCCESS("Created weekly deep analysis schedule"))
 
             # File integrity monitoring (every 6 hours)
             Schedule.objects.update_or_create(
@@ -339,9 +316,7 @@ class Command(BaseCommand):
                     "repeats": -1,
                 },
             )
-            self.stdout.write(
-                self.style.SUCCESS("Created file integrity monitoring schedule (6h)")
-            )
+            self.stdout.write(self.style.SUCCESS("Created file integrity monitoring schedule (6h)"))
 
             self.stdout.write(
                 self.style.SUCCESS(
@@ -351,10 +326,6 @@ class Command(BaseCommand):
             )
 
         except ImportError:
-            self.stderr.write(
-                self.style.ERROR(
-                    "Django-Q2 not installed. Install with: pip install django-q2"
-                )
-            )
+            self.stderr.write(self.style.ERROR("Django-Q2 not installed. Install with: pip install django-q2"))
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"Failed to setup schedules: {e}"))

@@ -4,6 +4,8 @@ Infrastructure Forms
 Django forms for node deployment management.
 """
 
+from typing import Any
+
 from django import forms
 from django.core.exceptions import ValidationError
 
@@ -32,12 +34,8 @@ class NodeDeploymentForm(forms.ModelForm):
             "backup_enabled",
         ]
         widgets = {
-            "environment": forms.RadioSelect(
-                attrs={"class": "sr-only peer", "x-model": "environment"}
-            ),
-            "node_type": forms.RadioSelect(
-                attrs={"class": "sr-only peer", "x-model": "nodeType"}
-            ),
+            "environment": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "environment"}),
+            "node_type": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "nodeType"}),
             "provider": forms.Select(
                 attrs={
                     "class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white",
@@ -51,9 +49,7 @@ class NodeDeploymentForm(forms.ModelForm):
                     "x-model": "region",
                 }
             ),
-            "node_size": forms.RadioSelect(
-                attrs={"class": "sr-only peer", "x-model": "nodeSize"}
-            ),
+            "node_size": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "nodeSize"}),
             "panel_type": forms.Select(
                 attrs={
                     "class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white",
@@ -72,7 +68,7 @@ class NodeDeploymentForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         # Filter to only active providers
@@ -90,7 +86,7 @@ class NodeDeploymentForm(forms.ModelForm):
         # Set defaults
         self.fields["backup_enabled"].initial = True
 
-    def clean(self):
+    def clean(self) -> dict[str, Any]:
         cleaned_data = super().clean()
         provider = cleaned_data.get("provider")
         region = cleaned_data.get("region")
@@ -271,11 +267,11 @@ class DeploymentDestroyForm(forms.Form):
         help_text="Type the hostname exactly to confirm destruction",
     )
 
-    def __init__(self, *args, hostname: str = "", **kwargs):
+    def __init__(self, *args: Any, hostname: str = "", **kwargs: Any) -> None:
         self.expected_hostname = hostname
         super().__init__(*args, **kwargs)
 
-    def clean_confirm_hostname(self):
+    def clean_confirm_hostname(self) -> str:
         confirm = self.cleaned_data["confirm_hostname"]
         if confirm != self.expected_hostname:
             raise ValidationError(f"Hostname must match exactly: {self.expected_hostname}")

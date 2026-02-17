@@ -11,7 +11,9 @@ DEBUG = False
 SECRET_KEY = os.environ.get("SECRET_KEY", "staging-key-change-before-prod")
 
 # Allowed hosts for staging
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "staging-portal.pragmatichost.com,portal-staging.pragmatichost.com").split(",")
+ALLOWED_HOSTS = os.environ.get(
+    "ALLOWED_HOSTS", "staging-portal.pragmatichost.com,portal-staging.pragmatichost.com"
+).split(",")
 
 # Platform API configuration for staging
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://platform-staging:8700/api")
@@ -24,7 +26,7 @@ CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 X_FRAME_OPTIONS = "DENY"
 
 # HSTS settings (shorter duration for staging)
@@ -38,12 +40,12 @@ STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesSto
 
 # Cache configuration for staging
 CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'portal-staging-cache',
-        'OPTIONS': {
-            'MAX_ENTRIES': 5000,
-        }
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "portal-staging-cache",
+        "OPTIONS": {
+            "MAX_ENTRIES": 5000,
+        },
     }
 }
 

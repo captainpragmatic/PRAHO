@@ -26,7 +26,7 @@
         </a>
 
         <!-- Mobile Menu Toggle -->
-        <button 
+        <button
             id="mobile-menu-toggle"
             type="button"
             class="text-slate-300 hover:text-white focus:outline-none focus:text-white transition-colors"
@@ -48,7 +48,7 @@
                 <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
                     Portal
                 </div>
-                
+
                 <!-- Dashboard -->
                 <a href="/dashboard/" class="mobile-nav-item group">
                     <div class="flex items-center space-x-5 p-4">
@@ -134,7 +134,7 @@
                 <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
                     Account
                 </div>
-                
+
                 <!-- Settings -->
                 <a href="/profile/" class="mobile-nav-item group">
                     <div class="flex items-center space-x-5 p-4">
@@ -175,7 +175,7 @@
                     </button>
                 </form>
             </div>
-            
+
             <!-- Bottom Padding for Safe Area -->
             <div class="h-8"></div>
         </div>
@@ -285,13 +285,13 @@ body.mobile-menu-open {
 // Wait for DOM to be ready before binding events
 document.addEventListener('DOMContentLoaded', function() {
     console.log('📱 [Mobile Nav] Initializing mobile navigation');
-    
+
     // Ensure mobile menu starts closed
     const menu = document.getElementById('mobile-menu');
     if (menu) {
         menu.classList.add('hidden');
     }
-    
+
     // Initialize menu state
     document.body.classList.remove('mobile-menu-open');
 });
@@ -300,7 +300,7 @@ function toggleMobileMenu() {
     const menu = document.getElementById('mobile-menu');
     const hamburger = document.getElementById('hamburger-icon');
     const close = document.getElementById('close-icon');
-    
+
     if (menu && hamburger && close) {
         if (menu.classList.contains('hidden')) {
             // 📱 Opening menu
@@ -326,7 +326,7 @@ function toggleMobileMenu() {
 document.addEventListener('click', function(event) {
     const menu = document.getElementById('mobile-menu');
     const toggle = document.getElementById('mobile-menu-toggle');
-    
+
     if (menu && toggle && !menu.contains(event.target) && !toggle.contains(event.target) && !menu.classList.contains('hidden')) {
         toggleMobileMenu();
     }

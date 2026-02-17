@@ -17,7 +17,6 @@ from __future__ import annotations
 import ast
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from apps.common.flow_analysis.base import (
     AnalysisContext,
@@ -58,9 +57,7 @@ class ControlFlowGraph:
     exit_nodes: list[int] = field(default_factory=list)
     _node_counter: int = 0
 
-    def add_node(
-        self, node_type: str, ast_node: ast.AST, is_entry: bool = False, is_exit: bool = False
-    ) -> int:
+    def add_node(self, node_type: str, ast_node: ast.AST, is_entry: bool = False, is_exit: bool = False) -> int:
         """Add a new node to the graph."""
         node_id = self._node_counter
         self._node_counter += 1
@@ -99,9 +96,7 @@ class ControlFlowGraph:
             visited.add(node_id)
             self.nodes[node_id].is_reachable = True
 
-            for succ_id in self.nodes[node_id].successors:
-                if succ_id not in visited:
-                    queue.append(succ_id)
+            queue.extend(succ_id for succ_id in self.nodes[node_id].successors if succ_id not in visited)
 
         # Mark unvisited nodes as unreachable
         for node_id, node in self.nodes.items():
@@ -459,20 +454,22 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
 
         # Check for overly broad Exception catch
         for handler in node.handlers:
-            if isinstance(handler.type, ast.Name) and handler.type.id == "Exception":
-                # Check if handler body just passes or re-raises
-                if len(handler.body) == 1:
-                    if isinstance(handler.body[0], ast.Pass):
-                        location = CodeLocation.from_ast_node(handler, self.context.file_path)
-                        self.add_issue(
-                            category=IssueCategory.EXCEPTION_FLOW,
-                            severity=AnalysisSeverity.HIGH,
-                            message="Exception caught but silently ignored (pass)",
-                            location=location,
-                            code_snippet=self.get_source_line(self.context, location.line_number),
-                            remediation="Log the exception or handle it appropriately.",
-                            cwe_id="CWE-390",
-                        )
+            if (
+                isinstance(handler.type, ast.Name)
+                and handler.type.id == "Exception"
+                and len(handler.body) == 1
+                and isinstance(handler.body[0], ast.Pass)
+            ):
+                location = CodeLocation.from_ast_node(handler, self.context.file_path)
+                self.add_issue(
+                    category=IssueCategory.EXCEPTION_FLOW,
+                    severity=AnalysisSeverity.HIGH,
+                    message="Exception caught but silently ignored (pass)",
+                    location=location,
+                    code_snippet=self.get_source_line(self.context, location.line_number),
+                    remediation="Log the exception or handle it appropriately.",
+                    cwe_id="CWE-390",
+                )
 
     def _check_missing_return(self, node: ast.FunctionDef) -> None:
         """Check if function might be missing a return statement."""
@@ -492,18 +489,16 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             return
 
         # Check if all code paths have return
-        if not self._all_paths_return(node.body):
-            # Only warn if there's a return type annotation suggesting value
-            if node.returns:
-                location = CodeLocation.from_ast_node(node, self.context.file_path)
-                self.add_issue(
-                    category=IssueCategory.MISSING_BRANCH,
-                    severity=AnalysisSeverity.LOW,
-                    message=f"Function '{node.name}' may not return a value on all paths",
-                    location=location,
-                    code_snippet=self.get_source_line(self.context, location.line_number),
-                    remediation="Ensure all code paths return a value.",
-                )
+        if not self._all_paths_return(node.body) and node.returns:
+            location = CodeLocation.from_ast_node(node, self.context.file_path)
+            self.add_issue(
+                category=IssueCategory.MISSING_BRANCH,
+                severity=AnalysisSeverity.LOW,
+                message=f"Function '{node.name}' may not return a value on all paths",
+                location=location,
+                code_snippet=self.get_source_line(self.context, location.line_number),
+                remediation="Ensure all code paths return a value.",
+            )
 
     def _all_paths_return(self, stmts: list[ast.stmt]) -> bool:
         """Check if all code paths in statements return a value."""
@@ -521,9 +516,7 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             elif isinstance(stmt, ast.Try):
                 # All handlers plus main body must return
                 body_returns = self._all_paths_return(stmt.body)
-                all_handlers_return = all(
-                    self._all_paths_return(handler.body) for handler in stmt.handlers
-                )
+                all_handlers_return = all(self._all_paths_return(handler.body) for handler in stmt.handlers)
                 if body_returns or all_handlers_return:
                     return True
         return False
@@ -558,9 +551,7 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             return bool(node.value)
         if isinstance(node, ast.NameConstant):  # Python 3.7 compatibility
             return node.value is True
-        if isinstance(node, ast.Name) and node.id == "True":
-            return True
-        return False
+        return bool(isinstance(node, ast.Name) and node.id == "True")
 
     def _is_constant_false(self, node: ast.expr) -> bool:
         """Check if expression is always False."""
@@ -568,6 +559,4 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             return not node.value
         if isinstance(node, ast.NameConstant):
             return node.value is False
-        if isinstance(node, ast.Name) and node.id == "False":
-            return True
-        return False
+        return bool(isinstance(node, ast.Name) and node.id == "False")

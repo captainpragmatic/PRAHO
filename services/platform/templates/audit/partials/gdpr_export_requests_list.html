@@ -53,11 +53,11 @@
                             {% if request.file_size %}
                                 <span class="text-slate-300">📁 {{ request.file_size|filesizeformat }}</span>
                             {% endif %}
-                            
+
                             {% if request.download_count > 0 %}
                                 <span class="text-slate-300">📥 {{ request.download_count }} {% trans "download" %}{% if request.download_count != 1 %}s{% endif %}</span>
                             {% endif %}
-                            
+
                             {% if request.status == 'completed' %}
                                 <span class="{% if current_time > request.expires_at %}text-red-400{% else %}text-green-400{% endif %}">
                                     ⏰ {% trans "Expires:" %} {{ request.expires_at|date:"M d, Y H:i" }}
@@ -92,13 +92,13 @@
                                 hx-indicator="#export-detail-{{ request.id }}-loading"
                                 onclick="toggleExportDetail(this, '{{ request.id }}')"
                                 title="{% trans 'View Details' %}">
-                            <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon" 
-                                 fill="none" 
-                                 stroke="currentColor" 
+                            <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon"
+                                 fill="none"
+                                 stroke="currentColor"
                                  viewBox="0 0 24 24">
-                                <path stroke-linecap="round" 
-                                      stroke-linejoin="round" 
-                                      stroke-width="2" 
+                                <path stroke-linecap="round"
+                                      stroke-linejoin="round"
+                                      stroke-width="2"
                                       d="M19 9l-7 7-7-7"></path>
                             </svg>
                         </button>
@@ -165,7 +165,7 @@ function toggleExportDetail(button, requestId) {
     const detailDiv = document.getElementById('export-detail-' + requestId);
     const chevron = button.querySelector('.chevron-icon');
     const isHidden = detailDiv.classList.contains('hidden');
-    
+
     if (isHidden) {
         detailDiv.classList.remove('hidden');
         chevron.style.transform = 'rotate(180deg)';

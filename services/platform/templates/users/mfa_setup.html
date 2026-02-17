@@ -6,7 +6,7 @@
 {% block content %}
 <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
   <div class="max-w-4xl w-full space-y-8">
-    
+
     <!-- Step Navigation -->
     {% include 'components/step_navigation.html' with steps=steps current_step=current_step show_back_button=True %}
 
@@ -23,10 +23,10 @@
 
     <!-- Setup Steps Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      
+
       <!-- Left Column: Instructions -->
       <div class="space-y-6">
-        
+
         <!-- Step 1: Download App -->
         <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
           <div class="flex items-center mb-4">
@@ -35,7 +35,7 @@
               {% trans 'Download Authenticator App' %}
             </h3>
           </div>
-          
+
           <div class="grid grid-cols-1 gap-3">
             <div class="bg-slate-700 p-3 rounded-md border border-slate-600 hover:border-blue-500 transition-colors">
               <div class="flex items-center">
@@ -75,7 +75,7 @@
               {% trans 'Scan QR Code' %}
             </h3>
           </div>
-          
+
           <div class="space-y-3 text-sm text-slate-300">
             <div class="flex items-start">
               <span class="text-green-400 mr-2">•</span>
@@ -92,10 +92,10 @@
           </div>
         </div>
       </div>
-      
+
       <!-- Right Column: QR Code & Form -->
       <div class="space-y-6">
-        
+
         <!-- QR Code Card -->
         <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 text-center">
           <h3 class="text-lg font-medium text-white mb-4">
@@ -107,7 +107,7 @@
           <p class="text-sm text-slate-400 mt-4">
             {% trans 'Scan this QR code with your authenticator app' %}
           </p>
-          
+
           <!-- Manual Entry Option -->
           <div class="mt-6 pt-6 border-t border-slate-700">
             <details class="text-left">
@@ -118,8 +118,8 @@
                 <p class="text-xs text-slate-400 mb-2">{% trans 'Secret Key:' %}</p>
                 <div class="flex items-center justify-between bg-slate-900 px-3 py-2 rounded border">
                   <code id="secret-key" class="text-sm text-green-400 font-mono break-all">{{ secret }}</code>
-                  <button type="button" onclick="copySecret()" 
-                          class="ml-2 text-slate-400 hover:text-white transition-colors" 
+                  <button type="button" onclick="copySecret()"
+                          class="ml-2 text-slate-400 hover:text-white transition-colors"
                           title="{% trans 'Copy secret key' %}">
                     📋
                   </button>
@@ -137,16 +137,16 @@
               {% trans 'Verify Setup' %}
             </h3>
           </div>
-          
+
           <form method="post" class="space-y-4">
             {% csrf_token %}
-            
+
             <div>
               <label for="{{ form.token.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Enter verification code from your app:' %}
               </label>
-              <input type="text" 
-                     name="{{ form.token.name }}" 
+              <input type="text"
+                     name="{{ form.token.name }}"
                      id="{{ form.token.id_for_label }}"
                      class="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white text-center text-lg font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                      placeholder="000000"
@@ -154,7 +154,7 @@
                      pattern="[0-9]{6}"
                      autocomplete="one-time-code"
                      required>
-              
+
               {% if form.token.errors %}
                 <div class="mt-2 text-sm text-red-400">
                   {% for error in form.token.errors %}
@@ -163,7 +163,7 @@
                 </div>
               {% endif %}
             </div>
-            
+
             {% if form.non_field_errors %}
               <div class="text-sm text-red-400">
                 {% for error in form.non_field_errors %}
@@ -171,15 +171,15 @@
                 {% endfor %}
               </div>
             {% endif %}
-            
+
             <div class="flex gap-3">
-              <button type="submit" 
+              <button type="submit"
                       class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-slate-800">
                 {% trans 'Verify & Enable MFA' %}
               </button>
             </div>
           </form>
-          
+
           <div class="mt-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg">
             <div class="flex items-start">
               <div class="text-blue-400 mr-2">ℹ️</div>
@@ -200,13 +200,13 @@
 function copySecret() {
   const secretElement = document.getElementById('secret-key');
   const textToCopy = secretElement.textContent;
-  
+
   navigator.clipboard.writeText(textToCopy).then(function() {
     // Visual feedback
     const button = event.target;
     const originalText = button.textContent;
     button.textContent = '✅';
-    
+
     setTimeout(() => {
       button.textContent = originalText;
     }, 2000);

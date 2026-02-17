@@ -59,9 +59,9 @@ Our custom `admin_role` field handles **business functionality** (not Django fra
 class User(AbstractUser):
     # Django framework fields (built-in)
     # is_active = models.BooleanField(default=True)      # Account status
-    # is_staff = models.BooleanField(default=False)      # Django admin access  
+    # is_staff = models.BooleanField(default=False)      # Django admin access
     # is_superuser = models.BooleanField(default=False)  # Django god mode
-    
+
     # PragmaticHost business field (our custom)
     admin_role = models.CharField(
         max_length=20,
@@ -89,7 +89,7 @@ user.admin_role = 'admin'  # ✅ Also business admin
 ### **2. Business Administrator**
 ```python
 user.is_superuser = False  # ❌ Not Django god
-user.is_staff = True       # ✅ Can access Django admin  
+user.is_staff = True       # ✅ Can access Django admin
 user.admin_role = 'admin'  # ✅ Business admin role
 # Can access Django admin + manage customers/billing
 ```
@@ -165,7 +165,7 @@ elif user.admin_role == 'support':
 if user.is_staff:
     # Show business admin menu
 
-# ✅ CORRECT: Using admin_role for business logic  
+# ✅ CORRECT: Using admin_role for business logic
 if user.admin_role:
     # Show business admin menu
 

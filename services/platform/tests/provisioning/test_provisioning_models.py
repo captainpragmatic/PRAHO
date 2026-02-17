@@ -181,7 +181,7 @@ class ServicePlanModelTestCase(TestCase):
             price_quarterly=None,
             price_annual=None
         )
-        
+
         self.assertEqual(plan.get_effective_price('quarterly'), Decimal('50.00'))
         self.assertEqual(plan.get_effective_price('annual'), Decimal('50.00'))
 
@@ -280,7 +280,7 @@ class ServerModelTestCase(TestCase):
         self.server.cpu_usage_percent = Decimal('60.00')
         self.server.ram_usage_percent = Decimal('40.00')
         self.server.disk_usage_percent = Decimal('80.00')
-        
+
         expected_average = (60.0 + 40.0 + 80.0) / 3
         self.assertEqual(self.server.resource_usage_average, expected_average)
 
@@ -289,7 +289,7 @@ class ServerModelTestCase(TestCase):
         self.server.cpu_usage_percent = None
         self.server.ram_usage_percent = None
         self.server.disk_usage_percent = None
-        
+
         expected_average = 0.0
         self.assertEqual(self.server.resource_usage_average, expected_average)
 
@@ -297,7 +297,7 @@ class ServerModelTestCase(TestCase):
         """Test can_host_service returns False for inactive server"""
         self.server.is_active = False
         self.server.save()
-        
+
         result = self.server.can_host_service(self.plan)
         self.assertFalse(result)
 
@@ -305,7 +305,7 @@ class ServerModelTestCase(TestCase):
         """Test can_host_service returns False for offline server"""
         self.server.status = 'offline'
         self.server.save()
-        
+
         result = self.server.can_host_service(self.plan)
         self.assertFalse(result)
 
@@ -333,21 +333,21 @@ class ServerModelTestCase(TestCase):
     def test_can_host_service_insufficient_ram(self):
         """Test can_host_service returns False when insufficient RAM"""
         plan = create_test_service_plan(ram_gb=64)  # More than server's 32GB
-        
+
         result = self.server.can_host_service(plan)
         self.assertFalse(result)
 
     def test_can_host_service_insufficient_cpu(self):
         """Test can_host_service returns False when insufficient CPU"""
         plan = create_test_service_plan(cpu_cores=16)  # More than server's 8 cores
-        
+
         result = self.server.can_host_service(plan)
         self.assertFalse(result)
 
     def test_can_host_service_success(self):
         """Test can_host_service returns True when server can host"""
         plan = create_test_service_plan(ram_gb=16, cpu_cores=4)
-        
+
         result = self.server.can_host_service(plan)
         self.assertTrue(result)
 
@@ -365,7 +365,7 @@ class ServiceModelTestCase(TestCase):
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
         self.server = create_test_server()
-        
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
@@ -440,7 +440,7 @@ class ServiceModelTestCase(TestCase):
         future_date = timezone.now() + timezone.timedelta(days=30)
         self.service.expires_at = future_date
         self.service.save()
-        
+
         self.assertFalse(self.service.is_overdue)
 
     def test_is_overdue_past_expiry(self):
@@ -448,7 +448,7 @@ class ServiceModelTestCase(TestCase):
         past_date = timezone.now() - timezone.timedelta(days=1)
         self.service.expires_at = past_date
         self.service.save()
-        
+
         self.assertTrue(self.service.is_overdue)
 
     def test_days_until_expiry_no_expiry(self):
@@ -460,7 +460,7 @@ class ServiceModelTestCase(TestCase):
         future_date = timezone.now() + timezone.timedelta(days=15)
         self.service.expires_at = future_date
         self.service.save()
-        
+
         # Should be approximately 15 days (allowing for small timing differences)
         days = self.service.days_until_expiry
         self.assertGreaterEqual(days, 14)
@@ -471,14 +471,14 @@ class ServiceModelTestCase(TestCase):
         past_date = timezone.now() - timezone.timedelta(days=5)
         self.service.expires_at = past_date
         self.service.save()
-        
+
         self.assertEqual(self.service.days_until_expiry, 0)
 
     def test_suspend_method(self):
         """Test suspend method updates status and timestamps"""
         reason = "Payment overdue"
         self.service.suspend(reason)
-        
+
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, 'suspended')
         self.assertIsNotNone(self.service.suspended_at)
@@ -487,7 +487,7 @@ class ServiceModelTestCase(TestCase):
     def test_activate_method_first_time(self):
         """Test activate method for first-time activation"""
         self.service.activate()
-        
+
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, 'active')
         self.assertIsNotNone(self.service.activated_at)
@@ -500,10 +500,10 @@ class ServiceModelTestCase(TestCase):
         original_activation = timezone.now() - timezone.timedelta(days=10)
         self.service.activated_at = original_activation
         self.service.suspend("Test suspension")
-        
+
         # Then reactivate
         self.service.activate()
-        
+
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, 'active')
         self.assertEqual(self.service.activated_at, original_activation)  # Should keep original
@@ -523,7 +523,7 @@ class ProvisioningTaskModelTestCase(TestCase):
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
-        
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
@@ -554,7 +554,7 @@ class ProvisioningTaskModelTestCase(TestCase):
         self.task.status = 'failed'
         self.task.retry_count = 1
         self.task.save()
-        
+
         self.assertTrue(self.task.can_retry)
 
     def test_can_retry_when_failed_but_max_retries_reached(self):
@@ -562,7 +562,7 @@ class ProvisioningTaskModelTestCase(TestCase):
         self.task.status = 'failed'
         self.task.retry_count = 3
         self.task.save()
-        
+
         self.assertFalse(self.task.can_retry)
 
     def test_can_retry_when_not_failed(self):
@@ -570,18 +570,18 @@ class ProvisioningTaskModelTestCase(TestCase):
         self.task.status = 'completed'
         self.task.retry_count = 0
         self.task.save()
-        
+
         self.assertFalse(self.task.can_retry)
 
     def test_duration_seconds_with_timestamps(self):
         """Test duration_seconds calculation with start and end times"""
         start_time = timezone.now()
         end_time = start_time + timezone.timedelta(seconds=45)
-        
+
         self.task.started_at = start_time
         self.task.completed_at = end_time
         self.task.save()
-        
+
         self.assertEqual(self.task.duration_seconds, 45)
 
     def test_duration_seconds_without_timestamps(self):
@@ -592,7 +592,7 @@ class ProvisioningTaskModelTestCase(TestCase):
         """Test duration_seconds returns 0 when only start time present"""
         self.task.started_at = timezone.now()
         self.task.save()
-        
+
         self.assertEqual(self.task.duration_seconds, 0)
 
 
@@ -608,7 +608,7 @@ class ServiceRelationshipModelTestCase(TestCase):
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
-        
+
         self.parent_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
@@ -639,7 +639,7 @@ class ServiceRelationshipModelTestCase(TestCase):
             relationship_type='addon',
             billing_impact='separate'
         )
-        
+
         expected = f"{self.parent_service} → {self.child_service} (🔧 Add-on Service)"
         self.assertEqual(str(relationship), expected)
 
@@ -651,7 +651,7 @@ class ServiceRelationshipModelTestCase(TestCase):
             relationship_type='addon',
             billing_impact='separate'
         )
-        
+
         with self.assertRaises(ValidationError):
             relationship.clean()
 
@@ -672,7 +672,7 @@ class ServiceRelationshipModelTestCase(TestCase):
             relationship_type='dependency',
             billing_impact='separate'
         )
-        
+
         with self.assertRaises(ValidationError):
             circular_relationship.clean()
 
@@ -711,7 +711,7 @@ class ServiceGroupModelTestCase(TestCase):
         """Set up test data"""
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Test Customer', self.admin_user)
-        
+
         self.service_group = ServiceGroup.objects.create(
             name='VPS + Domain Bundle',
             description='Complete hosting solution with VPS and domain',
@@ -733,7 +733,7 @@ class ServiceGroupModelTestCase(TestCase):
     def test_total_services_property_with_members(self):
         """Test total_services property with members"""
         plan = create_test_service_plan()
-        
+
         # Create services
         service1 = Service.objects.create(
             customer=self.customer,
@@ -763,7 +763,7 @@ class ServiceGroupModelTestCase(TestCase):
             service=service1,
             member_role='primary'
         )
-        
+
         ServiceGroupMember.objects.create(
             group=self.service_group,
             service=service2,
@@ -775,7 +775,7 @@ class ServiceGroupModelTestCase(TestCase):
     def test_active_services_property(self):
         """Test active_services property counts only active services"""
         plan = create_test_service_plan()
-        
+
         # Create active service
         active_service = Service.objects.create(
             customer=self.customer,
@@ -806,7 +806,7 @@ class ServiceGroupModelTestCase(TestCase):
             service=active_service,
             member_role='primary'
         )
-        
+
         ServiceGroupMember.objects.create(
             group=self.service_group,
             service=pending_service,
@@ -827,7 +827,7 @@ class ServiceGroupMemberModelTestCase(TestCase):
         """Set up test data"""
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Test Customer', self.admin_user)
-        
+
         self.service_group = ServiceGroup.objects.create(
             name='Test Package',
             group_type='package',
@@ -855,7 +855,7 @@ class ServiceGroupMemberModelTestCase(TestCase):
             member_role='primary',
             provision_order=1
         )
-        
+
         expected = f"{self.service} in {self.service_group} (🎯 Primary Service)"
         self.assertEqual(str(member), expected)
 
@@ -867,7 +867,7 @@ class ServiceGroupMemberModelTestCase(TestCase):
             member_role='primary',
             custom_price_cents=4500  # 45.00 RON
         )
-        
+
         self.assertEqual(member.custom_price, 45.0)
 
     def test_custom_price_property_none(self):
@@ -877,7 +877,7 @@ class ServiceGroupMemberModelTestCase(TestCase):
             service=self.service,
             member_role='primary'
         )
-        
+
         self.assertIsNone(member.custom_price)
 
     def test_service_group_member_validation_different_customer(self):
@@ -899,6 +899,6 @@ class ServiceGroupMemberModelTestCase(TestCase):
             service=other_service,
             member_role='addon'
         )
-        
+
         with self.assertRaises(ValidationError):
             member.clean()

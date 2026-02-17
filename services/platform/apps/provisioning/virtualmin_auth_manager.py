@@ -69,12 +69,36 @@ AUTH_METHOD_SSH_SUDO = "ssh_sudo"
 # Cache keys for auth method tracking
 CACHE_AUTH_METHOD_PREFIX = "virtualmin_auth_method_"
 CACHE_AUTH_HEALTH_PREFIX = "virtualmin_auth_health_"
-CACHE_TIMEOUT = 3600  # 1 hour
+_DEFAULT_CACHE_TIMEOUT = 3600  # 1 hour
+CACHE_TIMEOUT = _DEFAULT_CACHE_TIMEOUT
 
 # SSH connection constants
-SSH_TIMEOUT = 30
+_DEFAULT_SSH_TIMEOUT = 30
+SSH_TIMEOUT = _DEFAULT_SSH_TIMEOUT
 SSH_MAX_RETRIES = 3
-SUDO_COMMAND_TIMEOUT = 60
+_DEFAULT_SUDO_COMMAND_TIMEOUT = 60
+SUDO_COMMAND_TIMEOUT = _DEFAULT_SUDO_COMMAND_TIMEOUT
+
+
+def get_cache_timeout() -> int:
+    """Get cache timeout from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("provisioning.cache_timeout", _DEFAULT_CACHE_TIMEOUT)
+
+
+def get_ssh_timeout() -> int:
+    """Get ssh timeout from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("provisioning.ssh_timeout", _DEFAULT_SSH_TIMEOUT)
+
+
+def get_sudo_command_timeout() -> int:
+    """Get sudo command timeout from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("provisioning.sudo_command_timeout", _DEFAULT_SUDO_COMMAND_TIMEOUT)
 
 
 class AuthMethod(Enum):
@@ -287,7 +311,7 @@ class VirtualminAuthenticationManager:
             if not self._ssh_client:
                 return create_error_result("Failed to establish SSH connection")
 
-            stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=SUDO_COMMAND_TIMEOUT)
+            _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=SUDO_COMMAND_TIMEOUT)
 
             # Read output
             output = stdout.read().decode("utf-8")

@@ -22,7 +22,7 @@ class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
 
     @staticmethod
-    def validate(order: Order) -> tuple[list[str], list[str]]:
+    def validate(order: Order) -> tuple[list[str], list[str]]:  # noqa: C901, PLR0912
         """Return (errors, warnings) for the given order."""
         errors: list[str] = []
         warnings: list[str] = []
@@ -41,7 +41,9 @@ class OrderPreflightValidationService:
         for field, message in required_fields:
             field_value = str(billing.get(field, "")).strip()
             if not field_value:
-                logger.warning(f"🔎 [Validation] Missing field '{field}': '{field_value}' from billing data: {list(billing.keys())}")
+                logger.warning(
+                    f"🔎 [Validation] Missing field '{field}': '{field_value}' from billing data: {list(billing.keys())}"
+                )
                 errors.append(str(message))
 
         # Basic email presence - format validation is assumed upstream
@@ -83,7 +85,7 @@ class OrderPreflightValidationService:
         try:
             # For preflight validation (temporary orders), use the provided subtotal
             # For real orders, recompute from items
-            if hasattr(order, '_preflight_subtotal_cents'):
+            if hasattr(order, "_preflight_subtotal_cents"):
                 subtotal_cents = order._preflight_subtotal_cents
             else:
                 # Compute subtotal from items (unit * qty + setup)
@@ -92,15 +94,14 @@ class OrderPreflightValidationService:
                     subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
 
             customer_vat_info: CustomerVATInfo = {
-                'country': country,
-                'is_business': is_business,
-                'vat_number': vat_number or None,
-                'customer_id': str(order.customer_id),
-                'order_id': str(order.id),
+                "country": country,
+                "is_business": is_business,
+                "vat_number": vat_number or None,
+                "customer_id": str(order.customer_id),
+                "order_id": str(order.id),
             }
             vat_result = OrderVATCalculator.calculate_vat(
-                subtotal_cents=subtotal_cents,
-                customer_info=customer_vat_info
+                subtotal_cents=subtotal_cents, customer_info=customer_vat_info
             )
 
             expected_tax_cents = int(vat_result.vat_cents)
@@ -108,15 +109,19 @@ class OrderPreflightValidationService:
 
             if int(order.tax_cents) != expected_tax_cents:
                 errors.append(
-                    str(_("VAT mismatch: order={}¢ vs computed={}¢ ({})").format(
-                        order.tax_cents, expected_tax_cents, vat_result.reasoning
-                    ))
+                    str(
+                        _("VAT mismatch: order={}¢ vs computed={}¢ ({})").format(
+                            order.tax_cents, expected_tax_cents, vat_result.reasoning
+                        )
+                    )
                 )
             if int(order.total_cents) != expected_total_cents:
                 errors.append(
-                    str(_("Total mismatch: order={}¢ vs computed={}¢ (subtotal={}¢)").format(
-                        order.total_cents, expected_total_cents, subtotal_cents
-                    ))
+                    str(
+                        _("Total mismatch: order={}¢ vs computed={}¢ (subtotal={}¢)").format(
+                            order.total_cents, expected_total_cents, subtotal_cents
+                        )
+                    )
                 )
         except Exception as exc:
             logger.exception("Order VAT validation failed: %s", exc)
@@ -137,4 +142,3 @@ class OrderPreflightValidationService:
         # optionally escalate warnings
         if warnings and not allow_warning_override:
             raise ValueError("; ".join(warnings))
-

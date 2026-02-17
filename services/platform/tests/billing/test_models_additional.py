@@ -51,7 +51,7 @@ class CurrencyModelAdditionalTestCase(TestCase):
     def test_currency_primary_key_constraint(self):
         """Test Currency primary key uniqueness"""
         Currency.objects.create(code='USD', symbol='$', decimals=2)
-        
+
         with self.assertRaises(IntegrityError):
             Currency.objects.create(code='USD', symbol='$', decimals=2)
 
@@ -63,11 +63,11 @@ class CurrencyModelAdditionalTestCase(TestCase):
             ('EUR', '€', 2),  # Standard precision
             ('BTC', '₿', 8),  # High precision
         ]
-        
+
         for code, symbol, decimals in currencies:
             currency = Currency.objects.create(
-                code=code, 
-                symbol=symbol, 
+                code=code,
+                symbol=symbol,
                 decimals=decimals
             )
             self.assertEqual(currency.decimals, decimals)
@@ -97,14 +97,14 @@ class FXRateModelAdditionalTestCase(TestCase):
     def test_fx_rate_unique_constraint(self):
         """Test FXRate unique constraint on base_code, quote_code, as_of"""
         rate_date = date.today()
-        
+
         FXRate.objects.create(
             base_code=self.usd,
             quote_code=self.eur,
             rate=Decimal('0.85'),
             as_of=rate_date
         )
-        
+
         # Should raise IntegrityError for duplicate
         with self.assertRaises(IntegrityError):
             FXRate.objects.create(
@@ -132,12 +132,12 @@ class FXRateModelAdditionalTestCase(TestCase):
             rate=Decimal('0.85'),
             as_of=date.today()
         )
-        
+
         rate_id = fx_rate.id
-        
+
         # Delete base currency
         self.usd.delete()
-        
+
         # FX rate should be deleted too
         self.assertFalse(FXRate.objects.filter(id=rate_id).exists())
 
@@ -154,20 +154,20 @@ class InvoiceSequenceModelAdditionalTestCase(TestCase):
     def test_invoice_sequence_scope_uniqueness(self):
         """Test InvoiceSequence scope uniqueness constraint"""
         InvoiceSequence.objects.create(scope='test_scope')
-        
+
         with self.assertRaises(IntegrityError):
             InvoiceSequence.objects.create(scope='test_scope')
 
     def test_get_next_number_concurrency_safety(self):
         """Test get_next_number atomicity under concurrent access"""
         sequence = InvoiceSequence.objects.create(scope='concurrency_test')
-        
+
         # Simulate concurrent access
         results = []
         for _ in range(5):
             next_number = sequence.get_next_number('TEST')
             results.append(next_number)
-        
+
         # All numbers should be unique and sequential
         expected = ['TEST-000001', 'TEST-000002', 'TEST-000003', 'TEST-000004', 'TEST-000005']
         self.assertEqual(results, expected)
@@ -175,14 +175,14 @@ class InvoiceSequenceModelAdditionalTestCase(TestCase):
     def test_get_next_number_custom_prefix(self):
         """Test get_next_number with custom prefix"""
         sequence = InvoiceSequence.objects.create(scope='custom_prefix')
-        
+
         custom_number = sequence.get_next_number('CUSTOM')
         self.assertEqual(custom_number, 'CUSTOM-000001')
 
     def test_get_next_number_padding(self):
         """Test get_next_number number padding"""
         sequence = InvoiceSequence.objects.create(scope='padding_test', last_value=999999)
-        
+
         next_number = sequence.get_next_number('PAD')
         self.assertEqual(next_number, 'PAD-1000000')  # Should handle large numbers
 
@@ -207,20 +207,20 @@ class ProformaSequenceModelAdditionalTestCase(TestCase):
     def test_proforma_sequence_scope_uniqueness(self):
         """Test ProformaSequence scope uniqueness constraint"""
         ProformaSequence.objects.create(scope='proforma_test_scope')
-        
+
         with self.assertRaises(IntegrityError):
             ProformaSequence.objects.create(scope='proforma_test_scope')
 
     def test_get_next_number_logging(self):
         """Test get_next_number logging functionality"""
         sequence = ProformaSequence.objects.create(scope='logging_test')
-        
+
         with patch('apps.billing.models.logging.getLogger') as mock_logger:
             mock_log = Mock()
             mock_logger.return_value = mock_log
-            
+
             next_number = sequence.get_next_number('LOG')
-            
+
             # Should have logged the operation
             mock_log.info.assert_called_once()
             self.assertEqual(next_number, 'LOG-000001')
@@ -229,10 +229,10 @@ class ProformaSequenceModelAdditionalTestCase(TestCase):
     def test_get_next_number_transaction_rollback(self, mock_atomic):
         """Test get_next_number transaction rollback on error"""
         sequence = ProformaSequence.objects.create(scope='rollback_test')
-        
+
         # Mock transaction.atomic to raise exception
         mock_atomic.side_effect = Exception('Database error')
-        
+
         with self.assertRaises(Exception):
             sequence.get_next_number('FAIL')
 
@@ -240,7 +240,7 @@ class ProformaSequenceModelAdditionalTestCase(TestCase):
         """Test ProformaSequence model meta attributes"""
         meta = ProformaSequence._meta
         self.assertEqual(meta.db_table, 'proforma_sequence')
-        # Accept both English and Romanian translations  
+        # Accept both English and Romanian translations
         self.assertIn(str(meta.verbose_name), ['Proforma Sequence', 'Secvență proformă'])
         self.assertIn(str(meta.verbose_name_plural), ['Proforma Sequences', 'Secvențe proformă'])
 
@@ -284,17 +284,17 @@ class TaxRuleModelAdditionalTestCase(TestCase):
             # No valid_to date
             is_eu_member=True
         )
-        
+
         future_date = date(2030, 1, 1)
         self.assertTrue(rule_no_end.is_active(future_date))
 
     def test_tax_rule_is_active_default_today(self):
         """Test TaxRule.is_active() with default today's date"""
         with patch('django.utils.timezone.now') as mock_now:
-            # Create a mock datetime object with date() method  
+            # Create a mock datetime object with date() method
             from datetime import datetime
             mock_now.return_value = datetime(2024, 6, 15, 12, 0, 0)
-            
+
             self.assertTrue(self.tax_rule.is_active())
 
     def test_tax_rule_str_representation(self):
@@ -349,14 +349,14 @@ class VATValidationModelAdditionalTestCase(TestCase):
         """Test VATValidation.is_expired() with past expiration"""
         self.vat_validation.expires_at = timezone.now() - timedelta(days=1)
         self.vat_validation.save()
-        
+
         self.assertTrue(self.vat_validation.is_expired())
 
     def test_vat_validation_is_expired_no_expiration(self):
         """Test VATValidation.is_expired() with no expiration date"""
         self.vat_validation.expires_at = None
         self.vat_validation.save()
-        
+
         self.assertFalse(self.vat_validation.is_expired())
 
     def test_vat_validation_str_representation(self):
@@ -411,7 +411,7 @@ class PaymentRetryPolicyModelAdditionalTestCase(TestCase):
             is_default=True,
             is_active=True
         )
-        
+
         # Creating second default policy should either fail or make first non-default
         # This depends on the model implementation
         default_policy2 = PaymentRetryPolicy.objects.create(
@@ -419,15 +419,15 @@ class PaymentRetryPolicyModelAdditionalTestCase(TestCase):
             is_default=True,
             is_active=True
         )
-        
+
         # Refresh from database to check current state
         default_policy1.refresh_from_db()
         default_policy2.refresh_from_db()
-        
+
         # At least one should be marked as default
         default_policies = PaymentRetryPolicy.objects.filter(is_default=True)
         self.assertGreaterEqual(default_policies.count(), 1)
-        
+
         # Verify that if both exist, only one is marked as default
         # (implementation detail may vary)
         if default_policy1.is_default and default_policy2.is_default:
@@ -468,7 +468,7 @@ class PaymentRetryAttemptModelAdditionalTestCase(TestCase):
             max_attempts=3,
             is_active=True
         )
-        
+
         self.retry_attempt = PaymentRetryAttempt.objects.create(
             payment=self.payment,
             policy=self.policy,
@@ -488,7 +488,7 @@ class PaymentRetryAttemptModelAdditionalTestCase(TestCase):
         self.retry_attempt.status = 'executed'
         self.retry_attempt.executed_at = timezone.now()
         self.retry_attempt.save()
-        
+
         self.retry_attempt.refresh_from_db()
         self.assertEqual(self.retry_attempt.status, 'executed')
         self.assertIsNotNone(self.retry_attempt.executed_at)
@@ -496,12 +496,12 @@ class PaymentRetryAttemptModelAdditionalTestCase(TestCase):
     def test_payment_retry_attempt_failure_reason(self):
         """Test PaymentRetryAttempt failure handling"""
         failure_reason = 'Insufficient funds'
-        
+
         self.retry_attempt.status = 'failed'
         self.retry_attempt.failure_reason = failure_reason
         self.retry_attempt.executed_at = timezone.now()
         self.retry_attempt.save()
-        
+
         self.assertEqual(self.retry_attempt.failure_reason, failure_reason)
 
 
@@ -514,7 +514,7 @@ class PaymentCollectionRunModelAdditionalTestCase(TestCase):
             email='collection@test.ro',
             password='testpass'
         )
-        
+
         self.collection_run = PaymentCollectionRun.objects.create(
             run_type='manual',
             status='running',
@@ -530,7 +530,7 @@ class PaymentCollectionRunModelAdditionalTestCase(TestCase):
         """Test PaymentCollectionRun __str__ method"""
         expected_parts = ['manual', 'running', str(self.collection_run.started_at.date())]
         str_repr = str(self.collection_run)
-        
+
         for part in expected_parts:
             self.assertIn(part, str_repr)
 
@@ -538,7 +538,7 @@ class PaymentCollectionRunModelAdditionalTestCase(TestCase):
         """Test PaymentCollectionRun amount property conversion"""
         self.collection_run.amount_recovered_cents = 125000  # 1250.00
         self.collection_run.save()
-        
+
         # Test if there's an amount property that converts cents to decimal
         self.assertEqual(self.collection_run.amount_recovered, Decimal('1250.00'))
 
@@ -552,7 +552,7 @@ class PaymentCollectionRunModelAdditionalTestCase(TestCase):
         self.collection_run.total_failed = 5
         self.collection_run.amount_recovered_cents = 50000
         self.collection_run.save()
-        
+
         self.assertEqual(self.collection_run.status, 'completed')
         self.assertIsNotNone(self.collection_run.completed_at)
         self.assertEqual(self.collection_run.total_processed, 95)
@@ -560,12 +560,12 @@ class PaymentCollectionRunModelAdditionalTestCase(TestCase):
     def test_payment_collection_run_error_handling(self):
         """Test PaymentCollectionRun error handling"""
         error_message = 'Connection timeout to payment gateway'
-        
+
         self.collection_run.status = 'failed'
         self.collection_run.error_message = error_message
         self.collection_run.completed_at = timezone.now()
         self.collection_run.save()
-        
+
         self.assertEqual(self.collection_run.status, 'failed')
         self.assertEqual(self.collection_run.error_message, error_message)
 
@@ -590,7 +590,7 @@ class ModelRelationshipTestCase(TestCase):
             number='PRO-REL-001',
             total_cents=10000
         )
-        
+
         invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -598,7 +598,7 @@ class ModelRelationshipTestCase(TestCase):
             total_cents=10000,
             converted_from_proforma=proforma
         )
-        
+
         self.assertEqual(invoice.converted_from_proforma, proforma)
 
     def test_payment_invoice_relationship(self):
@@ -610,7 +610,7 @@ class ModelRelationshipTestCase(TestCase):
             total_cents=10000,
             status='issued'
         )
-        
+
         payment = Payment.objects.create(
             customer=self.customer,
             invoice=invoice,
@@ -618,7 +618,7 @@ class ModelRelationshipTestCase(TestCase):
             currency=self.currency,
             status='succeeded'
         )
-        
+
         self.assertEqual(payment.invoice, invoice)
         self.assertIn(payment, invoice.payments.all())
 
@@ -630,7 +630,7 @@ class ModelRelationshipTestCase(TestCase):
             number='INV-CASCADE-001',
             total_cents=10000
         )
-        
+
         payment = Payment.objects.create(
             customer=self.customer,
             invoice=invoice,
@@ -638,16 +638,16 @@ class ModelRelationshipTestCase(TestCase):
             currency=self.currency,
             status='succeeded'
         )
-        
+
         payment_id = payment.id
-        
+
         # Delete invoice - payment should remain (not CASCADE)
         invoice.delete()
-        
+
         # Payment should still exist (depends on actual model relationship)
         payment.refresh_from_db()
         self.assertIsNone(payment.invoice)
-        
+
         # Verify payment still exists by ID
         self.assertTrue(Payment.objects.filter(id=payment_id).exists())
 
@@ -667,7 +667,7 @@ class ModelValidationTestCase(TestCase):
     def test_invoice_status_validation(self):
         """Test Invoice status field validation"""
         valid_statuses = ['draft', 'issued', 'paid', 'overdue', 'void', 'refunded']
-        
+
         for status in valid_statuses:
             invoice = Invoice.objects.create(
                 customer=self.customer,
@@ -687,9 +687,9 @@ class ModelValidationTestCase(TestCase):
             total_cents=10000,
             status='issued'
         )
-        
+
         valid_methods = ['stripe', 'bank', 'paypal', 'cash', 'other']
-        
+
         for method in valid_methods:
             payment = Payment.objects.create(
                 customer=self.customer,
@@ -705,8 +705,8 @@ class ModelValidationTestCase(TestCase):
         """Test Currency code length validation"""
         # Should accept 3-character codes
         currency = Currency.objects.create(
-            code='USD', 
-            symbol='$', 
+            code='USD',
+            symbol='$',
             decimals=2
         )
         self.assertEqual(len(currency.code), 3)
@@ -716,14 +716,14 @@ class ModelValidationTestCase(TestCase):
         # Test high precision rate
         base_currency = Currency.objects.create(code='USD', symbol='$', decimals=2)
         quote_currency = Currency.objects.create(code='BTC', symbol='₿', decimals=8)
-        
+
         fx_rate = FXRate.objects.create(
             base_code=base_currency,
             quote_code=quote_currency,
             rate=Decimal('0.00002156'),  # Very small rate
             as_of=date.today()
         )
-        
+
         self.assertEqual(fx_rate.rate, Decimal('0.00002156'))
 
 
@@ -750,7 +750,7 @@ class ModelPropertyTestCase(TestCase):
             status='issued',
             total_cents=10000
         )
-        
+
         self.assertTrue(overdue_invoice.is_overdue())
 
     def test_invoice_decimal_properties(self):
@@ -764,7 +764,7 @@ class ModelPropertyTestCase(TestCase):
             total_cents=11900,
             status='draft'
         )
-        
+
         self.assertEqual(invoice.subtotal, Decimal('100.00'))
         self.assertEqual(invoice.tax_amount, Decimal('19.00'))
         self.assertEqual(invoice.total, Decimal('119.00'))
@@ -778,7 +778,7 @@ class ModelPropertyTestCase(TestCase):
             total_cents=15000,
             status='issued'
         )
-        
+
         payment = Payment.objects.create(
             customer=self.customer,
             invoice=invoice,
@@ -786,7 +786,7 @@ class ModelPropertyTestCase(TestCase):
             currency=self.currency,
             status='succeeded'
         )
-        
+
         self.assertEqual(payment.amount, Decimal('150.00'))
 
 
@@ -813,11 +813,11 @@ class ModelManagerTestCase(TestCase):
                 total_cents=(i + 1) * 1000,
                 status='issued'
             )
-        
+
         # Test basic manager operations
         all_invoices = Invoice.objects.all()
         self.assertEqual(all_invoices.count(), 3)
-        
+
         # Test filtering
         issued_invoices = Invoice.objects.filter(status='issued')
         self.assertEqual(issued_invoices.count(), 3)
@@ -832,7 +832,7 @@ class ModelManagerTestCase(TestCase):
             total_cents=10000,
             status='issued'
         )
-        
+
         Payment.objects.create(
             customer=self.customer,
             invoice=invoice,
@@ -840,10 +840,10 @@ class ModelManagerTestCase(TestCase):
             currency=self.currency,
             status='succeeded'
         )
-        
+
         # Test select_related optimization
         invoices_with_customer = Invoice.objects.select_related('customer')
         invoice_from_qs = invoices_with_customer.get(pk=invoice.pk)
-        
+
         # Accessing customer shouldn't trigger additional query
         self.assertEqual(invoice_from_qs.customer, self.customer)

@@ -45,6 +45,16 @@ from apps.common.logging import (
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_MAX_HEADER_JSON_LENGTH = 1000
+MAX_HEADER_JSON_LENGTH = _DEFAULT_MAX_HEADER_JSON_LENGTH
+
+
+def get_max_header_json_length() -> int:
+    """Get max header json length from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
+
 
 class TraceMiddleware:
     """
@@ -89,10 +99,7 @@ class TraceMiddleware:
             return True
 
         # Check DEBUG mode
-        if getattr(settings, "DEBUG", False) and request.META.get("HTTP_X_DEBUG_TRACE", "").lower() == "true":
-            return True
-
-        return False
+        return bool(getattr(settings, "DEBUG", False) and request.META.get("HTTP_X_DEBUG_TRACE", "").lower() == "true")
 
     def _traced_request(self, request: HttpRequest) -> HttpResponse:
         """Process request with full tracing enabled."""
@@ -176,7 +183,7 @@ class TraceMiddleware:
         # Add summary as JSON
         try:
             summary_json = json.dumps(trace_data, default=str)
-            if len(summary_json) < 1000:  # Only if not too large
+            if len(summary_json) < MAX_HEADER_JSON_LENGTH:  # Only if not too large
                 response[f"{prefix}-Summary"] = summary_json
         except (TypeError, ValueError):
             pass
@@ -305,7 +312,7 @@ def trace_view(
     max_queries: int = 50,
     warn_on_n_plus_one: bool = True,
     log_performance: bool = True,
-):
+) -> Callable[..., Any]:
     """
     Decorator to trace a specific view function.
 
@@ -314,11 +321,11 @@ def trace_view(
         def my_view(request):
             return render(request, "template.html")
     """
-    from functools import wraps
+    from functools import wraps  # noqa: PLC0415
 
-    def decorator(view_func):
+    def decorator(view_func: Callable[..., Any]) -> Any:
         @wraps(view_func)
-        def wrapped(request, *args, **kwargs):
+        def wrapped(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
             budget = QueryBudget(
                 max_queries=max_queries,
                 warn_on_exceed=warn_on_n_plus_one,
@@ -355,7 +362,7 @@ def trace_view(
 # =============================================================================
 
 __all__ = [
-    "TraceMiddleware",
     "DebugTraceMiddleware",
+    "TraceMiddleware",
     "trace_view",
 ]

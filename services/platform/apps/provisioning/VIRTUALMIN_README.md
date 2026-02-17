@@ -26,7 +26,7 @@ Following PRAHO's established patterns:
 
 ```python
 virtualmin_validators.py  # Input validation
-virtualmin_gateway.py     # External API integration  
+virtualmin_gateway.py     # External API integration
 virtualmin_service.py     # Business logic
 virtualmin_models.py      # Data layer
 virtualmin_tasks.py       # Async operations
@@ -168,7 +168,7 @@ python manage.py qcluster
 
 **Schedule Details:**
 - Health Check: Every hour
-- Statistics Update: Every 6 hours  
+- Statistics Update: Every 6 hours
 - Retry Failed Jobs: Every 15 minutes
 
 ## 🚀 Usage Examples

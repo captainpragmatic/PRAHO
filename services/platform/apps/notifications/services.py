@@ -27,7 +27,6 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
-from django.db import transaction
 from django.template import Context, Template
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -51,6 +50,15 @@ logger = logging.getLogger(__name__)
 # Security constants
 MAX_CONTEXT_VALUE_LENGTH = 1000  # Maximum length for template context values
 _DEFAULT_MAX_RECIPIENTS_PER_BATCH = 50  # Maximum recipients per batch send
+
+
+def get_max_recipients_per_batch() -> int:
+    """Get max recipients per batch from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "notifications.max_recipients_per_batch", _DEFAULT_MAX_RECIPIENTS_PER_BATCH
+    )
+
+
 TEMPLATE_CACHE_PREFIX = "email_template:"
 TEMPLATE_CACHE_TIMEOUT = 3600  # 1 hour
 SUPPRESSION_CACHE_PREFIX = "email_suppressed:"
@@ -191,7 +199,7 @@ class EmailSuppressionService:
             return cached  # Returns True or False
 
         # Check database
-        from apps.notifications.models import EmailSuppression
+        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
 
         is_suppressed = EmailSuppression.is_suppressed(email)
 
@@ -210,7 +218,7 @@ class EmailSuppressionService:
             reason: Reason for suppression (bounce, complaint, unsubscribe)
             duration_days: How long to suppress (None = permanent)
         """
-        from apps.notifications.models import EmailSuppression
+        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
 
         # Persist to database (source of truth)
         EmailSuppression.suppress(
@@ -236,7 +244,7 @@ class EmailSuppressionService:
     @classmethod
     def unsuppress_email(cls, email: str) -> bool:
         """Remove an email from the suppression list."""
-        from apps.notifications.models import EmailSuppression
+        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
@@ -357,7 +365,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_email(
+    def send_email(  # noqa: PLR0913
         cls,
         to: str | list[str],
         subject: str,
@@ -420,7 +428,7 @@ class EmailService:
             )
 
         # Check rate limit
-        allowed, remaining = EmailRateLimiter.check_rate_limit()
+        allowed, _remaining = EmailRateLimiter.check_rate_limit()
         if not allowed:
             logger.warning("Email rate limit exceeded")
             if async_send:
@@ -484,7 +492,7 @@ class EmailService:
         )
 
     @classmethod
-    def _send_now(
+    def _send_now(  # noqa: PLR0913
         cls,
         to: list[str],
         subject: str,
@@ -611,7 +619,7 @@ class EmailService:
             )
 
     @classmethod
-    def _send_async(
+    def _send_async(  # noqa: PLR0913
         cls,
         to: list[str],
         subject: str,
@@ -651,7 +659,7 @@ class EmailService:
         )
 
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import async_task  # noqa: PLC0415
 
             # Queue the email task
             task_id = async_task(
@@ -704,7 +712,7 @@ class EmailService:
             )
 
     @classmethod
-    def _queue_email_for_retry(
+    def _queue_email_for_retry(  # noqa: PLR0913
         cls,
         to: list[str],
         subject: str,
@@ -737,7 +745,7 @@ class EmailService:
         )
 
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import async_task  # noqa: PLC0415
 
             retry_config = getattr(settings, "EMAIL_RETRY", {})
             retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)
@@ -768,7 +776,7 @@ class EmailService:
             )
 
     @staticmethod
-    def _create_email_log(
+    def _create_email_log(  # noqa: PLR0913
         to: str,
         from_addr: str,
         reply_to: str,
@@ -803,7 +811,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_template_email(
+    def send_template_email(  # noqa: PLR0913
         cls,
         template_key: str,
         recipient: str,
@@ -841,7 +849,7 @@ class EmailService:
         """
         # Security logging
         try:
-            recipient_domain = recipient.split("@")[-1] if "@" in recipient else ""
+            recipient_domain = recipient.rsplit("@", maxsplit=1)[-1] if "@" in recipient else ""
             validators.log_security_event(
                 event_type="template_email_send",
                 details={
@@ -891,11 +899,7 @@ class EmailService:
             subject = render_template_safely(template.subject, safe_context)
             body_html = render_template_safely(template.body_html, safe_context)
             body_text = template.body_text
-            if body_text:
-                body_text = render_template_safely(body_text, safe_context)
-            else:
-                # Generate text version from HTML
-                body_text = strip_tags(body_html)
+            body_text = render_template_safely(body_text, safe_context) if body_text else strip_tags(body_html)
 
             # Send the email
             return cls.send_email(
@@ -960,7 +964,7 @@ class EmailService:
     @staticmethod
     def _generate_unsubscribe_url(email: str, template_key: str) -> str:
         """Generate unsubscribe URL for email."""
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
         token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
         base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
@@ -1015,7 +1019,9 @@ class EmailService:
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
-            "paid_date": invoice.paid_at.strftime("%Y-%m-%d") if invoice.paid_at else timezone.now().strftime("%Y-%m-%d"),
+            "paid_date": invoice.paid_at.strftime("%Y-%m-%d")
+            if invoice.paid_at
+            else timezone.now().strftime("%Y-%m-%d"),
             "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
         }
 
@@ -1128,7 +1134,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def handle_delivery_event(
+    def handle_delivery_event(  # noqa: C901, PLR0912
         cls,
         event_type: str,
         message_id: str,
@@ -1224,7 +1230,7 @@ class EmailService:
     ) -> None:
         """Log email-related audit event."""
         try:
-            from apps.audit.services import AuditEventData, AuditService
+            from apps.audit.services import AuditEventData, AuditService  # noqa: PLC0415
 
             event_data = AuditEventData(
                 event_type=f"email_{event_type}",
@@ -1416,18 +1422,16 @@ class EmailPreferenceService:
         Returns:
             True if unsubscribe was successful
         """
-        import hashlib
-        import hmac
+        import hashlib  # noqa: PLC0415
+        import hmac  # noqa: PLC0415
 
-        from apps.customers.models import Customer
+        from apps.customers.models import Customer  # noqa: PLC0415
 
         # Verify token using timing-safe comparison
         # Check against known template keys to validate
         token_valid = False
         for template_key in ["marketing", "newsletter", "all"]:
-            expected_token = hashlib.sha256(
-                f"{email}:{template_key}:{settings.SECRET_KEY}".encode()
-            ).hexdigest()[:32]
+            expected_token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
             # Use timing-safe comparison to prevent timing attacks
             if hmac.compare_digest(token, expected_token):
                 token_valid = True

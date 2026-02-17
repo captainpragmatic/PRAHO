@@ -15,10 +15,8 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlparse
-
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +57,7 @@ class ConnectionPool:
         """Acquire a connection slot from the pool."""
         acquired = self._semaphore.acquire(timeout=self.connection_timeout)
         if not acquired:
-            raise ConnectionError(
-                f"Could not acquire connection within {self.connection_timeout}s timeout"
-            )
+            raise ConnectionError(f"Could not acquire connection within {self.connection_timeout}s timeout")
 
         try:
             yield
@@ -84,10 +80,10 @@ class HTTPConnectionPool:
     Supports retry logic and connection reuse.
     """
 
-    _instances: dict[str, "HTTPConnectionPool"] = {}
+    _instances: ClassVar[dict[str, HTTPConnectionPool]] = {}
     _lock = threading.Lock()
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         base_url: str,
         pool_connections: int = 10,
@@ -125,8 +121,7 @@ class HTTPConnectionPool:
         self.session.mount("https://", adapter)
 
         logger.debug(
-            f"HTTPConnectionPool initialized for {base_url} "
-            f"(pool_size={pool_maxsize}, retries={max_retries})"
+            f"HTTPConnectionPool initialized for {base_url} " f"(pool_size={pool_maxsize}, retries={max_retries})"
         )
 
     @classmethod
@@ -134,7 +129,7 @@ class HTTPConnectionPool:
         cls,
         base_url: str,
         **kwargs: Any,
-    ) -> "HTTPConnectionPool":
+    ) -> HTTPConnectionPool:
         """Get or create a connection pool for a base URL."""
         parsed = urlparse(base_url)
         pool_key = f"{parsed.scheme}://{parsed.netloc}"
@@ -144,25 +139,25 @@ class HTTPConnectionPool:
                 cls._instances[pool_key] = cls(base_url, **kwargs)
             return cls._instances[pool_key]
 
-    def get(self, path: str, **kwargs: Any) -> "requests.Response":
+    def get(self, path: str, **kwargs: Any) -> requests.Response:
         """Make a GET request."""
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
         kwargs.setdefault("timeout", self.timeout)
         return self.session.get(url, **kwargs)
 
-    def post(self, path: str, **kwargs: Any) -> "requests.Response":
+    def post(self, path: str, **kwargs: Any) -> requests.Response:
         """Make a POST request."""
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
         kwargs.setdefault("timeout", self.timeout)
         return self.session.post(url, **kwargs)
 
-    def put(self, path: str, **kwargs: Any) -> "requests.Response":
+    def put(self, path: str, **kwargs: Any) -> requests.Response:
         """Make a PUT request."""
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
         kwargs.setdefault("timeout", self.timeout)
         return self.session.put(url, **kwargs)
 
-    def delete(self, path: str, **kwargs: Any) -> "requests.Response":
+    def delete(self, path: str, **kwargs: Any) -> requests.Response:
         """Make a DELETE request."""
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
         kwargs.setdefault("timeout", self.timeout)
@@ -172,7 +167,7 @@ class HTTPConnectionPool:
         """Close the session and release connections."""
         self.session.close()
 
-    def __enter__(self) -> "HTTPConnectionPool":
+    def __enter__(self) -> HTTPConnectionPool:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -185,11 +180,11 @@ class ExternalServicePool:
     Singleton pattern for application-wide pool management.
     """
 
-    _instance: "ExternalServicePool | None" = None
+    _instance: ExternalServicePool | None = None
     _lock = threading.Lock()
 
     # Default configuration for known services
-    SERVICE_CONFIGS = {
+    SERVICE_CONFIGS: ClassVar[dict] = {
         "virtualmin": {
             "pool_connections": 5,
             "pool_maxsize": 10,
@@ -216,7 +211,7 @@ class ExternalServicePool:
         },
     }
 
-    def __new__(cls) -> "ExternalServicePool":
+    def __new__(cls) -> ExternalServicePool:
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
@@ -250,10 +245,7 @@ class ExternalServicePool:
     def get_stats(self) -> dict[str, Any]:
         """Get statistics for all pools."""
         with self._pool_lock:
-            return {
-                name: pool.session.adapters.get("https://", None)
-                for name, pool in self._pools.items()
-            }
+            return {name: pool.session.adapters.get("https://", None) for name, pool in self._pools.items()}
 
 
 def get_http_session(
@@ -284,6 +276,7 @@ def get_http_session(
 
 
 # Database connection pooling configuration helpers
+
 
 def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
     """
@@ -331,6 +324,7 @@ def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
 
 # Cleanup on application shutdown
 
+
 def cleanup_pools() -> None:
     """Clean up all connection pools on application shutdown."""
     try:
@@ -341,6 +335,7 @@ def cleanup_pools() -> None:
 
 
 # SSH connection pool for Virtualmin (optional)
+
 
 class SSHConnectionPool:
     """
@@ -354,7 +349,8 @@ class SSHConnectionPool:
         idle_timeout: float = 300.0,
     ) -> None:
         try:
-            import paramiko
+            import paramiko  # noqa: PLC0415
+
             self._paramiko = paramiko
         except ImportError:
             self._paramiko = None

@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
@@ -55,7 +55,7 @@ class AnsibleService:
     """
 
     # Panel-aware playbook execution order
-    PANEL_PLAYBOOKS: dict[str, list[str]] = {
+    PANEL_PLAYBOOKS: ClassVar[dict[str, list[str]]] = {
         "virtualmin": [
             "common_base.yml",
             "virtualmin.yml",
@@ -181,16 +181,19 @@ class AnsibleService:
             # Build command
             cmd = [
                 self._ansible_path,
-                "-i", str(inventory_file),
-                "--private-key", str(key_file),
-                "-e", vars_json,
+                "-i",
+                str(inventory_file),
+                "--private-key",
+                str(key_file),
+                "-e",
+                vars_json,
                 str(playbook_path),
             ]
 
             logger.info(f"📜 [Ansible] Running: {playbook} on {deployment.ipv4_address}")
 
             # Execute
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: PLW1510, S603
                 cmd,
                 cwd=ANSIBLE_BASE_PATH,
                 capture_output=True,
@@ -214,24 +217,28 @@ class AnsibleService:
             # Parse stats if possible
             stats = self._parse_stats(result.stdout)
 
-            return Ok(AnsibleResult(
-                success=success,
-                playbook=playbook,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                return_code=result.returncode,
-                stats=stats,
-            ))
+            return Ok(
+                AnsibleResult(
+                    success=success,
+                    playbook=playbook,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    return_code=result.returncode,
+                    stats=stats,
+                )
+            )
 
         except subprocess.TimeoutExpired:
             logger.error(f"🚨 [Ansible] Playbook {playbook} timed out after {self.timeout}s")
-            return Ok(AnsibleResult(
-                success=False,
-                playbook=playbook,
-                stdout="",
-                stderr=f"Playbook timed out after {self.timeout} seconds",
-                return_code=-1,
-            ))
+            return Ok(
+                AnsibleResult(
+                    success=False,
+                    playbook=playbook,
+                    stdout="",
+                    stderr=f"Playbook timed out after {self.timeout} seconds",
+                    return_code=-1,
+                )
+            )
         except Exception as e:
             logger.error(f"🚨 [Ansible] Playbook {playbook} failed: {e}")
             return Err(f"Playbook execution failed: {e}")
@@ -239,7 +246,7 @@ class AnsibleService:
             # Cleanup temporary files
             if key_file.exists():
                 key_file.unlink()
-            if 'inventory_file' in locals() and inventory_file.exists():
+            if "inventory_file" in locals() and inventory_file.exists():
                 inventory_file.unlink()
 
     def _generate_inventory(self, deployment: NodeDeployment) -> Path:
@@ -275,24 +282,24 @@ ansible_python_interpreter=/usr/bin/python3
             "deployment_id": str(deployment.id),
             "inventory_hostname": deployment.hostname,
             "inventory_hostname_short": deployment.hostname,
-
             # Backup settings
             "backup_enabled": backup_enabled,
             "backup_storage": backup_storage,
             "backup_retention_days": backup_retention,
             "backup_schedule": backup_schedule,
-
             # Force hostname setting
             "virtualmin_force_hostname": True,
         }
 
         # Add S3 backup settings when S3 storage is configured
         if backup_storage == "s3":
-            vars_dict.update({
-                "backup_s3_bucket": SettingsService.get_setting("node_deployment.backup_s3_bucket", ""),
-                "backup_s3_region": SettingsService.get_setting("node_deployment.backup_s3_region", "eu-central-1"),
-                "backup_s3_prefix": SettingsService.get_setting("node_deployment.backup_s3_prefix", "backups/"),
-            })
+            vars_dict.update(
+                {
+                    "backup_s3_bucket": SettingsService.get_setting("node_deployment.backup_s3_bucket", ""),
+                    "backup_s3_region": SettingsService.get_setting("node_deployment.backup_s3_region", "eu-central-1"),
+                    "backup_s3_prefix": SettingsService.get_setting("node_deployment.backup_s3_prefix", "backups/"),
+                }
+            )
 
         # Add FQDN if DNS zone is configured
         if deployment.dns_zone:
@@ -315,7 +322,8 @@ ansible_python_interpreter=/usr/bin/python3
 
             # Try to extract host stats
             # Format: hostname : ok=X changed=Y unreachable=Z failed=W
-            import re
+            import re  # noqa: PLC0415
+
             match = re.search(
                 r"ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)",
                 recap_section,
@@ -345,7 +353,7 @@ _ansible_service: AnsibleService | None = None
 
 def get_ansible_service() -> AnsibleService:
     """Get global Ansible service instance"""
-    global _ansible_service
+    global _ansible_service  # noqa: PLW0603
     if _ansible_service is None:
         _ansible_service = AnsibleService()
     return _ansible_service

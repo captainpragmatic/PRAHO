@@ -20,8 +20,24 @@ logger = logging.getLogger(__name__)
 # Task configuration
 TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 3
-TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
-TASK_TIME_LIMIT = 600  # 10 minutes
+_DEFAULT_TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
+TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
+_DEFAULT_TASK_TIME_LIMIT = 600  # 10 minutes
+TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
+
+
+def get_task_soft_time_limit() -> int:
+    """Get task soft time limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
+
+
+def get_task_time_limit() -> int:
+    """Get task time limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
 
 def process_customer_feedback(note_id: str) -> dict[str, Any]:

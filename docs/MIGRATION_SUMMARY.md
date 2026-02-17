@@ -6,7 +6,7 @@ The PRAHO API is now accessible without version prefixes:
 
 ```
 /api/customers/search/           → Customer search API
-/api/customers/{id}/services/    → Customer services API  
+/api/customers/{id}/services/    → Customer services API
 /api/billing/                    → Billing APIs (placeholder)
 /api/tickets/                    → Ticket APIs (placeholder)
 ```
@@ -21,7 +21,7 @@ Any existing JavaScript/AJAX calls need to be updated from:
 fetch('/customers/search/?q=' + query)
 fetch('/customers/' + id + '/services/')
 
-// New centralized API URLs  
+// New centralized API URLs
 fetch('/api/customers/search/?q=' + query)
 fetch('/api/customers/' + id + '/services/')
 ```
@@ -58,7 +58,7 @@ Then test the endpoints:
 # Customer search
 curl "http://localhost:8001/api/customers/search/?q=test"
 
-# Customer services  
+# Customer services
 curl "http://localhost:8001/api/customers/1/services/"
 ```
 
@@ -72,10 +72,10 @@ curl "http://localhost:8001/api/customers/1/services/"
 
 ## 🎯 **Architecture Benefits**
 
-✅ **Clean URLs**: No version clutter - simple `/api/domain/` structure  
-✅ **Centralized**: All APIs in one app following Sentry/Stripe pattern  
-✅ **Future-Proof**: Can add versioning later if needed  
-✅ **Domain-Organized**: Clear separation by business domain  
-✅ **Django-Native**: Proper app structure with migrations support  
+✅ **Clean URLs**: No version clutter - simple `/api/domain/` structure
+✅ **Centralized**: All APIs in one app following Sentry/Stripe pattern
+✅ **Future-Proof**: Can add versioning later if needed
+✅ **Domain-Organized**: Clear separation by business domain
+✅ **Django-Native**: Proper app structure with migrations support
 
 The API is ready for development! 🚀

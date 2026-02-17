@@ -60,7 +60,7 @@ disable_error_code = [
 [[tool.mypy.overrides]]
 module = [
     "*.views",
-    "*.models", 
+    "*.models",
     "*.forms",
     "*.admin",
 ]
@@ -70,7 +70,7 @@ disable_error_code = ["assignment", "type-arg"]
 [[tool.mypy.overrides]]
 module = [
     "*.services.*",
-    "*.utils.*", 
+    "*.utils.*",
     "*.repos.*",
     "*.gateways.*",
     # Romanian business logic
@@ -103,7 +103,7 @@ strict = true
 
 Special attention to type safety in:
 - **CUI/VAT validation** (`apps.common.validators`)
-- **Invoice calculations** (`apps.billing.calculations`) 
+- **Invoice calculations** (`apps.billing.calculations`)
 - **Payment processing** (`apps.billing.services`)
 - **e-Factura generation** (when implemented)
 

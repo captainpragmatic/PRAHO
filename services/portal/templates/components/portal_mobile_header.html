@@ -22,7 +22,7 @@
         </a>
 
         <!-- Mobile Menu Toggle -->
-        <button 
+        <button
             id="mobile-menu-toggle"
             type="button"
             class="text-slate-300 hover:text-white focus:outline-none focus:text-white transition-colors"
@@ -44,7 +44,7 @@
                 <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
                     My Account
                 </div>
-                
+
                 <!-- Dashboard -->
                 <a href="/dashboard/" class="mobile-nav-item group">
                     <div class="flex items-center space-x-4">
@@ -130,7 +130,7 @@
                 <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
                     Account
                 </div>
-                
+
                 <!-- Profile -->
                 <a href="#" class="mobile-nav-item group">
                     <div class="flex items-center space-x-4">
@@ -167,7 +167,7 @@
                     </div>
                 </a>
             </div>
-            
+
             <!-- Bottom Padding for Safe Area -->
             <div class="h-8"></div>
         </div>
@@ -211,7 +211,7 @@ function toggleMobileMenu() {
     const menu = document.getElementById('mobile-menu');
     const hamburger = document.getElementById('hamburger-icon');
     const close = document.getElementById('close-icon');
-    
+
     if (menu && hamburger && close) {
         if (menu.classList.contains('hidden')) {
             menu.classList.remove('hidden');
@@ -231,7 +231,7 @@ function toggleMobileMenu() {
 document.addEventListener('click', function(event) {
     const menu = document.getElementById('mobile-menu');
     const toggle = document.getElementById('mobile-menu-toggle');
-    
+
     if (menu && toggle && !menu.contains(event.target) && !toggle.contains(event.target) && !menu.classList.contains('hidden')) {
         toggleMobileMenu();
     }

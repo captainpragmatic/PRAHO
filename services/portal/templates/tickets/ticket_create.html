@@ -66,7 +66,7 @@
         </div>
 
         <!-- Optional: Related Service - For future implementation -->
-        <!-- 
+        <!--
         <div>
           <label for="service" class="block text-sm font-medium text-slate-300 mb-2">
             {% trans 'Related Service' %} <span class="text-slate-500">({% trans 'optional' %})</span>
@@ -195,7 +195,7 @@
   document.querySelector('form').addEventListener('submit', function (e) {
     const title = document.getElementById('title').value.trim();
     const description = document.getElementById('description').value.trim();
-    
+
     if (!title || !description) {
       e.preventDefault();
       alert('{% trans "Please fill in both title and description fields." %}');

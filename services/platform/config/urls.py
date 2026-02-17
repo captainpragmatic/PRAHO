@@ -15,9 +15,6 @@ from django.http.response import HttpResponseBase
 from django.urls import include, path
 from django.views.generic import RedirectView
 
-# Import dashboard view
-from apps.common.views import dashboard_view
-
 # Import legal views
 from apps.common.legal_views import (
     cookie_policy,
@@ -26,13 +23,16 @@ from apps.common.legal_views import (
     terms_of_service,
 )
 
+# Import dashboard view
+from apps.common.views import dashboard_view
+
 
 def root_redirect(request: HttpRequest) -> HttpResponseBase:
     """Redirect root URL based on authentication status"""
     if request.user.is_authenticated:
         return RedirectView.as_view(url="/dashboard/", permanent=False)(request)
     else:
-        return RedirectView.as_view(url="/users/login/", permanent=False)(request)
+        return RedirectView.as_view(url="/auth/login/", permanent=False)(request)
 
 
 urlpatterns = [
@@ -51,17 +51,14 @@ urlpatterns = [
     # Cookie policy kept for staff reference; consent banner + proxy moved to Portal
     path("cookie-policy/", cookie_policy, name="cookie_policy"),
     path("data-processors/", data_processors, name="data_processors"),
-    # Authentication URLs
+    # Authentication URLs (canonical prefix)
     path("auth/", include("apps.users.urls")),
-    # Backward-compatible alias expected by some tests
-    path("users/", include("apps.users.urls")),
     # Django i18n for language switching
     path("i18n/", include("django.conf.urls.i18n")),
     # Core business apps
     path("customers/", include("apps.customers.urls")),
     path("products/", include("apps.products.urls")),
     path("orders/", include("apps.orders.urls")),
-    path("order/", include("apps.orders.urls")),  # Singular alias for cart operations
     path("billing/", include("apps.billing.urls")),
     path("tickets/", include("apps.tickets.urls")),
     path("provisioning/", include("apps.provisioning.urls")),

@@ -18,11 +18,11 @@ This demonstrates how to use our reusable table component across the platform.
 <!-- Documents Results Container -->
 <div>
   {% if documents.object_list %}
-    
+
     <!-- Use Standardized Enhanced Table Component -->
-    {% table_enhanced 
-       columns=table_data.columns 
-       rows=table_data.rows 
+    {% table_enhanced
+       columns=table_data.columns
+       rows=table_data.rows
        page_obj=documents
        extra_params=extra_params
        htmx_target='#billing-results'

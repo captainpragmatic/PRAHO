@@ -9,9 +9,9 @@
 {% else %}bg-slate-50 border-slate-200 text-slate-800 dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200
 {% endif %}{% if css_class %} {{ css_class }}{% endif %}"
 {% if html_id %}id="{{ html_id }}"{% endif %}
-{% if dismissible %}x-data="{ show: true }" x-show="show" x-transition{% endif %} 
+{% if dismissible %}x-data="{ show: true }" x-show="show" x-transition{% endif %}
 role="alert">
-  
+
   <div class="flex">
     {# Icon #}
     {% if show_icon|default:True %}
@@ -67,15 +67,15 @@ role="alert">
     {# Dismiss button #}
     {% if dismissible %}
     <div class="ml-auto pl-3">
-      <button type="button" 
-              class="inline-flex rounded-md p-1.5 
+      <button type="button"
+              class="inline-flex rounded-md p-1.5
 {% if variant == "success" %}text-green-400 hover:bg-green-100
 {% elif variant == "warning" %}text-yellow-400 hover:bg-yellow-100
 {% elif variant == "error" or variant == "danger" %}text-red-400 hover:bg-red-100
 {% elif variant == "info" %}text-blue-400 hover:bg-blue-100
 {% else %}text-slate-400 hover:bg-slate-100
-{% endif %}" 
-              {% if dismissible %}@click="show = false"{% endif %} 
+{% endif %}"
+              {% if dismissible %}@click="show = false"{% endif %}
               aria-label="Close notification">
         <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
           <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>

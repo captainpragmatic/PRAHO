@@ -27,11 +27,37 @@ logger = logging.getLogger(__name__)
 ENCRYPTION_AVAILABLE = True
 
 # Security constants
-MAX_TEMPLATE_SIZE = 100_000  # 100KB limit for templates
+_DEFAULT_MAX_TEMPLATE_SIZE = 100_000  # 100KB limit for templates
+MAX_TEMPLATE_SIZE = _DEFAULT_MAX_TEMPLATE_SIZE
 MAX_JSON_SIZE = 10_000  # 10KB limit for JSON data
 MAX_JSON_DEPTH = 10  # Maximum JSON nesting depth
-MAX_SUBJECT_LENGTH = 200  # Maximum subject line length
-MAX_NAME_LENGTH = 200  # Maximum campaign name length
+_DEFAULT_MAX_SUBJECT_LENGTH = 200  # Maximum subject line length
+MAX_SUBJECT_LENGTH = _DEFAULT_MAX_SUBJECT_LENGTH
+_DEFAULT_MAX_NAME_LENGTH = 200  # Maximum campaign name length
+MAX_NAME_LENGTH = _DEFAULT_MAX_NAME_LENGTH
+
+
+def get_max_template_size() -> int:
+    """Get max template size from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("notifications.max_template_size", _DEFAULT_MAX_TEMPLATE_SIZE)
+
+
+def get_max_subject_length() -> int:
+    """Get max subject length from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("notifications.max_subject_length", _DEFAULT_MAX_SUBJECT_LENGTH)
+
+
+def get_max_name_length() -> int:
+    """Get max name length from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("notifications.max_name_length", _DEFAULT_MAX_NAME_LENGTH)
+
+
 CONTENT_PREVIEW_LENGTH = 100  # Length for content preview
 
 
@@ -667,10 +693,10 @@ class EmailSuppression(models.Model):
             provider: Email provider that reported the issue
             expires_days: Days until suppression expires (None = permanent)
         """
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
-        from django.db import transaction
-        from django.utils import timezone
+        from django.db import transaction  # noqa: PLC0415
+        from django.utils import timezone  # noqa: PLC0415
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         expires_at = None
@@ -709,9 +735,9 @@ class EmailSuppression(models.Model):
     @classmethod
     def is_suppressed(cls, email: str) -> bool:
         """Check if an email is currently suppressed."""
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
-        from django.utils import timezone
+        from django.utils import timezone  # noqa: PLC0415
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
@@ -860,7 +886,7 @@ class EmailPreference(models.Model):
 
     def update_marketing_consent(self, consent: bool, source: str = "") -> None:
         """Update marketing consent with GDPR tracking."""
-        from django.utils import timezone
+        from django.utils import timezone  # noqa: PLC0415
 
         self.marketing = consent
         if consent:

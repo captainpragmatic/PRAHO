@@ -54,11 +54,11 @@
                             {% else %}
                                 <span class="text-slate-400">System</span>
                             {% endif %}
-                            
+
                             {% if event.ip_address %}
                                 <span class="font-mono">from {{ event.ip_address }}</span>
                             {% endif %}
-                            
+
                             {% if event.object_id and event.content_type.model != 'user' %}
                                 <span class="text-slate-500">ID: {{ event.object_id|slice:":8" }}</span>
                             {% endif %}
@@ -73,13 +73,13 @@
                             hx-indicator="#event-detail-{{ event.id }}-loading"
                             onclick="toggleEventDetail(this, '{{ event.id }}')"
                             >
-                        <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon" 
-                             fill="none" 
-                             stroke="currentColor" 
+                        <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon"
+                             fill="none"
+                             stroke="currentColor"
                              viewBox="0 0 24 24">
-                            <path stroke-linecap="round" 
-                                  stroke-linejoin="round" 
-                                  stroke-width="2" 
+                            <path stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  stroke-width="2"
                                   d="M19 9l-7 7-7-7"></path>
                         </svg>
                     </button>
@@ -107,7 +107,7 @@
     <div class="text-center py-12">
         <div class="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
             </svg>
         </div>
@@ -122,7 +122,7 @@ function toggleEventDetail(button, eventId) {
     const detailDiv = document.getElementById('event-detail-' + eventId);
     const chevron = button.querySelector('.chevron-icon');
     const isHidden = detailDiv.classList.contains('hidden');
-    
+
     if (isHidden) {
         detailDiv.classList.remove('hidden');
         chevron.style.transform = 'rotate(180deg)';

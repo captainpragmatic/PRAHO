@@ -4,7 +4,7 @@
 
 ### **Problem Analysis:**
 - Django's `is_staff` field is for Django admin panel access
-- Our custom `system_role` field is for business role distinction  
+- Our custom `system_role` field is for business role distinction
 - **Field names are confusing and create conflicts!**
 
 ### **Current Confusing Usage:**
@@ -23,20 +23,20 @@ user.is_superuser    # Super what? Business super user or Django superuser?
 class User(AbstractUser):
     # Django admin access (keep as-is for Django framework)
     # is_staff = models.BooleanField(default=False)  # Built-in Django field
-    
+
     # RENAMED: Business role for internal staff (much clearer!)
     admin_role = models.CharField(
-        max_length=20, 
-        choices=ADMIN_ROLE_CHOICES, 
-        null=True, 
+        max_length=20,
+        choices=ADMIN_ROLE_CHOICES,
+        null=True,
         blank=True,
         help_text=_('Internal admin role. Leave empty for customer users.')
     )
-    
+
     ADMIN_ROLE_CHOICES = [
         ('admin', _('Administrator')),      # Full business control
         ('support', _('Support Agent')),    # Customer support
-        ('billing', _('Billing Staff')),    # Financial operations  
+        ('billing', _('Billing Staff')),    # Financial operations
         ('manager', _('Manager')),          # Account management
     ]
 ```
@@ -50,7 +50,7 @@ class User(AbstractUser):
 
 ### **`is_superuser` - Django God Mode**
 - **Purpose**: Has ALL Django permissions automatically
-- **Scope**: Django framework only  
+- **Scope**: Django framework only
 - **Usage**: Bypass all permission checks in Django admin
 
 ### **`admin_role` - Business Role (Our Custom Field)**
@@ -77,15 +77,15 @@ class User(AbstractUser):
 # Django admin access
 if user.is_staff:
     # Can access /admin/ interface
-    
+
 # Business admin functions
 if user.admin_role:
     # Can perform business operations
-    
+
 # Specific business roles
 if user.admin_role == 'billing':
     # Can manage invoices and payments
-    
+
 # Customer access
 if user.is_customer_user:
     # Can access customer dashboard
@@ -128,7 +128,7 @@ def is_admin_user(self) -> bool:
     """Check if user has business admin role"""
     return self.admin_role is not None
 
-@property  
+@property
 def is_business_admin(self) -> bool:
     """Check if user has admin business role"""
     return self.admin_role == 'admin'
@@ -138,6 +138,6 @@ def is_business_admin(self) -> bool:
 
 1. **No Confusion**: `admin_role` clearly means business admin role
 2. **Self-Documenting**: Code is easier to understand
-3. **Better Onboarding**: New developers understand immediately  
+3. **Better Onboarding**: New developers understand immediately
 4. **Clear Separation**: Django vs Business logic distinction
 5. **Future Proof**: Easy to extend with new business roles

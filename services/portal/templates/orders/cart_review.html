@@ -5,23 +5,23 @@
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-  
+
   <!-- Breadcrumbs -->
   {% include "orders/partials/order_breadcrumbs.html" with current_step="cart" %}
-  
+
   <!-- Page Header -->
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-white mb-2">🛒 {% trans "Cart Review" %}</h1>
     <p class="text-slate-400">{% trans "Review selected products and proceed to checkout" %}</p>
   </div>
-  
+
   <!-- Cart Items -->
   <div class="grid lg:grid-cols-3 gap-8">
-    
+
     <!-- Cart Items List -->
     <div class="lg:col-span-2">
       <div class="bg-slate-800 rounded-lg border border-slate-700">
-        
+
         <!-- Items Header -->
         <div class="px-6 py-4 border-b border-slate-700">
           <h2 class="text-lg font-medium text-white">
@@ -32,23 +32,23 @@
             {% endblocktrans %}
           </h2>
         </div>
-        
+
         <!-- Items List -->
         <div class="divide-y divide-slate-700">
           {% for item in cart_items %}
           <div class="p-6" id="cart-item-{{ forloop.counter0 }}">
             <div class="flex flex-col sm:flex-row sm:items-start space-y-4 sm:space-y-0 sm:space-x-4">
-              
+
               <!-- Product Info -->
               <div class="flex-1 min-w-0">
                 <h3 class="text-lg font-medium text-white mb-1">
                   {{ item.product_name }}
                 </h3>
-                
+
                 <div class="flex flex-wrap items-center gap-2 text-sm text-slate-400 mb-3">
                   {% badge item.product_type|title variant="secondary" size="sm" %}
                   {% badge item.billing_period|title variant="primary" size="sm" %}
-                  
+
                   {% if item.domain_name %}
                   <span class="flex items-center">
                     <span class="mr-1">🌐</span>
@@ -56,7 +56,7 @@
                   </span>
                   {% endif %}
                 </div>
-                
+
                 <!-- Configuration Details -->
                 {% if item.config %}
                 <details class="mb-4">
@@ -76,10 +76,10 @@
                 </details>
                 {% endif %}
               </div>
-              
+
               <!-- Quantity & Actions -->
               <div class="flex items-center justify-between sm:flex-col sm:items-end sm:justify-start space-y-0 sm:space-y-4">
-                
+
                 <!-- Quantity Controls -->
                 <div class="flex items-center space-x-2">
                   <label for="qty-{{ forloop.counter0 }}" class="text-sm text-slate-400">
@@ -101,7 +101,7 @@
                     {% endfor %}
                   </select>
                 </div>
-                
+
                 <!-- Remove Button -->
                 <button hx-post="{% url 'orders:remove_from_cart' %}"
                         hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}'
@@ -135,7 +135,7 @@
           {% endfor %}
         </div>
       </div>
-      
+
       <!-- Continue Shopping -->
       <div class="mt-6">
         <a href="{% url 'orders:catalog' %}" class="ui-btn inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 bg-slate-700 text-slate-300 hover:bg-slate-600 focus:ring-slate-300 border border-slate-600">
@@ -143,19 +143,19 @@
         </a>
       </div>
     </div>
-    
+
     <!-- Order Summary -->
     <div class="lg:col-span-1">
       <div class="bg-slate-800 rounded-lg border border-slate-700 sticky top-8">
-        
+
         <!-- Calculate Totals -->
-        <div id="cart-totals" 
+        <div id="cart-totals"
              hx-post="{% url 'orders:calculate_totals' %}"
              hx-trigger="load"
              hx-target="this"
              hx-swap="outerHTML"
              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-          
+
           <!-- Loading State -->
           <div class="p-6">
             <h3 class="text-lg font-medium text-white mb-4">{% trans "Order Summary" %}</h3>
@@ -166,7 +166,7 @@
             </div>
           </div>
         </div>
-        
+
         <!-- Warnings Display -->
         {% if warnings %}
         <div class="px-6 pb-4">
@@ -178,7 +178,7 @@
           {% endfor %}
         </div>
         {% endif %}
-        
+
       </div>
     </div>
   </div>

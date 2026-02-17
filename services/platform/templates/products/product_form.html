@@ -60,11 +60,11 @@
   <!-- Form -->
   <form method="POST" class="space-y-6">
     {% csrf_token %}
-    
+
     <!-- Basic Information -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">📋 {% trans 'Basic Information' %}</h2>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Product Name -->
         <div class="md:col-span-2">
@@ -144,10 +144,10 @@
         <div class="md:col-span-2">
           <fieldset class="border border-slate-600 rounded-lg p-4">
             <legend class="text-sm font-medium text-slate-300 px-2">{% trans 'Domain Requirements' %}</legend>
-            
+
             <div class="space-y-3">
               {% checkbox_field "requires_domain" label="Customer must provide a domain" html_id="id_requires_domain" checked=form.requires_domain.value %}
-              
+
               {% checkbox_field "domain_required_at_signup" label="Domain must be specified during order" html_id="id_domain_required_at_signup" checked=form.domain_required_at_signup.value %}
             </div>
           </fieldset>
@@ -158,12 +158,12 @@
     <!-- Status & Visibility -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">👁️ {% trans 'Status & Visibility' %}</h2>
-      
+
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {% checkbox_field "is_active" label="Active (available for purchase)" html_id="id_is_active" checked=form.is_active.value %}
-        
+
         {% checkbox_field "is_public" label="Public (visible on website)" html_id="id_is_public" checked=form.is_public.value %}
-        
+
         {% checkbox_field "is_featured" label="Featured (show prominently)" html_id="id_is_featured" checked=form.is_featured.value %}
       </div>
     </div>
@@ -171,14 +171,14 @@
     <!-- Romanian Business Settings -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">🇷🇴 {% trans 'Romanian Business Settings' %}</h2>
-      
+
       {% checkbox_field "includes_vat" label="Prices include 21% Romanian VAT" html_id="id_includes_vat" checked=form.includes_vat.value help_text="Important for e-Factura compliance and tax reporting" %}
     </div>
 
     <!-- SEO Settings -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <h2 class="text-xl font-semibold text-white mb-6">🔍 {% trans 'SEO Settings' %}</h2>
-      
+
       <div class="space-y-6">
         <div>
           {% input_field "meta_title" label="Meta Title" html_id="id_meta_title" placeholder="SEO title for search engines" value=form.meta_title.value help_text="SEO title for search engines (max 255 chars)" error=form.meta_title.errors.0 %}
@@ -224,7 +224,7 @@
 
     <!-- Form Actions -->
     <div class="flex justify-end space-x-3">
-      <a href="{% if action == 'edit' %}{% url 'products:product_detail' slug=product.slug %}{% else %}{% url 'products:product_list' %}{% endif %}" 
+      <a href="{% if action == 'edit' %}{% url 'products:product_detail' slug=product.slug %}{% else %}{% url 'products:product_list' %}{% endif %}"
          class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
         ❌ {% trans 'Cancel' %}
       </a>

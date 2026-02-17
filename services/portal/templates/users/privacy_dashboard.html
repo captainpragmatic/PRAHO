@@ -26,7 +26,7 @@
         <!-- Current Privacy Status -->
         <div class="space-y-4">
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Settings' %}</h4>
-          
+
           <div class="space-y-3">
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
@@ -73,7 +73,7 @@
         <!-- Quick Actions -->
         <div class="space-y-4">
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Quick Actions' %}</h4>
-          
+
           <div class="space-y-3">
             <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
               <span class="text-blue-400 mr-3">📄</span>
@@ -87,7 +87,7 @@
               </div>
               <span class="text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
             </a>
-            
+
             <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
               <span class="text-yellow-400 mr-3">📜</span>
               <div class="flex-1">
@@ -179,7 +179,7 @@
       <h3 class="text-lg font-medium text-white mb-4">
         📞 {% trans 'Data Protection Contact' %}
       </h3>
-      
+
       <div class="bg-slate-700 rounded-lg p-4">
         <p class="text-white mb-2">{% trans 'For any privacy-related questions or to exercise your rights:' %}</p>
         <div class="text-sm text-slate-300 space-y-1">
@@ -195,7 +195,7 @@
 
   <!-- Back to Profile -->
   <div class="mt-6 text-center">
-    <a href="{% url 'users:profile' %}" 
+    <a href="{% url 'users:profile' %}"
        class="text-slate-400 hover:text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
       ← {% trans 'Back to Profile' %}
     </a>

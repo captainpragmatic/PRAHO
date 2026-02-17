@@ -43,7 +43,7 @@ class Command(BaseCommand):
             help="Force update existing settings",
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:  # noqa: C901, PLR0912, PLR0915
         """Execute the command"""
         force = options.get("force", False)
         secret_key = options.get("secret_key")
@@ -54,14 +54,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("💳 Setting up Stripe payment integration settings..."))
 
         # Ensure integrations category exists
-        integrations_category, created = SettingCategory.objects.get_or_create(
+        _integrations_category, created = SettingCategory.objects.get_or_create(
             key="integrations",
             defaults={
                 "name": "Integrations",
                 "description": "Third-party service integration settings",
                 "display_order": 8,
                 "is_active": True,
-            }
+            },
         )
 
         if created:
@@ -133,7 +133,7 @@ class Command(BaseCommand):
                         "help_text": setting_data["help_text"],
                         "is_public": False,  # All Stripe settings are internal
                         "is_active": True,
-                    }
+                    },
                 )
 
                 if created:
@@ -172,9 +172,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"⏭️  {key}: already exists (use --force to update)")
 
             except Exception as e:
-                self.stdout.write(
-                    self.style.ERROR(f"❌ Failed to create setting {key}: {e}")
-                )
+                self.stdout.write(self.style.ERROR(f"❌ Failed to create setting {key}: {e}"))
 
         # Summary
         self.stdout.write("")

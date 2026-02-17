@@ -8,7 +8,7 @@ repos:
   # ===============================================================================
   # CORE PYTHON QUALITY - FAST CHECKS ⚡
   # ===============================================================================
-  
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
@@ -24,25 +24,17 @@ repos:
         exclude: ^(scripts/.*\.py|.*/management/commands/.*\.py)$
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
+        exclude: \.j2$
 
   # ===============================================================================
   # RUFF - STRATEGIC LINTING ⚡🔒
   # ===============================================================================
   # Uses the strategic configuration from pyproject.toml
   # Focus: Performance, Security, Type Hints
-  
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.8
     hooks:
-      # Fast linting check - strategic rules only
-      - id: ruff
-        name: "Strategic Linting (Performance & Security)"
-        args: 
-          - --config=pyproject.toml
-          - --statistics
-          - --show-source
-        exclude: ^(migrations/.*\.py|scripts/backup\.py|scripts/deploy\.py)$
-      
       # Auto-formatting (safe fixes only)
       - id: ruff-format
         name: "Auto-format Python Code"
@@ -52,25 +44,36 @@ repos:
   # ===============================================================================
   # TYPE SAFETY - GRADUAL IMPLEMENTATION 🏷️
   # ===============================================================================
-  
+
   - repo: local
     hooks:
+      # Block only newly-introduced Ruff issues; tolerate historical debt.
+      - id: ruff-new-violations
+        name: "Ruff: Block New Violations Only"
+        entry: .venv/bin/python
+        args: [scripts/ruff_new_violations.py, --staged]
+        language: system
+        files: \.py$
+        exclude: ^migrations/.*\.py$
+        pass_filenames: true
+        require_serial: true
+
       # Only check modified Python files for performance
       - id: type-check-modified
         name: "Type Check Modified Files"
         entry: .venv/bin/python
-        args: [services/platform/scripts/check_types_modified.py]
+        args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
         files: \.py$
         exclude: ^(migrations/.*\.py|services/platform/scripts/backup\.py|services/platform/scripts/deploy\.py)$
-        pass_filenames: true
+        pass_filenames: false
         require_serial: false
-        
+
       # Prevent new # type: ignore comments to avoid regression
       - id: prevent-type-ignore
         name: "Block New Type Ignore Comments"
         entry: .venv/bin/python
-        args: [services/platform/scripts/prevent_type_ignore.py]
+        args: [services/platform/scripts/prevent_type_ignore.py, --staged-only]
         language: system
         files: \.py$
         exclude: ^(migrations/.*\.py|tests/.*\.py)$
@@ -81,7 +84,7 @@ repos:
   # DJANGO TEMPLATE SAFETY 🎨
   # ===============================================================================
   # Prevent the template comparison operator spacing issue
-  
+
   - repo: local
     hooks:
       - id: django-template-check
@@ -95,7 +98,7 @@ repos:
   # ===============================================================================
   # SECURITY CHECKS 🔒
   # ===============================================================================
-  
+
   - repo: local
     hooks:
       # Check portal doesn't import platform code
@@ -105,16 +108,25 @@ repos:
         args:
           - -c
           - |
-            # Check if portal tries to import platform code
-            if grep -r "from apps\." services/portal/ --include="*.py" 2>/dev/null; then
-              echo "❌ Portal is trying to import platform apps!"
+            # Validate runtime import isolation from portal context.
+            cd services/portal || exit 1
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then
+              echo "❌ SECURITY BREACH: Portal can import apps.customers.customer_models"
+              exit 1
+            fi
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then
+              echo "❌ SECURITY BREACH: Portal can import apps.billing.invoice_models"
+              exit 1
+            fi
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then
+              echo "❌ SECURITY BREACH: Portal can import apps.orders.signals_extended"
               exit 1
             fi
             exit 0
         language: system
         files: ^services/portal/.*\.py$
         pass_filenames: false
-        
+
       # Audit coverage regression check
       - id: audit-coverage-check
         name: "Security: Audit Coverage Check"
@@ -145,7 +157,7 @@ repos:
   # ===============================================================================
   # PERFORMANCE ANALYSIS ⚡
   # ===============================================================================
-  
+
   - repo: local
     hooks:
       # Check for performance anti-patterns in modified files
@@ -157,7 +169,7 @@ repos:
           - |
             # Check for performance issues in modified files
             .venv/bin/ruff check --select=PERF,C90,PIE,SIM --output-format=concise --quiet $@ || true
-            # Always pass - this is informational only  
+            # Always pass - this is informational only
             exit 0
         language: system
         files: \.py$
@@ -177,12 +189,6 @@ default_language_version:
 default_stages: [pre-commit]
 fail_fast: false  # Run all hooks even if one fails
 minimum_pre_commit_version: "3.0.0"
-
-# Repository settings
-repos:
-  # Additional local repository settings if needed
-  - repo: local
-    hooks: []
 
 # CI/CD integration settings
 ci:

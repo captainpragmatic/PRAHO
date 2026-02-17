@@ -22,7 +22,7 @@ TemplateSyntaxError: Could not parse the remainder: '==VALUE' from 'variable==VA
   },
   "[html]": {
     "editor.formatOnSave": false,
-    "editor.formatOnPaste": false, 
+    "editor.formatOnPaste": false,
     "editor.formatOnType": false
   },
   "files.associations": {
@@ -69,7 +69,7 @@ templates/
 make check-templates
 python scripts/fix_template_comparisons.py --check
 
-# Fix automatically  
+# Fix automatically
 make fix-templates
 python scripts/fix_template_comparisons.py
 ```
@@ -77,7 +77,7 @@ python scripts/fix_template_comparisons.py
 ## 🚨 Common Auto-Formatting Triggers
 
 1. **Format on Save** - Most dangerous, formats everything automatically
-2. **Format on Paste** - Breaks copied template code  
+2. **Format on Paste** - Breaks copied template code
 3. **Format on Type** - Reformats as you type
 4. **Prettier Extension** - Very aggressive HTML formatting
 5. **Manual Format Document** - `Cmd+Shift+F` / `Ctrl+Shift+F`
@@ -176,7 +176,7 @@ If you encounter template syntax errors:
 ## 🛡️ Defense in Depth Strategy
 
 1. **Prevention** - IDE settings prevent auto-formatting
-2. **Detection** - Scripts detect issues when they occur  
+2. **Detection** - Scripts detect issues when they occur
 3. **Validation** - Pre-commit hooks block bad commits
 4. **Automation** - Easy fix commands available
 5. **Education** - Clear documentation and warnings

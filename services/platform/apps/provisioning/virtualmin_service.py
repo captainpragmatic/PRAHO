@@ -40,7 +40,17 @@ logger = logging.getLogger(__name__)
 
 # Username generation constants
 MIN_USERNAME_LENGTH = 3
-MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+_DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+MAX_USERNAME_UNIQUENESS_ATTEMPTS = _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
+
+
+def get_max_username_uniqueness_attempts() -> int:
+    """Get max username uniqueness attempts from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "provisioning.max_username_uniqueness_attempts", _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
+    )
 
 
 @dataclass
@@ -274,11 +284,11 @@ class VirtualminProvisioningService:
                     except Exception as db_error:
                         # Database update failed - rollback Virtualmin domain creation
                         logger.error(f"🔥 [VirtualminService] Database update failed for {account.domain}: {db_error}")
-                        rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                        rollback_status, rollback_details = self._execute_rollback(
+                            rollback_operations, gateway, account
+                        )
                         if rollback_status == "failed":
-                            logger.error(
-                                f"🚨 [VirtualminService] CRITICAL: Rollback failed for {account.domain}"
-                            )
+                            logger.error(f"🚨 [VirtualminService] CRITICAL: Rollback failed for {account.domain}")
 
                         job.mark_failed(
                             f"Database update failed: {db_error}",
@@ -390,7 +400,7 @@ class VirtualminProvisioningService:
             logger.exception(f"🔥 [VirtualminService] Validation error for {account.domain}: {e}")
             return Err(f"Validation error: {e}")
 
-    def _execute_rollback(
+    def _execute_rollback(  # noqa: C901, PLR0912, PLR0915
         self, rollback_operations: list[dict[str, Any]], gateway: VirtualminGateway, account: VirtualminAccount
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -463,7 +473,9 @@ class VirtualminProvisioningService:
                         op_result["status"] = "skipped"
                         op_result["reason"] = f"Unknown operation type: {operation['operation']}"
 
-                    logger.info(f"✅ [VirtualminService] Rolled back: {operation.get('description', operation['operation'])}")
+                    logger.info(
+                        f"✅ [VirtualminService] Rolled back: {operation.get('description', operation['operation'])}"
+                    )
 
                 except Exception as op_error:
                     logger.error(
@@ -499,7 +511,7 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(self, account: VirtualminAccount, reason: str = "") -> Result[bool, str]:
+    def suspend_account(self, account: VirtualminAccount, reason: str = "") -> Result[bool, str]:  # noqa: PLR0911
         """
         Suspend Virtualmin account with idempotency and rollback support.
 
@@ -583,8 +595,12 @@ class VirtualminProvisioningService:
 
                         except Exception as db_error:
                             # Database update failed - rollback the API operation
-                            logger.error(f"🔥 [VirtualminService] DB update failed for suspend {account.domain}: {db_error}")
-                            rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                            logger.error(
+                                f"🔥 [VirtualminService] DB update failed for suspend {account.domain}: {db_error}"
+                            )
+                            rollback_status, rollback_details = self._execute_rollback(
+                                rollback_operations, gateway, account
+                            )
 
                             job.mark_failed(
                                 f"Database update failed: {db_error}",
@@ -607,7 +623,7 @@ class VirtualminProvisioningService:
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            except Exception as e:
+            except Exception:
                 IdempotencyManager.clear(idempotency_key)
                 raise
 
@@ -615,7 +631,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(self, account: VirtualminAccount) -> Result[bool, str]:
+    def unsuspend_account(self, account: VirtualminAccount) -> Result[bool, str]:  # noqa: PLR0911
         """
         Unsuspend (reactivate) Virtualmin account with idempotency and rollback support.
 
@@ -650,7 +666,9 @@ class VirtualminProvisioningService:
                     logger.info(f"✅ [VirtualminService] Returning cached unsuspend result for {account.domain}")
                     return Ok(True)
                 else:
-                    logger.warning(f"⚠️ [VirtualminService] Unsuspend operation already in progress for {account.domain}")
+                    logger.warning(
+                        f"⚠️ [VirtualminService] Unsuspend operation already in progress for {account.domain}"
+                    )
                     return Err("Operation already in progress")
 
             gateway = self._get_gateway(account.server)
@@ -698,8 +716,12 @@ class VirtualminProvisioningService:
 
                         except Exception as db_error:
                             # Database update failed - rollback the API operation
-                            logger.error(f"🔥 [VirtualminService] DB update failed for unsuspend {account.domain}: {db_error}")
-                            rollback_status, rollback_details = self._execute_rollback(rollback_operations, gateway, account)
+                            logger.error(
+                                f"🔥 [VirtualminService] DB update failed for unsuspend {account.domain}: {db_error}"
+                            )
+                            rollback_status, rollback_details = self._execute_rollback(
+                                rollback_operations, gateway, account
+                            )
 
                             job.mark_failed(
                                 f"Database update failed: {db_error}",
@@ -722,7 +744,7 @@ class VirtualminProvisioningService:
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            except Exception as e:
+            except Exception:
                 IdempotencyManager.clear(idempotency_key)
                 raise
 
@@ -730,7 +752,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(self, account: VirtualminAccount) -> Result[bool, str]:
+    def delete_account(self, account: VirtualminAccount) -> Result[bool, str]:  # noqa: PLR0911, PLR0912, PLR0915
         """
         Delete Virtualmin account permanently with idempotency and rollback support.
 
@@ -861,7 +883,9 @@ class VirtualminProvisioningService:
                             except Exception as revert_error:
                                 logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
 
-                            return Err(f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}")
+                            return Err(
+                                f"Deletion failed during database update (CRITICAL: domain already deleted): {db_error}"
+                            )
 
                     else:
                         error_msg = response.data.get("error", "Deletion failed")
@@ -876,7 +900,7 @@ class VirtualminProvisioningService:
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg)
 
-            except Exception as e:
+            except Exception:
                 IdempotencyManager.clear(idempotency_key)
                 raise
 
@@ -917,7 +941,7 @@ class VirtualminProvisioningService:
             Valid Virtualmin username
         """
         # Remove TLD and special characters
-        base = domain.split(".")[0]
+        base = domain.split(".", maxsplit=1)[0]
         username = "".join(c for c in base if c.isalnum())
 
         # Ensure minimum length and uniqueness

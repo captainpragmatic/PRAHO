@@ -31,10 +31,10 @@
     <!-- =============================================================================== -->
     <!-- JOB STATUS CONTAINER (HTMX Target) -->
     <!-- =============================================================================== -->
-    <div id="job-status-container" 
+    <div id="job-status-container"
          {% if not is_complete %}
-         hx-get="{{ refresh_url }}" 
-         hx-trigger="every 3s" 
+         hx-get="{{ refresh_url }}"
+         hx-trigger="every 3s"
          hx-swap="innerHTML"
          {% endif %}>
         {% include "provisioning/virtualmin/partials/job_status.html" %}

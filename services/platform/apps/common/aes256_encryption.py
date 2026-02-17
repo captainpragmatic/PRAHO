@@ -22,14 +22,13 @@ import hashlib
 import json
 import logging
 import os
-import struct
 from typing import Any
 
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
-from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
@@ -45,6 +44,8 @@ PBKDF2_ITERATIONS = 310_000  # OWASP 2023 recommendation for PBKDF2-HMAC-SHA256
 # Encryption version prefixes for forward compatibility
 VERSION_AES256_GCM = b"\x01"  # Current version: AES-256-GCM
 VERSION_FERNET_LEGACY = b"\x00"  # Legacy Fernet-encrypted data
+
+FERNET_VERSION_BYTE = 0x80
 
 
 class AES256EncryptionError(Exception):
@@ -100,9 +101,7 @@ class AES256Cipher:
         3. Derived from DJANGO_SECRET_KEY using PBKDF2 (fallback)
         """
         # Try direct AES-256 key first
-        aes_key = os.environ.get("DJANGO_AES256_KEY") or getattr(
-            settings, "AES256_ENCRYPTION_KEY", None
-        )
+        aes_key = os.environ.get("DJANGO_AES256_KEY") or getattr(settings, "AES256_ENCRYPTION_KEY", None)
         if aes_key:
             try:
                 key_bytes = base64.urlsafe_b64decode(aes_key)
@@ -123,8 +122,8 @@ class AES256Cipher:
             raise ImproperlyConfigured(
                 "AES-256 encryption requires DJANGO_AES256_KEY or "
                 "CREDENTIAL_VAULT_MASTER_KEY environment variable. "
-                "Generate with: python -c \"import secrets, base64; "
-                "print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())\""
+                'Generate with: python -c "import secrets, base64; '
+                'print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
             )
 
         return self._derive_key(master_key.encode() if isinstance(master_key, str) else master_key)
@@ -164,11 +163,7 @@ class AES256Cipher:
                 f"Got {len(self._key) if self._key else 0} bytes."
             )
 
-    def encrypt(
-        self,
-        plaintext: str | bytes,
-        associated_data: bytes | None = None
-    ) -> str:
+    def encrypt(self, plaintext: str | bytes, associated_data: bytes | None = None) -> str:
         """
         Encrypt data using AES-256-GCM.
 
@@ -204,11 +199,7 @@ class AES256Cipher:
             logger.error(f"AES-256 encryption failed: {type(e).__name__}")
             raise AES256EncryptionError(f"Encryption failed: {e}") from e
 
-    def decrypt(
-        self,
-        ciphertext: str,
-        associated_data: bytes | None = None
-    ) -> str:
+    def decrypt(self, ciphertext: str, associated_data: bytes | None = None) -> str:
         """
         Decrypt AES-256-GCM encrypted data.
 
@@ -233,8 +224,8 @@ class AES256Cipher:
 
             if version == VERSION_AES256_GCM:
                 # AES-256-GCM decryption
-                nonce = encrypted[1:1 + NONCE_SIZE]
-                ct = encrypted[1 + NONCE_SIZE:]
+                nonce = encrypted[1 : 1 + NONCE_SIZE]
+                ct = encrypted[1 + NONCE_SIZE :]
 
                 plaintext = self._aesgcm.decrypt(nonce, ct, associated_data)
                 return plaintext.decode("utf-8")
@@ -256,14 +247,12 @@ class AES256Cipher:
     def _is_fernet_token(self, data: bytes) -> bool:
         """Check if data looks like a Fernet token."""
         # Fernet tokens start with version byte 0x80
-        return len(data) > 0 and data[0] == 0x80
+        return len(data) > 0 and data[0] == FERNET_VERSION_BYTE
 
     def _decrypt_fernet_legacy(self, ciphertext: str) -> str:
         """Decrypt legacy Fernet-encrypted data."""
         if not self._fernet:
-            raise AES256DecryptionError(
-                "Cannot decrypt legacy data: DJANGO_ENCRYPTION_KEY not configured"
-            )
+            raise AES256DecryptionError("Cannot decrypt legacy data: DJANGO_ENCRYPTION_KEY not configured")
 
         try:
             # Handle double-base64 encoding from old encryption
@@ -276,7 +265,7 @@ class AES256Cipher:
             return decrypted.decode("utf-8")
 
         except InvalidToken:
-            raise AES256DecryptionError("Invalid Fernet token - data may be corrupted")
+            raise AES256DecryptionError("Invalid Fernet token - data may be corrupted") from None
         except Exception as e:
             raise AES256DecryptionError(f"Legacy decryption failed: {e}") from e
 
@@ -305,7 +294,7 @@ _cipher_instance: AES256Cipher | None = None
 
 def get_aes256_cipher() -> AES256Cipher:
     """Get global AES-256 cipher instance with lazy initialization."""
-    global _cipher_instance
+    global _cipher_instance  # noqa: PLW0603
     if _cipher_instance is None:
         _cipher_instance = AES256Cipher()
     return _cipher_instance
@@ -335,7 +324,8 @@ def generate_aes256_key() -> str:
 
     Returns base64-encoded 32-byte key suitable for DJANGO_AES256_KEY.
     """
-    import secrets
+    import secrets  # noqa: PLC0415
+
     key = secrets.token_bytes(AES_KEY_SIZE)
     return base64.urlsafe_b64encode(key).decode("utf-8")
 

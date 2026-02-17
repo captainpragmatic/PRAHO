@@ -43,9 +43,9 @@ class StripeGateway(BasePaymentGateway):
     def _initialize_stripe(self) -> None:
         """Initialize Stripe SDK with API keys from settings system"""
         try:
-            import stripe
+            import stripe  # noqa: PLC0415
 
-            from apps.settings.services import SettingsService
+            from apps.settings.services import SettingsService  # noqa: PLC0415
 
             # Get encrypted Stripe secret key from settings system
             api_key = SettingsService.get_setting("integrations.stripe_secret_key")
@@ -68,12 +68,12 @@ class StripeGateway(BasePaymentGateway):
 
     @property
     def gateway_name(self) -> str:
-        return 'stripe'
+        return "stripe"
 
     def validate_configuration(self) -> bool:
         """Validate Stripe configuration from settings system"""
         try:
-            from apps.settings.services import SettingsService
+            from apps.settings.services import SettingsService  # noqa: PLC0415
 
             # Check if Stripe integration is enabled
             stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)
@@ -110,9 +110,9 @@ class StripeGateway(BasePaymentGateway):
         self,
         order_id: str,
         amount_cents: int,
-        currency: str = 'RON',
+        currency: str = "RON",
         customer_id: str | None = None,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
     ) -> PaymentIntentResult:
         """
         Create Stripe Payment Intent
@@ -130,23 +130,23 @@ class StripeGateway(BasePaymentGateway):
         try:
             # Prepare payment intent parameters
             payment_intent_params = {
-                'amount': amount_cents,
-                'currency': currency.lower(),
-                'automatic_payment_methods': {'enabled': True},
-                'metadata': {
-                    'praho_order_id': order_id,
-                    'platform': 'PRAHO',
-                    'vat_rate': '21%',  # Romanian VAT rate
-                    **(metadata or {})
+                "amount": amount_cents,
+                "currency": currency.lower(),
+                "automatic_payment_methods": {"enabled": True},
+                "metadata": {
+                    "praho_order_id": order_id,
+                    "platform": "PRAHO",
+                    "vat_rate": "21%",  # Romanian VAT rate
+                    **(metadata or {}),
                 },
                 # Romanian business compliance
-                'statement_descriptor_suffix': 'PRAHO',
-                'receipt_email': None  # Will be set from customer data
+                "statement_descriptor_suffix": "PRAHO",
+                "receipt_email": None,  # Will be set from customer data
             }
 
             # Add customer if provided
             if customer_id:
-                payment_intent_params['customer'] = customer_id
+                payment_intent_params["customer"] = customer_id
 
             # Create payment intent
             payment_intent = self._stripe.PaymentIntent.create(**payment_intent_params)
@@ -160,24 +160,16 @@ class StripeGateway(BasePaymentGateway):
                 success=True,
                 payment_intent_id=payment_intent.id,
                 client_secret=payment_intent.client_secret,
-                error=None
+                error=None,
             )
 
         except self._stripe.error.StripeError as e:
             self.logger.error(f"🔥 Stripe PaymentIntent creation failed: {e}")
-            return PaymentIntentResult(
-                success=False,
-                payment_intent_id='',
-                client_secret=None,
-                error=str(e)
-            )
+            return PaymentIntentResult(success=False, payment_intent_id="", client_secret=None, error=str(e))
         except Exception as e:
             self.logger.error(f"🔥 Unexpected error creating PaymentIntent: {e}")
             return PaymentIntentResult(
-                success=False,
-                payment_intent_id='',
-                client_secret=None,
-                error=f"Unexpected error: {e}"
+                success=False, payment_intent_id="", client_secret=None, error=f"Unexpected error: {e}"
             )
 
     def confirm_payment(self, payment_intent_id: str) -> PaymentConfirmResult:
@@ -195,32 +187,17 @@ class StripeGateway(BasePaymentGateway):
 
             self.logger.info(f"💳 Payment {payment_intent_id} status: {payment_intent.status}")
 
-            return PaymentConfirmResult(
-                success=True,
-                status=payment_intent.status,
-                error=None
-            )
+            return PaymentConfirmResult(success=True, status=payment_intent.status, error=None)
 
         except self._stripe.error.StripeError as e:
             self.logger.error(f"🔥 Failed to retrieve PaymentIntent {payment_intent_id}: {e}")
-            return PaymentConfirmResult(
-                success=False,
-                status='error',
-                error=str(e)
-            )
+            return PaymentConfirmResult(success=False, status="error", error=str(e))
         except Exception as e:
             self.logger.error(f"🔥 Unexpected error confirming payment: {e}")
-            return PaymentConfirmResult(
-                success=False,
-                status='error',
-                error=f"Unexpected error: {e}"
-            )
+            return PaymentConfirmResult(success=False, status="error", error=f"Unexpected error: {e}")
 
     def create_subscription(
-        self,
-        customer_id: str,
-        price_id: str,
-        metadata: dict[str, Any] | None = None
+        self, customer_id: str, price_id: str, metadata: dict[str, Any] | None = None
     ) -> SubscriptionResult:
         """
         Create Stripe subscription for recurring billing
@@ -235,49 +212,30 @@ class StripeGateway(BasePaymentGateway):
         """
         try:
             subscription_params = {
-                'customer': customer_id,
-                'items': [{'price': price_id}],
-                'payment_behavior': 'default_incomplete',
-                'payment_settings': {
-                    'save_default_payment_method': 'on_subscription'
-                },
-                'expand': ['latest_invoice.payment_intent'],
-                'metadata': {
-                    'platform': 'PRAHO',
-                    **(metadata or {})
-                }
+                "customer": customer_id,
+                "items": [{"price": price_id}],
+                "payment_behavior": "default_incomplete",
+                "payment_settings": {"save_default_payment_method": "on_subscription"},
+                "expand": ["latest_invoice.payment_intent"],
+                "metadata": {"platform": "PRAHO", **(metadata or {})},
             }
 
             subscription = self._stripe.Subscription.create(**subscription_params)
 
             self.logger.info(
-                f"✅ Created Stripe subscription {subscription.id} "
-                f"for customer {customer_id} (price: {price_id})"
+                f"✅ Created Stripe subscription {subscription.id} " f"for customer {customer_id} (price: {price_id})"
             )
 
             return SubscriptionResult(
-                success=True,
-                subscription_id=subscription.id,
-                status=subscription.status,
-                error=None
+                success=True, subscription_id=subscription.id, status=subscription.status, error=None
             )
 
         except self._stripe.error.StripeError as e:
             self.logger.error(f"🔥 Stripe subscription creation failed: {e}")
-            return SubscriptionResult(
-                success=False,
-                subscription_id=None,
-                status=None,
-                error=str(e)
-            )
+            return SubscriptionResult(success=False, subscription_id=None, status=None, error=str(e))
         except Exception as e:
             self.logger.error(f"🔥 Unexpected error creating subscription: {e}")
-            return SubscriptionResult(
-                success=False,
-                subscription_id=None,
-                status=None,
-                error=f"Unexpected error: {e}"
-            )
+            return SubscriptionResult(success=False, subscription_id=None, status=None, error=f"Unexpected error: {e}")
 
     def cancel_subscription(self, subscription_id: str) -> bool:
         """
@@ -317,11 +275,11 @@ class StripeGateway(BasePaymentGateway):
             (success, message) tuple
         """
         try:
-            if event_type.startswith('payment_intent.'):
+            if event_type.startswith("payment_intent."):
                 return self._handle_payment_intent_webhook(event_type, event_data)
-            elif event_type.startswith('invoice.'):
+            elif event_type.startswith("invoice."):
                 return self._handle_invoice_webhook(event_type, event_data)
-            elif event_type.startswith('customer.subscription.'):
+            elif event_type.startswith("customer.subscription."):
                 return self._handle_subscription_webhook(event_type, event_data)
             else:
                 self.logger.info(f"⏭️ Unhandled webhook event type: {event_type}")
@@ -333,16 +291,16 @@ class StripeGateway(BasePaymentGateway):
 
     def _handle_payment_intent_webhook(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
         """Handle payment_intent.* webhook events"""
-        payment_intent = event_data.get('object', {})
-        payment_intent_id = payment_intent.get('id')
+        payment_intent = event_data.get("object", {})
+        payment_intent_id = payment_intent.get("id")
 
-        if event_type == 'payment_intent.succeeded':
+        if event_type == "payment_intent.succeeded":
             self.logger.info(f"💰 Payment succeeded: {payment_intent_id}")
             # Update payment status in database would happen here
             # This is handled by the existing webhook processor
             return True, f"Payment succeeded: {payment_intent_id}"
 
-        elif event_type == 'payment_intent.payment_failed':
+        elif event_type == "payment_intent.payment_failed":
             self.logger.warning(f"❌ Payment failed: {payment_intent_id}")
             return True, f"Payment failed: {payment_intent_id}"
 
@@ -350,14 +308,14 @@ class StripeGateway(BasePaymentGateway):
 
     def _handle_invoice_webhook(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
         """Handle invoice.* webhook events"""
-        invoice = event_data.get('object', {})
-        invoice_id = invoice.get('id')
+        invoice = event_data.get("object", {})
+        invoice_id = invoice.get("id")
 
-        if event_type == 'invoice.payment_succeeded':
+        if event_type == "invoice.payment_succeeded":
             self.logger.info(f"🧾 Invoice payment succeeded: {invoice_id}")
             return True, f"Invoice payment succeeded: {invoice_id}"
 
-        elif event_type == 'invoice.payment_failed':
+        elif event_type == "invoice.payment_failed":
             self.logger.warning(f"📋 Invoice payment failed: {invoice_id}")
             return True, f"Invoice payment failed: {invoice_id}"
 
@@ -365,14 +323,14 @@ class StripeGateway(BasePaymentGateway):
 
     def _handle_subscription_webhook(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
         """Handle customer.subscription.* webhook events"""
-        subscription = event_data.get('object', {})
-        subscription_id = subscription.get('id')
+        subscription = event_data.get("object", {})
+        subscription_id = subscription.get("id")
 
-        if event_type == 'customer.subscription.created':
+        if event_type == "customer.subscription.created":
             self.logger.info(f"🔄 Subscription created: {subscription_id}")
             return True, f"Subscription created: {subscription_id}"
 
-        elif event_type == 'customer.subscription.deleted':
+        elif event_type == "customer.subscription.deleted":
             self.logger.info(f"🗑️ Subscription cancelled: {subscription_id}")
             return True, f"Subscription cancelled: {subscription_id}"
 
@@ -384,4 +342,4 @@ class StripeGateway(BasePaymentGateway):
 # ===============================================================================
 
 # Register Stripe gateway with factory
-PaymentGatewayFactory.register_gateway('stripe', StripeGateway)
+PaymentGatewayFactory.register_gateway("stripe", StripeGateway)

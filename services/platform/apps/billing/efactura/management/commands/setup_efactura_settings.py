@@ -40,17 +40,14 @@ class Command(BaseCommand):
         dry_run = options.get("dry_run", False)
 
         try:
-            from apps.settings.models import SystemSetting
+            from apps.settings.models import SystemSetting  # noqa: PLC0415
         except ImportError:
             self.stderr.write(
-                self.style.ERROR(
-                    "Settings app not available. "
-                    "Please ensure apps.settings is installed."
-                )
+                self.style.ERROR("Settings app not available. " "Please ensure apps.settings is installed.")
             )
             return
 
-        from apps.billing.efactura.settings import (
+        from apps.billing.efactura.settings import (  # noqa: PLC0415
             EFACTURA_DEFAULTS,
             EFacturaSettingKeys,
         )
@@ -361,7 +358,5 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Done! Created: {created_count}, Updated: {updated_count}, Skipped: {skipped_count}"
-            )
+            self.style.SUCCESS(f"Done! Created: {created_count}, Updated: {updated_count}, Skipped: {skipped_count}")
         )

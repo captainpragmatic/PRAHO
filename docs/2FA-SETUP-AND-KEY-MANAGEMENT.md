@@ -46,7 +46,7 @@ python manage.py test tests.test_2fa_security_improvements
    ```bash
    # Generate key
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   
+
    # Add to .env (replace the placeholder)
    DJANGO_ENCRYPTION_KEY=VCxwdmuZL09WGdWLI203O64yhNs48IiafhjFIq0o_JE=
    ```
@@ -63,7 +63,7 @@ python manage.py test tests.test_2fa_security_improvements
    ```bash
    # Generate on secure, isolated system
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" > encryption_key.txt
-   
+
    # Store in secure vault (HashiCorp Vault, AWS Secrets Manager, etc.)
    ```
 
@@ -76,7 +76,7 @@ python manage.py test tests.test_2fa_security_improvements
          DJANGO_ENCRYPTION_KEY: ${DJANGO_ENCRYPTION_KEY}
        secrets:
          - django_encryption_key
-         
+
    secrets:
      django_encryption_key:
        external: true
@@ -97,10 +97,10 @@ python manage.py test tests.test_2fa_security_improvements
 
 ### Encryption Flow
 ```
-User Input (TOTP Secret) 
+User Input (TOTP Secret)
     ↓
 Fernet.encrypt(secret, DJANGO_ENCRYPTION_KEY)
-    ↓  
+    ↓
 Encrypted Storage (User._two_factor_secret)
     ↓
 Fernet.decrypt(encrypted_secret, DJANGO_ENCRYPTION_KEY)
@@ -187,10 +187,10 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
    ```bash
    # Backup database
    pg_dump praho_production > backup_pre_rotation.sql
-   
+
    # Generate new key
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   
+
    # Store old key temporarily
    export OLD_DJANGO_ENCRYPTION_KEY="current_key_value"
    export NEW_DJANGO_ENCRYPTION_KEY="new_key_value"
@@ -206,7 +206,7 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
    ```bash
    # Test on staging first
    python manage.py migrate --settings=config.settings.staging
-   
+
    # Apply to production during maintenance window
    python manage.py migrate --settings=config.settings.prod
    ```
@@ -215,7 +215,7 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
    ```bash
    # Test 2FA functionality
    python manage.py test tests.test_2fa_security_improvements
-   
+
    # Verify user can authenticate
    # Monitor logs for encryption errors
    ```
@@ -239,7 +239,7 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
    # Emergency script: reset_2fa.py
    from django.contrib.auth import get_user_model
    User = get_user_model()
-   
+
    # Disable 2FA for all users
    User.objects.filter(two_factor_enabled=True).update(
        two_factor_enabled=False,
@@ -259,11 +259,11 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
 2. **Security Alerts**
    ```bash
    # Alert on multiple failed 2FA attempts
-   SELECT user_id, COUNT(*) as failures 
-   FROM user_login_logs 
-   WHERE status = 'failed_2fa' 
+   SELECT user_id, COUNT(*) as failures
+   FROM user_login_logs
+   WHERE status = 'failed_2fa'
      AND timestamp > NOW() - INTERVAL '1 hour'
-   GROUP BY user_id 
+   GROUP BY user_id
    HAVING COUNT(*) > 3;
    ```
 
@@ -315,7 +315,7 @@ import os
 os.environ['DJANGO_ENCRYPTION_KEY'] = 'key1'
 encrypted = encrypt_sensitive_data('test')
 
-os.environ['DJANGO_ENCRYPTION_KEY'] = 'key2'  
+os.environ['DJANGO_ENCRYPTION_KEY'] = 'key2'
 try:
     decrypt_sensitive_data(encrypted)  # Should fail
     print('ERROR: Key isolation failed')
@@ -329,18 +329,18 @@ except:
 ### 2FA Adoption Metrics
 ```sql
 -- 2FA adoption rate
-SELECT 
+SELECT
     COUNT(CASE WHEN two_factor_enabled THEN 1 END) as enabled_users,
     COUNT(*) as total_users,
     ROUND(COUNT(CASE WHEN two_factor_enabled THEN 1 END) * 100.0 / COUNT(*), 2) as adoption_rate
 FROM users;
 
 -- Backup code usage trends
-SELECT 
+SELECT
     DATE_TRUNC('day', timestamp) as date,
     COUNT(*) as backup_code_logins
-FROM user_login_logs 
-WHERE status = 'success' 
+FROM user_login_logs
+WHERE status = 'success'
   AND user_agent LIKE '%backup_code%'
 GROUP BY DATE_TRUNC('day', timestamp)
 ORDER BY date DESC;
@@ -349,7 +349,7 @@ ORDER BY date DESC;
 ### Security Dashboard Queries
 ```sql
 -- Recent 2FA events
-SELECT 
+SELECT
     u.email,
     ull.timestamp,
     ull.status,
@@ -361,7 +361,7 @@ ORDER BY ull.timestamp DESC
 LIMIT 100;
 
 -- Users with low backup code counts
-SELECT 
+SELECT
     u.email,
     jsonb_array_length(u.backup_tokens) as remaining_codes
 FROM users u
@@ -425,7 +425,7 @@ python manage.py shell -c "
 from apps.common.encryption import encrypt_sensitive_data, decrypt_sensitive_data
 test = 'test_data'
 encrypted = encrypt_sensitive_data(test)
-decrypted = decrypt_sensitive_data(encrypted) 
+decrypted = decrypt_sensitive_data(encrypted)
 print(f'Encryption test: {test == decrypted}')
 "
 ```
@@ -439,6 +439,6 @@ print(f'Encryption test: {test == decrypted}')
 
 ---
 
-**Last Updated**: December 2024  
-**Version**: 1.0  
+**Last Updated**: December 2024
+**Version**: 1.0
 **Review Schedule**: Quarterly

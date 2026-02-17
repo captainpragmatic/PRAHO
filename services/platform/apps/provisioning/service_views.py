@@ -65,7 +65,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     else:
         # For "All Services", show actual active count
         active_count = services.filter(status="active").count()
-        display_status = 'active'
+        display_status = "active"
 
     context = {
         "services": services_page,

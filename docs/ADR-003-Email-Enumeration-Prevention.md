@@ -1,9 +1,9 @@
 # ADR-003: Email Enumeration Prevention
 
-**Status:** Implemented ✅  
-**Date:** 2025-01-08  
-**Authors:** PRAHO Security Team  
-**Reviewers:** Engineering Team  
+**Status:** Implemented ✅
+**Date:** 2025-01-08
+**Authors:** PRAHO Security Team
+**Reviewers:** Engineering Team
 
 ## Context
 
@@ -27,7 +27,7 @@ def api_check_email(request):
 1. **Email Enumeration Oracle**: Attackers could systematically discover all registered email addresses
 2. **User Privacy Violation**: Exposed personal information without consent
 3. **GDPR Compliance Risk**: Unauthorized data disclosure of EU users
-4. **Attack Vectors**: 
+4. **Attack Vectors**:
    - Automated email harvesting for spam/phishing
    - Social engineering attacks using known accounts
    - Competitor intelligence gathering
@@ -68,13 +68,13 @@ def api_check_email(request):
     """
     🔒 HARDENED EMAIL VALIDATION ENDPOINT
     - Uniform responses prevent enumeration attacks
-    - No database queries - zero information disclosure  
+    - No database queries - zero information disclosure
     - Consistent timing prevents side-channel analysis
     - Soft rate limiting with user-aware keys
     """
     # Add timing delay to prevent analysis
     _sleep_uniform()
-    
+
     # Always return identical response
     return _uniform_response()
 ```
@@ -92,7 +92,7 @@ def user_or_ip(group, request):
 
 **Soft Limiting Approach:**
 - **10 requests/minute** - Short-term protection
-- **100 requests/hour** - Long-term abuse prevention  
+- **100 requests/hour** - Long-term abuse prevention
 - **No 429 errors** - Maintains uniform responses
 - **Security logging** - Audit trail for rate limit hits
 
@@ -122,7 +122,7 @@ def signup(request):
        """Responses must be identical regardless of email existence."""
        available_response = self.client.post('/api/check-email/', {'email': 'new@example.com'})
        existing_response = self.client.post('/api/check-email/', {'email': 'existing@example.com'})
-       
+
        self.assertEqual(available_response.content, existing_response.content)
    ```
 
@@ -141,10 +141,10 @@ def signup(request):
        durations = []
        for i in range(5):
            start = time.time()
-           response = self.client.post('/api/check-email/', {'email': f'test{i}@example.com'})  
+           response = self.client.post('/api/check-email/', {'email': f'test{i}@example.com'})
            duration = time.time() - start
            durations.append(duration)
-       
+
        # All responses should take at least base delay time
        for duration in durations:
            self.assertGreater(duration, 0.07)
@@ -165,7 +165,7 @@ def signup(request):
 
 - **A01 - Broken Access Control**: Prevents unauthorized data access through enumeration
 - **A03 - Injection**: Eliminates information disclosure vectors
-- **A04 - Insecure Design**: Implements secure-by-default patterns  
+- **A04 - Insecure Design**: Implements secure-by-default patterns
 - **A07 - Authentication Failures**: Hardens account discovery mechanisms
 
 ### Security Controls Implemented
@@ -186,7 +186,7 @@ def signup(request):
 
 ### Phase 2: Extension (Future)
 - [ ] Apply same pattern to password reset flows
-- [ ] Extend to account recovery endpoints  
+- [ ] Extend to account recovery endpoints
 - [ ] Add CAPTCHA integration for high-volume abuse
 - [ ] Implement advanced monitoring dashboards
 
@@ -211,7 +211,7 @@ def signup(request):
 ### 1. CAPTCHA-Only Approach ❌
 **Why Rejected**: CAPTCHA alone doesn't prevent enumeration - attackers can solve CAPTCHAs or use services. Uniform responses are the core defense.
 
-### 2. Aggressive Rate Limiting ❌  
+### 2. Aggressive Rate Limiting ❌
 **Why Rejected**: Hard rate limiting with 429 errors would block legitimate users sharing IP addresses (offices, schools, public WiFi).
 
 ### 3. Account Lockout ❌
@@ -250,7 +250,7 @@ def signup(request):
 This implementation successfully eliminates the critical email enumeration vulnerability while maintaining excellent user experience. The solution follows defense-in-depth principles with multiple layers of protection:
 
 1. **Uniform responses** prevent all enumeration attempts
-2. **Timing consistency** blocks side-channel attacks  
+2. **Timing consistency** blocks side-channel attacks
 3. **Soft rate limiting** handles abuse gracefully
 4. **Zero database queries** eliminate information leakage
 5. **Comprehensive testing** ensures ongoing security

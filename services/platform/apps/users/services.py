@@ -5,7 +5,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -43,12 +43,9 @@ from apps.common.validators import (
     SecureInputValidator,
     log_security_event,
 )
-from apps.customers.models import (
-    Customer,
-    CustomerAddress,
-    CustomerBillingProfile,
-    CustomerTaxProfile,
-)
+from apps.customers.contact_models import CustomerAddress
+from apps.customers.models import Customer
+from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
 from apps.settings.services import SettingsService
 
 from .models import CustomerMembership
@@ -61,17 +58,9 @@ This replaces the existing services.py with security-hardened implementations.
 """
 
 if TYPE_CHECKING:
-    from apps.customers.contact_models import CustomerAddress
-    from apps.customers.models import Customer
-    from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
-
     from .models import User
 else:
     User = get_user_model()
-    # Import Customer models for runtime
-    from apps.customers.contact_models import CustomerAddress
-    from apps.customers.models import Customer
-    from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
 
 logger = logging.getLogger(__name__)
 
@@ -216,12 +205,14 @@ class SecureUserRegistrationService:
             registration_number = customer_data.get("registration_number", "").strip()
 
             if vat_number or registration_number or cnp:
-                CustomerTaxProfile.objects.create(  # type: ignore[misc]
+                CustomerTaxProfile.objects.update_or_create(
                     customer=customer,
-                    vat_number=vat_number,  # RO prefix validated
-                    cnp=cnp,
-                    registration_number=registration_number,  # CUI format validated
-                    is_vat_payer=bool(vat_number),
+                    defaults={
+                        "vat_number": vat_number,  # RO prefix validated
+                        "cnp": cnp,
+                        "registration_number": registration_number,  # CUI format validated
+                        "is_vat_payer": bool(vat_number),
+                    },
                 )
 
                 # Log tax profile creation for Romanian compliance
@@ -237,11 +228,13 @@ class SecureUserRegistrationService:
                 )
 
             # Step 5: Create billing profile (secure defaults)
-            CustomerBillingProfile.objects.create(  # type: ignore[misc]
+            CustomerBillingProfile.objects.update_or_create(
                 customer=customer,
-                payment_terms=30,  # Default 30 days
-                preferred_currency="RON",  # Romanian Lei
-                invoice_delivery_method="email",
+                defaults={
+                    "payment_terms": 30,  # Default 30 days
+                    "preferred_currency": "RON",  # Romanian Lei
+                    "invoice_delivery_method": "email",
+                },
             )
 
             # Step 6: Create billing address with validated data
@@ -435,7 +428,9 @@ class SecureUserRegistrationService:
             # Rate limit lookups
             cache_key = f"customer_lookup:{request_ip or 'unknown'}"
             lookups = cache.get(cache_key, 0)
-            if lookups >= SettingsService.get_integer_setting("security.max_customer_lookups_per_hour", 20):  # lookups per hour per IP
+            if lookups >= SettingsService.get_integer_setting(
+                "security.max_customer_lookups_per_hour", 20
+            ):  # lookups per hour per IP
                 return None
             cache.set(cache_key, lookups + 1, timeout=3600)
 
@@ -447,7 +442,8 @@ class SecureUserRegistrationService:
                 # Validate VAT format first
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()
+                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
+                    tax_profile = tax_profile_manager.filter(vat_number=validated_vat).first()
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -455,7 +451,8 @@ class SecureUserRegistrationService:
                 # Validate CUI format first
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()
+                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
+                    tax_profile = tax_profile_manager.filter(registration_number=validated_cui).first()
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -479,7 +476,9 @@ class SecureUserRegistrationService:
             # Rate limit notifications
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
-            if notifications >= SettingsService.get_integer_setting("security.invitation_rate_limit_per_user", 10):  # Max notifications per hour per customer
+            if notifications >= SettingsService.get_integer_setting(
+                "security.invitation_rate_limit_per_user", 10
+            ):  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
 
@@ -809,7 +808,9 @@ class SecureCustomerUserService:
             # Rate limit lookups
             cache_key = f"customer_lookup:{request_ip or 'unknown'}"
             lookups = cache.get(cache_key, 0)
-            if lookups >= SettingsService.get_integer_setting("security.max_customer_lookups_per_hour", 20):  # lookups per hour per IP
+            if lookups >= SettingsService.get_integer_setting(
+                "security.max_customer_lookups_per_hour", 20
+            ):  # lookups per hour per IP
                 return None
             cache.set(cache_key, lookups + 1, timeout=3600)
 
@@ -821,7 +822,8 @@ class SecureCustomerUserService:
                 # Validate VAT format first
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()
+                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
+                    tax_profile = tax_profile_manager.filter(vat_number=validated_vat).first()
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -829,7 +831,8 @@ class SecureCustomerUserService:
                 # Validate CUI format first
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()
+                    tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
+                    tax_profile = tax_profile_manager.filter(registration_number=validated_cui).first()
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -903,7 +906,9 @@ class SecureCustomerUserService:
             # Rate limit notifications
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
-            if notifications >= SettingsService.get_integer_setting("security.invitation_rate_limit_per_user", 10):  # Max notifications per hour per customer
+            if notifications >= SettingsService.get_integer_setting(
+                "security.invitation_rate_limit_per_user", 10
+            ):  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
 
@@ -1199,7 +1204,7 @@ class SessionSecurityService:
         # Update cache
         cache.set(cache_key, recent_ips, timeout=3600)
 
-        return is_suspicious
+        return bool(is_suspicious)
 
     @classmethod
     def log_session_activity(cls, request: HttpRequest, activity_type: str, **extra_data: Any) -> None:

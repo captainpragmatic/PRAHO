@@ -79,7 +79,7 @@ class CustomerModelTestCase(TestCase):
         self.customer.customer_type = 'company'
         self.customer.company_name = 'Tech Solutions SRL'
         self.customer.name = 'John Doe'
-        
+
         self.assertEqual(self.customer.get_display_name(), 'Tech Solutions SRL')
 
     def test_customer_display_name_individual(self):
@@ -87,17 +87,17 @@ class CustomerModelTestCase(TestCase):
         self.customer.customer_type = 'individual'
         self.customer.company_name = ''
         self.customer.name = 'Maria Popescu'
-        
+
         self.assertEqual(self.customer.get_display_name(), 'Maria Popescu')
 
     def test_soft_delete_properties(self):
         """Test soft delete functionality"""
         # Initially not deleted
         self.assertFalse(self.customer.is_deleted)
-        
+
         # Soft delete
         self.customer.soft_delete(user=self.admin_user)
-        
+
         # Should be marked as deleted
         self.assertTrue(self.customer.is_deleted)
         self.assertIsNotNone(self.customer.deleted_at)
@@ -108,7 +108,7 @@ class CustomerModelTestCase(TestCase):
         # Soft delete then restore
         self.customer.soft_delete(user=self.admin_user)
         self.customer.restore()
-        
+
         # Should be restored
         self.assertFalse(self.customer.is_deleted)
         self.assertIsNone(self.customer.deleted_at)
@@ -137,7 +137,7 @@ class CustomerTaxProfileTestCase(TestCase):
             vat_number='RO12345678',
             vat_rate=Decimal('19.00')
         )
-        
+
         self.assertEqual(tax_profile.cui, 'RO12345678')
         self.assertTrue(tax_profile.is_vat_payer)
         self.assertEqual(tax_profile.vat_rate, Decimal('19.00'))
@@ -146,14 +146,14 @@ class CustomerTaxProfileTestCase(TestCase):
         """Test customer.get_tax_profile() method"""
         # No tax profile initially
         self.assertIsNone(self.customer.get_tax_profile())
-        
+
         # Create tax profile
         tax_profile = CustomerTaxProfile.objects.create(
             customer=self.customer,
             cui='RO87654321',
             is_vat_payer=True
         )
-        
+
         # Should return the tax profile
         retrieved_profile = self.customer.get_tax_profile()
         self.assertEqual(retrieved_profile, tax_profile)
@@ -181,7 +181,7 @@ class CustomerBillingProfileTestCase(TestCase):
             preferred_currency='RON',
             invoice_delivery_method='email'
         )
-        
+
         self.assertEqual(billing_profile.payment_terms, 30)
         self.assertEqual(billing_profile.credit_limit, Decimal('10000.00'))
         self.assertEqual(billing_profile.preferred_currency, 'RON')
@@ -190,14 +190,14 @@ class CustomerBillingProfileTestCase(TestCase):
         """Test customer.get_billing_profile() method"""
         # No billing profile initially
         self.assertIsNone(self.customer.get_billing_profile())
-        
+
         # Create billing profile
         billing_profile = CustomerBillingProfile.objects.create(
             customer=self.customer,
             payment_terms=14,
             credit_limit=Decimal('5000.00')
         )
-        
+
         # Should return the billing profile
         retrieved_profile = self.customer.get_billing_profile()
         self.assertEqual(retrieved_profile, billing_profile)
@@ -210,7 +210,7 @@ class CustomerBillingProfileTestCase(TestCase):
             payment_terms=30,
             credit_limit=Decimal('10000.00')
         )
-        
+
         # Should return 0.00 when no invoices
         balance = billing_profile.get_account_balance()
         self.assertEqual(balance, Decimal('0.00'))
@@ -240,7 +240,7 @@ class CustomerAddressTestCase(TestCase):
             country='România',
             is_current=True
         )
-        
+
         self.assertEqual(address.city, 'București')
         self.assertEqual(address.county, 'Sector 1')
         self.assertTrue(address.is_current)
@@ -256,7 +256,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='400000',
             is_current=True
         )
-        
+
         expected = f"{self.customer.name} - Adresa facturare"
         self.assertEqual(str(address), expected)
 
@@ -273,7 +273,7 @@ class CustomerAddressTestCase(TestCase):
             country='România',
             is_current=True
         )
-        
+
         full_address = address.get_full_address()
         expected = "Strada Principală 100, Bloc A, Ap. 15, Timișoara, Timiș, 300001, România"
         self.assertEqual(full_address, expected)
@@ -282,7 +282,7 @@ class CustomerAddressTestCase(TestCase):
         """Test customer.get_primary_address() method"""
         # No address initially
         self.assertIsNone(self.customer.get_primary_address())
-        
+
         # Create primary address
         primary_address = CustomerAddress.objects.create(
             customer=self.customer,
@@ -293,7 +293,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='700000',
             is_current=True
         )
-        
+
         # Should return the primary address
         retrieved_address = self.customer.get_primary_address()
         self.assertEqual(retrieved_address, primary_address)
@@ -310,11 +310,11 @@ class CustomerAddressTestCase(TestCase):
             postal_code='500000',
             is_current=True
         )
-        
+
         # Should fall back to primary when no billing address
         billing_address = self.customer.get_billing_address()
         self.assertEqual(billing_address, primary_address)
-        
+
         # Create billing address
         specific_billing = CustomerAddress.objects.create(
             customer=self.customer,
@@ -325,7 +325,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='900000',
             is_current=True
         )
-        
+
         # Should return specific billing address
         billing_address = self.customer.get_billing_address()
         self.assertEqual(billing_address, specific_billing)
@@ -353,7 +353,7 @@ class CustomerPaymentMethodTestCase(TestCase):
             is_default=True,
             is_active=True
         )
-        
+
         self.assertEqual(payment_method.method_type, 'stripe_card')
         self.assertEqual(payment_method.last_four, '1234')
         self.assertTrue(payment_method.is_default)
@@ -366,7 +366,7 @@ class CustomerPaymentMethodTestCase(TestCase):
             display_name='Transfer bancar ING',
             is_active=True
         )
-        
+
         expected = f"{self.customer.get_display_name()} - Transfer bancar ING"
         self.assertEqual(str(payment_method), expected)
 
@@ -393,7 +393,7 @@ class CustomerNoteTestCase(TestCase):
             is_important=True,
             created_by=self.admin_user
         )
-        
+
         self.assertEqual(note.title, 'Important Client Information')
         self.assertEqual(note.note_type, 'general')
         self.assertTrue(note.is_important)
@@ -408,6 +408,6 @@ class CustomerNoteTestCase(TestCase):
             note_type='meeting',
             created_by=self.admin_user
         )
-        
+
         expected = f"Client Meeting Notes - {self.customer.name}"
         self.assertEqual(str(note), expected)

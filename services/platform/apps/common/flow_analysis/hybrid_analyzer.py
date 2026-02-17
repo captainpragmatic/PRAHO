@@ -25,7 +25,6 @@ from apps.common.flow_analysis.base import (
     AnalysisMode,
     AnalysisResult,
     AnalysisSeverity,
-    CodeLocation,
     FlowIssue,
     IssueCategory,
 )
@@ -34,6 +33,16 @@ from apps.common.flow_analysis.control_flow import ControlFlowAnalyzer
 from apps.common.flow_analysis.data_flow import DataFlowAnalyzer
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PROXIMITY_LINE_THRESHOLD = 5
+PROXIMITY_LINE_THRESHOLD = _DEFAULT_PROXIMITY_LINE_THRESHOLD
+
+
+def get_proximity_line_threshold() -> int:
+    """Get proximity line threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD)
 
 
 @dataclass
@@ -120,7 +129,7 @@ class HybridFlowAnalyzer:
                 analysis_mode=AnalysisMode.HYBRID,
             )
 
-        if not path.suffix == ".py":
+        if path.suffix != ".py":
             return AnalysisResult(
                 errors=[f"Not a Python file: {file_path}"],
                 analysis_mode=AnalysisMode.HYBRID,
@@ -199,11 +208,7 @@ class HybridFlowAnalyzer:
         files = list(dir_path.glob(pattern))
 
         # Apply exclude patterns
-        files = [
-            f
-            for f in files
-            if not any(f.match(exc) for exc in self.config.exclude_patterns)
-        ]
+        files = [f for f in files if not any(f.match(exc) for exc in self.config.exclude_patterns)]
 
         if not files:
             return AnalysisResult(
@@ -308,90 +313,69 @@ class HybridFlowAnalyzer:
 
         # Check for tainted data in potentially infinite loops
         infinite_loop_lines = {
-            i.location.line_number
-            for i in control_issues
-            if i.category == IssueCategory.INFINITE_LOOP
+            i.location.line_number for i in control_issues if i.category == IssueCategory.INFINITE_LOOP
         }
 
-        for data_issue in data_issues:
-            if data_issue.location.line_number in infinite_loop_lines:
-                # Security issue in infinite loop - amplify severity
-                cross_ref_issues.append(
-                    FlowIssue(
-                        category=IssueCategory.TAINTED_DATA,
-                        severity=AnalysisSeverity.CRITICAL,
-                        message=(
-                            f"AMPLIFIED: {data_issue.message} - occurs in potential infinite loop"
-                        ),
-                        location=data_issue.location,
-                        mode=AnalysisMode.HYBRID,
-                        code_snippet=data_issue.code_snippet,
-                        remediation=(
-                            f"{data_issue.remediation} Additionally, fix the infinite loop."
-                        ),
-                        cwe_id=data_issue.cwe_id,
-                        metadata={
-                            **data_issue.metadata,
-                            "cross_reference": "infinite_loop",
-                        },
-                    )
-                )
+        cross_ref_issues.extend(
+            FlowIssue(
+                category=IssueCategory.TAINTED_DATA,
+                severity=AnalysisSeverity.CRITICAL,
+                message=(f"AMPLIFIED: {data_issue.message} - occurs in potential infinite loop"),
+                location=data_issue.location,
+                mode=AnalysisMode.HYBRID,
+                code_snippet=data_issue.code_snippet,
+                remediation=(f"{data_issue.remediation} Additionally, fix the infinite loop."),
+                cwe_id=data_issue.cwe_id,
+                metadata={
+                    **data_issue.metadata,
+                    "cross_reference": "infinite_loop",
+                },
+            )
+            for data_issue in data_issues
+            if data_issue.location.line_number in infinite_loop_lines
+        )
 
         # Check for security issues in unreachable code
         unreachable_lines = {
-            i.location.line_number
-            for i in control_issues
-            if i.category == IssueCategory.UNREACHABLE_CODE
+            i.location.line_number for i in control_issues if i.category == IssueCategory.UNREACHABLE_CODE
         }
 
-        for data_issue in data_issues:
-            if data_issue.location.line_number in unreachable_lines:
-                # Security issue in unreachable code - lower priority but note it
-                cross_ref_issues.append(
-                    FlowIssue(
-                        category=data_issue.category,
-                        severity=AnalysisSeverity.LOW,  # Lower because unreachable
-                        message=f"UNREACHABLE: {data_issue.message} - in dead code",
-                        location=data_issue.location,
-                        mode=AnalysisMode.HYBRID,
-                        code_snippet=data_issue.code_snippet,
-                        remediation="Remove the dead code or fix the control flow to make it reachable.",
-                        cwe_id=data_issue.cwe_id,
-                        metadata={
-                            **data_issue.metadata,
-                            "cross_reference": "unreachable_code",
-                        },
-                    )
-                )
+        cross_ref_issues.extend(
+            FlowIssue(
+                category=data_issue.category,
+                severity=AnalysisSeverity.LOW,  # Lower because unreachable
+                message=f"UNREACHABLE: {data_issue.message} - in dead code",
+                location=data_issue.location,
+                mode=AnalysisMode.HYBRID,
+                code_snippet=data_issue.code_snippet,
+                remediation="Remove the dead code or fix the control flow to make it reachable.",
+                cwe_id=data_issue.cwe_id,
+                metadata={
+                    **data_issue.metadata,
+                    "cross_reference": "unreachable_code",
+                },
+            )
+            for data_issue in data_issues
+            if data_issue.location.line_number in unreachable_lines
+        )
 
         # Check for missing exception handlers with tainted data
-        exception_issues = [
-            i for i in control_issues
-            if i.category == IssueCategory.EXCEPTION_FLOW
-        ]
+        exception_issues = [i for i in control_issues if i.category == IssueCategory.EXCEPTION_FLOW]
 
         for exc_issue in exception_issues:
             # Look for nearby tainted data usage
             for data_issue in data_issues:
-                line_diff = abs(
-                    data_issue.location.line_number - exc_issue.location.line_number
-                )
-                if line_diff <= 5:  # Within 5 lines
+                line_diff = abs(data_issue.location.line_number - exc_issue.location.line_number)
+                if line_diff <= PROXIMITY_LINE_THRESHOLD:  # Within 5 lines
                     cross_ref_issues.append(
                         FlowIssue(
                             category=IssueCategory.TAINTED_DATA,
                             severity=AnalysisSeverity.HIGH,
-                            message=(
-                                f"EXCEPTION CONTEXT: {data_issue.message} - "
-                                f"near improper exception handling"
-                            ),
+                            message=(f"EXCEPTION CONTEXT: {data_issue.message} - " f"near improper exception handling"),
                             location=data_issue.location,
                             mode=AnalysisMode.HYBRID,
                             code_snippet=data_issue.code_snippet,
-                            remediation=(
-                                f"{data_issue.remediation} "
-                                f"Also ensure proper exception handling."
-                            ),
+                            remediation=(f"{data_issue.remediation} " f"Also ensure proper exception handling."),
                             cwe_id=data_issue.cwe_id,
                             metadata={
                                 **data_issue.metadata,
@@ -455,7 +439,7 @@ class HybridFlowAnalyzer:
         }
 
 
-def analyze_code(
+def analyze_code(  # noqa: PLR0911
     source: str | Path,
     config: HybridAnalysisConfig | None = None,
 ) -> AnalysisResult:

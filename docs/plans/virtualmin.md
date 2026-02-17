@@ -74,50 +74,50 @@ class VirtualminProvisioningService:
         self.virtualmin_gateway = virtualmin_gateway
         self.audit_service = AuditService()
         self.metrics = ProvisioningMetrics()
-    
+
     def provision_hosting_account(self, customer: Customer, plan: HostingPlan) -> ProvisioningResult:
         """Main business logic for hosting account provisioning"""
         # Comprehensive error handling learned from cPanel patterns
         # Audit logging throughout the process
         # Metrics collection for monitoring
         pass
-    
+
     def create_domain(self, account_id: str, domain: str) -> DomainResult:
         """Orchestrates domain creation across Virtualmin and PRAHO systems"""
         pass
-    
+
     def bulk_provision_accounts(self, accounts: List[AccountParams]) -> List[ProvisioningResult]:
         """Bulk operations with rate limiting (learned from cPanel analysis)"""
         pass
 
-# apps/provisioning/gateways.py  
+# apps/provisioning/gateways.py
 class VirtualminGateway:
     """Production-ready Virtualmin gateway with enterprise patterns"""
-    
+
     def __init__(self, config: VirtualminConfig):
         self.base_url = f"https://{config.hostname}:{config.port}"
         self.session = self._create_enhanced_session(config)
         self.rate_limiter = TokenBucketLimiter(max_calls=config.rate_limit_qps, time_window=60)
         self.circuit_breaker = CircuitBreaker()
         self.logger = logging.getLogger('praho.virtualmin.api')
-    
+
     def call(self, program: str, params: dict, method: Literal['GET', 'POST'] = 'POST') -> GatewayResult:
         """Core API call with response normalization and error taxonomy"""
         # Normalize JSON/XML/text responses to unified GatewayResult
         # Handle VirtualminError types: AuthError, RateLimited, ConflictExists, NotFound, TransientError
         pass
-    
+
     def create_account_idempotent(self, params: AccountCreationParams) -> AccountResult:
         """Idempotent account creation with existence checks"""
         # Pre-check with list-domains, treat existing-as-success when safe
         if self.domain_exists(params.domain):
             return AccountResult(success=True, message="Domain already exists")
         return self.create_account(params)
-    
+
     def get_account_status(self, domain: str) -> AccountStatus:
         """Comprehensive status checking with caching"""
         pass
-    
+
     def suspend_account(self, domain: str, reason: str) -> OperationResult:
         """Account suspension with audit trail and correlation ID"""
         pass
@@ -125,11 +125,11 @@ class VirtualminGateway:
 # apps/provisioning/repos.py
 class VirtualminProvisioningRepository:
     """Data access layer with comprehensive audit logging"""
-    
+
     def save_provisioning_record(self, record: ProvisioningRecord) -> None:
         # Enhanced data persistence with audit trails
         pass
-    
+
     def get_account_by_domain(self, domain: str) -> Optional[HostingAccount]:
         # Efficient querying with caching
         pass
@@ -152,7 +152,7 @@ VIRTUALMIN_SETTINGS = {
     'VIRTUALMIN_PINNED_CERT_SHA256': 'Optional SHA-256 fingerprint for certificate pinning',
 }
 
-# Usage in provisioning service  
+# Usage in provisioning service
 class VirtualminConfig:
     hostname = SystemSetting.get_value('virtualmin_hostname')
     port = SystemSetting.get_value('virtualmin_port', 10000)
@@ -210,7 +210,7 @@ class VirtualminAccount(BaseModel):
         ('suspended', 'Suspended'),
         ('disabled', 'Disabled'),
     ], default='active')
-    
+
     class Meta:
         unique_together = ['virtualmin_domain', 'virtualmin_server']
 
@@ -229,7 +229,7 @@ class VirtualminServer(BaseModel):
         ('maintenance', 'Maintenance'),
     ], default='healthy')
     last_healthcheck_at = models.DateTimeField(null=True, blank=True)
-    
+
     class Meta:
         unique_together = ['hostname', 'port']
 
@@ -241,7 +241,7 @@ class VirtualminProvisioningJob(BaseModel):
         ('completed', 'Completed'),
         ('failed', 'Failed'),
     ]
-    
+
     virtualmin_account = models.ForeignKey(VirtualminAccount, on_delete=models.CASCADE)
     virtualmin_server = models.ForeignKey(VirtualminServer, on_delete=models.CASCADE)
     operation = models.CharField(max_length=50)  # create, modify, suspend, terminate, create_subdomain
@@ -252,11 +252,11 @@ class VirtualminProvisioningJob(BaseModel):
     retry_count = models.IntegerField(default=0)
     virtualmin_command = models.TextField()  # Store the actual Virtualmin API command used
     virtualmin_response = models.JSONField(null=True, blank=True)  # Store API response
-    
+
     # Idempotency and observability (from review)
     idempotency_key = models.CharField(max_length=100, unique=True)  # domain + operation
     correlation_id = models.CharField(max_length=50, db_index=True)  # For tracing across services
-    
+
     class Meta:
         # Single-flight enforced in code for status='running'.
         # Do not use a global unique_together across statuses to preserve history.
@@ -279,7 +279,7 @@ class VirtualminProvisioningJob(BaseModel):
 - Integration with existing Service model
 - End-to-end testing with Virtualmin instance
 
-**Phase 3: Advanced Virtualmin Features (Week 5-6)**  
+**Phase 3: Advanced Virtualmin Features (Week 5-6)**
 - Implement subdomain creation and alias management
 - SSL certificate automation with Let's Encrypt
 - Database management (MySQL/PostgreSQL) integration
@@ -312,7 +312,7 @@ class VirtualminRateLimited(VirtualminError):
     """Rate limit exceeded - implement exponential backoff"""
     pass
 
-class VirtualminConflictExists(VirtualminError):  
+class VirtualminConflictExists(VirtualminError):
     """Resource already exists - handle idempotently"""
     pass
 
@@ -336,7 +336,7 @@ class GatewayResult:
 
 class VirtualminResponseParser:
     """Handles Virtualmin's varied response formats: JSON/XML/text"""
-    
+
     def parse_response(self, response: requests.Response, program: str) -> GatewayResult:
         """Normalize response regardless of format"""
         try:
@@ -348,27 +348,27 @@ class VirtualminResponseParser:
                 return self._parse_json_list_response(result)
         except json.JSONDecodeError:
             pass
-        
+
         try:
-            # Try XML parsing (xml=1 parameter)  
+            # Try XML parsing (xml=1 parameter)
             import xml.etree.ElementTree as ET
             root = ET.fromstring(response.text)
             return self._parse_xml_response(root)
         except ET.ParseError:
             pass
-        
+
         # Fallback to text parsing
         return self._parse_text_response(response.text, program)
-    
+
     def _parse_json_response(self, result: dict) -> GatewayResult:
         """Handle JSON responses with varied status formats"""
         # Virtualmin uses "status": "success" or "status": 1 or "result": 1
         success = (
             result.get('status') == 'success' or
-            result.get('status') == 1 or  
+            result.get('status') == 1 or
             result.get('result') == 1
         )
-        
+
         return GatewayResult(
             success=success,
             code=str(result.get('status', result.get('result', 'unknown'))),
@@ -376,11 +376,11 @@ class VirtualminResponseParser:
             data=result.get('data'),
             raw_response=None
         )
-    
+
     def _parse_text_response(self, text: str, program: str) -> GatewayResult:
         """Parse plain text responses with error detection"""
         lower_text = text.lower()
-        
+
         # Common error patterns in Virtualmin text responses
         if any(error in lower_text for error in ['failed', 'error', 'not found', 'denied']):
             return GatewayResult(
@@ -389,7 +389,7 @@ class VirtualminResponseParser:
                 message=text.strip()[:200],  # Truncate for logs
                 raw_response=text
             )
-        
+
         return GatewayResult(
             success=True,
             code='text_success',
@@ -407,7 +407,7 @@ class VirtualminGateway(HostingPanelGateway):
         self.session = requests.Session()
         self.session.auth = (config.admin_user, config.admin_password)
         self.session.verify = config.ssl_verify
-    
+
     def create_account(self, params: AccountCreationParams) -> AccountResult:
         """Create virtual server in Virtualmin"""
         api_params = {
@@ -423,7 +423,7 @@ class VirtualminGateway(HostingPanelGateway):
             'mail': '1',  # Enable email
             'json': '1'   # Return JSON response
         }
-        
+
         try:
             response = self.session.post(
                 f"{self.base_url}/virtual-server/remote.cgi",
@@ -432,7 +432,7 @@ class VirtualminGateway(HostingPanelGateway):
             )
             response.raise_for_status()
             result = response.json()
-            
+
             if result.get('status') == 'success':
                 return AccountResult(
                     success=True,
@@ -445,11 +445,11 @@ class VirtualminGateway(HostingPanelGateway):
                     error=result.get('error', 'Unknown error'),
                     details=result
                 )
-                
+
         except requests.RequestException as e:
             logger.error(f"Virtualmin API error: {e}")
             return AccountResult(success=False, error=str(e))
-    
+
     def get_account_info(self, domain: str) -> AccountInfo:
         """Get virtual server details"""
         params = {
@@ -458,7 +458,7 @@ class VirtualminGateway(HostingPanelGateway):
             'json': '1'
         }
         # Implementation...
-    
+
     def suspend_account(self, domain: str) -> bool:
         """Suspend virtual server"""
         params = {
@@ -473,7 +473,7 @@ class VirtualminGateway(HostingPanelGateway):
 ```python
 class VirtualminGateway:
     """Production-ready Virtualmin gateway with error taxonomy and response normalization"""
-    
+
     def __init__(self, config: VirtualminConfig):
         self.base_url = f"https://{config.hostname}:{config.port}"
         self.session = self._create_enhanced_session(config)
@@ -481,13 +481,13 @@ class VirtualminGateway:
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30)
         self.response_parser = VirtualminResponseParser()
         self.logger = logging.getLogger('praho.virtualmin.api')
-        
+
     def _create_enhanced_session(self, config):
         """Create session with enterprise-grade configurations"""
         session = requests.Session()
         session.auth = (config.admin_user, config.admin_password)
         session.verify = config.ssl_verify
-        
+
         # Connection pooling and retry strategy (learned from cPanel patterns)
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=10,
@@ -501,33 +501,33 @@ class VirtualminGateway:
         session.mount('https://', adapter)
         session.mount('http://', adapter)
         return session
-    
+
     def call(self, program: str, params: dict, method: Literal['GET', 'POST'] = 'POST') -> GatewayResult:
         """Core API call with response normalization and error taxonomy"""
         correlation_id = str(uuid.uuid4())[:8]
-        
+
         # Apply rate limiting and circuit breaker
         self.rate_limiter.wait_if_needed()
         if not self.circuit_breaker.can_call():
             raise VirtualminRateLimited("Circuit breaker is open")
-        
+
         api_params = {**params, 'json': '1'}  # Always request JSON
         endpoint = f"{self.base_url}/virtual-server/remote.cgi"
-        
+
         start_time = time.time()
         try:
             if method == 'POST':
                 response = self.session.post(endpoint, data=api_params, timeout=60)
             else:
                 response = self.session.get(endpoint, params=api_params, timeout=60)
-                
+
             response.raise_for_status()
             duration_ms = (time.time() - start_time) * 1000
-            
+
             # Use response parser for normalization
             result = self.response_parser.parse_response(response, program)
             self.circuit_breaker.record_success()
-            
+
             # Enhanced structured logging
             self.logger.info(
                 f"Virtualmin API success - Program: {program}",
@@ -540,23 +540,23 @@ class VirtualminGateway:
                     'status_code': result.code
                 }
             )
-            
+
             return result
-            
+
         except requests.HTTPError as e:
             duration_ms = (time.time() - start_time) * 1000
             self.circuit_breaker.record_failure()
-            
+
             # Map HTTP errors to our taxonomy
             if e.response.status_code == 401:
                 error = VirtualminAuthError("Authentication failed - check ACL permissions")
             elif e.response.status_code == 429:
-                error = VirtualminRateLimited("Rate limit exceeded")  
+                error = VirtualminRateLimited("Rate limit exceeded")
             elif e.response.status_code >= 500:
                 error = VirtualminTransientError(f"Server error: {e.response.status_code}")
             else:
                 error = VirtualminError(f"HTTP {e.response.status_code}: {str(e)}")
-            
+
             self.logger.error(
                 f"Virtualmin API error - Program: {program}, Error: {error}",
                 extra={
@@ -570,11 +570,11 @@ class VirtualminGateway:
                 }
             )
             raise error
-            
+
         except requests.RequestException as e:
             duration_ms = (time.time() - start_time) * 1000
             self.circuit_breaker.record_failure()
-            
+
             error = VirtualminTransientError(f"Request failed: {str(e)}")
             self.logger.error(
                 f"Virtualmin API request failed - Program: {program}",
@@ -588,7 +588,7 @@ class VirtualminGateway:
                 }
             )
             raise error
-    
+
     def create_account_idempotent(self, params: AccountCreationParams) -> AccountResult:
         """Idempotent account creation with existence checks"""
         # Pre-check if domain already exists
@@ -606,7 +606,7 @@ class VirtualminGateway:
             pass  # Domain doesn't exist, proceed with creation
         except VirtualminError:
             pass  # Ignore check errors, attempt creation anyway
-        
+
         # Create the domain
         create_params = {
             'program': 'create-domain',
@@ -615,12 +615,12 @@ class VirtualminGateway:
             'pass': params.password,
             'plan': params.plan or 'Default',
             'unix': '1',
-            'dir': '1', 
+            'dir': '1',
             'web': '1',
             'dns': '1',
             'mail': '1'
         }
-        
+
         try:
             result = self.call('create-domain', create_params, method='POST')
             if result.success:
@@ -639,9 +639,9 @@ class VirtualminGateway:
                         message="Domain already exists",
                         details={'idempotent': True}
                     )
-                
+
                 return AccountResult(success=False, error=result.message, details=result.data)
-                
+
         except VirtualminConflictExists:
             # Handle conflict as success for idempotency
             return AccountResult(
@@ -650,7 +650,7 @@ class VirtualminGateway:
                 message="Domain already exists",
                 details={'idempotent': True}
             )
-    
+
     def get_account_status(self, domain: str) -> AccountStatus:
         """Comprehensive account status checking"""
         params = {
@@ -658,7 +658,7 @@ class VirtualminGateway:
             'domain': domain,
             'json': '1'
         }
-        
+
         try:
             response = self.session.get(
                 f"{self.base_url}/virtual-server/remote.cgi",
@@ -667,7 +667,7 @@ class VirtualminGateway:
             )
             response.raise_for_status()
             result = response.json()
-            
+
             # Enhanced status parsing
             if result.get('status') == 'success' and result.get('data'):
                 domain_info = result['data'][0] if result['data'] else {}
@@ -680,7 +680,7 @@ class VirtualminGateway:
                 )
             else:
                 return AccountStatus(exists=False)
-                
+
         except Exception as e:
             self.logger.error(f"Failed to get account status for {domain}: {e}")
             raise VirtualminAPIError(f"Status check failed: {e}")
@@ -698,45 +698,45 @@ def provision_virtualmin_account(self, job_id: int):
         job.status = 'running'
         job.started_at = timezone.now()
         job.save()
-        
+
         # Get Virtualmin gateway
         config = VirtualminConfig()
         gateway = VirtualminGateway(config)
-        
+
         # Perform provisioning with enhanced logging
         service = VirtualminProvisioningService(gateway)
         result = service.provision_hosting_account(job.virtualmin_account)
-        
+
         # Store detailed results for debugging and audit
         job.virtualmin_response = result.details if result.details else {}
-        
+
         if result.success:
             job.status = 'completed'
             job.completed_at = timezone.now()
-            
+
             # Update account status
             job.virtualmin_account.status = 'active'
             job.virtualmin_account.last_sync = timezone.now()
             job.virtualmin_account.save()
-            
+
         else:
             job.status = 'failed'
             job.error_message = result.error
-            
+
         job.save()
-        
+
         # Enhanced notifications with Virtualmin-specific details
         if result.success:
             send_virtualmin_provisioning_success_notification.delay(job.virtualmin_account.id)
         else:
             send_virtualmin_provisioning_failure_notification.delay(job.id)
-            
+
     except Exception as exc:
         job.status = 'failed'
         job.error_message = str(exc)
         job.retry_count += 1
         job.save()
-        
+
         # Exponential backoff with Virtualmin-specific considerations
         countdown = min(300, 60 * (2 ** self.request.retries))  # Max 5 minutes
         raise self.retry(exc=exc, countdown=countdown)
@@ -747,12 +747,12 @@ def provision_virtualmin_account(self, job_id: int):
 **Authentication & Authorization (Critical Updates):**
 - **DO NOT use master admin** - Create dedicated Webmin ACL user with minimal privileges
 - Grant only "Virtualmin Virtual Servers" module access with "Remote API" permission
-- IP-allowlist PRAHO servers on Virtualmin host 
+- IP-allowlist PRAHO servers on Virtualmin host
 - Store API credentials in environment variables, never in code or settings files
 - Implement credential rotation policies and monitor failed authentication attempts
 
 **Network Security:**
-- Always use HTTPS for API communications with TLS 1.2+ 
+- Always use HTTPS for API communications with TLS 1.2+
 - Enable HSTS on reverse proxy in front of port 10000
 - Implement SSL certificate verification with cert pinning for production
 - Use VPN or private networks for server-to-server communication
@@ -783,18 +783,18 @@ def provision_virtualmin_account(self, job_id: int):
 # apps/provisioning/monitoring.py
 class VirtualminMetrics:
     """Prometheus metrics for Virtualmin operations"""
-    
+
     @staticmethod
     def record_virtualmin_request(program: str, status: str, duration: float):
         # virtualmin_requests_total{program="create-domain",status="success"}
         # virtualmin_request_duration_seconds{program="create-domain"}
         pass
-    
+
     @staticmethod
     def record_virtualmin_error(program: str, error_type: str):
         # virtualmin_errors_total{program="create-domain",type="ConflictExists"}
         pass
-    
+
     @staticmethod
     def record_circuit_breaker_state(server: str, state: str):
         # virtualmin_circuit_breaker_state{server="vm1.example.com",state="open"}
@@ -804,7 +804,7 @@ class VirtualminMetrics:
 logger = logging.getLogger('praho.virtualmin.api')
 
 class VirtualminAPILogging:
-    def log_api_call(self, program: str, method: str, domain: str, correlation_id: str, 
+    def log_api_call(self, program: str, method: str, domain: str, correlation_id: str,
                      duration_ms: float, success: bool, error_type: Optional[str] = None):
         logger.info(
             f"Virtualmin API Call - Program: {program}, Domain: {domain}, "
@@ -859,7 +859,7 @@ class TestVirtualminGateway:
             rate_limit_qps=10
         )
         return VirtualminGateway(config)
-    
+
     @responses.activate
     def test_create_account_idempotent_success(self, gateway):
         """Test idempotent account creation with existence check"""
@@ -870,7 +870,7 @@ class TestVirtualminGateway:
             json={'status': 'success', 'data': []},
             status=200
         )
-        
+
         # Second call - create-domain succeeds
         responses.add(
             responses.POST,
@@ -878,19 +878,19 @@ class TestVirtualminGateway:
             json={'status': 'success', 'data': {'domain': 'test.example.com'}},
             status=200
         )
-        
+
         params = AccountCreationParams(
             domain='test.example.com',
             username='testuser',
             password='testpass',
             plan='Default'
         )
-        
+
         result = gateway.create_account_idempotent(params)
         assert result.success is True
         assert result.account_id == 'test.example.com'
-    
-    @responses.activate  
+
+    @responses.activate
     def test_response_normalization_text_fallback(self, gateway):
         """Test response parser handles text responses gracefully"""
         responses.add(
@@ -900,11 +900,11 @@ class TestVirtualminGateway:
             status=200,
             content_type='text/plain'
         )
-        
+
         result = gateway.call('create-domain', {'domain': 'test.example.com'})
         assert result.success is True
         assert 'created successfully' in result.raw_response
-    
+
     @responses.activate
     def test_error_taxonomy_auth_error(self, gateway):
         """Test error taxonomy maps HTTP 401 to VirtualminAuthError"""
@@ -914,10 +914,10 @@ class TestVirtualminGateway:
             json={'error': 'Access denied'},
             status=401
         )
-        
+
         with pytest.raises(VirtualminAuthError) as exc_info:
             gateway.call('create-domain', {'domain': 'test.example.com'})
-        
+
         assert 'check ACL permissions' in str(exc_info.value)
 ```
 
@@ -926,7 +926,7 @@ class TestVirtualminGateway:
 # tests/provisioning/test_virtualmin_integration.py
 class TestVirtualminProvisioningIntegration:
     @pytest.mark.integration
-    @pytest.mark.skipif(not os.getenv('VIRTUALMIN_TEST_INSTANCE'), 
+    @pytest.mark.skipif(not os.getenv('VIRTUALMIN_TEST_INSTANCE'),
                        reason="Requires VIRTUALMIN_TEST_INSTANCE env var")
     def test_full_virtualmin_provisioning_workflow(self):
         """Test against real Virtualmin instance"""
@@ -934,7 +934,7 @@ class TestVirtualminProvisioningIntegration:
         customer = CustomerFactory()
         plan = HostingPlanFactory()
         service = ServiceFactory(customer=customer, plan=plan)
-        
+
         # Use test Virtualmin instance
         config = VirtualminConfig(
             hostname=os.getenv('VIRTUALMIN_TEST_HOSTNAME'),
@@ -943,31 +943,31 @@ class TestVirtualminProvisioningIntegration:
             admin_password=os.getenv('VIRTUALMIN_TEST_PASSWORD'),
             ssl_verify=False  # Test instance may use self-signed cert
         )
-        
+
         # Test idempotent provisioning
         provisioning_service = VirtualminProvisioningService(VirtualminGateway(config))
-        
+
         # Generate unique test domain
         test_domain = f"test-{uuid.uuid4().hex[:8]}.example.com"
-        
+
         try:
             result = provisioning_service.provision_hosting_account_idempotent(
                 customer, plan, test_domain
             )
-            
+
             assert result.success is True
             assert VirtualminAccount.objects.filter(
-                service=service, 
+                service=service,
                 virtualmin_domain=test_domain
             ).exists()
-            
+
             # Test idempotency - second call should succeed
             result2 = provisioning_service.provision_hosting_account_idempotent(
                 customer, plan, test_domain
             )
             assert result2.success is True
             assert result2.message == "Domain already exists"
-            
+
         finally:
             # Cleanup test domain
             try:
@@ -1009,7 +1009,7 @@ class TestVirtualminProvisioningLoad:
         # Verify Virtualmin server stability under load
         # Test rate limiting effectiveness
         pass
-    
+
     def test_bulk_romanian_domain_provisioning(self):
         # Test provisioning multiple .ro domains simultaneously
         # Verify ROTLD integration doesn't bottleneck
@@ -1076,7 +1076,7 @@ VIRTUALMIN_CONFIG = {
 # Celery configuration for Virtualmin provisioning tasks
 CELERY_ROUTES = {
     'apps.provisioning.tasks.provision_virtualmin_account': {'queue': 'virtualmin_provisioning'},
-    'apps.provisioning.tasks.sync_virtualmin_account_status': {'queue': 'virtualmin_sync'},  
+    'apps.provisioning.tasks.sync_virtualmin_account_status': {'queue': 'virtualmin_sync'},
     'apps.provisioning.tasks.bulk_provision_virtualmin_accounts': {'queue': 'virtualmin_bulk'},
     'apps.provisioning.tasks.virtualmin_health_check': {'queue': 'virtualmin_monitoring'},
 }
@@ -1118,34 +1118,34 @@ class OptimizedVirtualminProvisioningService:
             max_retries=3
         )
         session.mount('https://', adapter)
-        
+
         # Process in batches to avoid overwhelming the control panel
         batch_size = 5
         results = []
-        
+
         for i in range(0, len(account_params_list), batch_size):
             batch = account_params_list[i:i + batch_size]
             batch_results = []
-            
+
             # Process batch concurrently (respecting Virtualmin's limitations)
             with ThreadPoolExecutor(max_workers=min(batch_size, 3)) as executor:  # Limit for Virtualmin
                 futures = [
                     executor.submit(self._create_single_virtualmin_account, session, params)
                     for params in batch
                 ]
-                
+
                 for future in as_completed(futures):
                     try:
                         result = future.result()
                         batch_results.append(result)
                     except Exception as e:
                         batch_results.append(AccountResult(success=False, error=str(e)))
-            
+
             results.extend(batch_results)
-            
+
             # Rate limiting between batches (more conservative for Virtualmin)
             time.sleep(2)  # Longer delay for Virtualmin stability
-        
+
         return results
 ```
 
@@ -1157,28 +1157,28 @@ class CachedVirtualminProvisioningService(VirtualminProvisioningService):
     def get_account_info(self, domain: str) -> AccountInfo:
         cache_key = f"virtualmin_account_info:{domain}"
         cached_info = cache.get(cache_key)
-        
+
         if cached_info is None:
             info = super().get_account_info(domain)
             cache.set(cache_key, info, timeout=300)  # 5 minutes
             return info
-        
+
         return cached_info
-    
+
     def invalidate_virtualmin_account_cache(self, domain: str):
         cache_key = f"virtualmin_account_info:{domain}"
         cache.delete(cache_key)
-        
+
     def get_server_status(self, server_hostname: str) -> ServerStatus:
         """Cache Virtualmin server status to avoid repeated health checks"""
         cache_key = f"virtualmin_server_status:{server_hostname}"
         cached_status = cache.get(cache_key)
-        
+
         if cached_status is None:
             status = self.virtualmin_gateway.check_server_health()
             cache.set(cache_key, status, timeout=60)  # 1 minute for server status
             return status
-        
+
         return cached_status
 ```
 
@@ -1195,7 +1195,7 @@ class VirtualminFailureHandler:
             max_delay=300,  # 5 minutes max
             partial_failure_recovery=True
         )
-    
+
     def handle_rate_limit_exceeded(self, server_id: str) -> LoadSheddingStrategy:
         """Shed load and queue jobs when rate limited"""
         return LoadSheddingStrategy(
@@ -1218,7 +1218,7 @@ def handle_domain_exists_conflict(self, domain: str, operation: str) -> Conflict
                 reconcile_differences=True,
                 audit_conflict=True
             )
-    
+
     return ConflictResolution(treat_as_success=False)
 ```
 
@@ -1233,7 +1233,7 @@ def handle_non_json_response(self, response_text: str, program: str) -> GatewayR
         'parse_attempt': 'text_fallback',
         'timestamp': timezone.now()
     }
-    
+
     # Parse minimal signal from text
     if 'failed' in response_text.lower() or 'error' in response_text.lower():
         return GatewayResult(
@@ -1242,10 +1242,10 @@ def handle_non_json_response(self, response_text: str, program: str) -> GatewayR
             message=self._extract_error_message(response_text),
             raw_response=response_text
         )
-    
+
     return GatewayResult(
         success=True,
-        code='text_success', 
+        code='text_success',
         message=f"{program} completed (text response)",
         raw_response=response_text
     )
@@ -1257,48 +1257,48 @@ def handle_non_json_response(self, response_text: str, program: str) -> GatewayR
 # apps/provisioning/cli_fallback.py
 class VirtualminCLIFallback:
     """SSH-based Virtualmin CLI for emergency operations when remote.cgi fails"""
-    
+
     def __init__(self, ssh_config: SSHConfig):
         self.ssh_config = ssh_config
         self.enabled = settings.VIRTUALMIN_CLI_FALLBACK_ENABLED
-        
+
     def execute_command(self, virtualmin_command: str) -> CLIResult:
         """Execute Virtualmin CLI command via SSH"""
         if not self.enabled:
             raise VirtualminError("CLI fallback is disabled")
-        
+
         import paramiko
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        
+
         try:
             ssh.connect(
                 hostname=self.ssh_config.hostname,
                 username=self.ssh_config.username,
                 key_filename=self.ssh_config.private_key_path
             )
-            
+
             # Execute virtualmin command
             stdin, stdout, stderr = ssh.exec_command(f"virtualmin {virtualmin_command}")
-            
+
             stdout_text = stdout.read().decode()
             stderr_text = stderr.read().decode()
             exit_code = stdout.channel.recv_exit_status()
-            
+
             return CLIResult(
                 success=exit_code == 0,
                 stdout=stdout_text,
                 stderr=stderr_text,
                 exit_code=exit_code
             )
-            
+
         finally:
             ssh.close()
-    
+
     def create_domain_via_cli(self, domain: str, username: str, password: str) -> CLIResult:
         """Create domain via CLI as fallback"""
         command = f"create-domain --domain {domain} --user {username} --pass '{password}' --unix --dir --web --dns --mail"
-        
+
         self.logger.warning(
             f"Using CLI fallback for domain creation: {domain}",
             extra={
@@ -1307,7 +1307,7 @@ class VirtualminCLIFallback:
                 'reason': 'remote_api_unavailable'
             }
         )
-        
+
         return self.execute_command(command)
 ```
 
@@ -1319,7 +1319,7 @@ class VirtualminCLIFallback:
 # apps/provisioning/placement.py
 class VirtualminPlacementPolicy:
     """Intelligent server placement based on capacity, tags, and health - NO Virtualmin clustering required"""
-    
+
     def select_server(self, placement_request: PlacementRequest) -> VirtualminServer:
         """Select optimal server based on policy"""
         available_servers = VirtualminServer.objects.filter(
@@ -1329,21 +1329,21 @@ class VirtualminPlacementPolicy:
         ).filter(
             load_percentage__lt=90  # Don't use servers above 90% capacity
         )
-        
+
         # Apply tag-based filtering
         if placement_request.required_tags:
             for tag in placement_request.required_tags:
                 available_servers = available_servers.filter(tags__contains=tag)
-        
+
         # Select server with lowest load
         selected_server = available_servers.order_by('load_percentage').first()
-        
+
         if not selected_server:
             raise VirtualminError("No suitable server available for placement")
-        
+
         return selected_server
-    
-    def handle_server_failure(self, failed_server: VirtualminServer, 
+
+    def handle_server_failure(self, failed_server: VirtualminServer,
                             affected_accounts: List[VirtualminAccount]) -> FailoverPlan:
         """Create failover plan for server failure - PRAHO orchestrates everything"""
         return FailoverPlan(
@@ -1354,7 +1354,7 @@ class VirtualminPlacementPolicy:
             rollback_plan=self._create_rollback_plan(failed_server),
             dns_updates_required=True,  # PRAHO handles DNS changes for traffic routing
         )
-    
+
 
 ### DNS-Based Traffic Management (Multiple DNS Servers + CloudFlare)
 
@@ -1362,47 +1362,47 @@ class VirtualminPlacementPolicy:
 # apps/provisioning/dns_management.py
 class PrahoDNSManager:
     """PRAHO manages multiple DNS servers and CloudFlare API for traffic routing"""
-    
+
     def update_dns_for_failover(self, account: VirtualminAccount, new_server: VirtualminServer):
         """Update DNS records when account moves to new server across all DNS providers"""
-        
+
         # Update all PRAHO-managed DNS servers
         self._update_all_praho_dns_servers(account.virtualmin_domain, new_server.ip_address)
-        
+
         # Also update via CloudFlare API if configured
         if account.uses_cloudflare_dns:
             self._update_cloudflare_dns(account.virtualmin_domain, new_server.ip_address)
-        
+
         # Log DNS propagation for monitoring
         self._log_dns_update(account.virtualmin_domain, new_server.ip_address)
-    
+
     def _update_all_praho_dns_servers(self, domain: str, new_ip: str):
         """Update DNS zone on all PRAHO-managed PowerDNS servers"""
         powerdns_servers = DNSServer.objects.filter(
-            status='active', 
+            status='active',
             managed_by_praho=True,
             software_type='powerdns'
         )
-        
+
         for dns_server in powerdns_servers:
             try:
                 self._update_powerdns_zone(dns_server, domain, new_ip)
-                
+
                 # Verify update was successful
                 self._verify_dns_update(dns_server, domain, new_ip)
-                
+
             except DNSUpdateError as e:
                 logger.error(f"Failed to update PowerDNS server {dns_server.hostname}: {e}")
                 # Continue with other servers - redundancy is key
                 continue
-    
+
     def _update_powerdns_zone(self, dns_server: DNSServer, domain: str, new_ip: str):
         """Update PowerDNS via HTTP API - Clean, reliable, programmatic"""
         powerdns_api = PowerDNSAPI(
             base_url=f"http://{dns_server.hostname}:8081",
             api_key=dns_server.api_key
         )
-        
+
         # Update A records via PowerDNS HTTP API
         rrsets = [
             {
@@ -1413,42 +1413,42 @@ class PrahoDNSManager:
             },
             {
                 "name": f"www.{domain}",
-                "type": "A", 
+                "type": "A",
                 "records": [{"content": new_ip, "disabled": False}],
                 "ttl": 300
             }
         ]
-        
+
         powerdns_api.replace_rrsets(domain, rrsets)
-        
+
         # PowerDNS also supports bulk operations for efficiency
         if hasattr(self, '_bulk_updates') and len(self._bulk_updates) > 1:
             powerdns_api.bulk_replace_rrsets(domain, self._bulk_updates)
             self._bulk_updates.clear()
-    
+
     def _update_cloudflare_dns(self, domain: str, new_ip: str):
         """Update DNS records via CloudFlare API"""
         cloudflare_api = CloudFlareAPI(self.get_cloudflare_api_token(domain))
         zone_id = cloudflare_api.get_zone_id(domain)
-        
+
         # Update A records with short TTL for faster failover
         cloudflare_api.update_dns_record(zone_id, '@', 'A', new_ip, ttl=300)
         cloudflare_api.update_dns_record(zone_id, 'www', 'A', new_ip, ttl=300)
-    
+
     def _verify_dns_update(self, dns_server: DNSServer, domain: str, expected_ip: str):
         """Verify DNS update was successful by querying the server"""
         import dns.resolver
-        
+
         resolver = dns.resolver.Resolver()
         resolver.nameservers = [dns_server.ip_address]
-        
+
         try:
             answer = resolver.resolve(domain, 'A')
             actual_ip = str(answer[0])
-            
+
             if actual_ip != expected_ip:
                 raise DNSVerificationError(f"DNS server {dns_server.hostname} returned {actual_ip}, expected {expected_ip}")
-                
+
         except dns.resolver.NXDOMAIN:
             raise DNSVerificationError(f"Domain {domain} not found on DNS server {dns_server.hostname}")
 
@@ -1458,7 +1458,7 @@ class DNSServer(BaseModel):
     hostname = models.CharField(max_length=200)
     ip_address = models.GenericIPAddressField()
     software_type = models.CharField(max_length=50, choices=[
-        ('powerdns', 'PowerDNS'), 
+        ('powerdns', 'PowerDNS'),
         ('cloudflare', 'CloudFlare API')
     ])
     api_key = models.CharField(max_length=200)  # Required for both PowerDNS API and CloudFlare
@@ -1470,7 +1470,7 @@ class DNSServer(BaseModel):
     ], default='active')
     managed_by_praho = models.BooleanField(default=True)
     priority = models.IntegerField(default=10)  # For DNS server preference
-    
+
     class Meta:
         ordering = ['priority', 'hostname']
 
@@ -1534,10 +1534,10 @@ def deploy_powerdns_cluster(self):
     """Deploy 2-3 PowerDNS instances with shared database backend"""
     powerdns_servers = [
         {'hostname': 'ns1.praho-hosting.ro', 'location': 'Bucharest'},
-        {'hostname': 'ns2.praho-hosting.ro', 'location': 'Cluj-Napoca'}, 
+        {'hostname': 'ns2.praho-hosting.ro', 'location': 'Cluj-Napoca'},
         {'hostname': 'ns3.praho-hosting.ro', 'location': 'Timișoara'}
     ]
-    
+
     for server_config in powerdns_servers:
         self._deploy_powerdns_instance(server_config)
         self._configure_database_replication(server_config)
@@ -1549,11 +1549,11 @@ def deploy_powerdns_cluster(self):
 def update_dns_with_fallback(self, domain: str, new_ip: str):
     """Update DNS with fallback strategy"""
     success_count = 0
-    
+
     # Try PowerDNS first (self-hosted, more control)
     if self._update_powerdns_servers(domain, new_ip):
         success_count += 1
-    
+
     # Try CloudFlare (external service)
     try:
         if self._update_cloudflare_dns(domain, new_ip):
@@ -1561,10 +1561,10 @@ def update_dns_with_fallback(self, domain: str, new_ip: str):
     except CloudFlareAPIError as e:
         logger.warning(f"CloudFlare update failed for {domain}: {e}")
         # Continue without CloudFlare - PowerDNS should handle traffic
-    
+
     if success_count == 0:
         raise DNSUpdateError("Failed to update any DNS servers")
-    
+
     return success_count > 0
 ```
 
@@ -1575,14 +1575,14 @@ class CloudFlareRateLimiter:
     def __init__(self):
         self.requests_per_5min = 1200
         self.request_timestamps = []
-    
+
     def wait_if_needed(self):
         """Implement sliding window rate limiting"""
         now = time.time()
         # Remove requests older than 5 minutes
-        self.request_timestamps = [ts for ts in self.request_timestamps 
+        self.request_timestamps = [ts for ts in self.request_timestamps
                                  if now - ts < 300]
-        
+
         if len(self.request_timestamps) >= self.requests_per_5min:
             sleep_time = 300 - (now - self.request_timestamps[0])
             if sleep_time > 0:
@@ -1616,31 +1616,31 @@ This approach gives Romanian hosting providers:
 # apps/provisioning/server_monitoring.py
 class VirtualminServerMonitoring:
     """Monitor server health and update DNS accordingly - no load balancer dependencies"""
-    
+
     def monitor_server_health(self, server: VirtualminServer):
         """Monitor server health and update DNS if needed"""
         health_result = self._perform_health_check(server)
-        
+
         if health_result.healthy:
             self._ensure_dns_points_to_server(server)
         else:
             self._failover_dns_to_backup_server(server)
-    
+
     def _ensure_dns_points_to_server(self, server: VirtualminServer):
         """Ensure DNS records point to healthy server"""
         for account in server.virtualminaccount_set.filter(status='active'):
             dns_manager = PrahoDNSManager()
             current_ip = dns_manager.resolve_domain_ip(account.virtualmin_domain)
-            
+
             if current_ip != server.ip_address:
                 # DNS points elsewhere, update if this server is the primary
                 if account.is_primary_server(server):
                     dns_manager.update_dns_for_server_change(account, server)
-    
+
     def _failover_dns_to_backup_server(self, failed_server: VirtualminServer):
         """Update DNS to point away from failed server"""
         placement_policy = VirtualminPlacementPolicy()
-        
+
         for account in failed_server.virtualminaccount_set.filter(status='active'):
             backup_server = placement_policy.select_backup_server(account)
             if backup_server:
@@ -1654,19 +1654,19 @@ class VirtualminServerMonitoring:
 # apps/provisioning/drift_detection.py
 class VirtualminDriftDetector:
     """Detect and reconcile differences between PRAHO and Virtualmin state"""
-    
+
     def detect_drift(self, server: VirtualminServer) -> List[DriftIssue]:
         """Compare PRAHO database with actual Virtualmin state"""
         drift_issues = []
-        
+
         # Get all domains from PRAHO for this server
         praho_accounts = VirtualminAccount.objects.filter(
             virtualmin_server=server
         ).values_list('virtualmin_domain', flat=True)
-        
+
         # Get all domains from Virtualmin
         virtualmin_domains = self._fetch_virtualmin_domains(server)
-        
+
         # Find orphaned domains (in Virtualmin but not in PRAHO)
         # Since PRAHO is source of truth, these should be removed from Virtualmin
         orphaned = set(virtualmin_domains) - set(praho_accounts)
@@ -1678,7 +1678,7 @@ class VirtualminDriftDetector:
                 auto_fixable=True,  # PRAHO is source of truth - safe to remove orphans
                 description=f"Domain {domain} exists in Virtualmin but not in PRAHO (will be removed)"
             ))
-        
+
         # Find missing domains (in PRAHO but not in Virtualmin)
         missing = set(praho_accounts) - set(virtualmin_domains)
         for domain in missing:
@@ -1689,26 +1689,26 @@ class VirtualminDriftDetector:
                 auto_fixable=True,
                 description=f"Domain {domain} exists in PRAHO but not in Virtualmin"
             ))
-        
+
         return drift_issues
-    
+
     def auto_heal_drift(self, drift_issue: DriftIssue) -> HealingResult:
         """Automatically fix drift issues based on PRAHO as source of truth"""
         if not drift_issue.auto_fixable:
             return HealingResult(success=False, reason="Manual intervention required")
-        
+
         if drift_issue.type == 'missing_domain':
             # Recreate missing domain in Virtualmin from PRAHO data
             account = VirtualminAccount.objects.get(virtualmin_domain=drift_issue.domain)
             return self._recreate_domain_in_virtualmin(account)
-        
+
         elif drift_issue.type == 'orphaned_domain':
             # Remove orphaned domain from Virtualmin (PRAHO doesn't have it)
             return self._remove_orphaned_domain_from_virtualmin(
-                drift_issue.domain, 
+                drift_issue.domain,
                 reason="Not present in PRAHO source of truth"
             )
-        
+
         return HealingResult(success=False, reason="Unknown drift type")
 
 # Celery task for periodic drift detection
@@ -1716,10 +1716,10 @@ class VirtualminDriftDetector:
 def detect_and_heal_drift():
     """Periodic task to detect and auto-heal drift issues"""
     detector = VirtualminDriftDetector()
-    
+
     for server in VirtualminServer.objects.filter(status='healthy'):
         drift_issues = detector.detect_drift(server)
-        
+
         for issue in drift_issues:
             if issue.auto_fixable:
                 result = detector.auto_heal_drift(issue)
@@ -1738,48 +1738,48 @@ def detect_and_heal_drift():
 # apps/provisioning/policy_enforcement.py
 class VirtualminPolicyEnforcer:
     """Enforce PRAHO-level policies mapped to Virtualmin plans"""
-    
+
     def enforce_disk_quota(self, account: VirtualminAccount, new_quota_mb: int) -> PolicyResult:
         """Enforce disk quota limits"""
         server = account.virtualmin_server
         gateway = VirtualminGateway(self._get_server_config(server))
-        
+
         # Get current usage
         usage_result = gateway.call('list-domains', {
             'domain': account.virtualmin_domain,
             'show-disk': '1'
         })
-        
+
         if usage_result.success and usage_result.data:
             current_usage = usage_result.data[0].get('disk_usage', 0)
-            
+
             # Check if new quota would violate current usage
             if new_quota_mb < current_usage:
                 return PolicyResult(
                     success=False,
                     reason=f"New quota ({new_quota_mb}MB) less than current usage ({current_usage}MB)"
                 )
-        
+
         # Apply quota in Virtualmin
         modify_result = gateway.call('modify-domain', {
             'domain': account.virtualmin_domain,
             'quota': str(new_quota_mb * 1024)  # Virtualmin expects KB
         })
-        
+
         return PolicyResult(success=modify_result.success, virtualmin_response=modify_result)
-    
+
     def enforce_email_limits(self, account: VirtualminAccount, max_mailboxes: int) -> PolicyResult:
         """Enforce email account limits"""
         # Count current mailboxes
         current_count = self._count_mailboxes(account)
-        
+
         if current_count > max_mailboxes:
             return PolicyResult(
                 success=False,
                 reason=f"Account has {current_count} mailboxes, limit is {max_mailboxes}",
                 suggested_action="reduce_mailboxes"
             )
-        
+
         # Set limit in Virtualmin template if supported
         return self._update_mailbox_limit(account, max_mailboxes)
 ```
@@ -1790,16 +1790,16 @@ class VirtualminPolicyEnforcer:
 # apps/provisioning/server_lifecycle.py
 class VirtualminServerLifecycle:
     """Manage Virtualmin servers as replaceable infrastructure"""
-    
-    def replace_server(self, old_server: VirtualminServer, 
+
+    def replace_server(self, old_server: VirtualminServer,
                       replacement_server: VirtualminServer) -> ReplacementResult:
         """Replace a Virtualmin server by rebuilding all accounts from PRAHO data"""
-        
+
         # Get all accounts on the old server
         accounts_to_migrate = VirtualminAccount.objects.filter(
             virtualmin_server=old_server
         )
-        
+
         migration_plan = []
         for account in accounts_to_migrate:
             # Reconstruct account from PRAHO's authoritative data
@@ -1809,13 +1809,13 @@ class VirtualminServerLifecycle:
                 target_server=replacement_server,
                 rebuild_from_praho=True  # Don't migrate from old server - rebuild fresh
             ))
-        
+
         return self._execute_server_replacement(migration_plan)
-    
-    def decomission_server(self, server: VirtualminServer, 
+
+    def decomission_server(self, server: VirtualminServer,
                           target_servers: List[VirtualminServer]) -> DecommissionResult:
         """Safely remove a server by redistributing accounts"""
-        
+
         # Verify all account data exists in PRAHO
         orphaned_accounts = self._verify_praho_data_completeness(server)
         if orphaned_accounts:
@@ -1823,51 +1823,51 @@ class VirtualminServerLifecycle:
                 success=False,
                 reason=f"Found {len(orphaned_accounts)} accounts missing PRAHO data"
             )
-        
+
         # Redistribute accounts to target servers based on capacity
         placement_policy = VirtualminPlacementPolicy()
-        
+
         for account in server.virtualminaccount_set.all():
             target = placement_policy.select_server(
                 PlacementRequest(required_tags=account.service.plan.tags)
             )
-            
+
             # Recreate account on target server from PRAHO data
             self._recreate_account_from_praho(account, target)
-            
+
             # Update PRAHO record
             account.virtualmin_server = target
             account.save()
-        
+
         # Mark old server as decommissioned
-        server.status = 'decommissioned' 
+        server.status = 'decommissioned'
         server.save()
-        
+
         return DecommissionResult(success=True, migrated_accounts=len(accounts))
-    
+
     def provision_new_server(self, server_config: ServerConfig) -> ProvisionResult:
         """Provision a fresh Virtualmin server from bare Linux server"""
-        
+
         # Step 1: Install Virtualmin on fresh server
         install_result = self._install_virtualmin_on_server(server_config)
         if not install_result.success:
             return ProvisionResult(success=False, error=install_result.error)
-        
+
         # Step 2: Configure PRAHO API user with ACL permissions
         api_user_result = self._configure_praho_api_user(server_config)
         if not api_user_result.success:
             return ProvisionResult(success=False, error=api_user_result.error)
-        
+
         # Step 3: Apply security hardening
         security_result = self._apply_security_hardening(server_config)
         if not security_result.success:
             return ProvisionResult(success=False, error=security_result.error)
-        
+
         # Step 4: Validate installation with health check
         health_result = self._comprehensive_health_check(server_config)
         if not health_result.healthy:
             return ProvisionResult(success=False, error=f"Health check failed: {health_result.issues}")
-        
+
         # Step 5: Register server in PRAHO database
         new_server = VirtualminServer.objects.create(
             name=server_config.name,
@@ -1877,62 +1877,62 @@ class VirtualminServerLifecycle:
             tags=server_config.tags,
             last_healthcheck_at=timezone.now()
         )
-        
+
         return ProvisionResult(success=True, server=new_server, health_report=health_result)
 
     def _install_virtualmin_on_server(self, server_config: ServerConfig) -> InstallResult:
         """Install Virtualmin on fresh Linux server via SSH"""
         ssh_client = self._create_ssh_client(server_config)
-        
+
         try:
             # Download and run Virtualmin install script
             install_commands = [
                 # Update system packages
                 "apt-get update && apt-get upgrade -y",  # Ubuntu/Debian
                 # "dnf update -y",  # RHEL/CentOS/AlmaLinux
-                
+
                 # Download Virtualmin install script
                 "wget -O install.sh https://software.virtualmin.com/gpl/scripts/install.sh",
-                
+
                 # Make executable and run with unattended mode
                 "chmod +x install.sh",
                 "./install.sh --force --hostname {hostname} --minimal".format(
                     hostname=server_config.hostname
                 ),
-                
+
                 # Verify installation
                 "systemctl status webmin",
                 "systemctl status virtualmin"
             ]
-            
+
             for command in install_commands:
                 stdin, stdout, stderr = ssh_client.exec_command(command)
                 exit_status = stdout.channel.recv_exit_status()
-                
+
                 if exit_status != 0:
                     error_output = stderr.read().decode()
                     return InstallResult(
-                        success=False, 
+                        success=False,
                         error=f"Command failed: {command}\nError: {error_output}"
                     )
-            
+
             return InstallResult(success=True, message="Virtualmin installed successfully")
-            
+
         except Exception as e:
             return InstallResult(success=False, error=f"SSH installation failed: {str(e)}")
         finally:
             ssh_client.close()
-    
+
     def _configure_praho_api_user(self, server_config: ServerConfig) -> ConfigResult:
         """Configure dedicated PRAHO API user with minimal ACL permissions"""
         ssh_client = self._create_ssh_client(server_config)
-        
+
         try:
             # Create webmin user for PRAHO with restricted permissions
             config_commands = [
                 # Create webmin user
                 f"/usr/share/webmin/changepass.pl /etc/webmin praho_api {server_config.api_password}",
-                
+
                 # Set ACL permissions (only Virtualmin module + Remote API)
                 """cat > /etc/webmin/praho_api.acl << 'EOF'
 virtual-server: 1
@@ -1942,33 +1942,33 @@ webminlog: 0
 acl: 0
 remote: 1
 EOF""",
-                
+
                 # Restart webmin to apply changes
                 "systemctl restart webmin"
             ]
-            
+
             for command in config_commands:
                 stdin, stdout, stderr = ssh_client.exec_command(command)
                 exit_status = stdout.channel.recv_exit_status()
-                
+
                 if exit_status != 0:
                     error_output = stderr.read().decode()
                     return ConfigResult(
                         success=False,
                         error=f"Config command failed: {command}\nError: {error_output}"
                     )
-            
+
             return ConfigResult(success=True, message="PRAHO API user configured")
-            
+
         except Exception as e:
             return ConfigResult(success=False, error=f"API user configuration failed: {str(e)}")
         finally:
             ssh_client.close()
-    
+
     def _apply_security_hardening(self, server_config: ServerConfig) -> SecurityResult:
         """Apply security hardening for production Virtualmin server"""
         ssh_client = self._create_ssh_client(server_config)
-        
+
         try:
             # Security hardening commands
             security_commands = [
@@ -1983,7 +1983,7 @@ EOF""",
                 "ufw allow 143/tcp",   # IMAP
                 "ufw allow 993/tcp",   # IMAPS
                 "ufw allow 995/tcp",   # POP3S
-                
+
                 # Configure fail2ban
                 "apt-get install -y fail2ban",
                 """cat > /etc/fail2ban/jail.local << 'EOF'
@@ -2001,89 +2001,89 @@ port = 10000
 filter = webmin-auth
 logpath = /var/webmin/miniserv.log
 EOF""",
-                
+
                 # Configure SSL for Webmin
                 "openssl req -new -x509 -days 365 -nodes -out /etc/webmin/miniserv.pem -keyout /etc/webmin/miniserv.pem -subj '/CN={hostname}'".format(hostname=server_config.hostname),
-                
+
                 # Restart services
                 "systemctl restart fail2ban",
                 "systemctl restart webmin"
             ]
-            
+
             for command in security_commands:
                 stdin, stdout, stderr = ssh_client.exec_command(command)
                 # Note: Some commands may return non-zero but still succeed
-                
+
             return SecurityResult(success=True, message="Security hardening applied")
-            
+
         except Exception as e:
             return SecurityResult(success=False, error=f"Security hardening failed: {str(e)}")
         finally:
             ssh_client.close()
-    
+
     def _comprehensive_health_check(self, server_config: ServerConfig) -> HealthCheckResult:
         """Comprehensive Virtualmin installation and configuration validation"""
         health_issues = []
-        
+
         # Check 1: Webmin/Virtualmin services running
         service_check = self._check_services_running(server_config)
         if not service_check.healthy:
             health_issues.extend(service_check.issues)
-        
+
         # Check 2: Remote API accessibility
         api_check = self._check_remote_api_access(server_config)
         if not api_check.healthy:
             health_issues.extend(api_check.issues)
-        
+
         # Check 3: PRAHO API user permissions
         permissions_check = self._check_praho_api_permissions(server_config)
         if not permissions_check.healthy:
             health_issues.extend(permissions_check.issues)
-        
+
         # Check 4: Essential Virtualmin programs available
         programs_check = self._check_virtualmin_programs(server_config)
         if not programs_check.healthy:
             health_issues.extend(programs_check.issues)
-        
+
         # Check 5: Security configuration
         security_check = self._check_security_configuration(server_config)
         if not security_check.healthy:
             health_issues.extend(security_check.issues)
-        
+
         return HealthCheckResult(
             healthy=len(health_issues) == 0,
             issues=health_issues,
             timestamp=timezone.now()
         )
-    
+
     def _check_services_running(self, server_config: ServerConfig) -> ServiceCheckResult:
         """Verify Webmin and Virtualmin services are running"""
         ssh_client = self._create_ssh_client(server_config)
         issues = []
-        
+
         try:
             # Check webmin service
             stdin, stdout, stderr = ssh_client.exec_command("systemctl is-active webmin")
             if stdout.read().decode().strip() != 'active':
                 issues.append("Webmin service not active")
-            
+
             # Check if port 10000 is listening
             stdin, stdout, stderr = ssh_client.exec_command("netstat -tlnp | grep :10000")
             if not stdout.read().decode().strip():
                 issues.append("Port 10000 not listening (Webmin)")
-            
+
             return ServiceCheckResult(healthy=len(issues) == 0, issues=issues)
-            
+
         except Exception as e:
             issues.append(f"Service check failed: {str(e)}")
             return ServiceCheckResult(healthy=False, issues=issues)
         finally:
             ssh_client.close()
-    
+
     def _check_remote_api_access(self, server_config: ServerConfig) -> APICheckResult:
         """Test Remote API accessibility with PRAHO API user"""
         issues = []
-        
+
         try:
             # Create temporary Virtualmin gateway for testing
             test_config = VirtualminConfig(
@@ -2093,69 +2093,69 @@ EOF""",
                 admin_password=server_config.api_password,
                 ssl_verify=False  # May use self-signed cert initially
             )
-            
+
             gateway = VirtualminGateway(test_config)
-            
+
             # Test basic API call - list domains (should work even if empty)
             result = gateway.call('list-domains', {}, method='GET')
-            
+
             if not result.success:
                 issues.append(f"Remote API call failed: {result.message}")
-            
+
             return APICheckResult(healthy=len(issues) == 0, issues=issues)
-            
+
         except VirtualminAuthError:
             issues.append("Authentication failed - PRAHO API user not configured correctly")
         except VirtualminError as e:
             issues.append(f"Virtualmin API error: {str(e)}")
         except Exception as e:
             issues.append(f"API connectivity test failed: {str(e)}")
-        
+
         return APICheckResult(healthy=False, issues=issues)
-    
+
     def _check_praho_api_permissions(self, server_config: ServerConfig) -> PermissionsCheckResult:
         """Verify PRAHO API user has correct ACL permissions"""
         ssh_client = self._create_ssh_client(server_config)
         issues = []
-        
+
         try:
             # Check ACL file exists and has correct permissions
             stdin, stdout, stderr = ssh_client.exec_command("cat /etc/webmin/praho_api.acl")
             acl_content = stdout.read().decode()
-            
+
             required_permissions = ['virtual-server: 1', 'remote: 1']
             forbidden_permissions = ['webmin: 1', 'acl: 1']  # Should not have these
-            
+
             for permission in required_permissions:
                 if permission not in acl_content:
                     issues.append(f"Missing required permission: {permission}")
-            
+
             for permission in forbidden_permissions:
                 if permission in acl_content:
                     issues.append(f"Has forbidden permission: {permission}")
-            
+
             return PermissionsCheckResult(healthy=len(issues) == 0, issues=issues)
-            
+
         except Exception as e:
             issues.append(f"ACL permissions check failed: {str(e)}")
             return PermissionsCheckResult(healthy=False, issues=issues)
         finally:
             ssh_client.close()
-    
+
     def _check_virtualmin_programs(self, server_config: ServerConfig) -> ProgramsCheckResult:
         """Verify essential Virtualmin programs are available"""
         issues = []
-        
+
         # Essential programs that PRAHO needs
         essential_programs = [
             'list-domains',
-            'create-domain', 
+            'create-domain',
             'delete-domain',
             'enable-domain',
             'disable-domain',
             'modify-domain'
         ]
-        
+
         try:
             test_config = VirtualminConfig(
                 hostname=server_config.hostname,
@@ -2164,9 +2164,9 @@ EOF""",
                 admin_password=server_config.api_password,
                 ssl_verify=False
             )
-            
+
             gateway = VirtualminGateway(test_config)
-            
+
             # Test each essential program with a dry-run or list operation
             for program in essential_programs:
                 try:
@@ -2176,43 +2176,43 @@ EOF""",
                         # For other programs, just test they exist by calling with --help
                         # This would need SSH access or a different validation approach
                         continue  # Skip for now in this implementation
-                    
+
                     if not result.success and "unknown program" in result.message.lower():
                         issues.append(f"Program not available: {program}")
-                        
+
                 except Exception as e:
                     issues.append(f"Program test failed for {program}: {str(e)}")
-            
+
             return ProgramsCheckResult(healthy=len(issues) == 0, issues=issues)
-            
+
         except Exception as e:
             issues.append(f"Programs availability check failed: {str(e)}")
             return ProgramsCheckResult(healthy=False, issues=issues)
-    
+
     def _check_security_configuration(self, server_config: ServerConfig) -> SecurityCheckResult:
         """Verify security hardening is correctly applied"""
         ssh_client = self._create_ssh_client(server_config)
         issues = []
-        
+
         try:
             # Check firewall status
             stdin, stdout, stderr = ssh_client.exec_command("ufw status")
             ufw_output = stdout.read().decode()
             if "Status: active" not in ufw_output:
                 issues.append("UFW firewall not active")
-            
-            # Check fail2ban status  
+
+            # Check fail2ban status
             stdin, stdout, stderr = ssh_client.exec_command("systemctl is-active fail2ban")
             if stdout.read().decode().strip() != 'active':
                 issues.append("Fail2ban service not active")
-            
+
             # Check SSL certificate exists
             stdin, stdout, stderr = ssh_client.exec_command("ls -la /etc/webmin/miniserv.pem")
             if stderr.read().decode().strip():
                 issues.append("SSL certificate not found")
-            
+
             return SecurityCheckResult(healthy=len(issues) == 0, issues=issues)
-            
+
         except Exception as e:
             issues.append(f"Security configuration check failed: {str(e)}")
             return SecurityCheckResult(healthy=False, issues=issues)
@@ -2224,7 +2224,7 @@ EOF""",
 def monitor_virtualmin_servers():
     """Periodic health check for all Virtualmin servers"""
     lifecycle_manager = VirtualminServerLifecycle()
-    
+
     for server in VirtualminServer.objects.filter(status__in=['healthy', 'degraded']):
         try:
             # Create server config from database record
@@ -2232,10 +2232,10 @@ def monitor_virtualmin_servers():
                 hostname=server.hostname,
                 api_password=env(f'VIRTUALMIN_{server.name.upper()}_API_PASSWORD')
             )
-            
+
             # Run comprehensive health check
             health_result = lifecycle_manager._comprehensive_health_check(server_config)
-            
+
             # Update server status based on health
             if health_result.healthy:
                 server.status = 'healthy'
@@ -2243,10 +2243,10 @@ def monitor_virtualmin_servers():
                 server.status = 'degraded'
             else:
                 server.status = 'unavailable'
-            
+
             server.last_healthcheck_at = health_result.timestamp
             server.save()
-            
+
             # Log health status
             logger.info(
                 f"Health check completed for {server.name}",
@@ -2257,11 +2257,11 @@ def monitor_virtualmin_servers():
                     'healthy': health_result.healthy
                 }
             )
-            
+
             # Alert on status changes
             if server.status == 'unavailable':
                 send_server_unavailable_alert(server, health_result.issues)
-            
+
         except Exception as e:
             logger.error(f"Health check failed for {server.name}: {e}")
             server.status = 'unavailable'
@@ -2274,13 +2274,13 @@ Since PRAHO is the source of truth, disaster recovery is simplified:
 
 ```python
 # Virtualmin server crashed? No problem - rebuild from PRAHO
-def rebuild_server_from_praho(crashed_server: VirtualminServer, 
+def rebuild_server_from_praho(crashed_server: VirtualminServer,
                              replacement_server: VirtualminServer) -> RebuildResult:
     """Complete server rebuild without data loss - PRAHO has everything"""
-    
+
     # Get all accounts that were on the crashed server
     accounts = VirtualminAccount.objects.filter(virtualmin_server=crashed_server)
-    
+
     rebuild_jobs = []
     for account in accounts:
         # Recreate account from PRAHO's authoritative data
@@ -2290,11 +2290,11 @@ def rebuild_server_from_praho(crashed_server: VirtualminServer,
             operation='rebuild_from_praho',
             idempotency_key=f"rebuild-{account.virtualmin_domain}-{replacement_server.id}"
         )
-        
+
         # Queue async rebuild job
         provision_virtualmin_account.delay(job.id)
         rebuild_jobs.append(job)
-    
+
     return RebuildResult(
         success=True,
         message=f"Rebuilding {len(accounts)} accounts from PRAHO data",
@@ -2326,17 +2326,17 @@ class VirtualminProvisioningMicroservice:
     Can be deployed separately and scaled independently
     Maintains backward compatibility with PRAHO monolith
     """
-    
+
     def __init__(self):
         self.virtualmin_gateways = self._initialize_virtualmin_gateways()
         self.metrics_collector = PrometheusMetrics()
         self.event_publisher = EventPublisher()  # For domain events
         self.health_checker = VirtualminHealthChecker()
-    
+
     async def provision_virtualmin_account(self, request: VirtualminProvisioningRequest) -> ProvisioningResponse:
         # Microservice implementation with Virtualmin-specific logic
         pass
-    
+
     async def health_check(self) -> VirtualminClusterHealth:
         # Monitor all connected Virtualmin servers
         pass
@@ -2371,7 +2371,7 @@ class BillingEventHandler:
         # Update billing records, send welcome email with Virtualmin details
         # Include server info, control panel URL, etc.
         pass
-    
+
     def handle_virtualmin_account_suspended(self, event: VirtualminAccountSuspendedEvent):
         # Send suspension notice, update billing status
         # Include appeal process and restoration information
@@ -2392,7 +2392,7 @@ class MonitoringEventHandler:
 After analyzing both Virtualmin and cPanel integration patterns, **PRAHO will focus exclusively on Virtualmin integration** for the following strategic reasons:
 
 1. **Cost Leadership**: Enable Romanian hosting providers to compete on pricing with GPL licensing
-2. **Technical Excellence**: Achieve superior Virtualmin integration depth vs multi-panel competitors  
+2. **Technical Excellence**: Achieve superior Virtualmin integration depth vs multi-panel competitors
 3. **Market Differentiation**: Position as the specialized Virtualmin management platform
 4. **Resource Focus**: Concentrate development effort on perfecting one integration
 5. **Romanian Market Fit**: Open-source philosophy aligns with Romanian technical community values
@@ -2425,7 +2425,7 @@ After analyzing both Virtualmin and cPanel integration patterns, **PRAHO will fo
 
 **Priority 1 - Essential Operations:**
 - `create-domain` - Create virtual server with web/mail/DNS
-- `delete-domain` - Remove virtual server completely  
+- `delete-domain` - Remove virtual server completely
 - `list-domains` - List virtual servers (with filtering by domain)
 - `enable-domain` / `disable-domain` - Suspend/unsuspend accounts
 - `modify-domain` - Update domain settings and quotas
@@ -2503,7 +2503,7 @@ The proposed architecture positions PRAHO as the premier Virtualmin-powered host
 **YES** - PRAHO continuously monitors Virtualmin servers through:
 
 1. **Service Health**: Verifies Webmin/Virtualmin processes running
-2. **API Connectivity**: Tests Remote API accessibility with PRAHO credentials  
+2. **API Connectivity**: Tests Remote API accessibility with PRAHO credentials
 3. **Permission Validation**: Confirms ACL user has correct minimal permissions
 4. **Program Availability**: Verifies essential Virtualmin programs work
 5. **Security Status**: Checks firewall, fail2ban, SSL configuration
@@ -2516,7 +2516,7 @@ The proposed architecture positions PRAHO as the premier Virtualmin-powered host
 # Deploy new server from scratch
 server = provision_new_server(ServerConfig(hostname="new-vm.example.com"))
 
-# Monitor continuously  
+# Monitor continuously
 monitor_virtualmin_servers()  # Celery task runs every 15 minutes
 
 # Replace failed server
@@ -2530,7 +2530,7 @@ decomission_server(old_server, target_servers)  # Redistributes accounts
 
 Romanian hosting providers using PRAHO can:
 - **Scale automatically**: Add servers without manual Virtualmin setup
-- **Maintain reliability**: Continuous health monitoring prevents outages  
+- **Maintain reliability**: Continuous health monitoring prevents outages
 - **Replace servers easily**: Hardware failures become routine events
 - **Reduce operations costs**: No specialized Virtualmin administrators needed
 - **Ensure compliance**: All installations follow security best practices
@@ -2539,7 +2539,7 @@ Romanian hosting providers using PRAHO can:
 
 ## 🔍 **Implementation Validation & Research Findings**
 
-*Research conducted: 2024-09-01*  
+*Research conducted: 2024-09-01*
 *Sources: Virtualmin documentation, community forums, production implementations*
 
 Based on comprehensive research of current Virtualmin API capabilities and real-world implementations, here are the validated findings and critical considerations for this integration approach:
@@ -2630,7 +2630,7 @@ Based on comprehensive research of current Virtualmin API capabilities and real-
    # Adjusted configuration based on research
    VIRTUALMIN_CONFIG = {
        'REQUEST_TIMEOUT': 90,  # Increased from 60s
-       'RATE_LIMIT_QPS': 2,    # Reduced from 10 QPS  
+       'RATE_LIMIT_QPS': 2,    # Reduced from 10 QPS
        'MAX_RETRIES': 5,       # Increased from 3
        'MEMORY_CHECK_ENABLED': True,  # New requirement
        'HEALTH_CHECK_INTERVAL': 300,  # 5 minutes instead of 15
@@ -2686,11 +2686,11 @@ This research validates that the architectural approach is sound while highlight
 
 ---
 
-*Document created by: Senior Technical Architecture Team*  
-*Implementation validation: Senior Tech Lead Research*  
-*Last updated: 2024-09-01*  
-*Next review: 2024-09-30*  
-*Integration Target: Virtualmin GPL/Pro exclusively*  
-*Market Focus: Romanian hosting providers*  
-*Server Lifecycle: Fully automated cattle management*  
+*Document created by: Senior Technical Architecture Team*
+*Implementation validation: Senior Tech Lead Research*
+*Last updated: 2024-09-01*
+*Next review: 2024-09-30*
+*Integration Target: Virtualmin GPL/Pro exclusively*
+*Market Focus: Romanian hosting providers*
+*Server Lifecycle: Fully automated cattle management*
 *Status: Architecture validated, performance adjustments required*

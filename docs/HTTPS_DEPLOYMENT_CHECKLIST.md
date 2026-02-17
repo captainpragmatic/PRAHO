@@ -161,7 +161,7 @@ python manage.py test --pattern="*security*" --settings=config.settings.prod
 
 #### **Browser Compatibility**
 - [ ] **Chrome**: Test latest Chrome browser
-- [ ] **Firefox**: Test latest Firefox browser  
+- [ ] **Firefox**: Test latest Firefox browser
 - [ ] **Safari**: Test Safari (if supporting macOS users)
 - [ ] **Mobile**: Test mobile browsers
 
@@ -311,7 +311,7 @@ export CSRF_TRUSTED_ORIGINS="https://staging.pragmatichost.com"
 ## **Emergency Contacts**
 
 - **DevOps Team**: Contact for load balancer/SSL issues
-- **Infrastructure Team**: DNS and certificate issues  
+- **Infrastructure Team**: DNS and certificate issues
 - **Security Team**: Security policy questions
 - **Development Team**: Application-specific HTTPS issues
 

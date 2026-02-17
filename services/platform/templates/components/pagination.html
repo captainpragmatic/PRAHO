@@ -56,13 +56,13 @@ Features:
   {# Modern Pagination Navigation - Right Side #}
   <nav role="navigation" aria-label="{% trans 'Pagination' %}" data-slot="pagination" class="flex justify-end">
     <ul data-slot="pagination-content" class="inline-flex items-center gap-0.5 sm:gap-1 bg-slate-800/30 backdrop-blur-sm border border-slate-700/40 rounded-lg px-1.5 py-1.5 sm:px-2 sm:py-2 shadow-lg">
-    
+
     {# Previous Page Button #}
     <li data-slot="pagination-item">
       {% if page_obj.has_previous %}
-        <a data-slot="pagination-link" 
+        <a data-slot="pagination-link"
            class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-300 border border-transparent hover:border-slate-600/50"
-           aria-label="{% trans 'Go to previous page' %}" 
+           aria-label="{% trans 'Go to previous page' %}"
            href="?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}"
            {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left">
@@ -71,7 +71,7 @@ Features:
           <span class="hidden sm:block">{% trans 'Previous' %}</span>
         </a>
       {% else %}
-        <span data-slot="pagination-link" 
+        <span data-slot="pagination-link"
               class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-500 cursor-not-allowed border border-transparent"
               aria-label="{% trans 'Previous page (unavailable)' %}">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left">
@@ -84,18 +84,18 @@ Features:
 
     {# Smart Page Range Logic #}
     {% with page_obj.number as current_page and page_obj.paginator.num_pages as total_pages %}
-      
+
       {# First page (if not in visible range) #}
       {% if current_page > 3 %}
         <li data-slot="pagination-item">
-          <a data-slot="pagination-link" 
-             class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50" 
+          <a data-slot="pagination-link"
+             class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50"
              href="?page=1{{ extra_params|default:'' }}"
              {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page=1{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
             1
           </a>
         </li>
-        
+
         {% if current_page > 4 %}
           <li data-slot="pagination-item">
             <span aria-hidden="true" data-slot="pagination-ellipsis" class="flex size-8 sm:size-9 items-center justify-center text-slate-400">
@@ -115,16 +115,16 @@ Features:
         {% if page_num >= current_page|add:"-2" and page_num <= current_page|add:"2" %}
           <li data-slot="pagination-item">
             {% if page_num == current_page %}
-              <a aria-current="page" 
-                 data-slot="pagination-link" 
-                 data-active="true" 
-                 class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 border bg-slate-700/90 border-slate-600/80 shadow-sm hover:bg-slate-600/90 hover:text-slate-50 active:bg-slate-600/80 size-8 sm:size-9 text-slate-100 font-semibold" 
+              <a aria-current="page"
+                 data-slot="pagination-link"
+                 data-active="true"
+                 class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 border bg-slate-700/90 border-slate-600/80 shadow-sm hover:bg-slate-600/90 hover:text-slate-50 active:bg-slate-600/80 size-8 sm:size-9 text-slate-100 font-semibold"
                  href="?page={{ page_num }}{{ extra_params|default:'' }}">
                 {{ page_num }}
               </a>
             {% else %}
-              <a data-slot="pagination-link" 
-                 class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50" 
+              <a data-slot="pagination-link"
+                 class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50"
                  href="?page={{ page_num }}{{ extra_params|default:'' }}"
                  {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page={{ page_num }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
                 {{ page_num }}
@@ -148,10 +148,10 @@ Features:
             </span>
           </li>
         {% endif %}
-        
+
         <li data-slot="pagination-item">
-          <a data-slot="pagination-link" 
-             class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50" 
+          <a data-slot="pagination-link"
+             class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 size-8 sm:size-9 text-slate-300 border border-transparent hover:border-slate-600/50"
              href="?page={{ total_pages }}{{ extra_params|default:'' }}"
              {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page={{ total_pages }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
             {{ total_pages }}
@@ -164,9 +164,9 @@ Features:
     {# Next Page Button #}
     <li data-slot="pagination-item">
       {% if page_obj.has_next %}
-        <a data-slot="pagination-link" 
+        <a data-slot="pagination-link"
            class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400/50 focus-visible:ring-offset-1 hover:bg-slate-700/60 hover:text-slate-100 active:bg-slate-600/80 h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-300 border border-transparent hover:border-slate-600/50"
-           aria-label="{% trans 'Go to next page' %}" 
+           aria-label="{% trans 'Go to next page' %}"
            href="?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}"
            {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
           <span class="hidden sm:block">{% trans 'Next' %}</span>
@@ -175,7 +175,7 @@ Features:
           </svg>
         </a>
       {% else %}
-        <span data-slot="pagination-link" 
+        <span data-slot="pagination-link"
               class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-500 cursor-not-allowed border border-transparent"
               aria-label="{% trans 'Next page (unavailable)' %}">
           <span class="hidden sm:block">{% trans 'Next' %}</span>

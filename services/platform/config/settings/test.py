@@ -86,7 +86,6 @@ class DisableMigrations:
         return None
 
 
-
 # ===============================================================================
 # PASSWORD HASHER (Fast for tests)
 # ===============================================================================
@@ -221,7 +220,7 @@ DISABLE_AUDIT_SIGNALS = False
 DISABLE_ACCOUNT_LOCKOUT = False
 
 # ===============================================================================
-# TEST RUNNER (Fix parallel test runner pickling issues)  
+# TEST RUNNER (Fix parallel test runner pickling issues)
 # ===============================================================================
 
 # Fix multiprocessing pickling errors with Django admin template functions

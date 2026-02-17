@@ -173,7 +173,7 @@
               {% if profile.mfa_enabled %}
                 {% badge "Enabled" variant="success" icon="🔒" %}
                 <div class="mt-2">
-                  <a href="{% url 'users:mfa_management' %}" 
+                  <a href="{% url 'users:mfa_management' %}"
                      class="text-blue-400 hover:text-blue-300 text-xs">
                     🔧 {% trans 'Manage MFA Settings' %}
                   </a>
@@ -181,7 +181,7 @@
               {% else %}
                 {% badge "Disabled" variant="warning" icon="⚠️" %}
                 <div class="mt-2">
-                  <a href="{% url 'users:mfa_management' %}" 
+                  <a href="{% url 'users:mfa_management' %}"
                      class="text-yellow-400 hover:text-yellow-300 text-xs">
                     ⚡ {% trans 'Enable MFA Now' %}
                   </a>
@@ -193,7 +193,7 @@
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Password Security' %}</dt>
             <dd class="mt-1 text-sm">
-              <a href="{% url 'users:change_password' %}" 
+              <a href="{% url 'users:change_password' %}"
                  class="text-blue-400 hover:text-blue-300">
                 🔑 {% trans 'Change Password' %}
               </a>
@@ -213,14 +213,14 @@
           <h3 class="text-lg font-medium text-white">
             🏢 {% trans 'Company Profiles' %}
           </h3>
-          
+
           <!-- Customer Context Summary - Mobile Full Width -->
           {% if user_memberships %}
           <div class="flex flex-col sm:flex-row sm:items-center gap-3">
             <span class="text-xs text-slate-400 whitespace-nowrap">
               {{ user_memberships|length }} {% trans 'company' %}{% if user_memberships|length != 1 %}{% trans 'ies' %}{% endif %}
             </span>
-            
+
             <!-- Quick Customer Selector - Mobile Full Width -->
             <div class="relative w-full sm:w-auto min-w-0 sm:min-w-48">
               <select onchange="switchCustomer(this.value)" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
@@ -256,7 +256,7 @@
                 <span class="whitespace-nowrap">{% trans 'Your role:' %}</span>
                 <span class="inline-flex px-2 py-1 rounded-full text-xs font-medium
                   {% if selected_customer_role == 'owner' %}bg-green-600 text-white
-                  {% elif selected_customer_role == 'billing' %}bg-blue-600 text-white  
+                  {% elif selected_customer_role == 'billing' %}bg-blue-600 text-white
                   {% elif selected_customer_role == 'tech' %}bg-purple-600 text-white
                   {% elif selected_customer_role == 'viewer' %}bg-gray-600 text-white
                   {% else %}bg-slate-600 text-white{% endif %}">
@@ -269,15 +269,15 @@
               </div>
             </div>
           </div>
-          
+
           <!-- Quick Actions - Mobile Full Width Buttons -->
           <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <a href="{% url 'users:company_profile' %}" 
+            <a href="{% url 'users:company_profile' %}"
                class="flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
               👁️ {% trans 'View' %}
             </a>
             {% if can_edit_profile %}
-            <a href="{% url 'users:company_profile_edit' %}" 
+            <a href="{% url 'users:company_profile_edit' %}"
                class="flex items-center justify-center px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
               ✏️ {% trans 'Edit' %}
             </a>
@@ -289,24 +289,24 @@
 
       <!-- Company Cards Grid - Better Mobile Spacing -->
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-        
+
         <!-- Existing Company Cards -->
         {% for membership in user_memberships %}
         <div class="bg-slate-700/50 border border-slate-600 rounded-lg p-4 hover:border-slate-500 transition-colors
                     {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}ring-2 ring-blue-500 border-blue-500{% endif %}">
-          
+
           <!-- Company Header -->
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center space-x-2">
               <span class="text-blue-400">🏢</span>
               <h4 class="font-medium text-white text-sm truncate">{{ membership.customer_name }}</h4>
             </div>
-            
+
             <!-- Role Badge -->
             <span class="px-2 py-1 rounded-full text-xs font-medium
               {% if membership.role == 'owner' %}bg-green-600 text-white
               {% elif membership.role == 'billing' %}bg-blue-600 text-white
-              {% elif membership.role == 'tech' %}bg-purple-600 text-white  
+              {% elif membership.role == 'tech' %}bg-purple-600 text-white
               {% elif membership.role == 'viewer' %}bg-gray-600 text-white
               {% else %}bg-slate-600 text-white{% endif %}">
               {% if membership.role == "owner" %}👑{% elif membership.role == "billing" %}💳{% elif membership.role == "tech" %}⚙️{% elif membership.role == "viewer" %}👁️{% endif %}
@@ -330,19 +330,19 @@
           <div class="flex flex-col sm:flex-row gap-2">
             {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}
               <!-- Current customer - direct actions -->
-              <a href="{% url 'users:company_profile' %}" 
+              <a href="{% url 'users:company_profile' %}"
                  class="flex-1 px-3 py-2 bg-blue-600 text-white text-xs text-center font-medium rounded-lg hover:bg-blue-700 transition-colors">
                 👁️ {% trans 'View' %}
               </a>
               {% if membership.role in 'owner,billing' %}
-              <a href="{% url 'users:company_profile_edit' %}" 
+              <a href="{% url 'users:company_profile_edit' %}"
                  class="flex-1 px-3 py-2 bg-green-600 text-white text-xs text-center font-medium rounded-lg hover:bg-green-700 transition-colors">
                 ✏️ {% trans 'Edit' %}
               </a>
               {% endif %}
             {% else %}
               <!-- Other customer - switch first -->
-              <button onclick="switchToCustomer('{{ membership.customer_id }}')" 
+              <button onclick="switchToCustomer('{{ membership.customer_id }}')"
                       class="w-full px-3 py-2 bg-slate-600 text-white text-xs font-medium rounded-lg hover:bg-slate-500 transition-colors">
                 🔄 {% trans 'Switch & View' %}
               </button>
@@ -372,7 +372,7 @@
             <p class="text-xs text-slate-500 group-hover:text-slate-400 mb-4 leading-relaxed">
               {% trans 'Create a new company profile and become the owner' %}
             </p>
-            <a href="{% url 'users:create_company' %}" 
+            <a href="{% url 'users:create_company' %}"
                class="inline-flex items-center justify-center w-full px-4 py-2.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
               🏢 {% trans 'Create Company' %}
             </a>
@@ -397,39 +397,39 @@
   <script>
   function switchCustomer(customerId) {
     if (!customerId) return;
-    
+
     // Create a form and submit to switch customer
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = '{% url "users:switch_customer" %}';
-    
+
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
     const csrfInput = document.createElement('input');
     csrfInput.type = 'hidden';
     csrfInput.name = 'csrfmiddlewaretoken';
     csrfInput.value = csrfToken;
     form.appendChild(csrfInput);
-    
+
     const customerInput = document.createElement('input');
     customerInput.type = 'hidden';
     customerInput.name = 'customer_id';
     customerInput.value = customerId;
     form.appendChild(customerInput);
-    
+
     const nextInput = document.createElement('input');
     nextInput.type = 'hidden';
     nextInput.name = 'next';
     nextInput.value = window.location.pathname;
     form.appendChild(nextInput);
-    
+
     document.body.appendChild(form);
     form.submit();
   }
-  
+
   function switchToCustomer(customerId) {
     switchCustomer(customerId);
   }
-  
+
   // addNewCompany function removed - now uses direct link to create_company view
   </script>
 
@@ -444,7 +444,7 @@
         <!-- Current Consent Status -->
         <div class="space-y-4">
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
-          
+
           <div class="space-y-3">
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
@@ -489,7 +489,7 @@
         <!-- GDPR Actions -->
         <div class="space-y-4">
           <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Data Rights' %}</h4>
-          
+
           <div class="space-y-3">
             <a href="{% url 'users:privacy_dashboard' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
               <span class="text-blue-400 mr-3 text-lg">🛡️</span>

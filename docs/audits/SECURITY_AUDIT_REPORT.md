@@ -3,7 +3,7 @@
 **Date:** December 27, 2025
 **Auditor:** Security Assessment (Attacker Perspective)
 **Target:** PRAHO Django CRM/Billing Platform
-**Version:** 0.15.1
+**Version:** 0.15.2
 
 ---
 

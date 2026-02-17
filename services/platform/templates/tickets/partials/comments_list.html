@@ -8,7 +8,7 @@
     {% elif comment.comment_type != 'internal' %}
         <div class="mb-8{% if not forloop.last %} border-b border-slate-700 pb-8{% endif %}">
     {% endif %}
-    
+
     {# Render comment content only if it should be visible #}
     {% if comment.comment_type != 'internal' or user.is_staff %}
         <div class="flex items-start space-x-3 sm:space-x-4">
@@ -19,7 +19,7 @@
                     {{ comment.get_author_name|first|upper }}
                 </div>
             </div>
-            
+
             <!-- Comment Content -->
             <div class="flex-1 min-w-0">
                 <!-- Header -->
@@ -29,13 +29,13 @@
                         <p class="{% if comment.comment_type == 'internal' %}text-amber-100 font-bold text-base sm:text-lg{% else %}text-white font-medium{% endif %} truncate pr-2">
                             {{ comment.get_author_name }}
                         </p>
-                        
+
                         <!-- Timestamp -->
                         <p class="{% if comment.comment_type == 'internal' %}text-amber-200 text-xs sm:text-sm{% else %}text-slate-400 text-xs sm:text-sm{% endif %} flex-shrink-0" title="{{ comment.created_at|date:'c' }}">
                             {{ comment.created_at|date:"d.m.Y H:i" }}
                         </p>
                     </div>
-                    
+
                     <!-- Badges row -->
                     <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
                         <!-- Role Badge -->
@@ -62,7 +62,7 @@
                                 <span class="xs:hidden">{% trans 'STAFF NOTE' %}</span>
                             </span>
                         {% endif %}
-                        
+
                         <!-- Billable Status -->
                         {% if comment.is_billable %}
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
@@ -75,7 +75,7 @@
                         {% endif %}
                     </div>
                 </div>
-                
+
                 <!-- Content -->
                 {% if comment.comment_type == 'internal' %}
                 <div class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-4 mt-3">
@@ -90,8 +90,8 @@
                     </div>
                 </div>
                 {% endif %}
-                
-                
+
+
                 <!-- Attachments -->
                 {% if comment.attachments.all %}
                 <div class="{% if comment.comment_type == 'internal' %}mt-4 bg-amber-900/30 border border-amber-700/50 rounded-lg p-4{% else %}mt-3 space-y-2{% endif %}">

@@ -18,7 +18,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -111,8 +111,8 @@ class SSHKeyManager:
         ).decode("utf-8")
 
         # Calculate fingerprint (using SHA256)
-        import hashlib
-        import base64
+        import base64  # noqa: PLC0415
+        import hashlib  # noqa: PLC0415
 
         # The public key bytes in raw format for fingerprint
         raw_public = public_key.public_bytes(
@@ -345,9 +345,7 @@ class SSHKeyManager:
             return Ok(True)
 
         except EncryptedCredential.DoesNotExist:
-            logger.warning(
-                f"🔑 [SSH Manager] SSH key credential not found: {deployment.ssh_key_credential_id}"
-            )
+            logger.warning(f"🔑 [SSH Manager] SSH key credential not found: {deployment.ssh_key_credential_id}")
             return Ok(True)  # Already deleted
 
         except Exception as e:
@@ -468,9 +466,7 @@ class SSHKeyManager:
 
         # Fallback to master key if deployment key failed
         if self.has_master_key():
-            logger.warning(
-                f"🔑 [SSH Manager] Falling back to master key for: {deployment.hostname}"
-            )
+            logger.warning(f"🔑 [SSH Manager] Falling back to master key for: {deployment.hostname}")
             master_result = self.get_master_key()
             if master_result.is_ok():
                 return Ok(
@@ -490,7 +486,7 @@ _ssh_key_manager: SSHKeyManager | None = None
 
 def get_ssh_key_manager() -> SSHKeyManager:
     """Get global SSH key manager instance"""
-    global _ssh_key_manager
+    global _ssh_key_manager  # noqa: PLW0603
     if _ssh_key_manager is None:
         _ssh_key_manager = SSHKeyManager()
     return _ssh_key_manager

@@ -30,13 +30,13 @@ class RememberMeFunctionalityTest(TestCase):
             "password": "testpass123",
             "remember_me": True
         })
-        
+
         # Should redirect on success
         self.assertEqual(response.status_code, 302)
-        
+
         # Check session has remember_me flag
         self.assertTrue(self.client.session.get("remember_me", False))
-        
+
         # Check session timeout was updated (7 days = 604800 seconds)
         expected_timeout = 86400 * 7  # 7 days in seconds
         actual_timeout = self.client.session.get_expiry_age()
@@ -49,13 +49,13 @@ class RememberMeFunctionalityTest(TestCase):
             "password": "testpass123",
             "remember_me": False
         })
-        
+
         # Should redirect on success
         self.assertEqual(response.status_code, 302)
-        
+
         # Check session does NOT have remember_me flag
         self.assertFalse(self.client.session.get("remember_me", False))
-        
+
         # Check session timeout is standard (not 7 days)
         actual_timeout = self.client.session.get_expiry_age()
         self.assertNotEqual(actual_timeout, 86400 * 7)
@@ -67,10 +67,10 @@ class RememberMeFunctionalityTest(TestCase):
             "password": "testpass123"
             # No remember_me field - simulates unchecked checkbox
         })
-        
+
         # Should redirect on success
         self.assertEqual(response.status_code, 302)
-        
+
         # Check session does NOT have remember_me flag
         self.assertFalse(self.client.session.get("remember_me", False))
 
@@ -78,7 +78,7 @@ class RememberMeFunctionalityTest(TestCase):
         """Test that remember_me field is properly rendered in form"""
         response = self.client.get(self.login_url)
         self.assertEqual(response.status_code, 200)
-        
+
         # The template should render the checkbox with the correct name
         self.assertContains(response, 'name="remember_me"')
         self.assertContains(response, 'Keep me logged in')
@@ -90,12 +90,12 @@ class RememberMeFunctionalityTest(TestCase):
             "password": "wrongpassword",
             "remember_me": True
         })
-        
+
         # Should return login form with error (not redirect)
         self.assertEqual(response.status_code, 200)
-        
+
         # Session should not be created for failed login
         self.assertFalse(self.client.session.get("remember_me", False))
-        
+
         # User should not be authenticated
         self.assertFalse(response.wsgi_request.user.is_authenticated)

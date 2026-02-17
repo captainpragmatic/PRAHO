@@ -99,12 +99,12 @@
 
         <!-- Form Actions -->
         <div class="flex items-center justify-between pt-6 border-t border-slate-600">
-          <a href="{% url 'provisioning:services' %}" 
+          <a href="{% url 'provisioning:services' %}"
              class="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-md transition-colors">
             {% trans 'Cancel' %}
           </a>
-          
-          <button type="submit" 
+
+          <button type="submit"
                   class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors">
             {% if is_edit %}
             ✅ {% trans 'Update Service' %}

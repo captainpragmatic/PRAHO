@@ -7,7 +7,7 @@
 {% block content %}
 <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
   <div class="max-w-2xl w-full space-y-8">
-    
+
     <!-- Header -->
     <div class="text-center">
       <div class="mx-auto h-16 w-16 text-5xl">⚠️</div>
@@ -20,10 +20,10 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      
+
       <!-- Left Column: Security Impact -->
       <div class="space-y-6">
-        
+
         <!-- Security Warning -->
         <div class="bg-red-900 bg-opacity-50 rounded-lg p-6 border border-red-600">
           <div class="flex items-center mb-4">
@@ -92,10 +92,10 @@
               {% trans 'Enter your current MFA code to proceed' %}
             </p>
           </div>
-          
+
           <form method="post" class="space-y-6">
             {% csrf_token %}
-            
+
             <!-- Display form errors -->
             {% if messages %}
               {% for message in messages %}
@@ -115,7 +115,7 @@
               <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
                 🔢 {% trans 'Current MFA Code' %}
               </label>
-              <input type="text" id="token" name="token" maxlength="6" 
+              <input type="text" id="token" name="token" maxlength="6"
                      class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center text-xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
                      placeholder="123456" required autocomplete="off" autofocus>
               <p class="mt-2 text-xs text-slate-400">
@@ -128,7 +128,7 @@
               <label for="password" class="block text-sm font-medium text-slate-300 mb-2">
                 🔐 {% trans 'Confirm Your Password' %}
               </label>
-              <input type="password" id="password" name="password" 
+              <input type="password" id="password" name="password"
                      class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
                      placeholder="Enter your current password" required autocomplete="current-password">
               <p class="mt-2 text-xs text-slate-400">
@@ -143,11 +143,11 @@
 
             <!-- Action Buttons -->
             <div class="flex space-x-3">
-              <a href="{% url 'users:user_profile' %}" 
+              <a href="{% url 'users:user_profile' %}"
                  class="flex-1 flex justify-center py-3 px-4 border border-slate-600 text-sm font-medium rounded-lg text-slate-300 hover:bg-slate-700 hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
                 ← {% trans 'Cancel' %}
               </a>
-              <button type="submit" 
+              <button type="submit"
                       class="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
                       onclick="return confirmDisable()">
                 <span class="mr-2">🔓</span>
@@ -195,7 +195,7 @@ function confirmDisable() {
     alert('{% trans "Please confirm that you understand the security implications" %}');
     return false;
   }
-  
+
   return confirm('{% trans "Are you absolutely sure you want to disable two-factor authentication? This action cannot be undone." %}');
 }
 
@@ -220,7 +220,7 @@ document.getElementById('token').addEventListener('input', function(e) {
           </span>
           {% trans 'Yes, Disable Two-Factor Authentication' %}
         </button>
-        
+
         <div class="text-center">
           <a href="{% url 'users:user_profile' %}" class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-800 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors">
             {% trans 'Cancel' %}

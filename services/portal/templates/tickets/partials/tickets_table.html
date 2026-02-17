@@ -83,7 +83,7 @@
                   {{ ticket.status|capfirst }}
                 </span>
               {% endif %}
-              
+
               <!-- Customer replied badge -->
               {% if ticket.customer_replied_recently %}
                 <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
@@ -161,7 +161,7 @@
             {{ ticket.status|capfirst }}
           </span>
         {% endif %}
-        
+
         <!-- Customer replied badge -->
         {% if ticket.customer_replied_recently %}
           <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
@@ -219,7 +219,7 @@
     <p class="text-slate-400 mb-6 max-w-sm mx-auto">
       {% trans 'Need help with your hosting services? Create your first support ticket and our team will assist you promptly.' %}
     </p>
-    
+
     <div class="space-y-4">
       <a href="{% url 'tickets:create' %}"
         class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-primary hover:bg-primary/90 transition-colors shadow-sm">
@@ -228,7 +228,7 @@
         </svg>
         {% trans 'Create Support Ticket' %}
       </a>
-      
+
       <div class="text-sm text-slate-500">
         <p class="mb-2">{% trans 'Common reasons to contact support:' %}</p>
         <div class="flex flex-wrap justify-center gap-2">

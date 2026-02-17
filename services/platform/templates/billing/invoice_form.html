@@ -43,7 +43,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Left Column: Customer & Invoice Details -->
       <div class="lg:col-span-2 space-y-8">
-        
+
         <!-- Customer Selection -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
@@ -55,12 +55,12 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Select Customer' %} <span class="text-red-500">*</span>
               </label>
-              <select name="customer" required 
-                      class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500" 
+              <select name="customer" required
+                      class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
                       id="invoice-customer-select">
                 <option value="">{% trans 'Choose a customer...' %}</option>
                 {% for customer in customers %}
-                  <option value="{{ customer.id }}" 
+                  <option value="{{ customer.id }}"
                           data-company="{{ customer.company_name|default:customer.name }}"
                           data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
                           data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
@@ -72,7 +72,7 @@
                 {% endfor %}
               </select>
             </div>
-            
+
             <!-- Customer Details Preview -->
             <div id="invoice-customer-preview" class="hidden mt-4 p-4 bg-slate-900 rounded-lg border border-slate-600">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -114,7 +114,7 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              <select name="currency" required 
+              <select name="currency" required
                       class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500">
                 <option value="RON" selected>RON - Romanian Leu</option>
                 <option value="EUR">EUR - Euro</option>
@@ -125,7 +125,7 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Status' %}
               </label>
-              <select name="status" 
+              <select name="status"
                       class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500">
                 <option value="draft" selected>{% trans 'Draft' %}</option>
                 <option value="issued">{% trans 'Issued' %}</option>
@@ -143,7 +143,7 @@
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
             📋 {% trans 'Invoice Lines' %}
           </h3>
-          
+
           <div class="space-y-4">
             <!-- Header Row -->
             <div class="grid grid-cols-12 gap-3 text-sm font-medium text-slate-400 border-b border-slate-600 pb-2">
@@ -203,7 +203,7 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Public Notes' %} <span class="text-slate-500">({% trans 'shown on invoice' %})</span>
               </label>
-              <textarea name="public_notes" rows="3" 
+              <textarea name="public_notes" rows="3"
                         class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
                         placeholder="{% trans 'Thank you for your business! Payment due within 14 days.' %}"></textarea>
             </div>
@@ -222,7 +222,7 @@
 
       <!-- Right Column: Summary & Actions -->
       <div class="space-y-6">
-        
+
         <!-- Invoice Summary -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 sticky top-4">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
@@ -234,12 +234,12 @@
               <span>{% trans 'Subtotal:' %}</span>
               <span id="invoice-summary-subtotal" class="font-medium">0.00 RON</span>
             </div>
-            
+
             <div class="flex justify-between text-slate-300">
               <span id="invoice-summary-vat-label">{% trans 'VAT:' %}</span>
               <span id="invoice-summary-vat" class="font-medium">0.00 RON</span>
             </div>
-            
+
             <div class="border-t border-slate-600 pt-3">
               <div class="flex justify-between text-lg font-bold text-white">
                 <span>{% trans 'Total:' %}</span>
@@ -290,10 +290,10 @@
             {% button "💾 Save as Draft" variant="secondary" type="submit" css_class="w-full" %}
             {% button "📧 Create & Send" variant="primary" type="submit" css_class="w-full" %}
             {% button "🧾 Create & Download PDF" variant="success" type="submit" css_class="w-full" %}
-            
+
             <hr class="border-slate-600">
-            
-            <a href="{% url 'billing:invoice_list' %}" 
+
+            <a href="{% url 'billing:invoice_list' %}"
                class="block w-full text-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
               ❌ {% trans 'Cancel' %}
             </a>
@@ -311,25 +311,25 @@ let lineCounter = 1;
 function calculateTotals() {
     let subtotal = 0;
     let totalVat = 0;
-    
+
     document.querySelectorAll('.invoice-line').forEach(function(line) {
         const quantity = parseFloat(line.querySelector('.line-quantity').value) || 0;
         const unitPrice = parseFloat(line.querySelector('.line-price').value) || 0;
         const vatRate = parseFloat(line.querySelector('.line-vat').value) || 0;
-        
+
         const lineSubtotal = quantity * unitPrice;
         const lineVat = lineSubtotal * (vatRate / 100);
         const lineTotal = lineSubtotal + lineVat;
-        
+
         // Update line total display
         line.querySelector('.line-total').textContent = lineTotal.toFixed(2) + ' RON';
-        
+
         subtotal += lineSubtotal;
         totalVat += lineVat;
     });
-    
+
     const grandTotal = subtotal + totalVat;
-    
+
     // Update summary
     document.getElementById('invoice-summary-subtotal').textContent = subtotal.toFixed(2) + ' RON';
     document.getElementById('invoice-summary-vat').textContent = totalVat.toFixed(2) + ' RON';
@@ -348,7 +348,7 @@ function calculateTotals() {
         vatLabel.textContent = 'TVA:';
       }
     }
-    
+
     // Update line count
     document.getElementById('line-count').textContent = document.querySelectorAll('.invoice-line').length;
 }
@@ -359,11 +359,11 @@ function addLineItem() {
     const lineHtml = `
         <div class="invoice-line grid grid-cols-12 gap-3 items-center" data-line="${lineCounter}">
             <div class="col-span-4">
-                <input type="text" name="line_${lineCounter}_description" placeholder="{% trans 'Service description' %}" 
+                <input type="text" name="line_${lineCounter}_description" placeholder="{% trans 'Service description' %}"
                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="col-span-2">
-                <input type="number" name="line_${lineCounter}_quantity" value="1" min="0" step="1" 
+                <input type="number" name="line_${lineCounter}_quantity" value="1" min="0" step="1"
                        class="line-quantity w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="col-span-2">
@@ -384,16 +384,16 @@ function addLineItem() {
                 <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">🗑️</button>
             </div>
         </div>`;
-    
+
     container.insertAdjacentHTML('beforeend', lineHtml);
     lineCounter++;
-    
+
     // Add event listeners to new line
     const newLine = container.lastElementChild;
     newLine.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
         input.addEventListener('input', calculateTotals);
     });
-    
+
     newLine.querySelector('.remove-line').addEventListener('click', function() {
         if (document.querySelectorAll('.invoice-line').length > 1) {
             newLine.remove();
@@ -401,7 +401,7 @@ function addLineItem() {
             updateRemoveButtons();
         }
     });
-    
+
     calculateTotals();
     updateRemoveButtons();
 }
@@ -425,18 +425,18 @@ function updateRemoveButtons() {
 document.addEventListener('DOMContentLoaded', function() {
     // Calculate initial totals
     calculateTotals();
-    
+
     // Add event listeners to existing inputs
     document.querySelectorAll('.line-quantity, .line-price, .line-vat').forEach(input => {
         input.addEventListener('input', calculateTotals);
     });
-    
+
     // Add line button
     document.querySelector('.add-line-btn').addEventListener('click', function(e) {
         e.preventDefault();
         addLineItem();
     });
-    
+
     // Remove line buttons (initial line)
     document.querySelectorAll('.remove-line').forEach(btn => {
         btn.addEventListener('click', function() {
@@ -447,28 +447,28 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-    
+
     // Auto-calculate due date (14 days from issue date — matches billing.invoice_payment_terms_days)
     document.querySelector('input[name="issued_at"]').addEventListener('change', function() {
         const issueDate = new Date(this.value);
         const dueDate = new Date(issueDate);
         dueDate.setDate(dueDate.getDate() + 14);
-        
+
         document.querySelector('input[name="due_at"]').value = dueDate.toISOString().split('T')[0];
     });
-    
+
     // Set default issue date to today
     const today = new Date().toISOString().split('T')[0];
     document.querySelector('input[name="issued_at"]').value = today;
-    
+
     // Trigger due date calculation
     document.querySelector('input[name="issued_at"]').dispatchEvent(new Event('change'));
-    
+
     // Customer selection preview
     document.getElementById('invoice-customer-select').addEventListener('change', function() {
         const preview = document.getElementById('invoice-customer-preview');
         const selectedOption = this.options[this.selectedIndex];
-        
+
         if (this.value && selectedOption.dataset.company) {
             // Get data from the selected option's data attributes
             document.getElementById('invoice-customer-company').textContent = selectedOption.dataset.company;
@@ -480,7 +480,7 @@ document.addEventListener('DOMContentLoaded', function() {
             preview.classList.add('hidden');
         }
     });
-    
+
     updateRemoveButtons();
 });
 </script>

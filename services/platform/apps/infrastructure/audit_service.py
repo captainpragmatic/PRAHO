@@ -11,16 +11,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-from django.utils import timezone
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from apps.audit.services import AuditService
 from apps.common.request_ip import get_safe_client_ip
 
 if TYPE_CHECKING:
-    from django.http import HttpRequest
-
     from apps.audit.models import AuditEvent
     from apps.infrastructure.models import (
         CloudProvider,
@@ -43,7 +39,7 @@ class InfrastructureAuditContext:
     user_agent: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Extract IP and user agent from request if available"""
         if self.request and not self.ip_address:
             self.ip_address = get_safe_client_ip(self.request)
@@ -65,7 +61,7 @@ class InfrastructureAuditService:
     CATEGORY = "system_admin"
 
     # Severity mapping for different event types
-    SEVERITY_MAP = {
+    SEVERITY_MAP: ClassVar[dict] = {
         "node_deployment_created": "medium",
         "node_deployment_started": "low",
         "node_deployment_completed": "medium",
@@ -150,7 +146,9 @@ class InfrastructureAuditService:
             new_values={
                 "ipv4_address": deployment.ipv4_address,
                 "ipv6_address": deployment.ipv6_address,
-                "virtualmin_server_id": str(deployment.virtualmin_server_id) if deployment.virtualmin_server_id else None,
+                "virtualmin_server_id": str(deployment.virtualmin_server_id)
+                if deployment.virtualmin_server_id
+                else None,
             },
             metadata={
                 **context.metadata,
@@ -455,7 +453,7 @@ class InfrastructureAuditService:
         )
 
     @classmethod
-    def _create_event(
+    def _create_event(  # noqa: PLR0913
         cls,
         action: str,
         content_object: Any,
@@ -502,7 +500,7 @@ _audit_service: InfrastructureAuditService | None = None
 
 def get_infrastructure_audit_service() -> InfrastructureAuditService:
     """Get global infrastructure audit service instance"""
-    global _audit_service
+    global _audit_service  # noqa: PLW0603
     if _audit_service is None:
         _audit_service = InfrastructureAuditService()
     return _audit_service

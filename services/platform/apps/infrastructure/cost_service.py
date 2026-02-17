@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -68,7 +68,7 @@ class CostTrackingService:
     HOURS_PER_MONTH = Decimal("730")  # Average hours per month
     HOURS_PER_DAY = Decimal("24")
 
-    def calculate_deployment_costs(
+    def calculate_deployment_costs(  # noqa: PLR0911
         self,
         deployment: NodeDeployment,
         period_start: datetime,
@@ -85,7 +85,7 @@ class CostTrackingService:
         Returns:
             Result with the created cost record or error
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord
+        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
 
         # Validate period
         if period_end <= period_start:
@@ -145,10 +145,7 @@ class CostTrackingService:
             existing.bandwidth_cost = bandwidth_cost
             existing.storage_cost = storage_cost
             existing.save()
-            logger.info(
-                f"[Cost] Updated cost record for {deployment.hostname}: "
-                f"{total_cost:.4f} EUR"
-            )
+            logger.info(f"[Cost] Updated cost record for {deployment.hostname}: {total_cost:.4f} EUR")
             return Ok(existing)
 
         # Create new record
@@ -163,8 +160,7 @@ class CostTrackingService:
         )
 
         logger.info(
-            f"[Cost] Created cost record for {deployment.hostname}: "
-            f"{total_cost:.4f} EUR for {hours_active:.2f} hours"
+            f"[Cost] Created cost record for {deployment.hostname}: {total_cost:.4f} EUR for {hours_active:.2f} hours"
         )
 
         return Ok(record)
@@ -184,18 +180,23 @@ class CostTrackingService:
         Returns:
             List of results for each deployment
         """
-        from apps.infrastructure.models import NodeDeployment
+        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
 
         # Get all deployments that were active during this period
-        active_deployments = NodeDeployment.objects.filter(
-            status__in=["completed", "stopped", "destroyed"],
-        ).filter(
-            # Started before period end
-            models.Q(started_at__lte=period_end) | models.Q(started_at__isnull=True),
-        ).filter(
-            # Not destroyed before period start
-            models.Q(destroyed_at__gte=period_start) | models.Q(destroyed_at__isnull=True),
-        ).select_related("node_size")
+        active_deployments = (
+            NodeDeployment.objects.filter(
+                status__in=["completed", "stopped", "destroyed"],
+            )
+            .filter(
+                # Started before period end
+                models.Q(started_at__lte=period_end) | models.Q(started_at__isnull=True),
+            )
+            .filter(
+                # Not destroyed before period start
+                models.Q(destroyed_at__gte=period_start) | models.Q(destroyed_at__isnull=True),
+            )
+            .select_related("node_size")
+        )
 
         results = []
         for deployment in active_deployments:
@@ -225,7 +226,7 @@ class CostTrackingService:
         Returns:
             CostSummary with totals
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord
+        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
 
         records = NodeDeploymentCostRecord.objects.filter(
             period_start__gte=period_start,
@@ -260,7 +261,7 @@ class CostTrackingService:
         Returns:
             CostSummary for the month
         """
-        from calendar import monthrange
+        from calendar import monthrange  # noqa: PLC0415
 
         _, days_in_month = monthrange(year, month)
         period_start = timezone.make_aware(datetime(year, month, 1))
@@ -283,7 +284,7 @@ class CostTrackingService:
         Returns:
             List of DeploymentCostBreakdown for each deployment
         """
-        from apps.infrastructure.models import NodeDeployment, NodeDeploymentCostRecord
+        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
 
         breakdowns = []
 
@@ -345,7 +346,7 @@ class CostTrackingService:
         Returns:
             Dict mapping provider name to total cost
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord
+        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
 
         records = NodeDeploymentCostRecord.objects.filter(
             period_start__gte=period_start,
@@ -393,7 +394,7 @@ _cost_service: CostTrackingService | None = None
 
 def get_cost_tracking_service() -> CostTrackingService:
     """Get global cost tracking service instance"""
-    global _cost_service
+    global _cost_service  # noqa: PLW0603
     if _cost_service is None:
         _cost_service = CostTrackingService()
     return _cost_service

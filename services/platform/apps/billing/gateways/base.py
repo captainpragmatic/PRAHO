@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class PaymentIntentResult(TypedDict):
     """Result from payment intent creation"""
+
     success: bool
     payment_intent_id: str
     client_secret: str | None
@@ -29,6 +30,7 @@ class PaymentIntentResult(TypedDict):
 
 class PaymentConfirmResult(TypedDict):
     """Result from payment confirmation"""
+
     success: bool
     status: str  # succeeded, failed, requires_action, etc.
     error: str | None
@@ -36,6 +38,7 @@ class PaymentConfirmResult(TypedDict):
 
 class SubscriptionResult(TypedDict):
     """Result from subscription creation"""
+
     success: bool
     subscription_id: str | None
     status: str | None
@@ -71,9 +74,9 @@ class BasePaymentGateway(ABC):
         self,
         order_id: str,
         amount_cents: int,
-        currency: str = 'RON',
+        currency: str = "RON",
         customer_id: str | None = None,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
     ) -> PaymentIntentResult:
         """
         Create payment intent for immediate payment
@@ -103,10 +106,7 @@ class BasePaymentGateway(ABC):
 
     @abstractmethod
     def create_subscription(
-        self,
-        customer_id: str,
-        price_id: str,
-        metadata: dict[str, Any] | None = None
+        self, customer_id: str, price_id: str, metadata: dict[str, Any] | None = None
     ) -> SubscriptionResult:
         """
         Create recurring subscription
@@ -210,7 +210,7 @@ class PaymentGatewayFactory:
         Returns:
             Default configured gateway instance
         """
-        default_gateway = getattr(settings, 'DEFAULT_PAYMENT_GATEWAY', 'stripe')
+        default_gateway = getattr(settings, "DEFAULT_PAYMENT_GATEWAY", "stripe")
         return cls.create_gateway(default_gateway)
 
     @classmethod

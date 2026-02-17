@@ -21,9 +21,25 @@ from django.utils.translation import gettext_lazy as _
 logger = logging.getLogger(__name__)
 
 # Security constants
-MAX_JSON_CONTENT_SIZE = 10000  # Maximum size for JSON content
+_DEFAULT_MAX_JSON_CONTENT_SIZE = 10000  # Maximum size for JSON content
+MAX_JSON_CONTENT_SIZE = _DEFAULT_MAX_JSON_CONTENT_SIZE
 MAX_JSON_DEPTH = 10  # Maximum JSON nesting depth
-MAX_PRICE_CENTS = 100_000_000  # Maximum price in cents (1M major units)
+_DEFAULT_MAX_PRICE_CENTS = 100_000_000  # Maximum price in cents (1M major units)
+MAX_PRICE_CENTS = _DEFAULT_MAX_PRICE_CENTS
+
+
+def get_max_json_content_size() -> int:
+    """Get max json content size from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("products.max_json_content_size", _DEFAULT_MAX_JSON_CONTENT_SIZE)
+
+
+def get_max_price_cents() -> int:
+    """Get max price cents from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("products.max_price_cents", _DEFAULT_MAX_PRICE_CENTS)
 
 
 # ===============================================================================
@@ -474,7 +490,7 @@ class ProductPrice(models.Model):
         """Get effective monthly price in currency units"""
         return Decimal(self.effective_monthly_price_cents) / 100
 
-    def clean(self) -> None:
+    def clean(self) -> None:  # noqa: C901, PLR0912
         """🔒 Validate pricing constraints and log security validation"""
         super().clean()
 

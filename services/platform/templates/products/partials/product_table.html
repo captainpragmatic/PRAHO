@@ -49,7 +49,7 @@
               <div class="flex items-center">
                 <div>
                   <div class="text-sm font-medium text-white">
-                    <a href="{% url 'products:product_detail' slug=product.slug %}" 
+                    <a href="{% url 'products:product_detail' slug=product.slug %}"
                        class="hover:text-blue-400 transition-colors">
                       {{ product.name }}
                     </a>
@@ -76,7 +76,7 @@
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex flex-wrap gap-1">
                 <!-- Active Status Toggle -->
-                <button class="toggle-switch" 
+                <button class="toggle-switch"
                         hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
                         hx-target="this"
                         hx-swap="outerHTML"
@@ -89,7 +89,7 @@
                 </button>
 
                 <!-- Public Status Toggle -->
-                <button class="toggle-switch" 
+                <button class="toggle-switch"
                         hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
                         hx-target="this"
                         hx-swap="outerHTML"
@@ -143,22 +143,22 @@
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
               <div class="flex items-center justify-end space-x-2">
                 <!-- View Detail -->
-                <a href="{% url 'products:product_detail' slug=product.slug %}" 
-                   class="text-blue-400 hover:text-blue-300 transition-colors" 
+                <a href="{% url 'products:product_detail' slug=product.slug %}"
+                   class="text-blue-400 hover:text-blue-300 transition-colors"
                    title="{% trans 'View Details' %}">
                   🔍
                 </a>
-                
+
                 <!-- Edit Product -->
-                <a href="{% url 'products:product_edit' slug=product.slug %}" 
-                   class="text-green-400 hover:text-green-300 transition-colors" 
+                <a href="{% url 'products:product_edit' slug=product.slug %}"
+                   class="text-green-400 hover:text-green-300 transition-colors"
                    title="{% trans 'Edit Product' %}">
                   ✏️
                 </a>
-                
+
                 <!-- Manage Pricing -->
-                <a href="{% url 'products:product_prices' slug=product.slug %}" 
-                   class="text-yellow-400 hover:text-yellow-300 transition-colors" 
+                <a href="{% url 'products:product_prices' slug=product.slug %}"
+                   class="text-yellow-400 hover:text-yellow-300 transition-colors"
                    title="{% trans 'Manage Pricing' %}">
                   💰
                 </a>
@@ -319,11 +319,11 @@
               ← {% trans 'Previous' %}
             </a>
           {% endif %}
-          
+
           <span class="px-3 py-2 text-slate-400">
             {% trans 'Page' %} {{ products.number }} {% trans 'of' %} {{ products.paginator.num_pages }}
           </span>
-          
+
           {% if products.has_next %}
             <a href="?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"
                hx-get="{% url 'products:product_list_htmx' %}?page={{ products.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}{% if request.GET.product_type %}&product_type={{ request.GET.product_type }}{% endif %}{% if request.GET.is_active %}&is_active={{ request.GET.is_active }}{% endif %}{% if request.GET.is_public %}&is_public={{ request.GET.is_public }}{% endif %}"

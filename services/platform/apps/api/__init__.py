@@ -8,7 +8,7 @@
 # Structure:
 #   - api/core/      → Shared API infrastructure (pagination, permissions, etc.)
 #   - api/customers/ → Customer domain API endpoints
-#   - api/billing/   → Billing domain API endpoints  
+#   - api/billing/   → Billing domain API endpoints
 #   - api/tickets/   → Support tickets API endpoints
 #
 # Import Direction (CRITICAL):
@@ -16,4 +16,4 @@
 #   Never import api modules from domain apps to avoid circular dependencies
 #
 
-default_app_config = 'apps.api.apps.ApiConfig'
+default_app_config = "apps.api.apps.ApiConfig"

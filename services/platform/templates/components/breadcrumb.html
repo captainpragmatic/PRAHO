@@ -12,7 +12,7 @@ Provides hierarchical navigation with proper accessibility.
       {% if not forloop.first %}
         <span class="text-slate-400 mx-2">{{ separator }}</span>
       {% endif %}
-      
+
       {% if item.url and not forloop.last %}
         <a href="{{ item.url }}" class="text-blue-600 hover:text-blue-800 font-medium transition-colors">
           {{ item.text }}

@@ -1,16 +1,16 @@
 # ADR-0002: Strategic Linting Framework for PRAHO Platform
 
-**Status:** Accepted  
-**Date:** 2025-08-25  
-**Authors:** Development Team  
-**Supersedes:** N/A  
+**Status:** Accepted
+**Date:** 2025-08-25
+**Authors:** Development Team
+**Supersedes:** N/A
 
 ## Context
 
 PRAHO Platform required a comprehensive linting strategy focused on business impact rather than cosmetic code formatting. The primary goals were:
 
 1. **Performance Optimization**: Detect and prevent O(N²) complexity patterns
-2. **AI/LLM Code Readability**: Improve code comprehension for AI tools like Claude and GitHub Copilot  
+2. **AI/LLM Code Readability**: Improve code comprehension for AI tools like Claude and GitHub Copilot
 3. **Error Prevention**: Catch potential runtime errors before deployment
 4. **Security Awareness**: Flag hardcoded credentials and security anti-patterns
 5. **Developer Experience**: Maintain productivity while improving code quality
@@ -29,7 +29,7 @@ We implemented a **Strategic Linting Framework** using Ruff + MyPy with business
 
 **Rejected Alternatives:**
 - ❌ **Flake8 + Black**: Too slow for our 50,000+ LOC codebase
-- ❌ **Pylint**: Too opinionated, conflicts with Django patterns  
+- ❌ **Pylint**: Too opinionated, conflicts with Django patterns
 - ❌ **Basic formatters only**: Missed performance and security issues
 
 ### Strategic Rule Configuration
@@ -38,7 +38,7 @@ We implemented a **Strategic Linting Framework** using Ruff + MyPy with business
 ```python
 # Performance Rules (PERF)
 "PERF401",  # List comprehension optimization
-"PERF402",  # List/set comprehension efficiency  
+"PERF402",  # List/set comprehension efficiency
 
 # Security Rules (S) - Warnings only for manual review
 "S105", "S106",  # Hardcoded passwords/credentials
@@ -58,7 +58,7 @@ We implemented a **Strategic Linting Framework** using Ruff + MyPy with business
 **STRATEGICALLY IGNORED (Cosmetic/Low Impact):**
 ```python
 # Line length - Romanian business terms are longer
-"E501",  
+"E501",
 
 # Quote consistency - Not business critical
 "Q000", "Q001", "Q002", "Q003",
@@ -89,7 +89,7 @@ We implemented a **Strategic Linting Framework** using Ruff + MyPy with business
 
 ```bash
 make lint                 # Standard development linting
-make lint-security        # Security-focused credential scan  
+make lint-security        # Security-focused credential scan
 make lint-credentials     # Hardcoded password detection
 make lint-performance     # Performance anti-pattern detection
 make lint-fix            # Safe auto-fixes only
@@ -102,7 +102,7 @@ make lint-fix            # Safe auto-fixes only
 - **Rule Categorization**: Performance (10), Security (69), Formatting (500+)
 - **Strategic Decision**: Focus on business impact, ignore cosmetics
 
-### Phase 2: Strategic Configuration  
+### Phase 2: Strategic Configuration
 - **Security-First Approach**: 69 hardcoded credentials flagged for manual review
 - **Performance Rules**: All PERF401 patterns identified and planned for fixing
 - **VS Code Integration**: Auto-approval for common development commands
@@ -114,7 +114,7 @@ make lint-fix            # Safe auto-fixes only
 - **Zero PERF401 Issues**: All performance anti-patterns eliminated
 
 ### Final Metrics
-- **Before**: 848 linting issues  
+- **Before**: 848 linting issues
 - **After**: 1,768 total issues (expected with comprehensive rules)
 - **Performance Issues**: 10 → 0 (100% improvement)
 - **Auto-fixable Issues**: 71 → 0 (100% improvement)
@@ -136,7 +136,7 @@ make lint-fix            # Safe auto-fixes only
 
 ### Maintenance Requirements
 - 🔄 **Weekly Reviews**: Check for new performance anti-patterns
-- 🔄 **Monthly Configuration**: Adjust rules based on codebase evolution  
+- 🔄 **Monthly Configuration**: Adjust rules based on codebase evolution
 - 🔄 **Security Audits**: Manual review of flagged credentials quarterly
 - 🔄 **Rule Updates**: Keep Ruff updated for new performance detections
 

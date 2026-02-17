@@ -57,7 +57,6 @@ MIDDLEWARE = [
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",
     "apps.common.middleware.GDPRComplianceMiddleware",
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
 ]
 
 # ===============================================================================
@@ -209,8 +208,7 @@ _email_backends = {
 }
 
 EMAIL_BACKEND = _email_backends.get(
-    os.environ.get("EMAIL_PROVIDER", "smtp"),
-    "django.core.mail.backends.smtp.EmailBackend"
+    os.environ.get("EMAIL_PROVIDER", "smtp"), "django.core.mail.backends.smtp.EmailBackend"
 )
 
 # SMTP fallback configuration (also used by some ESPs)
@@ -275,7 +273,7 @@ else:
         {
             "OPTIONS": {
                 "MAX_ENTRIES": 50000,  # Higher limit for production
-                "CULL_FREQUENCY": 4,   # More aggressive culling
+                "CULL_FREQUENCY": 4,  # More aggressive culling
             },
             "TIMEOUT": 3600,  # 1 hour timeout for production
         }
@@ -395,50 +393,33 @@ TEMPLATE_LOADERS = [
 SIEM_CONFIG = {
     # Enable/disable SIEM integration
     "ENABLED": os.environ.get("SIEM_ENABLED", "false").lower() == "true",
-
     # Log format: cef, leef, json, syslog, ocsf
     # CEF = ArcSight/Splunk, LEEF = IBM QRadar, JSON = Elastic/Graylog
     "FORMAT": os.environ.get("SIEM_FORMAT", "json"),
-
     # Transport: tcp, udp, https, file
     "PROTOCOL": os.environ.get("SIEM_PROTOCOL", "tcp"),
     "HOST": os.environ.get("SIEM_HOST", "localhost"),
     "PORT": int(os.environ.get("SIEM_PORT", "514")),
     "USE_TLS": os.environ.get("SIEM_USE_TLS", "true").lower() == "true",
-
     # Authentication for HTTPS endpoints (e.g., Splunk HEC)
     "API_KEY": os.environ.get("SIEM_API_KEY", ""),
     "CERTIFICATE_PATH": os.environ.get("SIEM_CERTIFICATE_PATH", ""),
-
     # Buffering configuration
     "BUFFER_SIZE": int(os.environ.get("SIEM_BUFFER_SIZE", "1000")),
     "BATCH_SIZE": int(os.environ.get("SIEM_BATCH_SIZE", "100")),
     "FLUSH_INTERVAL": int(os.environ.get("SIEM_FLUSH_INTERVAL", "5")),
-
     # Retry configuration
     "MAX_RETRIES": int(os.environ.get("SIEM_MAX_RETRIES", "3")),
     "RETRY_DELAY": int(os.environ.get("SIEM_RETRY_DELAY", "1")),
-
     # Filtering - minimum severity to forward
     # Options: low, medium, high, critical
     "MIN_SEVERITY": os.environ.get("SIEM_MIN_SEVERITY", "low"),
-
     # Category filtering (comma-separated)
-    "INCLUDE_CATEGORIES": [
-        c.strip()
-        for c in os.environ.get("SIEM_INCLUDE_CATEGORIES", "").split(",")
-        if c.strip()
-    ],
-    "EXCLUDE_CATEGORIES": [
-        c.strip()
-        for c in os.environ.get("SIEM_EXCLUDE_CATEGORIES", "").split(",")
-        if c.strip()
-    ],
-
+    "INCLUDE_CATEGORIES": [c.strip() for c in os.environ.get("SIEM_INCLUDE_CATEGORIES", "").split(",") if c.strip()],
+    "EXCLUDE_CATEGORIES": [c.strip() for c in os.environ.get("SIEM_EXCLUDE_CATEGORIES", "").split(",") if c.strip()],
     # Tamper-proof hash chain
     "ENABLE_HASH_CHAIN": os.environ.get("SIEM_ENABLE_HASH_CHAIN", "true").lower() == "true",
     "HASH_ALGORITHM": os.environ.get("SIEM_HASH_ALGORITHM", "sha256"),
-
     # Vendor information for CEF/LEEF formats
     "VENDOR": os.environ.get("SIEM_VENDOR", "PRAHO"),
     "PRODUCT": os.environ.get("SIEM_PRODUCT", "PlatformAudit"),
@@ -651,21 +632,17 @@ AUDIT_LOG_RETENTION = {
 COMPLIANCE_REPORTING = {
     # Enable automated compliance report generation
     "ENABLED": True,
-
     # Report storage location
     "REPORT_DIR": os.environ.get("COMPLIANCE_REPORT_DIR", "/var/log/praho/compliance"),
-
     # Report formats: pdf, csv, json
     "FORMATS": ["pdf", "csv", "json"],
-
     # Report scheduling (cron expressions)
     "SCHEDULES": {
-        "daily_security": "0 6 * * *",      # 6 AM daily
-        "weekly_access": "0 6 * * 1",       # Monday 6 AM
-        "monthly_compliance": "0 6 1 * *",   # 1st of month 6 AM
+        "daily_security": "0 6 * * *",  # 6 AM daily
+        "weekly_access": "0 6 * * 1",  # Monday 6 AM
+        "monthly_compliance": "0 6 1 * *",  # 1st of month 6 AM
         "quarterly_audit": "0 6 1 1,4,7,10 *",  # Quarterly
     },
-
     # Report types to generate
     "REPORT_TYPES": [
         "security_summary",
@@ -676,14 +653,8 @@ COMPLIANCE_REPORTING = {
         "gdpr_compliance",
         "romanian_fiscal_compliance",
     ],
-
     # Email notifications for reports
-    "EMAIL_RECIPIENTS": [
-        c.strip()
-        for c in os.environ.get("COMPLIANCE_REPORT_RECIPIENTS", "").split(",")
-        if c.strip()
-    ],
-
+    "EMAIL_RECIPIENTS": [c.strip() for c in os.environ.get("COMPLIANCE_REPORT_RECIPIENTS", "").split(",") if c.strip()],
     # Compliance frameworks to check
     "FRAMEWORKS": [
         "ISO27001",

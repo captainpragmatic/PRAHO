@@ -23,7 +23,6 @@ from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Final
 
-from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 
 logger = logging.getLogger(__name__)
@@ -32,25 +31,17 @@ logger = logging.getLogger(__name__)
 class FileUploadError(Exception):
     """Base exception for file upload validation errors."""
 
-    pass
 
-
-class FileTypeNotAllowed(FileUploadError):
+class FileTypeNotAllowed(FileUploadError):  # noqa: N818
     """Raised when file type is not in the allowed list."""
 
-    pass
 
-
-class FileSizeTooLarge(FileUploadError):
+class FileSizeTooLarge(FileUploadError):  # noqa: N818
     """Raised when file exceeds size limits."""
 
-    pass
 
-
-class MaliciousContentDetected(FileUploadError):
+class MaliciousContentDetected(FileUploadError):  # noqa: N818
     """Raised when potentially malicious content is detected."""
-
-    pass
 
 
 class FileCategory(Enum):
@@ -253,7 +244,7 @@ class FileUploadSecurityService:
         self.max_size_override_mb = max_size_override_mb
         self.scan_content = scan_content
 
-    def validate_file(
+    def validate_file(  # noqa: PLR0911
         self,
         file: UploadedFile,
         filename: str | None = None,
@@ -311,9 +302,7 @@ class FileUploadSecurityService:
 
         # Get file size
         file_size = file.size if hasattr(file, "size") else 0
-        max_size_bytes = int(
-            (self.max_size_override_mb or file_type.max_size_mb) * 1024 * 1024
-        )
+        max_size_bytes = int((self.max_size_override_mb or file_type.max_size_mb) * 1024 * 1024)
 
         if file_size > max_size_bytes:
             logger.warning(
@@ -338,45 +327,44 @@ class FileUploadSecurityService:
 
         # Validate MIME type from content
         detected_mime = self._detect_mime_type(content, filename)
-        if detected_mime and detected_mime not in file_type.mime_types:
-            # Allow some flexibility for text-based formats
-            if not self._is_compatible_mime(detected_mime, file_type.mime_types):
-                logger.warning(
-                    f"File upload rejected - MIME type mismatch",
-                    extra={
-                        "filename": filename,
-                        "detected_mime": detected_mime,
-                        "expected_mimes": file_type.mime_types,
-                    },
-                )
-                return FileValidationResult(
-                    is_valid=False,
-                    error_message=f"File content does not match expected type",
-                    detected_mime_type=detected_mime,
-                    detected_extension=extension,
-                )
+        if (
+            detected_mime
+            and detected_mime not in file_type.mime_types
+            and not self._is_compatible_mime(detected_mime, file_type.mime_types)
+        ):
+            logger.warning(
+                "File upload rejected - MIME type mismatch",
+                extra={
+                    "filename": filename,
+                    "detected_mime": detected_mime,
+                    "expected_mimes": file_type.mime_types,
+                },
+            )
+            return FileValidationResult(
+                is_valid=False,
+                error_message="File content does not match expected type",
+                detected_mime_type=detected_mime,
+                detected_extension=extension,
+            )
 
         # Validate magic bytes if available
-        if file_type.magic_bytes:
-            if not self._validate_magic_bytes(content, file_type.magic_bytes):
-                logger.warning(
-                    f"File upload rejected - magic bytes mismatch",
-                    extra={"filename": filename, "extension": extension},
-                )
-                return FileValidationResult(
-                    is_valid=False,
-                    error_message="File content does not match expected format",
-                    detected_extension=extension,
-                )
+        if file_type.magic_bytes and not self._validate_magic_bytes(content, file_type.magic_bytes):
+            logger.warning(
+                "File upload rejected - magic bytes mismatch",
+                extra={"filename": filename, "extension": extension},
+            )
+            return FileValidationResult(
+                is_valid=False,
+                error_message="File content does not match expected format",
+                detected_extension=extension,
+            )
 
         # Scan for malicious content
         if self.scan_content:
-            scan_result = self._scan_for_malicious_content(
-                content, extension, filename
-            )
+            scan_result = self._scan_for_malicious_content(content, extension, filename)
             if scan_result:
                 logger.error(
-                    f"File upload rejected - malicious content detected",
+                    "File upload rejected - malicious content detected",
                     extra={"filename": filename, "reason": scan_result},
                 )
                 return FileValidationResult(
@@ -391,7 +379,7 @@ class FileUploadSecurityService:
         file.seek(0)
 
         logger.info(
-            f"File upload validated successfully",
+            "File upload validated successfully",
             extra={
                 "filename": filename,
                 "extension": extension,
@@ -415,20 +403,14 @@ class FileUploadSecurityService:
         mime_type, _ = mimetypes.guess_type(filename)
         return mime_type
 
-    def _is_compatible_mime(
-        self, detected: str, expected: tuple[str, ...]
-    ) -> bool:
+    def _is_compatible_mime(self, detected: str, expected: tuple[str, ...]) -> bool:
         """Check if detected MIME type is compatible with expected types."""
         # Handle text-based format variations
-        if detected.startswith("text/") and any(
-            exp.startswith("text/") for exp in expected
-        ):
+        if detected.startswith("text/") and any(exp.startswith("text/") for exp in expected):
             return True
         return detected in expected
 
-    def _validate_magic_bytes(
-        self, content: bytes, magic_bytes: tuple[bytes, ...]
-    ) -> bool:
+    def _validate_magic_bytes(self, content: bytes, magic_bytes: tuple[bytes, ...]) -> bool:
         """Validate that content starts with expected magic bytes."""
         return any(content.startswith(magic) for magic in magic_bytes)
 

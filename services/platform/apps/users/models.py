@@ -360,9 +360,7 @@ class CustomerMembership(models.Model):
     )
 
     # Active membership flag (allows deactivating without deleting)
-    is_active = models.BooleanField(
-        default=True, help_text=_("Whether this membership is currently active")
-    )
+    is_active = models.BooleanField(default=True, help_text=_("Whether this membership is currently active"))
 
     # ===============================================================================
     # NOTIFICATION PREFERENCES (Enhanced CustomerMembership)

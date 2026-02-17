@@ -30,11 +30,11 @@ __all__ = [
     "AnalysisMode",
     "AnalysisResult",
     "AnalysisSeverity",
-    "CodeLocation",
-    "FlowIssue",
     # Analyzers
     "BranchCoverageAnalyzer",
+    "CodeLocation",
     "ControlFlowAnalyzer",
     "DataFlowAnalyzer",
+    "FlowIssue",
     "HybridFlowAnalyzer",
 ]

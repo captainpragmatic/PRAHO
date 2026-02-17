@@ -27,13 +27,15 @@ TASK_TIME_LIMIT = 600  # 10 minutes
 def _get_task_retry_delay() -> int:
     """Get task retry delay seconds from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
-    return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", 300)
+
+    return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY)
 
 
 def _get_task_max_retries() -> int:
     """Get task max retries from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
-    return SettingsService.get_integer_setting("billing.task_max_retries", 3)
+
+    return SettingsService.get_integer_setting("billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES)
 
 
 # Backward-compatible module-level aliases (for code that imports them)
@@ -428,7 +430,7 @@ def run_daily_billing() -> dict[str, Any]:
     Returns:
         Dictionary with billing run statistics
     """
-    from apps.billing.subscription_service import RecurringBillingService
+    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
 
     logger.info("📅 [Billing] Starting daily billing run")
 
@@ -483,7 +485,7 @@ def process_expired_trials() -> dict[str, Any]:
     Returns:
         Dictionary with processing result
     """
-    from apps.billing.subscription_service import RecurringBillingService
+    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
 
     logger.info("⏰ [Trials] Processing expired trials")
 
@@ -526,7 +528,7 @@ def process_grace_period_expirations() -> dict[str, Any]:
     Returns:
         Dictionary with processing result
     """
-    from apps.billing.subscription_service import RecurringBillingService
+    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
 
     logger.info("⚠️ [Grace] Processing expired grace periods")
 
@@ -567,7 +569,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
     Returns:
         Dictionary with notification result
     """
-    from apps.billing.subscription_service import GrandfatheringService
+    from apps.billing.subscription_service import GrandfatheringService  # noqa: PLC0415
 
     logger.info(f"📢 [Grandfathering] Checking for expiring grandfathering ({days_ahead} days)")
 
@@ -578,7 +580,9 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
         for gf in expiring:
             try:
                 # Send notification email
-                from apps.notifications.services import EmailService
+                from apps.notifications.services import (  # noqa: PLC0415
+                    EmailService,
+                )
 
                 EmailService.send_template_email(
                     template_key="grandfathering_expiring",
@@ -626,7 +630,7 @@ def run_payment_collection() -> dict[str, Any]:
     Returns:
         Dictionary with collection result
     """
-    from apps.billing.payment_models import (
+    from apps.billing.payment_models import (  # noqa: PLC0415
         PaymentCollectionRun,
         PaymentRetryAttempt,
     )
@@ -661,8 +665,7 @@ def run_payment_collection() -> dict[str, Any]:
                 # Attempt payment
                 # TODO: Implement actual payment processing via Stripe
                 logger.info(
-                    f"💳 [Collection] Would retry payment {retry.payment_id} "
-                    f"(attempt {retry.attempt_number})"
+                    f"💳 [Collection] Would retry payment {retry.payment_id} " f"(attempt {retry.attempt_number})"
                 )
 
                 # For now, simulate success/failure
@@ -685,9 +688,7 @@ def run_payment_collection() -> dict[str, Any]:
 
                     # Schedule next retry if applicable
                     if retry.policy and retry.attempt_number < retry.policy.max_attempts:
-                        next_retry_date = retry.policy.get_next_retry_date(
-                            timezone.now(), retry.attempt_number
-                        )
+                        next_retry_date = retry.policy.get_next_retry_date(timezone.now(), retry.attempt_number)
                         if next_retry_date:
                             PaymentRetryAttempt.objects.create(
                                 payment=retry.payment,

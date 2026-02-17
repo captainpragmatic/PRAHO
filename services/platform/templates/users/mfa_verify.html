@@ -6,7 +6,7 @@
 {% block content %}
 <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
   <div class="max-w-lg w-full space-y-8">
-    
+
     <!-- Header -->
     <div class="text-center">
       <div class="mx-auto h-16 w-16 text-5xl">🔐</div>
@@ -20,7 +20,7 @@
 
     <!-- MFA Form Card -->
     <div class="bg-slate-800 rounded-lg p-8 border border-slate-700 shadow-xl">
-      
+
       <!-- User Info -->
       <div class="flex items-center justify-center mb-6 pb-6 border-b border-slate-600">
         <div class="text-center">
@@ -33,7 +33,7 @@
 
       <form method="post" class="space-y-6">
         {% csrf_token %}
-        
+
         <!-- Display form errors -->
         {% if messages %}
           {% for message in messages %}
@@ -53,13 +53,13 @@
           <label for="token" class="block text-lg font-medium text-white mb-4">
             🔢 {% trans 'Enter Authentication Code' %}
           </label>
-          
+
           <div class="mb-4">
-            <input type="text" id="token" name="token" maxlength="8" 
+            <input type="text" id="token" name="token" maxlength="8"
                    class="appearance-none block w-full px-4 py-4 border border-slate-600 placeholder-slate-400 text-white text-center text-2xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-700 transition-all"
                    placeholder="123456" required autocomplete="off" autofocus>
           </div>
-          
+
           <p class="text-sm text-slate-400 mb-6">
             {% trans 'Enter the 6-digit code from your authenticator app' %}
           </p>
@@ -67,31 +67,31 @@
 
         <!-- Submit Button -->
         <div>
-          <button type="submit" 
+          <button type="submit"
                   class="w-full flex justify-center py-4 px-6 border border-transparent text-lg font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-lg">
             <span class="mr-2">🔓</span>
             {% trans 'Verify & Continue' %}
           </button>
         </div>
       </form>
-      
+
       <!-- Alternative Options -->
       <div class="mt-8 border-t border-slate-600 pt-6">
         <div class="text-center">
           <p class="text-sm text-slate-400 mb-4">{% trans 'Having trouble?' %}</p>
-          
+
           <div class="space-y-3">
-            <button onclick="showBackupCodeInput()" 
+            <button onclick="showBackupCodeInput()"
                     class="w-full flex items-center justify-center px-4 py-3 border border-yellow-600 text-sm font-medium rounded-lg text-yellow-200 bg-yellow-900 bg-opacity-30 hover:bg-opacity-50 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
               <span class="mr-2">🔑</span>
               {% trans 'Use Backup Code Instead' %}
             </button>
-            
+
             <div id="backup-code-input" class="hidden space-y-3">
-              <input type="text" id="backup-token" name="backup-token" 
+              <input type="text" id="backup-token" name="backup-token"
                      class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center font-mono rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 bg-slate-700 transition-all"
                      placeholder="BACKUP-CODE-12345" autocomplete="off">
-              <button onclick="submitBackupCode()" 
+              <button onclick="submitBackupCode()"
                       class="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
                 <span class="mr-2">🔑</span>
                 {% trans 'Use Backup Code' %}
@@ -122,7 +122,7 @@
 
     <!-- Back to Login -->
     <div class="text-center mt-6">
-      <a href="{% url 'users:login' %}" 
+      <a href="{% url 'users:login' %}"
          class="text-slate-400 hover:text-slate-300 transition-colors text-sm">
         ← {% trans 'Back to login' %}
       </a>
@@ -135,7 +135,7 @@
 function showBackupCodeInput() {
   const backupDiv = document.getElementById('backup-code-input');
   const backupInput = document.getElementById('backup-token');
-  
+
   if (backupDiv.classList.contains('hidden')) {
     backupDiv.classList.remove('hidden');
     backupInput.focus();

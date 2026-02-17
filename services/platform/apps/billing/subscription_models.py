@@ -59,7 +59,10 @@ def get_subscription_grace_period_days() -> int:
     """Get grace period days from SettingsService (runtime)."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
-        return max(1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", 7))
+
+        return max(
+            1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", _DEFAULT_GRACE_PERIOD_DAYS)
+        )
     except Exception:
         return _DEFAULT_GRACE_PERIOD_DAYS
 
@@ -68,7 +71,13 @@ def get_max_payment_retry_attempts() -> int:
     """Get max payment retry attempts from SettingsService (runtime)."""
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
-        return max(1, SettingsService.get_integer_setting("billing.max_payment_retry_attempts", 5))
+
+        return max(
+            1,
+            SettingsService.get_integer_setting(
+                "billing.max_payment_retry_attempts", _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
+            ),
+        )
     except Exception:
         return _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
 
@@ -349,7 +358,7 @@ class Subscription(models.Model):
                 name="idx_active_billing_date",
             ),
         )
-        constraints = [
+        constraints: ClassVar[list] = [
             models.CheckConstraint(
                 condition=Q(unit_price_cents__gte=0),
                 name="subscription_price_non_negative",
@@ -377,11 +386,14 @@ class Subscription(models.Model):
             validate_financial_amount(self.locked_price_cents, "Locked price")
 
         # Validate period dates
-        if self.current_period_end and self.current_period_start:
-            if self.current_period_end <= self.current_period_start:
-                raise ValidationError("Period end must be after period start")
+        if (
+            self.current_period_end
+            and self.current_period_start
+            and self.current_period_end <= self.current_period_start
+        ):
+            raise ValidationError("Period end must be after period start")
 
-    def save(self, *args: Any, **kwargs: Any) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
         """Generate subscription number if not set."""
         if not self.subscription_number:
             self.subscription_number = self._generate_subscription_number()
@@ -391,7 +403,7 @@ class Subscription(models.Model):
 
     def _generate_subscription_number(self) -> str:
         """Generate unique subscription number."""
-        from .invoice_models import InvoiceSequence
+        from .invoice_models import InvoiceSequence  # noqa: PLC0415
 
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="subscription")
         return sequence.get_next_number("SUB")
@@ -660,7 +672,9 @@ class Subscription(models.Model):
                 details={
                     "subscription_id": str(self.id),
                     "failed_count": self.failed_payment_count,
-                    "grace_period_ends_at": self.grace_period_ends_at.isoformat() if self.grace_period_ends_at else None,
+                    "grace_period_ends_at": self.grace_period_ends_at.isoformat()
+                    if self.grace_period_ends_at
+                    else None,
                 },
             )
 

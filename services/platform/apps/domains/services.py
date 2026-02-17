@@ -136,7 +136,9 @@ class DomainValidationService:
     """
 
     @staticmethod
-    def validate_domain_name(domain_name: str) -> tuple[bool, str]:  # noqa: PLR0911 # Domain validation requires multiple early returns
+    def validate_domain_name(  # noqa: PLR0911 - Domain validation requires multiple early returns
+        domain_name: str,
+    ) -> tuple[bool, str]:
         """🔍 Validate domain name format and characters"""
         if not domain_name:
             return False, cast(str, _("Domain name is required"))
@@ -173,7 +175,7 @@ class DomainValidationService:
         """🌐 Extract TLD from domain name"""
         if "." not in domain_name:
             return ""
-        return domain_name.split(".")[-1].lower()
+        return domain_name.rsplit(".", maxsplit=1)[-1].lower()
 
     @staticmethod
     def is_romanian_domain(domain_name: str) -> bool:
@@ -517,7 +519,7 @@ class DomainOrderService:
     """
 
     @staticmethod
-    def create_domain_order_item(  # noqa: PLR0913 # Domain order requires multiple configuration parameters
+    def create_domain_order_item(  # Domain order requires multiple configuration parameters  # noqa: PLR0913
         order: Order,
         domain_name: str,
         action: str,
@@ -604,7 +606,7 @@ class DomainOrderService:
                     logger.error(f"🔥 [Domain] Failed to process registration: {item.domain_name}")
 
             elif item.action == "renew" and item.domain:
-                success, msg = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
+                success, _msg = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
 
                 if success:
                     processed_domains.append(item.domain)

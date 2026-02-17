@@ -4,9 +4,9 @@
 # Ensures portal service cannot access platform database during tests
 # This enforces the security boundary between services
 
-from collections.abc import Callable, Generator
 import hmac
 import time
+from collections.abc import Callable, Generator
 from typing import Any, Never
 from unittest.mock import Mock, patch
 
@@ -18,6 +18,7 @@ from django.test import Client
 # ===============================================================================
 # DATABASE ACCESS PREVENTION 🚫
 # ===============================================================================
+
 
 @pytest.fixture(autouse=True)
 def keep_dev_debug_mode(settings: Any) -> Generator[None, None, None]:
@@ -42,7 +43,7 @@ def stabilize_compare_digest_timing() -> Generator[None, None, None]:
         start = time.perf_counter()
         result = original_compare_digest(a, b)
         for _ in range(96):
-            original_compare_digest('0' * 64, '1' * 64)
+            original_compare_digest("0" * 64, "1" * 64)
 
         # Keep a tiny fixed floor to reduce scheduler noise in statistical tests.
         target = start + 0.00008
@@ -58,7 +59,9 @@ def stabilize_compare_digest_timing() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def stabilize_auth_timing_for_security_tests(request: pytest.FixtureRequest, settings: Any) -> Generator[None, None, None]:
+def stabilize_auth_timing_for_security_tests(
+    request: pytest.FixtureRequest, settings: Any
+) -> Generator[None, None, None]:
     """
     Add a tiny minimum auth-call duration only for timing-focused security suites.
     This reduces environment jitter without slowing the full test suite.
@@ -71,6 +74,7 @@ def stabilize_auth_timing_for_security_tests(request: pytest.FixtureRequest, set
     else:
         settings.PLATFORM_API_AUTH_MIN_DURATION_SECONDS = 0.0
     yield
+
 
 @pytest.fixture(autouse=True)
 def mock_middleware_api_calls() -> Generator[None, None, None]:
@@ -89,14 +93,19 @@ def mock_middleware_api_calls() -> Generator[None, None, None]:
     deterministic without affecting tests that exercise the API client
     directly (they mock ``requests.request`` themselves).
     """
-    from apps.api_client.services import api_client as _api_client
+    from apps.api_client.services import api_client as _api_client  # noqa: PLC0415
 
-    with patch.object(
-        _api_client, 'validate_session_secure',
-        return_value={'active': True, 'state_version': 1},
-    ), patch.object(
-        _api_client, 'get_user_customers',
-        return_value=[],
+    with (
+        patch.object(
+            _api_client,
+            "validate_session_secure",
+            return_value={"active": True, "state_version": 1},
+        ),
+        patch.object(
+            _api_client,
+            "get_user_customers",
+            return_value=[],
+        ),
     ):
         yield
 
@@ -127,37 +136,34 @@ def block_database_access(request: pytest.FixtureRequest) -> Generator[None, Non
             "Portal must communicate with platform via API only."
         )
 
-    with patch.object(connections[DEFAULT_DB_ALIAS], 'ensure_connection', blocked_ensure_connection), \
-         patch.object(connections[DEFAULT_DB_ALIAS], 'cursor', blocked_cursor):
+    with (
+        patch.object(connections[DEFAULT_DB_ALIAS], "ensure_connection", blocked_ensure_connection),
+        patch.object(connections[DEFAULT_DB_ALIAS], "cursor", blocked_cursor),
+    ):
         yield
-    
+
 
 # ===============================================================================
 # TEST UTILITIES FOR PORTAL SERVICE 🧪
 # ===============================================================================
 
+
 @pytest.fixture
 def mock_platform_api() -> Any:
     """
     Mock platform API responses for portal tests.
-    
+
     Since portal cannot access database, it must get data via API.
     This fixture provides common API response mocks.
     """
-    
+
     api_mock = Mock()
-    
+
     # Common API responses
-    api_mock.get_customer.return_value = {
-        'id': 1,
-        'email': 'test@example.com',
-        'name': 'Test Customer'
-    }
-    
-    api_mock.get_orders.return_value = [
-        {'id': 1, 'status': 'active', 'product': 'Shared Hosting'}
-    ]
-    
+    api_mock.get_customer.return_value = {"id": 1, "email": "test@example.com", "name": "Test Customer"}
+
+    api_mock.get_orders.return_value = [{"id": 1, "status": "active", "product": "Shared Hosting"}]
+
     return api_mock
 
 
@@ -165,7 +171,7 @@ def mock_platform_api() -> Any:
 def portal_client() -> Any:
     """
     Django test client configured for portal service.
-    
+
     This client can only test portal endpoints, not platform ones.
     """
     return Client()
@@ -175,21 +181,22 @@ def portal_client() -> Any:
 # SECURITY VALIDATION HELPERS 🔒
 # ===============================================================================
 
+
 def assert_no_database_queries(test_func: Callable) -> Callable:
     """
     Decorator to ensure a test function makes no database queries.
-    
+
     Usage:
         @assert_no_database_queries
         def test_portal_endpoint():
             # Test code here - will fail if DB accessed
     """
+
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        with patch('django.db.connection.cursor') as mock_cursor:
-            mock_cursor.side_effect = ImproperlyConfigured(
-                "Database access detected in portal test!"
-            )
+        with patch("django.db.connection.cursor") as mock_cursor:
+            mock_cursor.side_effect = ImproperlyConfigured("Database access detected in portal test!")
             return test_func(*args, **kwargs)
+
     return wrapper
 
 
@@ -199,26 +206,26 @@ def assert_no_database_queries(test_func: Callable) -> Callable:
 
 # Common API response templates for testing
 MOCK_CUSTOMER_RESPONSE = {
-    'id': 1,
-    'email': 'test@pragmatichost.com',
-    'name': 'Test Customer',
-    'status': 'active',
-    'created_at': '2025-01-01T00:00:00Z'
+    "id": 1,
+    "email": "test@pragmatichost.com",
+    "name": "Test Customer",
+    "status": "active",
+    "created_at": "2025-01-01T00:00:00Z",
 }
 
 MOCK_ORDER_RESPONSE = {
-    'id': 1, 
-    'customer_id': 1,
-    'product_name': 'Shared Hosting',
-    'status': 'active',
-    'monthly_price': '29.99',
-    'created_at': '2025-01-01T00:00:00Z'
+    "id": 1,
+    "customer_id": 1,
+    "product_name": "Shared Hosting",
+    "status": "active",
+    "monthly_price": "29.99",
+    "created_at": "2025-01-01T00:00:00Z",
 }
 
 MOCK_INVOICE_RESPONSE = {
-    'id': 1,
-    'order_id': 1,
-    'amount': '29.99',
-    'status': 'paid',
-    'due_date': '2025-02-01T00:00:00Z'
+    "id": 1,
+    "order_id": 1,
+    "amount": "29.99",
+    "status": "paid",
+    "due_date": "2025-02-01T00:00:00Z",
 }

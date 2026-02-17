@@ -13,7 +13,7 @@ from apps.common.types import Err, Ok, Result
 from .provisioning_service import ProvisioningService
 
 if TYPE_CHECKING:
-    from .models import Service
+    pass
 
 # Logger for backward compatibility with tests
 logger = logging.getLogger(__name__)
@@ -84,13 +84,15 @@ class ServiceManagementService:
             elif action == "check_status":
                 logger.info(f"⚙️ [ServiceMgmt] Status check for service {service_id}: {service.status}")
 
-            return Ok({
-                "service_id": str(service.id),
-                "action": action,
-                "previous_status": previous_status,
-                "current_status": service.status,
-                "success": True,
-            })
+            return Ok(
+                {
+                    "service_id": str(service.id),
+                    "action": action,
+                    "previous_status": previous_status,
+                    "current_status": service.status,
+                    "success": True,
+                }
+            )
 
         except Exception as e:
             logger.error(f"🔥 [ServiceMgmt] Failed to {action} service {service_id}: {e}")
@@ -137,12 +139,14 @@ class ServiceManagementService:
             )
 
             logger.info(f"⚠️ [ServiceMgmt] Marked service {service_id} for review: {reason}")
-            return Ok({
-                "service_id": str(service.id),
-                "status": "pending_review",
-                "reason": reason,
-                "success": True,
-            })
+            return Ok(
+                {
+                    "service_id": str(service.id),
+                    "status": "pending_review",
+                    "reason": reason,
+                    "success": True,
+                }
+            )
 
         except Exception as e:
             logger.error(f"🔥 [ServiceMgmt] Failed to mark service {service_id} for review: {e}")
@@ -200,12 +204,14 @@ class ServiceGroupService:
                 f"{results['processed']}/{results['total']} services"
             )
 
-            return Ok({
-                "group_id": group_id,
-                "action": action,
-                "results": results,
-                "success": len(results["errors"]) == 0,
-            })
+            return Ok(
+                {
+                    "group_id": group_id,
+                    "action": action,
+                    "results": results,
+                    "success": len(results["errors"]) == 0,
+                }
+            )
 
         except Exception as e:
             logger.error(f"🔥 [ServiceGroup] Failed to {action} group {group_id}: {e}")

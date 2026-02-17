@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Lint settings coverage — detect orphan settings, unwired constants,
 hardcoded candidates, and default-value drift.
@@ -83,6 +82,7 @@ DEFAULT_CONST_PATTERN = re.compile(r"^(_DEFAULT_\w+)\s*=")
 
 # ─── Finding ──────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Finding:
     file: str
@@ -94,6 +94,7 @@ class Finding:
 
 
 # ─── Allowlist loading ────────────────────────────────────────────────────────
+
 
 def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
     """Load allowlisted entries from file (one per line, # comments).
@@ -123,6 +124,7 @@ def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
 
 
 # ─── AST-based DEFAULT_SETTINGS extraction ────────────────────────────────────
+
 
 def extract_default_settings(services_file: Path) -> dict[str, Any]:
     """Parse DEFAULT_SETTINGS dict from services.py using AST.
@@ -185,6 +187,7 @@ def _ast_const_to_python(node: ast.expr) -> Any:
 
 # ─── File iteration ──────────────────────────────────────────────────────────
 
+
 def iter_python_files(root: Path) -> list[Path]:
     """Walk root for .py files, skipping excluded dirs."""
     files: list[Path] = []
@@ -211,14 +214,15 @@ def iter_template_files(root: Path) -> list[Path]:
 
 # ─── AST visitor: extract SettingsService call-sites ─────────────────────────
 
+
 @dataclass
 class SettingsCallSite:
     """A SettingsService.get_*() call found in source code."""
 
-    key: str               # the setting key string, e.g. "billing.efactura_batch_size"
-    fallback_value: Any    # the default/fallback argument (Python value or sentinel)
-    fallback_is_name: bool # True if fallback is a variable name (can't compare numerically)
-    fallback_name: str     # the variable name if fallback_is_name, else ""
+    key: str  # the setting key string, e.g. "billing.efactura_batch_size"
+    fallback_value: Any  # the default/fallback argument (Python value or sentinel)
+    fallback_is_name: bool  # True if fallback is a variable name (can't compare numerically)
+    fallback_name: str  # the variable name if fallback_is_name, else ""
     line: int
     file: str
 
@@ -283,14 +287,16 @@ class SettingsCallVisitor(ast.NodeVisitor):
                 if resolved is not None:
                     fallback_value = resolved
 
-        self.calls.append(SettingsCallSite(
-            key=key_value,
-            fallback_value=fallback_value,
-            fallback_is_name=fallback_is_name,
-            fallback_name=fallback_name,
-            line=node.lineno,
-            file=str(self.filepath.relative_to(PROJECT_ROOT)),
-        ))
+        self.calls.append(
+            SettingsCallSite(
+                key=key_value,
+                fallback_value=fallback_value,
+                fallback_is_name=fallback_is_name,
+                fallback_name=fallback_name,
+                line=node.lineno,
+                file=str(self.filepath.relative_to(PROJECT_ROOT)),
+            )
+        )
 
 
 def collect_settings_calls(app_files: list[Path]) -> list[SettingsCallSite]:
@@ -314,6 +320,7 @@ def collect_settings_calls(app_files: list[Path]) -> list[SettingsCallSite]:
 
 
 # ─── Check 1: Orphan Settings ────────────────────────────────────────────────
+
 
 def check_orphan_settings(
     defaults: dict[str, Any],
@@ -382,6 +389,7 @@ def check_orphan_settings(
 
 # ─── Check 2: Unwired Constants (AST-based) ──────────────────────────────────
 
+
 def check_unwired_constants(
     app_files: list[Path],
     allowlist: set[str],
@@ -443,6 +451,7 @@ def check_unwired_constants(
 
 # ─── Check 3: Hardcoded Candidates ───────────────────────────────────────────
 
+
 def check_hardcoded_candidates(app_files: list[Path], allowlist: set[str]) -> list[Finding]:
     """Find module-level constants that could be settings candidates."""
     findings: list[Finding] = []
@@ -502,6 +511,7 @@ def check_hardcoded_candidates(app_files: list[Path], allowlist: set[str]) -> li
 
 # ─── Check 4: Default Value Drift ────────────────────────────────────────────
 
+
 def _normalize_for_comparison(value: Any) -> Any:
     """Normalize a value for drift comparison (handle int/float/str coercions)."""
     if isinstance(value, float) and value == int(value):
@@ -551,7 +561,7 @@ def check_default_drift(
                 check="default-drift",
                 name=call.key,
                 message=(
-                    f'Inline fallback {inline!r} disagrees with DEFAULT_SETTINGS value {canonical!r} '
+                    f"Inline fallback {inline!r} disagrees with DEFAULT_SETTINGS value {canonical!r} "
                     f'for key "{call.key}". Update one to match the other.'
                 ),
             )
@@ -610,6 +620,7 @@ def format_json(findings: list[Finding]) -> str:
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Lint settings coverage: orphans, unwired constants, hardcoded candidates, default drift.",
@@ -649,7 +660,9 @@ def main() -> int:
 
     # Run all four checks
     all_findings: list[Finding] = []
-    all_findings.extend(check_orphan_settings(defaults, app_files, template_files, SETTINGS_SERVICE_FILE, known_orphans, call_sites))
+    all_findings.extend(
+        check_orphan_settings(defaults, app_files, template_files, SETTINGS_SERVICE_FILE, known_orphans, call_sites)
+    )
     all_findings.extend(check_unwired_constants(app_files, allowlist, call_sites))
     all_findings.extend(check_hardcoded_candidates(app_files, allowlist))
     all_findings.extend(check_default_drift(defaults, call_sites))

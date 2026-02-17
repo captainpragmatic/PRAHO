@@ -34,7 +34,7 @@ Notes:
 - **Setup**: Automatic for logged-in users
 
 ### 2. **Token Authentication** 🎫
-- **Use case**: Portal service, mobile apps, CLI tools  
+- **Use case**: Portal service, mobile apps, CLI tools
 - **Method**: Authorization header with token
 - **Setup**: Obtain token via API endpoint
 
@@ -79,7 +79,7 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 ```json
 {
     "user_id": 123,
-    "email": "user@example.com", 
+    "email": "user@example.com",
     "is_staff": false,
     "accessible_customers": [1, 2, 3],
     "full_name": "John Doe"
@@ -180,7 +180,7 @@ if (verifyResponse.status === 401) {
 
 ### **For Users**
 1. **Secure Storage**: Store tokens securely (encrypted storage)
-2. **Limited Scope**: Use tokens only for intended purposes  
+2. **Limited Scope**: Use tokens only for intended purposes
 3. **Revoke Unused**: Revoke tokens when no longer needed
 4. **Monitor Usage**: Check for suspicious API activity
 
@@ -193,13 +193,13 @@ if (verifyResponse.status === 401) {
 # Check token format
 curl -H "Authorization: Token YOUR_TOKEN_HERE" /api/users/token/verify/
 
-# Verify token exists  
+# Verify token exists
 python manage.py shell
 >>> from rest_framework.authtoken.models import Token
 >>> Token.objects.filter(key='YOUR_TOKEN_HERE').exists()
 ```
 
-#### **403 Forbidden**  
+#### **403 Forbidden**
 - User doesn't have access to requested resource
 - Check customer membership permissions
 

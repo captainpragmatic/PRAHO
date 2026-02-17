@@ -28,7 +28,7 @@ class VirtualminValidatorTest(TestCase):
             "a.co",
             "very-long-domain-name-that-is-still-valid.com"
         ]
-        
+
         for domain in valid_domains:
             with self.subTest(domain=domain):
                 # Should not use reserved domains in real tests
@@ -40,14 +40,14 @@ class VirtualminValidatorTest(TestCase):
         """Test reserved domain rejection"""
         reserved_domains = [
             "localhost",
-            "example.com", 
+            "example.com",
             "example.org",
             "example.net",
             "test.local",
             "invalid",
             "local"
         ]
-        
+
         for domain in reserved_domains:
             with self.subTest(domain=domain):
                 with self.assertRaises(ValidationError):
@@ -69,7 +69,7 @@ class VirtualminValidatorTest(TestCase):
             "special!chars.com",
             "under_score.com"  # Underscore not allowed in domain
         ]
-        
+
         for domain in invalid_domains:
             with self.subTest(domain=domain):
                 with self.assertRaises(ValidationError):
@@ -85,7 +85,7 @@ class VirtualminValidatorTest(TestCase):
             "user_with_numbers123",
             "a" * 32  # Maximum length
         ]
-        
+
         for username in valid_usernames:
             with self.subTest(username=username):
                 result = VirtualminValidator.validate_username(username)
@@ -95,7 +95,7 @@ class VirtualminValidatorTest(TestCase):
         """Test reserved username rejection"""
         reserved_usernames = [
             "root",
-            "admin", 
+            "admin",
             "administrator",
             "www",
             "mail",
@@ -106,7 +106,7 @@ class VirtualminValidatorTest(TestCase):
             "nobody",
             "www-data"
         ]
-        
+
         for username in reserved_usernames:
             with self.subTest(username=username):
                 with self.assertRaises(ValidationError):
@@ -126,7 +126,7 @@ class VirtualminValidatorTest(TestCase):
             # Note: USERNAME_PATTERN allows uppercase and numbers at start
             # These patterns are actually valid according to the regex: ^[a-zA-Z0-9_]{3,32}$
         ]
-        
+
         for username in invalid_usernames:
             with self.subTest(username=username):
                 with self.assertRaises(ValidationError):
@@ -136,7 +136,7 @@ class VirtualminValidatorTest(TestCase):
         """Test valid Virtualmin program validation"""
         valid_programs = [
             "create-domain",
-            "delete-domain", 
+            "delete-domain",
             "enable-domain",
             "disable-domain",
             "list-domains",
@@ -145,7 +145,7 @@ class VirtualminValidatorTest(TestCase):
             "delete-user",
             "list-users"
         ]
-        
+
         for program in valid_programs:
             with self.subTest(program=program):
                 result = VirtualminValidator.validate_virtualmin_program(program)
@@ -165,7 +165,7 @@ class VirtualminValidatorTest(TestCase):
             "program|pipe",
             "program&background"
         ]
-        
+
         for program in dangerous_programs:
             with self.subTest(program=program):
                 with self.assertRaises(ValidationError):
@@ -180,7 +180,7 @@ class VirtualminValidatorTest(TestCase):
             "MySecure#Pass1",
             "Test@123Password"
         ]
-        
+
         for password in strong_passwords:
             with self.subTest(password=password):
                 result = VirtualminValidator.validate_password(password)
@@ -192,14 +192,14 @@ class VirtualminValidatorTest(TestCase):
             "",
             "short",  # Too short
             "password",  # No uppercase, digits, special
-            "PASSWORD",  # No lowercase, digits, special  
+            "PASSWORD",  # No lowercase, digits, special
             "12345678",  # No letters, special
             "!!!!!!!!",  # No letters, digits
             "a" * 129,  # Too long
             "onlylower123",  # Missing uppercase and special
             "ONLYUPPER123",  # Missing lowercase and special
         ]
-        
+
         for password in weak_passwords:
             with self.subTest(password=password):
                 with self.assertRaises(ValidationError):
@@ -210,10 +210,10 @@ class VirtualminValidatorTest(TestCase):
         # Valid emails (avoid reserved domains)
         valid_emails = [
             "test@testdomain.ro",
-            "user.name@domain.org", 
+            "user.name@domain.org",
             "user+tag@test.co.uk"
         ]
-        
+
         for email in valid_emails:
             with self.subTest(email=email):
                 result = VirtualminValidator.validate_email(email)
@@ -230,7 +230,7 @@ class VirtualminValidatorTest(TestCase):
             "a" * 250 + "@domain.com",  # Too long
             "user@domain@domain.com"  # Multiple @
         ]
-        
+
         for email in invalid_emails:
             with self.subTest(email=email):
                 with self.assertRaises(ValidationError):
@@ -241,11 +241,11 @@ class VirtualminValidatorTest(TestCase):
         # Valid templates
         valid_templates = [
             "Default",
-            "PHP-Template", 
+            "PHP-Template",
             "Custom_Template",
             "Template123"
         ]
-        
+
         for template in valid_templates:
             with self.subTest(template=template):
                 result = VirtualminValidator.validate_template_name(template)
@@ -262,7 +262,7 @@ class VirtualminValidatorTest(TestCase):
             "Invalid.Template",  # Dot not allowed
             "Invalid@Template"  # Special chars not allowed
         ]
-        
+
         for template in invalid_templates:
             with self.subTest(template=template):
                 with self.assertRaises(ValidationError):
@@ -275,11 +275,11 @@ class VirtualminValidatorTest(TestCase):
         self.assertEqual(VirtualminValidator.validate_quota_mb(None), None)
         # Note: The validator returns 0 for 0 input, not None
         self.assertEqual(VirtualminValidator.validate_quota_mb(0), 0)
-        
+
         # Invalid quotas
         with self.assertRaises(ValidationError):
             VirtualminValidator.validate_quota_mb(-1)
-        
+
         with self.assertRaises(ValidationError):
             VirtualminValidator.validate_quota_mb(1000000000)  # Too large
 
@@ -294,11 +294,11 @@ class VirtualminValidatorTest(TestCase):
             "<script>alert('xss')</script>",
             "'; DROP TABLE users; --"
         ]
-        
+
         for malicious_input in malicious_inputs:
             with self.subTest(input=malicious_input):
                 with self.assertRaises(ValidationError):
                     VirtualminValidator.validate_domain_name(malicious_input)
-                    
+
                 with self.assertRaises(ValidationError):
                     VirtualminValidator.validate_username(malicious_input)

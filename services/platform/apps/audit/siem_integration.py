@@ -27,7 +27,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Final
-from urllib.parse import urljoin
 
 import requests
 from django.conf import settings
@@ -58,7 +57,7 @@ class SIEMSeverity(Enum):
     CRITICAL = 4
 
     @classmethod
-    def from_audit_severity(cls, severity: str) -> "SIEMSeverity":
+    def from_audit_severity(cls, severity: str) -> SIEMSeverity:
         """Convert audit event severity to SIEM severity."""
         mapping = {
             "low": cls.LOW,
@@ -133,10 +132,7 @@ class SIEMEvent:
             if v
         )
 
-        return (
-            f"CEF:0|PRAHO|Platform|1.0|{self.event_type}|"
-            f"{self.description[:100]}|{self.severity}|{extension}"
-        )
+        return f"CEF:0|PRAHO|Platform|1.0|{self.event_type}|" f"{self.description[:100]}|{self.severity}|{extension}"
 
     def to_syslog(self) -> str:
         """Convert to syslog RFC 5424 format."""
@@ -211,7 +207,7 @@ class SIEMIntegrationService:
 
         elif self.config.provider == SIEMProvider.ELASTICSEARCH:
             if self.config.api_key and self.config.api_secret:
-                import base64
+                import base64  # noqa: PLC0415
 
                 credentials = f"{self.config.api_key}:{self.config.api_secret}"
                 encoded = base64.b64encode(credentials.encode()).decode()
@@ -221,9 +217,8 @@ class SIEMIntegrationService:
             # Sumo Logic uses the URL for authentication
             pass
 
-        elif self.config.provider == SIEMProvider.GENERIC_WEBHOOK:
-            if self.config.api_key:
-                headers["Authorization"] = f"Bearer {self.config.api_key}"
+        elif self.config.provider == SIEMProvider.GENERIC_WEBHOOK and self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
 
         # Add custom headers
         headers.update(self.config.custom_headers)
@@ -255,18 +250,13 @@ class SIEMIntegrationService:
             praho_requires_review=audit_event.requires_review,
         )
 
-    def _format_for_provider(
-        self, events: list[SIEMEvent]
-    ) -> tuple[str, dict[str, str]]:
+    def _format_for_provider(self, events: list[SIEMEvent]) -> tuple[str, dict[str, str]]:
         """Format events for specific SIEM provider."""
         headers: dict[str, str] = {}
 
         if self.config.provider == SIEMProvider.SPLUNK:
             # Splunk HEC format
-            payload = "\n".join(
-                json.dumps({"event": event.to_dict(), "time": event.event_time})
-                for event in events
-            )
+            payload = "\n".join(json.dumps({"event": event.to_dict(), "time": event.event_time}) for event in events)
             return payload, headers
 
         elif self.config.provider == SIEMProvider.ELASTICSEARCH:
@@ -342,15 +332,12 @@ class SIEMIntegrationService:
         filtered_events = [
             event
             for event in audit_events
-            if SIEMSeverity.from_audit_severity(event.severity).value
-            >= min_severity_value
+            if SIEMSeverity.from_audit_severity(event.severity).value >= min_severity_value
         ]
 
         # Filter sensitive events if not included
         if not self.config.include_sensitive:
-            filtered_events = [
-                event for event in filtered_events if not event.is_sensitive
-            ]
+            filtered_events = [event for event in filtered_events if not event.is_sensitive]
 
         if not filtered_events:
             logger.debug("No events to send after filtering")
@@ -451,7 +438,7 @@ class SIEMIntegrationService:
                 events_failed += len(batch)
 
         logger.info(
-            f"SIEM export completed",
+            "SIEM export completed",
             extra={
                 "events_sent": events_sent,
                 "events_failed": events_failed,

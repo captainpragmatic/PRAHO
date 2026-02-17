@@ -10,7 +10,7 @@ class InfrastructureConfig(AppConfig):
     name = "apps.infrastructure"
     verbose_name = "Infrastructure Management"
 
-    def ready(self):
+    def ready(self) -> None:
         """Connect signals when app is ready"""
         # Import signals to register them
         from . import signals  # noqa: F401

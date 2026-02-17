@@ -111,20 +111,20 @@
         <div class="p-6">
             <h3 class="text-lg font-medium text-white mb-4">⚡ {% trans "Quick Actions" %}</h3>
             <div class="flex flex-wrap gap-3">
-                <button 
-                    onclick="refreshCache()" 
+                <button
+                    onclick="refreshCache()"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition-all duration-200"
                 >
                     🔄 {% trans "Refresh Cache" %}
                 </button>
-                <a 
-                    href="{% url 'settings:export_settings' %}" 
+                <a
+                    href="{% url 'settings:export_settings' %}"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200"
                 >
                     📥 {% trans "Export Settings" %}
                 </a>
-                <a 
-                    href="{% url 'settings:dashboard' %}" 
+                <a
+                    href="{% url 'settings:dashboard' %}"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200"
                 >
                     📊 {% trans "View Dashboard" %}
@@ -146,9 +146,9 @@ async function refreshCache() {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             // Show success message and reload current tab content
             showToast('✅ Cache refreshed successfully!', 'success');
@@ -169,14 +169,14 @@ function showToast(message, type = 'info') {
     // Simple toast notification - can be enhanced with PRAHO's toast component
     const toast = document.createElement('div');
     toast.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-sm ${
-        type === 'success' ? 'bg-green-600 text-white' : 
-        type === 'error' ? 'bg-red-600 text-white' : 
+        type === 'success' ? 'bg-green-600 text-white' :
+        type === 'error' ? 'bg-red-600 text-white' :
         'bg-blue-600 text-white'
     }`;
     toast.textContent = message;
-    
+
     document.body.appendChild(toast);
-    
+
     // Auto-remove after 5 seconds
     setTimeout(() => {
         toast.remove();
@@ -189,16 +189,16 @@ document.addEventListener('htmx:afterRequest', function(event) {
         // Update active tab styling
         const currentUrl = new URL(event.detail.requestConfig.path, window.location.origin);
         const categoryMatch = currentUrl.pathname.match(/\/manage\/category\/([^\/]+)\//);
-        
+
         if (categoryMatch) {
             const activeCategory = categoryMatch[1];
-            
+
             // Remove active state from all tabs
             document.querySelectorAll('.tab-button').forEach(tab => {
                 tab.classList.remove('border-blue-500', 'text-blue-400');
                 tab.classList.add('border-transparent', 'text-slate-400');
             });
-            
+
             // Add active state to current tab
             const currentTab = document.querySelector(`[data-category="${activeCategory}"]`);
             if (currentTab) {

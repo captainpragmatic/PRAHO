@@ -13,19 +13,21 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
-from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import models
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+WARNING_USAGE_PERCENT = 80.0
+DECEMBER = 12
+
 
 T = TypeVar("T")
 
@@ -76,7 +78,7 @@ class CustomerQuota:
     @property
     def is_warning(self) -> bool:
         """Check if quota is approaching limit (80%)."""
-        return self.usage_percentage >= 80.0
+        return self.usage_percentage >= WARNING_USAGE_PERCENT
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -252,10 +254,7 @@ class QuotaEnforcer:
         cache.set(cache_key, limit, None)  # No timeout for custom limits
         self._custom_quotas[(customer_id, quota_type)] = limit
 
-        logger.info(
-            f"Custom quota set: customer={customer_id}, "
-            f"type={quota_type.value}, limit={limit}"
-        )
+        logger.info(f"Custom quota set: customer={customer_id}, " f"type={quota_type.value}, limit={limit}")
 
     def reset_usage(
         self,
@@ -272,7 +271,7 @@ class QuotaEnforcer:
                 cache_key = f"{self.CACHE_PREFIX}:usage:{customer_id}:{qt.value}"
                 cache.delete(cache_key)
 
-    def _calculate_usage_from_db(
+    def _calculate_usage_from_db(  # noqa: PLR0911
         self,
         customer_id: int,
         quota_type: QuotaType,
@@ -281,20 +280,25 @@ class QuotaEnforcer:
         # Import models here to avoid circular imports
         try:
             if quota_type == QuotaType.SERVICES:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
+
                 return Service.objects.filter(
                     customer_id=customer_id,
                     status__in=["active", "pending", "provisioning"],
                 ).count()
 
             elif quota_type == QuotaType.DOMAINS:
-                from apps.provisioning.models import ServiceDomain
+                from apps.provisioning.models import (  # noqa: PLC0415
+                    ServiceDomain,
+                )
+
                 return ServiceDomain.objects.filter(
                     service__customer_id=customer_id,
                 ).count()
 
             elif quota_type == QuotaType.STORAGE_MB:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -302,7 +306,8 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.BANDWIDTH_MB:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -310,7 +315,8 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.EMAIL_ACCOUNTS:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -318,7 +324,8 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.DATABASES:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import Service  # noqa: PLC0415
+
                 total = Service.objects.filter(
                     customer_id=customer_id,
                     status="active",
@@ -330,7 +337,8 @@ class QuotaEnforcer:
                 return 0
 
             elif quota_type == QuotaType.USERS:
-                from apps.users.models import CustomerMembership
+                from apps.users.models import CustomerMembership  # noqa: PLC0415
+
                 return CustomerMembership.objects.filter(
                     customer_id=customer_id,
                 ).count()
@@ -347,13 +355,13 @@ class QuotaEnforcer:
         # API requests reset monthly
         if quota_type == QuotaType.API_REQUESTS:
             # First day of next month
-            if now.month == 12:
+            if now.month == DECEMBER:
                 return now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0)
             return now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0)
 
         # Bandwidth resets monthly
         if quota_type == QuotaType.BANDWIDTH_MB:
-            if now.month == 12:
+            if now.month == DECEMBER:
                 return now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0)
             return now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0)
 
@@ -367,7 +375,7 @@ _quota_enforcer: QuotaEnforcer | None = None
 
 def get_quota_enforcer() -> QuotaEnforcer:
     """Get the global quota enforcer instance."""
-    global _quota_enforcer
+    global _quota_enforcer  # noqa: PLW0603
     if _quota_enforcer is None:
         _quota_enforcer = QuotaEnforcer()
     return _quota_enforcer
@@ -380,9 +388,7 @@ def check_quota(
     tier: str = "basic",
 ) -> tuple[bool, CustomerQuota]:
     """Check if a customer has sufficient quota."""
-    return get_quota_enforcer().check_quota(
-        customer_id, quota_type, required_amount, tier
-    )
+    return get_quota_enforcer().check_quota(customer_id, quota_type, required_amount, tier)
 
 
 def get_customer_usage(customer_id: int, tier: str = "basic") -> list[CustomerQuota]:
@@ -391,6 +397,7 @@ def get_customer_usage(customer_id: int, tier: str = "basic") -> list[CustomerQu
 
 
 # Decorators for quota enforcement
+
 
 def enforce_quota(
     quota_type: QuotaType,
@@ -409,6 +416,7 @@ def enforce_quota(
         def create_service(request):
             ...
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
@@ -447,6 +455,7 @@ def enforce_quota(
             return func(request, *args, **kwargs)
 
         return wrapper
+
     return decorator
 
 
@@ -455,6 +464,7 @@ def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
     Decorator to track API request usage for quota purposes.
     Lighter weight than enforce_quota - just tracks, doesn't block.
     """
+
     @functools.wraps(func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         # Get customer ID
@@ -464,9 +474,7 @@ def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
 
         # Track usage
         if customer_id:
-            get_quota_enforcer().increment_usage(
-                customer_id, QuotaType.API_REQUESTS, 1
-            )
+            get_quota_enforcer().increment_usage(customer_id, QuotaType.API_REQUESTS, 1)
 
         return func(request, *args, **kwargs)
 
@@ -474,6 +482,7 @@ def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
 
 
 # Customer isolation utilities
+
 
 class CustomerIsolationMixin:
     """
@@ -488,11 +497,11 @@ class CustomerIsolationMixin:
             objects = ServiceQuerySet.as_manager()
     """
 
-    def for_customer(self, customer_id: int) -> "models.QuerySet[Any]":
+    def for_customer(self, customer_id: int) -> models.QuerySet[Any]:
         """Filter queryset by customer ID."""
         return self.filter(customer_id=customer_id)  # type: ignore[attr-defined]
 
-    def for_request(self, request: HttpRequest) -> "models.QuerySet[Any]":
+    def for_request(self, request: HttpRequest) -> models.QuerySet[Any]:
         """Filter queryset by customer from request."""
         customer_id = getattr(request, "current_customer_id", None)
         if customer_id is None:

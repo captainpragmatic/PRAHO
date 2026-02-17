@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Scan test files for error suppression patterns that hide real bugs.
 
@@ -56,6 +55,7 @@ LOW = "low"
 
 # ─── Finding dataclass ───────────────────────────────────────────────────────
 
+
 @dataclass
 class Finding:
     file: str
@@ -76,10 +76,10 @@ RULES: list[dict] = [
         "severity": CRITICAL,
         "regex": r"ignore_patterns\s*=\s*\[",
         "message": "ignore_patterns suppresses real errors in E2E monitors. "
-                   "Fix the root cause in application code or test logic instead.",
+        "Fix the root cause in application code or test logic instead.",
         "fix_hint": "Remove ignore_patterns and fix the underlying issue. "
-                    "If the error comes from rate limiting, use RATELIMIT_ENABLE=false. "
-                    "If from HMAC, check staff session fallback in middleware.",
+        "If the error comes from rate limiting, use RATELIMIT_ENABLE=false. "
+        "If from HMAC, check staff session fallback in middleware.",
     },
     {
         "id": "TS002",
@@ -87,9 +87,9 @@ RULES: list[dict] = [
         "severity": CRITICAL,
         "regex": r"ignore_console_patterns\s*=\s*\[",
         "message": "ignore_console_patterns hides JavaScript console errors. "
-                   "These may indicate real frontend bugs visible to users.",
+        "These may indicate real frontend bugs visible to users.",
         "fix_hint": "Fix the console error source. Common causes: missing API endpoints, "
-                    "CORS issues, broken fetch() calls without HMAC headers.",
+        "CORS issues, broken fetch() calls without HMAC headers.",
     },
     {
         "id": "TS003",
@@ -97,9 +97,9 @@ RULES: list[dict] = [
         "severity": HIGH,
         "regex": r"@pytest\.mark\.skip\b(?!.*(?:issue|ticket|bug|TODO|FIXME|http))",
         "message": "Test skipped without linking to a tracking issue. "
-                   "Skipped tests accumulate and hide regressions.",
+        "Skipped tests accumulate and hide regressions.",
         "fix_hint": "Either fix the test or add a skip reason with an issue link: "
-                    '@pytest.mark.skip(reason="See issue #123")',
+        '@pytest.mark.skip(reason="See issue #123")',
     },
     {
         "id": "TS004",
@@ -115,7 +115,7 @@ RULES: list[dict] = [
         "severity": MEDIUM,
         "regex": r"@pytest\.mark\.xfail\b(?!.*strict\s*=\s*True)",
         "message": "xfail without strict=True silently passes if the test starts working. "
-                   "This hides when bugs are fixed.",
+        "This hides when bugs are fixed.",
         "fix_hint": "Add strict=True: @pytest.mark.xfail(strict=True, reason='...')",
     },
     {
@@ -124,8 +124,7 @@ RULES: list[dict] = [
         "severity": MEDIUM,
         "regex": r"except\s*:\s*\n\s*(pass|continue|return\s+(?:None|False))",
         "multiline": True,
-        "message": "Bare except clause silently swallows all errors in test code. "
-                   "This hides real failures.",
+        "message": "Bare except clause silently swallows all errors in test code. " "This hides real failures.",
         "fix_hint": "Catch specific exceptions, or let the error propagate to fail the test.",
     },
     {
@@ -157,6 +156,7 @@ RULES: list[dict] = [
 
 # ─── Scanner ──────────────────────────────────────────────────────────────────
 
+
 def scan_file(filepath: Path) -> list[Finding]:
     """Scan a single test file for suppression patterns."""
     findings: list[Finding] = []
@@ -173,30 +173,34 @@ def scan_file(filepath: Path) -> list[Finding]:
             # Multi-line rules match against the full file content
             pattern = re.compile(rule["regex"], re.MULTILINE)
             for match in pattern.finditer(content):
-                line_num = content[:match.start()].count("\n") + 1
+                line_num = content[: match.start()].count("\n") + 1
                 matched_line = lines[line_num - 1] if line_num <= len(lines) else ""
-                findings.append(Finding(
-                    file=relative_path,
-                    line=line_num,
-                    severity=rule["severity"],
-                    pattern=rule["id"],
-                    code=matched_line.strip(),
-                    message=rule["message"],
-                    fix_hint=rule["fix_hint"],
-                ))
+                findings.append(
+                    Finding(
+                        file=relative_path,
+                        line=line_num,
+                        severity=rule["severity"],
+                        pattern=rule["id"],
+                        code=matched_line.strip(),
+                        message=rule["message"],
+                        fix_hint=rule["fix_hint"],
+                    )
+                )
         else:
             pattern = re.compile(rule["regex"])
             for i, line in enumerate(lines, start=1):
                 if pattern.search(line):
-                    findings.append(Finding(
-                        file=relative_path,
-                        line=i,
-                        severity=rule["severity"],
-                        pattern=rule["id"],
-                        code=line.strip(),
-                        message=rule["message"],
-                        fix_hint=rule["fix_hint"],
-                    ))
+                    findings.append(
+                        Finding(
+                            file=relative_path,
+                            line=i,
+                            severity=rule["severity"],
+                            pattern=rule["id"],
+                            code=line.strip(),
+                            message=rule["message"],
+                            fix_hint=rule["fix_hint"],
+                        )
+                    )
 
     return findings
 
@@ -219,6 +223,7 @@ def scan_all() -> list[Finding]:
 
 
 # ─── Output formatters ───────────────────────────────────────────────────────
+
 
 def format_text(findings: list[Finding], *, show_hints: bool = False) -> str:
     """Format findings as human-readable text."""
@@ -268,6 +273,7 @@ def format_json(findings: list[Finding]) -> str:
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(

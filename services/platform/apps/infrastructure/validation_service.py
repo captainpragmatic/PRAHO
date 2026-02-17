@@ -15,7 +15,7 @@ import logging
 import socket
 import ssl
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import paramiko
 
@@ -63,7 +63,7 @@ class NodeValidationService:
     """
 
     # Required ports for a Virtualmin hosting server
-    REQUIRED_PORTS = [
+    REQUIRED_PORTS: ClassVar[list] = [
         (22, "SSH"),
         (80, "HTTP"),
         (443, "HTTPS"),
@@ -71,7 +71,7 @@ class NodeValidationService:
     ]
 
     # Optional ports (warn if not open)
-    OPTIONAL_PORTS = [
+    OPTIONAL_PORTS: ClassVar[list] = [
         (25, "SMTP"),
         (993, "IMAPS"),
         (995, "POP3S"),
@@ -139,11 +139,7 @@ class NodeValidationService:
         passed_count = sum(1 for r in results if r.passed)
         total_count = len(results)
 
-        summary = (
-            f"All {total_count} checks passed"
-            if all_passed
-            else f"{passed_count}/{total_count} checks passed"
-        )
+        summary = f"All {total_count} checks passed" if all_passed else f"{passed_count}/{total_count} checks passed"
 
         report = NodeValidationReport(
             deployment_id=deployment.id,
@@ -186,10 +182,10 @@ class NodeValidationService:
 
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507
 
             # Load private key
-            import io
+            import io  # noqa: PLC0415
 
             key_file = io.StringIO(private_key_content)
             pkey = paramiko.Ed25519Key.from_private_key(key_file)
@@ -206,7 +202,7 @@ class NodeValidationService:
             )
 
             # Test command execution
-            stdin, stdout, stderr = client.exec_command("hostname", timeout=self.timeout)
+            _stdin, stdout, _stderr = client.exec_command("hostname", timeout=self.timeout)
             output = stdout.read().decode().strip()
             client.close()
 
@@ -229,7 +225,7 @@ class NodeValidationService:
                 passed=False,
                 message=f"SSH connection failed: {e}",
             )
-        except socket.timeout:
+        except TimeoutError:
             return ValidationResult(
                 check_name="ssh",
                 passed=False,
@@ -272,10 +268,10 @@ class NodeValidationService:
             },
         )
 
-    def _check_virtualmin(self, deployment: NodeDeployment) -> ValidationResult:
+    def _check_virtualmin(self, deployment: NodeDeployment) -> ValidationResult:  # noqa: PLR0911
         """Check Virtualmin API is accessible"""
-        import urllib.request
-        import urllib.error
+        import urllib.error  # noqa: PLC0415
+        import urllib.request  # noqa: PLC0415
 
         url = f"https://{deployment.ipv4_address}:10000/"
 
@@ -285,10 +281,10 @@ class NodeValidationService:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
 
-            request = urllib.request.Request(url, method="HEAD")
+            request = urllib.request.Request(url, method="HEAD")  # noqa: S310
             request.add_header("User-Agent", "PRAHO-Validation/1.0")
 
-            with urllib.request.urlopen(request, timeout=self.timeout, context=ctx) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=ctx) as response:  # noqa: S310
                 status_code = response.getcode()
 
                 # Webmin typically returns 200 or 401 (needs auth)
@@ -327,7 +323,7 @@ class NodeValidationService:
                 passed=False,
                 message=f"Connection failed: {e.reason}",
             )
-        except socket.timeout:
+        except TimeoutError:
             return ValidationResult(
                 check_name="virtualmin",
                 passed=False,
@@ -347,29 +343,28 @@ class NodeValidationService:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
 
-            with socket.create_connection(
-                (deployment.ipv4_address, 10000), timeout=self.timeout
-            ) as sock:
-                with context.wrap_socket(sock) as ssock:
-                    cert = ssock.getpeercert(binary_form=False)
+            with (
+                socket.create_connection((deployment.ipv4_address, 10000), timeout=self.timeout) as sock,
+                context.wrap_socket(sock) as ssock,
+            ):
+                cert = ssock.getpeercert(binary_form=False)
 
-                    # Even with self-signed, we want SSL working
-                    if cert or ssock.version():
-                        return ValidationResult(
-                            check_name="ssl",
-                            passed=True,
-                            message=f"SSL/TLS enabled ({ssock.version()})",
-                            details={
-                                "protocol": ssock.version(),
-                                "cipher": ssock.cipher(),
-                            },
-                        )
-                    else:
-                        return ValidationResult(
-                            check_name="ssl",
-                            passed=True,
-                            message="SSL/TLS enabled (self-signed certificate)",
-                        )
+                # Even with self-signed, we want SSL working
+                if cert or ssock.version():
+                    return ValidationResult(
+                        check_name="ssl",
+                        passed=True,
+                        message=f"SSL/TLS enabled ({ssock.version()})",
+                        details={
+                            "protocol": ssock.version(),
+                            "cipher": ssock.cipher(),
+                        },
+                    )
+                return ValidationResult(
+                    check_name="ssl",
+                    passed=True,
+                    message="SSL/TLS enabled (self-signed certificate)",
+                )
 
         except ssl.SSLError as e:
             return ValidationResult(
@@ -377,7 +372,7 @@ class NodeValidationService:
                 passed=False,
                 message=f"SSL error: {e}",
             )
-        except socket.timeout:
+        except TimeoutError:
             return ValidationResult(
                 check_name="ssl",
                 passed=False,
@@ -421,7 +416,7 @@ _validation_service: NodeValidationService | None = None
 
 def get_validation_service() -> NodeValidationService:
     """Get global validation service instance"""
-    global _validation_service
+    global _validation_service  # noqa: PLW0603
     if _validation_service is None:
         _validation_service = NodeValidationService()
     return _validation_service

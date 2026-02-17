@@ -20,7 +20,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -33,9 +33,11 @@ from apps.common.validators import log_security_event
 from apps.settings.services import SettingsService
 
 from .models import (
+    ProvisioningTask,
     Server,
     Service,
     ServiceDomain,
+    ServiceGroup,
     ServicePlan,
 )
 from .security_utils import (
@@ -63,12 +65,152 @@ _DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD = 85  # 85% resource usage alert thresho
 _DEFAULT_SERVER_OVERLOAD_THRESHOLD = 90  # 90% resource usage threshold
 _DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES = 30  # 30 minutes for provisioning timeout
 
+
+def get_resource_usage_alert_threshold() -> int:
+    """Get resource usage alert threshold from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "provisioning.resource_usage_alert_threshold", _DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD
+    )
+
+
+def get_server_overload_threshold() -> int:
+    """Get server overload threshold from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "provisioning.server_overload_threshold", _DEFAULT_SERVER_OVERLOAD_THRESHOLD
+    )
+
+
+def get_long_provisioning_threshold_minutes() -> int:
+    """Get long provisioning threshold from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "provisioning.long_provisioning_threshold_minutes", _DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES
+    )
+
+
 # Structural constants (not configurable via SettingsService)
 ENTERPRISE_DISK_THRESHOLD = 100  # 100 GB threshold for enterprise plans
 MAX_SERVICES_WARNING_THRESHOLD = 0.8  # 80% of max services capacity
 PRICE_CHANGE_DETECTION_THRESHOLD = 0.01  # Minimum price change detection (1 cent)
 SIGNIFICANT_PRICE_CHANGE_PERCENTAGE = 25  # 25% price change threshold for security alerts
 CRITICAL_SERVICE_DOWNTIME_THRESHOLD = 5  # 5 minutes critical service downtime
+
+# ===============================================================================
+# MODEL LIFECYCLE COVERAGE SIGNALS
+# ===============================================================================
+
+
+def _log_provisioning_model_event(  # noqa: PLR0913
+    *,
+    event_type: str,
+    instance: Any,
+    description: str,
+    new_values: dict[str, Any] | None = None,
+    old_values: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Log lightweight provisioning model lifecycle events."""
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+
+    try:
+        event_metadata = {
+            "source_app": "provisioning",
+            "model_lifecycle": True,
+        }
+        if metadata:
+            event_metadata.update(metadata)
+
+        AuditService.log_event(
+            AuditEventData(
+                event_type=event_type,
+                content_object=instance,
+                old_values=old_values or {},
+                new_values=new_values or {},
+                description=description,
+            ),
+            context=AuditContext(actor_type="system", metadata=event_metadata),
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Provisioning Lifecycle] Failed to log {event_type}: {e}")
+
+
+@receiver(post_save, sender=ProvisioningTask)
+def audit_provisioning_task_lifecycle(
+    sender: type[ProvisioningTask], instance: ProvisioningTask, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for ProvisioningTask model."""
+    event_type = "provisioning_task_created" if created else "provisioning_task_updated"
+    _log_provisioning_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Provisioning task {instance.id} {'created' if created else 'updated'}",
+        new_values={
+            "task_id": str(instance.id),
+            "service_id": str(instance.service_id),
+            "task_type": instance.task_type,
+            "status": instance.status,
+            "retry_count": instance.retry_count,
+        },
+        metadata={"model": "ProvisioningTask"},
+    )
+
+
+@receiver(pre_delete, sender=ProvisioningTask)
+def audit_provisioning_task_deleted(sender: type[ProvisioningTask], instance: ProvisioningTask, **kwargs: Any) -> None:
+    """Audit deletion events for ProvisioningTask model."""
+    _log_provisioning_model_event(
+        event_type="provisioning_task_deleted",
+        instance=instance,
+        description=f"Provisioning task {instance.id} deleted",
+        old_values={
+            "task_id": str(instance.id),
+            "service_id": str(instance.service_id),
+            "task_type": instance.task_type,
+            "status": instance.status,
+            "retry_count": instance.retry_count,
+        },
+        metadata={"model": "ProvisioningTask"},
+    )
+
+
+@receiver(post_save, sender=ServiceGroup)
+def audit_service_group_lifecycle(
+    sender: type[ServiceGroup], instance: ServiceGroup, created: bool, **kwargs: Any
+) -> None:
+    """Audit lifecycle events for ServiceGroup model."""
+    event_type = "service_group_created" if created else "service_group_updated"
+    _log_provisioning_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Service group '{instance.name}' {'created' if created else 'updated'}",
+        new_values={
+            "group_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "name": instance.name,
+            "group_type": instance.group_type,
+            "status": instance.status,
+        },
+        metadata={"model": "ServiceGroup"},
+    )
+
+
+@receiver(pre_delete, sender=ServiceGroup)
+def audit_service_group_deleted(sender: type[ServiceGroup], instance: ServiceGroup, **kwargs: Any) -> None:
+    """Audit deletion events for ServiceGroup model."""
+    _log_provisioning_model_event(
+        event_type="service_group_deleted",
+        instance=instance,
+        description=f"Service group '{instance.name}' deleted",
+        old_values={
+            "group_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "name": instance.name,
+            "group_type": instance.group_type,
+            "status": instance.status,
+        },
+        metadata={"model": "ServiceGroup"},
+    )
+
 
 # ===============================================================================
 # SERVICE PLAN SIGNALS
@@ -341,9 +483,11 @@ def _handle_new_service_plan_creation(instance: ServicePlan) -> None:
                 "source_app": "provisioning",
                 "compliance_event": True,
                 "pricing_event": True,
-                "high_value_plan": float(instance.price_monthly) >= SettingsService.get_integer_setting(
+                "high_value_plan": float(instance.price_monthly)
+                >= SettingsService.get_integer_setting(
                     "provisioning.high_value_plan_threshold_cents", _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS
-                ) / 100,
+                )
+                / 100,
                 "enterprise_plan": (instance.disk_space_gb and instance.disk_space_gb >= ENTERPRISE_DISK_THRESHOLD),
             },
         ),
@@ -416,9 +560,11 @@ def _handle_new_service_creation(instance: Service) -> None:
                 "service_lifecycle": True,
                 "customer_id": str(instance.customer.id),
                 "billing_cycle": instance.billing_cycle,
-                "high_value_service": float(instance.price) >= SettingsService.get_integer_setting(
+                "high_value_service": float(instance.price)
+                >= SettingsService.get_integer_setting(
                     "provisioning.high_value_plan_threshold_cents", _DEFAULT_HIGH_VALUE_PLAN_THRESHOLD_CENTS
-                ) / 100,
+                )
+                / 100,
             },
         ),
     )
@@ -519,7 +665,7 @@ def _validate_service_for_provisioning(service: Service) -> bool:
 
 def _check_existing_virtualmin_account(service: Service) -> bool:
     """Check if service already has a VirtualMin account."""
-    if hasattr(service, 'virtualmin_account') and service.virtualmin_account:
+    if hasattr(service, "virtualmin_account") and service.virtualmin_account:
         logger.info(f"⏭️ [AutoProvisioning] VirtualMin account already exists for {service.service_name}")
         return True
     return False
@@ -540,40 +686,31 @@ def _validate_provisioning_parameters(service_id_str: str, primary_domain: str) 
         validated_service_id = ProvisioningParametersValidator.validate_service_id(service_id_str)
         validated_domain = ProvisioningParametersValidator.validate_domain(primary_domain)
         validated_template = ProvisioningParametersValidator.validate_template(DEFAULT_TEMPLATE_NAME)
-        
-        return True, {
-            "service_id": validated_service_id,
-            "domain": validated_domain,
-            "template": validated_template
-        }
+
+        return True, {"service_id": validated_service_id, "domain": validated_domain, "template": validated_template}
     except Exception as validation_error:
         logger.error(f"❌ [AutoProvisioning] Parameter validation failed: {validation_error}")
         log_security_event_safe(
-            "virtualmin_parameter_validation_failed", 
+            "virtualmin_parameter_validation_failed",
             {"error": str(validation_error), "original_domain": primary_domain},
             service_id_str,
-            primary_domain
+            primary_domain,
         )
         return False, {}
 
 
 def _handle_idempotency_check(service_id: str, operation_params: dict[str, Any]) -> tuple[bool, str | None]:
     """Handle idempotency check for the operation."""
-    idempotency_key = IdempotencyManager.generate_key(
-        service_id, 
-        "auto_provision", 
-        operation_params
+    idempotency_key = IdempotencyManager.generate_key(service_id, "auto_provision", operation_params)
+
+    is_new, _existing_result = IdempotencyManager.check_and_set(
+        idempotency_key, {"status": "in_progress", "started_at": timezone.now().isoformat()}
     )
-    
-    is_new, existing_result = IdempotencyManager.check_and_set(
-        idempotency_key,
-        {"status": "in_progress", "started_at": timezone.now().isoformat()}
-    )
-    
+
     if not is_new:
         logger.info(f"⏭️ [AutoProvisioning] Operation already in progress (key: {idempotency_key[:16]}...)")
         return False, idempotency_key
-        
+
     return True, idempotency_key
 
 
@@ -597,12 +734,14 @@ def _prepare_secure_parameters(validated_params: dict[str, str]) -> tuple[bool, 
             "virtualmin_parameter_encryption_failed",
             {"error": str(encryption_error)},
             validated_params["service_id"],
-            validated_params["domain"]
+            validated_params["domain"],
         )
         return False, None
 
 
-def _schedule_provisioning_task(secure_params: SecureTaskParameters, validated_params: dict[str, str]) -> tuple[bool, str | None]:
+def _schedule_provisioning_task(
+    secure_params: SecureTaskParameters, validated_params: dict[str, str]
+) -> tuple[bool, str | None]:
     """Schedule the async provisioning task."""
     try:
         task_id = provision_virtualmin_account_async(secure_params)
@@ -613,7 +752,7 @@ def _schedule_provisioning_task(secure_params: SecureTaskParameters, validated_p
             "virtualmin_task_scheduling_failed",
             {"error": str(task_error)},
             validated_params["service_id"],
-            validated_params["domain"]
+            validated_params["domain"],
         )
         return False, None
 
@@ -657,20 +796,20 @@ def _log_audit_event(service: Service, audit_data: dict[str, Any]) -> None:
 def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
     """
     Trigger automatic VirtualMin account creation when service becomes active.
-    
+
     SECURITY FIXES APPLIED:
     1. Race condition protection with atomic database operations
     2. Input validation and sanitization for all parameters
     3. Secure parameter handling with encryption
     4. Proper error classification and state management
     5. Idempotency key management to prevent duplicate operations
-    
+
     Args:
         service: The Service instance that became active
     """
     service_id_str = str(service.id)
     correlation_id = f"auto_provision_{service_id_str}"
-    
+
     # Initialize secure logging context
     safe_log_ctx = {
         "service_id": service_id_str,
@@ -678,7 +817,7 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
         "customer_id": str(service.customer.id),
         "correlation_id": correlation_id,
     }
-    
+
     try:
         # Step 1-3: Validate service requirements and setup
         if not _validate_service_for_provisioning(service):
@@ -687,34 +826,38 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
         # Step 2: RACE CONDITION FIX - Use atomic transaction with select_for_update
         with transaction.atomic():
             # Lock the service row to prevent concurrent provisioning attempts
-            locked_service = Service.objects.select_for_update().select_related('customer').get(id=service.id)
-            
+            locked_service = Service.objects.select_for_update().select_related("customer").get(id=service.id)
+
             # Perform all validation checks within transaction
             if _check_existing_virtualmin_account(locked_service):
                 return
 
             primary_domain = _get_and_validate_primary_domain(locked_service)
-            is_valid, validated_params = _validate_provisioning_parameters(service_id_str, primary_domain) if primary_domain else (False, {})
-            
+            is_valid, validated_params = (
+                _validate_provisioning_parameters(service_id_str, primary_domain) if primary_domain else (False, {})
+            )
+
             # Early exit for any validation failures
             if not primary_domain or not is_valid:
                 return
-                
+
             safe_log_ctx["domain"] = validated_params["domain"]
 
             # Step 4-5: Idempotency check and parameter preparation
             operation_params = {**validated_params, "operation": "auto_provision"}
-            is_new_operation, idempotency_key = _handle_idempotency_check(validated_params["service_id"], operation_params)
-            
+            is_new_operation, idempotency_key = _handle_idempotency_check(
+                validated_params["service_id"], operation_params
+            )
+
             if not is_new_operation:
                 return
-            
+
             params_prepared, secure_params = _prepare_secure_parameters(validated_params)
             if not params_prepared or secure_params is None:
                 if idempotency_key:
                     IdempotencyManager.clear(idempotency_key)
                 return
-                
+
             safe_log_ctx["parameter_hash"] = secure_params.parameter_hash[:16]
 
         # Step 6: Schedule async provisioning task (outside transaction to avoid deadlock)
@@ -723,17 +866,15 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
             if idempotency_key:
                 IdempotencyManager.clear(idempotency_key)
             return
-            
+
         safe_log_ctx["task_id"] = task_id
 
         # Step 7: Update idempotency with task ID
         if idempotency_key:
-            IdempotencyManager.complete(idempotency_key, {
-            "status": "scheduled",
-            "task_id": task_id,
-            "scheduled_at": timezone.now().isoformat()
-        })
-        
+            IdempotencyManager.complete(
+                idempotency_key, {"status": "scheduled", "task_id": task_id, "scheduled_at": timezone.now().isoformat()}
+            )
+
         # Step 8: Secure audit logging
         assert secure_params is not None  # We checked earlier and returned if None
         audit_data = {
@@ -742,18 +883,20 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
             "service_id": validated_params["service_id"],
             "idempotency_key": idempotency_key,
             "parameter_hash": secure_params.parameter_hash,
-            "correlation_id": correlation_id
+            "correlation_id": correlation_id,
         }
         _log_audit_event(service, audit_data)
 
         # Success logging
-        logger.info(f"🚀 [AutoProvisioning] Scheduled secure VirtualMin provisioning: {sanitize_log_parameters(safe_log_ctx)}")
+        logger.info(
+            f"🚀 [AutoProvisioning] Scheduled secure VirtualMin provisioning: {sanitize_log_parameters(safe_log_ctx)}"
+        )
 
     except Exception as e:
         error_type = ProvisioningErrorClassifier.classify_error(str(e))
-        
+
         logger.error(f"🔥 [AutoProvisioning] Critical error in secure provisioning: {e}")
-        
+
         # Log security event for critical errors
         log_security_event_safe(
             "virtualmin_auto_provisioning_critical_error",
@@ -762,9 +905,9 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
                 "error_type": error_type.value,
                 "context": safe_log_ctx,
             },
-            service_id_str
+            service_id_str,
         )
-        
+
         # Clear any partial idempotency state
-        if 'idempotency_key' in locals() and idempotency_key:
+        if "idempotency_key" in locals() and idempotency_key:
             IdempotencyManager.clear(idempotency_key)

@@ -406,7 +406,9 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
         super().__init__(*args, **kwargs)
 
         # Filter servers to only active ones
-        cast("forms.ModelChoiceField[VirtualminServer]", self.fields["server"]).queryset = VirtualminServer.objects.filter(status="active")
+        cast(
+            "forms.ModelChoiceField[VirtualminServer]", self.fields["server"]
+        ).queryset = VirtualminServer.objects.filter(status="active")
 
         # Make some fields required
         self.fields["domain"].required = True

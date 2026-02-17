@@ -8,7 +8,7 @@ Provides temporary notification messages with auto-dismiss.
 <div class="toast fixed top-4 right-4 z-50 max-w-sm w-full bg-white shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden transform translate-x-full transition-transform duration-300 ease-in-out"
      {% if toast_id %}id="{{ toast_id }}"{% endif %}
      {% if auto_dismiss and auto_dismiss > 0 %}data-auto-dismiss="{{ auto_dismiss }}"{% endif %}>
-  
+
   <div class="p-4">
     <div class="flex items-start">
       <div class="flex-shrink-0">
@@ -22,13 +22,13 @@ Provides temporary notification messages with auto-dismiss.
           <div class="text-blue-400 text-lg">ℹ️</div>
         {% endif %}
       </div>
-      
+
       <div class="ml-3 w-0 flex-1">
         <p class="text-sm font-medium text-slate-900">
           {{ message }}
         </p>
       </div>
-      
+
       {% if dismissible %}
       <div class="ml-4 flex-shrink-0 flex">
         <button class="toast-dismiss bg-white rounded-md inline-flex text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
@@ -41,7 +41,7 @@ Provides temporary notification messages with auto-dismiss.
       {% endif %}
     </div>
   </div>
-  
+
   {% if variant == 'success' %}
   <div class="h-1 bg-green-500"></div>
   {% elif variant == 'error' %}
@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const toast = document.querySelector('.toast');
   if (toast) {
     setTimeout(() => toast.classList.remove('translate-x-full'), 100);
-    
+
     // Auto-dismiss
     const autoDismiss = toast.dataset.autoDismiss;
     if (autoDismiss && autoDismiss > 0) {
@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => toast.remove(), 300);
       }, parseInt(autoDismiss));
     }
-    
+
     // Manual dismiss
     const dismissBtn = toast.querySelector('.toast-dismiss');
     if (dismissBtn) {

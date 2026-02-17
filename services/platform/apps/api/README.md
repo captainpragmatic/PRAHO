@@ -73,7 +73,7 @@ Get services for a specific customer (placeholder - returns empty list).
 
 *Coming soon - Romanian VAT-compliant billing endpoints*
 
-### Ticket APIs  
+### Ticket APIs
 
 *Coming soon - Support ticket and SLA management endpoints*
 
@@ -90,7 +90,7 @@ The API returns standard HTTP status codes with JSON error messages:
 Common status codes:
 - `400`: Bad Request - Invalid parameters
 - `401`: Unauthorized - Authentication required
-- `403`: Forbidden - Access denied  
+- `403`: Forbidden - Access denied
 - `429`: Too Many Requests - Rate limit exceeded
 - `500`: Internal Server Error
 
@@ -112,7 +112,7 @@ All API endpoints should extend the base classes in `apps/api/core/`:
 
 These provide consistent:
 - Authentication & permissions
-- Rate limiting  
+- Rate limiting
 - Pagination
 - Error handling
 
@@ -126,7 +126,7 @@ from .serializers import CustomerSerializer
 class CustomerViewSet(BaseAPIViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
-    
+
     def get_queryset(self):
         # Filter based on user access
         user = self.request.user
@@ -136,14 +136,14 @@ class CustomerViewSet(BaseAPIViewSet):
 ## Migration Status
 
 ✅ **Completed:**
-- Customer search API (migrated from `apps.customers.customer_views.customer_search_api`)  
+- Customer search API (migrated from `apps.customers.customer_views.customer_search_api`)
 - Customer services API (migrated from `apps.customers.customer_views.customer_services_api`)
 - Base API infrastructure
 - URL routing and configuration
 
 🔄 **In Progress:**
 - Billing API endpoints
-- Ticket API endpoints  
+- Ticket API endpoints
 - API documentation generation
 
 📋 **Planned:**

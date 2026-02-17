@@ -43,7 +43,7 @@ class Command(BaseCommand):
         # STEP 1: GET OR CREATE PROVISIONING CATEGORY 🔧
         # =====================================================================================
 
-        provisioning_category, created = SettingCategory.objects.get_or_create(
+        _provisioning_category, created = SettingCategory.objects.get_or_create(
             key="provisioning",
             defaults={
                 "name": "Provisioning",
@@ -318,7 +318,7 @@ class Command(BaseCommand):
 
         created_count = 0
         for setting_data in virtualmin_settings:
-            setting, created = SystemSetting.objects.get_or_create(key=setting_data["key"], defaults=setting_data)
+            _setting, created = SystemSetting.objects.get_or_create(key=setting_data["key"], defaults=setting_data)
 
             if created:
                 created_count += 1

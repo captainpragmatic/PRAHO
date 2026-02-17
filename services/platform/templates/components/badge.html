@@ -31,10 +31,10 @@
             </svg>
         {% endif %}
     {% endif %}
-    
+
     {# Badge text #}
     <span>{{ text }}</span>
-    
+
     {# Icon on right side #}
     {% if icon and icon_position == 'right' %}
         {% if icon|length == 1 or icon|length == 2 %}
@@ -45,11 +45,11 @@
             </svg>
         {% endif %}
     {% endif %}
-    
+
     {# Dismissible close button #}
     {% if dismissible %}
-        <button type="button" class="ml-1 p-0.5 rounded-full hover:bg-black/10 transition-colors" 
-                onclick="this.parentElement.remove()" 
+        <button type="button" class="ml-1 p-0.5 rounded-full hover:bg-black/10 transition-colors"
+                onclick="this.parentElement.remove()"
                 aria-label="{% trans 'Închide' %}">
             <svg class="w-3 h-3 fill-current" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M12.854 4.854a.5.5 0 0 0-.708-.708L8 8.293 3.854 4.147a.5.5 0 1 0-.708.708L7.293 9l-4.147 4.146a.5.5 0 0 0 .708.708L8 9.707l4.146 4.147a.5.5 0 0 0 .708-.708L8.707 9l4.147-4.146z"/>

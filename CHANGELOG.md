@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Changed
+- **Lint Zero-Debt**: Eliminated all Ruff violations across Platform and Portal services — zero warnings, zero errors
+- **Portal Lint**: Reduced portal lint debt with code fixes and type annotations
+- **Platform Lint**: Reduced lint debt across billing, orders, API, audit, common, and remaining apps
+- **Lint Infrastructure**: Fixed URL collisions, deploy check, and test suppressions in lint tooling
+- **SettingsService Coverage**: Wired 78 hardcoded constants to `SettingsService` with getter functions, backward-compatible aliases, and `DEFAULT_SETTINGS` entries (224 total keys)
+
+### Added
+- **Type Stubs**: Added type stubs and expanded MyPy overrides for third-party libraries
+- **Settings Allowlist**: Added `scripts/settings_allowlist.txt` for structural constants that cannot be runtime-configurable
+
+### Fixed
+- **pyproject.toml**: Updated lint configuration — scoped Ruff rules for runtime import architecture, expanded MyPy overrides
+
+---
+
+## [0.15.2] - 2026-02-16
+
+### Added
+- **Audit Enforcement**: Added ADR-0016 and a model allowlist with justification requirements to formalize audit-trail coverage policy
+- **Audit Coverage Tests**: Added runtime model-classification checks and signal-registration regression tests for critical apps
+- **Audit Pipeline Tests**: Added integration/E2E tests for settings, billing, notifications, and customer audit event creation paths
+
+### Fixed
+- **Signal Registration**: Restored `ready()` signal imports for `billing`, `orders`, `customers`, and `domains` apps to ensure receivers are connected at startup
+- **Tax Rate Migration Drift**: Added migrations to align `InvoiceLine.tax_rate` and `OrderItem.tax_rate` schema metadata with current model definitions
+- **Portal Security**: Hardened security defaults and removed lint regressions
+- **CI Pipeline**: Fixed baseline SHA fetching and hardened ruff no-new-debt baseline resolution
+- **Portal Isolation**: Hardened runtime and E2E test settings to enforce stateless behavior
+- **E2E Workflow**: Stabilized development and test workflow
+- **Pre-commit Hooks**: Stabilized compatibility and enabled configured hooks with local cache isolation
+- **Audit Coverage**: Enforced signal wiring and model audit lifecycle coverage for all critical models
+
+### Changed
+- **Platform Lint Debt**: Reduced technical debt with safe complexity and security fixes
+- **Repository Normalization**: Applied repository-wide normalization and refactor updates
 
 ---
 

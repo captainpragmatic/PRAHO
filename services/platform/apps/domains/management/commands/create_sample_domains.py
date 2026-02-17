@@ -197,7 +197,7 @@ class Command(BaseCommand):
                 tld = TLD.objects.get(extension=assignment_data["tld"])
                 registrar = Registrar.objects.get(name=assignment_data["registrar"])
 
-                assignment, created = TLDRegistrarAssignment.objects.get_or_create(
+                _assignment, created = TLDRegistrarAssignment.objects.get_or_create(
                     tld=tld,
                     registrar=registrar,
                     defaults={
@@ -300,11 +300,11 @@ class Command(BaseCommand):
                     tld = TLD.objects.get(extension=tld_extension)
                 except TLD.DoesNotExist:
                     # Fallback to random TLD
-                    tld = random.choice(available_tlds)  # noqa: S311 # Sample data generation
+                    tld = random.choice(available_tlds)  # Sample data generation  # noqa: S311
                     domain_name = f"{domain_name.split('.')[0]}.{tld.extension}"
             else:
                 # Generate random domain
-                tld = random.choice(available_tlds)  # noqa: S311 # Sample data generation
+                tld = random.choice(available_tlds)  # Sample data generation  # noqa: S311
                 domain_name = f"sample-domain-{i + 1}.{tld.extension}"
 
             # Get primary registrar for this TLD
@@ -320,11 +320,15 @@ class Command(BaseCommand):
                 registrar = registrar_candidate
 
             # Random customer
-            customer = random.choice(customers)  # noqa: S311 # Sample data generation
+            customer = random.choice(customers)  # Sample data generation  # noqa: S311
 
             # Random dates
-            registered_at = timezone.now() - timedelta(days=random.randint(30, 365))  # noqa: S311 # Sample data generation
-            expires_at = registered_at + timedelta(days=365 * random.randint(1, 3))  # noqa: S311 # Sample data generation
+            registered_at = timezone.now() - timedelta(
+                days=random.randint(30, 365)  # noqa: S311 - Sample data generation
+            )
+            expires_at = registered_at + timedelta(
+                days=365 * random.randint(1, 3)  # noqa: S311 - Sample data generation
+            )
 
             # Create domain
             domain, created = Domain.objects.get_or_create(
@@ -333,13 +337,17 @@ class Command(BaseCommand):
                     "tld": tld,
                     "registrar": registrar,
                     "customer": customer,
-                    "status": random.choice(["active", "active", "active", "pending"]),  # noqa: S311 # Sample data generation
+                    "status": random.choice(  # noqa: S311 - Sample data generation
+                        ["active", "active", "active", "pending"]
+                    ),
                     "registered_at": registered_at,
                     "expires_at": expires_at,
-                    "registrar_domain_id": f"DOM_{random.randint(100000, 999999)}",  # noqa: S311 # Sample data generation
-                    "epp_code": f"EPP{random.randint(100000, 999999)}",  # noqa: S311 # Sample data generation
-                    "auto_renew": random.choice([True, True, False]),  # noqa: S311 # Sample data generation
-                    "whois_privacy": random.choice([True, False]) if tld.whois_privacy_available else False,  # noqa: S311 # Sample data generation
+                    "registrar_domain_id": f"DOM_{random.randint(100000, 999999)}",  # Sample data generation  # noqa: S311
+                    "epp_code": f"EPP{random.randint(100000, 999999)}",  # Sample data generation  # noqa: S311
+                    "auto_renew": random.choice([True, True, False]),  # Sample data generation  # noqa: S311
+                    "whois_privacy": random.choice([True, False])  # noqa: S311 - Sample data generation
+                    if tld.whois_privacy_available
+                    else False,
                     "locked": True,
                     "nameservers": registrar.default_nameservers or [],
                     "last_paid_amount_cents": tld.registration_price_cents,

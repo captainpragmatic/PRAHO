@@ -169,7 +169,9 @@ def setting_display(context: RequestContext, key: str, label: str = "", show_def
 
 
 @register.filter(name="setting_badge")
-def setting_badge(value: Any, data_type: str = "string") -> SafeString:  # noqa: PLR0911 # Template formatting requires multiple return paths
+def setting_badge(  # noqa: PLR0911 - Template formatting requires multiple return paths
+    value: Any, data_type: str = "string"
+) -> SafeString:
     """
     🏷️ Generate a badge for setting value based on data type
 

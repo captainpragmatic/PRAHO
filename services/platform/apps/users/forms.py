@@ -672,5 +672,5 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
         if result.is_err():
             raise ValidationError(f"Registration failed: {result.unwrap_err()}")
 
-        user, customer = result.unwrap()
+        user, _customer = result.unwrap()
         return user

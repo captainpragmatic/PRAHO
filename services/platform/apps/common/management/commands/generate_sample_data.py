@@ -19,7 +19,7 @@ from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice,
 from apps.billing.proforma_models import ProformaSequence
 from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
-from apps.products.models import Product
+from apps.products.models import Product, ProductPrice
 from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket
 from apps.users.models import CustomerMembership
@@ -33,6 +33,7 @@ else:
 @dataclass
 class SampleDataConfig:
     """Configuration parameters for sample data generation"""
+
     services_count: int
     orders_count: int
     invoices_count: int
@@ -90,11 +91,12 @@ class Command(BaseCommand):
             orders_count=orders_per_customer,
             invoices_count=invoices_per_customer,
             proformas_count=proformas_per_customer,
-            tickets_count=tickets_per_customer
+            tickets_count=tickets_per_customer,
         )
         test_customer = self.create_test_company_customer(fake, users, config)
         customers = [test_customer]
         self.stdout.write(f"  ✓ Created guaranteed test customer #1: {test_customer.get_display_name()}")
+        self.ensure_e2e_users(test_customer)
 
         # Create remaining customers with comprehensive data
         remaining_customers = max(0, num_customers - 1)  # -1 because we already created the test customer
@@ -102,7 +104,10 @@ class Command(BaseCommand):
             self.stdout.write(f"Creating {remaining_customers} additional customers with complete data...")
             for i in range(remaining_customers):
                 customer = self.create_customer_with_data(
-                    fake, i + 1, users, config  # i + 1 to continue numbering after test customer
+                    fake,
+                    i + 1,
+                    users,
+                    config,  # i + 1 to continue numbering after test customer
                 )
                 customers.append(customer)
                 self.stdout.write(f"  ✓ Complete customer {i+2}/{num_customers}: {customer.get_display_name()}")
@@ -151,6 +156,60 @@ class Command(BaseCommand):
                     is_active=True,
                 )
                 self.stdout.write(f"  ✓ Support: {user.email}")
+
+    def ensure_e2e_users(self, test_customer: Customer) -> None:
+        """Ensure deterministic E2E users required by Playwright flows."""
+        self.stdout.write("Ensuring deterministic E2E users...")
+
+        # E2E admin for platform login helpers
+        e2e_admin, _ = User.objects.get_or_create(
+            email="e2e-admin@test.local",
+            defaults={
+                "first_name": "E2E",
+                "last_name": "Admin",
+                "is_staff": True,
+                "is_superuser": True,
+                "is_active": True,
+                "staff_role": "admin",
+            },
+        )
+        e2e_admin.is_active = True
+        e2e_admin.is_staff = True
+        e2e_admin.is_superuser = True
+        e2e_admin.staff_role = "admin"
+        e2e_admin.set_password("test123")
+        e2e_admin.save()
+        self.stdout.write("  ✓ E2E admin: e2e-admin@test.local")
+
+        # E2E customer for portal login helpers
+        e2e_customer, _ = User.objects.get_or_create(
+            email="e2e-customer@test.local",
+            defaults={
+                "first_name": "E2E",
+                "last_name": "Customer",
+                "is_staff": False,
+                "is_superuser": False,
+                "is_active": True,
+            },
+        )
+        e2e_customer.is_active = True
+        e2e_customer.is_staff = False
+        e2e_customer.is_superuser = False
+        e2e_customer.set_password("test123")
+        e2e_customer.save()
+        self.stdout.write("  ✓ E2E customer: e2e-customer@test.local")
+
+        CustomerMembership.objects.update_or_create(
+            user=e2e_customer,
+            customer=test_customer,
+            defaults={
+                "role": "owner",
+                "is_primary": True,
+                "is_active": True,
+                "created_by": e2e_admin,
+            },
+        )
+        self.stdout.write(f"  ✓ Linked E2E customer to: {test_customer.get_display_name()}")
 
     def create_service_plans(self) -> list[ServicePlan]:
         self.stdout.write("Creating service plans...")
@@ -412,22 +471,22 @@ class Command(BaseCommand):
         # Delete orders first (and their items via CASCADE)
 
         # Delete in reverse dependency order
-        Order.objects.filter(customer__primary_email__contains='@example.').delete()
-        Invoice.objects.filter(customer__primary_email__contains='@example.').delete()
-        ProformaInvoice.objects.filter(customer__primary_email__contains='@example.').delete()
-        Ticket.objects.filter(customer__primary_email__contains='@example.').delete()
+        Order.objects.filter(customer__primary_email__contains="@example.").delete()
+        Invoice.objects.filter(customer__primary_email__contains="@example.").delete()
+        ProformaInvoice.objects.filter(customer__primary_email__contains="@example.").delete()
+        Ticket.objects.filter(customer__primary_email__contains="@example.").delete()
 
         # Delete services (which may be referenced by orders)
-        Service.objects.filter(customer__primary_email__contains='@example.').delete()
+        Service.objects.filter(customer__primary_email__contains="@example.").delete()
 
         # Delete customer memberships
-        CustomerMembership.objects.filter(customer__primary_email__contains='@example.').delete()
+        CustomerMembership.objects.filter(customer__primary_email__contains="@example.").delete()
 
         # Now delete customers and their profiles
-        Customer.objects.filter(primary_email__contains='@example.').delete()
+        Customer.objects.filter(primary_email__contains="@example.").delete()
 
         # Delete users
-        User.objects.filter(email__contains='@example.').delete()
+        User.objects.filter(email__contains="@example.").delete()
 
         print("✓ Cleaned existing sample data")
 
@@ -439,23 +498,15 @@ class Command(BaseCommand):
 
     def create_billing_essentials(self) -> None:
         """Create essential billing components like currencies and tax rules"""
-        from apps.billing.models import Currency
-        from apps.billing.tax_models import TaxRule
-
         # Create RON currency if it doesn't exist
-        ron_currency, created = Currency.objects.get_or_create(
-            code="RON",
-            defaults={
-                "name": "Romanian Leu",
-                "symbol": "RON",
-                "decimals": 2
-            }
+        _, created = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "RON", "decimals": 2}
         )
         if created:
             print("✓ Created RON currency")
 
         # Create Romanian VAT tax rule
-        tax_rule, created = TaxRule.objects.get_or_create(
+        _, created = TaxRule.objects.get_or_create(
             country_code="RO",
             tax_type="vat",
             valid_from=timezone.now().date(),
@@ -466,16 +517,13 @@ class Command(BaseCommand):
                 "reverse_charge_eligible": True,
                 "is_eu_member": True,
                 "vies_required": True,
-            }
+            },
         )
         if created:
             print("✓ Created Romanian VAT tax rule")
 
     def create_products_from_service_plans(self) -> None:
         """Create Product objects and ProductPrice objects based on existing ServicePlans with new pricing model"""
-        from apps.billing.models import Currency
-        from apps.products.models import ProductPrice  # Import here to avoid circular imports
-
         service_plans = ServicePlan.objects.all()
 
         # Get RON currency (should exist from billing foundation)
@@ -483,25 +531,20 @@ class Command(BaseCommand):
             ron_currency = Currency.objects.get(code="RON")
         except Currency.DoesNotExist:
             # Create RON currency if it doesn't exist
-            ron_currency = Currency.objects.create(
-                code="RON",
-                name="Romanian Leu",
-                symbol="RON",
-                is_active=True
-            )
+            ron_currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="RON", is_active=True)
             print("✓ Created RON currency")
 
         # Map ServicePlan types to Product types
         type_mapping = {
-            'shared_hosting': 'shared_hosting',
-            'vps': 'vps',
-            'dedicated': 'dedicated',
-            'cloud': 'shared_hosting',  # Map to shared hosting
-            'domain': 'domain',
-            'ssl': 'ssl',
-            'email': 'email',
-            'backup': 'backup',
-            'maintenance': 'addon'  # Map to addon
+            "shared_hosting": "shared_hosting",
+            "vps": "vps",
+            "dedicated": "dedicated",
+            "cloud": "shared_hosting",  # Map to shared hosting
+            "domain": "domain",
+            "ssl": "ssl",
+            "email": "email",
+            "backup": "backup",
+            "maintenance": "addon",  # Map to addon
         }
 
         products_created = 0
@@ -512,15 +555,15 @@ class Command(BaseCommand):
             product, product_created = Product.objects.get_or_create(
                 slug=f"product-{plan.id}",
                 defaults={
-                    'name': plan.name,
-                    'description': plan.description,
-                    'short_description': plan.description[:500] if plan.description else '',
-                    'product_type': type_mapping.get(plan.plan_type, 'shared_hosting'),
-                    'is_active': plan.is_active,
-                    'is_featured': False,
-                    'requires_domain': plan.plan_type in ['shared_hosting', 'vps', 'dedicated'],
-                    'includes_vat': plan.includes_vat,
-                }
+                    "name": plan.name,
+                    "description": plan.description,
+                    "short_description": plan.description[:500] if plan.description else "",
+                    "product_type": type_mapping.get(plan.plan_type, "shared_hosting"),
+                    "is_active": plan.is_active,
+                    "is_featured": False,
+                    "requires_domain": plan.plan_type in ["shared_hosting", "vps", "dedicated"],
+                    "includes_vat": plan.includes_vat,
+                },
             )
 
             if product_created:
@@ -531,18 +574,18 @@ class Command(BaseCommand):
             monthly_price_cents = int(plan.price_monthly * 100) if plan.price_monthly else 2999  # Default to 29.99 RON
 
             # Create/update ProductPrice for this product
-            price, price_created = ProductPrice.objects.get_or_create(
+            _, price_created = ProductPrice.objects.get_or_create(
                 product=product,
                 currency=ron_currency,
                 defaults={
-                    'monthly_price_cents': monthly_price_cents,
-                    'setup_cents': 0,  # No setup fee by default
-                    'semiannual_discount_percent': Decimal('5.00'),  # 5% discount for 6-month billing
-                    'annual_discount_percent': Decimal('10.00'),   # 10% discount for 12-month billing
-                    'minimum_quantity': 1,
-                    'maximum_quantity': None,  # Unlimited
-                    'is_active': True,
-                }
+                    "monthly_price_cents": monthly_price_cents,
+                    "setup_cents": 0,  # No setup fee by default
+                    "semiannual_discount_percent": Decimal("5.00"),  # 5% discount for 6-month billing
+                    "annual_discount_percent": Decimal("10.00"),  # 10% discount for 12-month billing
+                    "minimum_quantity": 1,
+                    "maximum_quantity": None,  # Unlimited
+                    "is_active": True,
+                },
             )
 
             if price_created:
@@ -554,35 +597,33 @@ class Command(BaseCommand):
     def create_users(self, fake: Faker, count: int) -> list[User]:
         """Create users that will be attached to customers"""
         users = []
-        
+
         # Clear existing users first to avoid conflicts
-        User.objects.filter(email__contains='@example.').delete()
-        
+        User.objects.filter(email__contains="@example.").delete()
+
         for i in range(count):
             # Some users are individuals, some are business contacts
             is_business = random.choice([True, False])
-            
+
             user_data = {
                 "first_name": fake.first_name(),
-                "last_name": fake.last_name(), 
+                "last_name": fake.last_name(),
                 "email": f"user{i+1}@example.com",  # Use unique predictable emails
                 "is_active": True,
-                "staff_role": "customer"
+                "staff_role": "customer",
             }
-            
+
             user = User.objects.create_user(password="testpass123", **user_data)
             users.append(user)
-            
+
             if i % 2 == 0:
                 self.stdout.write(f"  ✓ User {i+1}/{count}: {user.email}")
-                
+
         return users
 
-    def create_test_company_customer(
-        self, fake: Faker, users: list[User], config: SampleDataConfig
-    ) -> Customer:
+    def create_test_company_customer(self, fake: Faker, users: list[User], config: SampleDataConfig) -> Customer:
         """Create the guaranteed test company customer that should always have ID #1"""
-        
+
         # Check if test company already exists
         test_company_email = "contact@testcompany.com"
         customer = None
@@ -591,7 +632,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✓ Test company already exists: {customer.get_display_name()} (ID: {customer.id})")
         except Customer.DoesNotExist:
             customer = None
-        
+
         # Create the specific test user first if it doesn't exist
         test_user_email = "customer@pragmatichost.com"
         test_user = None
@@ -601,15 +642,15 @@ class Command(BaseCommand):
         except User.DoesNotExist:
             test_user = User.objects.create_user(
                 first_name="Ion",
-                last_name="Pop", 
+                last_name="Pop",
                 email=test_user_email,
                 password="testpass123",
                 is_active=True,
-                staff_role="customer"
+                staff_role="customer",
             )
             users.append(test_user)
             self.stdout.write(f"  ✓ Created test user: {test_user_email}")
-        
+
         # Create test company if it doesn't exist
         if customer is None:
             customer_data = {
@@ -632,7 +673,7 @@ class Command(BaseCommand):
                 city="Bucharest",
                 county="Bucharest",
                 postal_code="010000",
-                country="România"
+                country="România",
             )
 
             # Create tax profile with specific CUI
@@ -641,60 +682,54 @@ class Command(BaseCommand):
                 cui="RO12345678",
                 is_vat_payer=True,
                 vat_number="RO12345678",
-                reverse_charge_eligible=True
+                reverse_charge_eligible=True,
             )
 
             # Create billing profile
             billing_profile = CustomerBillingProfile.objects.create(
-                customer=customer,
-                payment_terms=30,
-                preferred_currency="RON",
-                invoice_delivery_method="email"
+                customer=customer, payment_terms=30, preferred_currency="RON", invoice_delivery_method="email"
             )
-        
+
         # Create customer membership for the test user (if it doesn't exist)
-        membership, created = CustomerMembership.objects.get_or_create(
-            customer=customer,
-            user=test_user,
-            defaults={
-                "role": "owner",
-                "is_primary": True
-            }
+        _, created = CustomerMembership.objects.get_or_create(
+            customer=customer, user=test_user, defaults={"role": "owner", "is_primary": True}
         )
-        
+
         if created:
             self.stdout.write(f"  ✓ Created customer membership for {test_user.email}")
         else:
             self.stdout.write(f"  ✓ Customer membership already exists for {test_user.email}")
-        
+
         # Clear existing test data for Test Company to ensure fresh comprehensive test data
         self.stdout.write("  ✓ Clearing existing test data for Test Company...")
         Service.objects.filter(customer=customer).delete()
         Order.objects.filter(customer=customer).delete()
-        from apps.billing.models import Invoice, ProformaInvoice
+
         Invoice.objects.filter(customer=customer).delete()
         ProformaInvoice.objects.filter(customer=customer).delete()
         Ticket.objects.filter(customer=customer).delete()
 
         # Create services, orders, invoices, proformas, and tickets with comprehensive test data
         services = self.create_customer_services(fake, customer, 7)  # 7 services with different statuses
-        orders = self.create_customer_orders(fake, customer, 7)      # 7 orders with different statuses
-        self.create_customer_invoices(fake, customer, orders, 10)    # 10 invoices with different statuses
-        self.create_customer_proformas(fake, customer, orders, 5)    # 5 proformas with different statuses
-        self.create_customer_tickets(fake, customer, 10)             # 10 tickets with different statuses
+        orders = self.create_customer_orders(fake, customer, 7)  # 7 orders with different statuses
+        self.create_customer_invoices(fake, customer, orders, 10)  # 10 invoices with different statuses
+        self.create_customer_proformas(fake, customer, orders, 5)  # 5 proformas with different statuses
+        self.create_customer_tickets(fake, customer, 10)  # 10 tickets with different statuses
 
-        self.stdout.write("  ✅ Created comprehensive test data: 7 services, 7 orders, 10 invoices, 5 proformas, 10 tickets")
-        
+        self.stdout.write(
+            "  ✅ Created comprehensive test data: 7 services, 7 orders, 10 invoices, 5 proformas, 10 tickets"
+        )
+
         return customer
 
     def create_customer_with_data(
         self, fake: Faker, index: int, users: list[User], config: SampleDataConfig
     ) -> Customer:
         """Create a customer with all related data: profiles, services, orders, invoices, tickets"""
-        
+
         # Decide if this is a company or individual
         is_company = random.choice([True, False, True])  # 2/3 chance of company
-        
+
         if is_company:
             customer_data = {
                 "customer_type": "company",
@@ -706,26 +741,26 @@ class Command(BaseCommand):
             }
         else:
             customer_data = {
-                "customer_type": "individual", 
+                "customer_type": "individual",
                 "name": f"{fake.first_name()} {fake.last_name()}",
                 "primary_email": fake.unique.email(),
                 "primary_phone": f"+40{fake.random_int(min=700000000, max=799999999)}",
                 "status": "active",
             }
-            
+
         customer = Customer.objects.create(**customer_data)
-        
+
         # Create customer address
         address = CustomerAddress.objects.create(
             customer=customer,
             address_type="billing",
             address_line1=fake.street_address(),
-            city=fake.city(), 
+            city=fake.city(),
             county=fake.city(),  # Use city as county
             postal_code=fake.postcode(),
-            country="România"
+            country="România",
         )
-        
+
         # Create tax profile for companies
         if is_company:
             tax_number = f"RO{fake.random_int(min=10000000, max=99999999)}"
@@ -734,34 +769,31 @@ class Command(BaseCommand):
                 cui=tax_number,
                 is_vat_payer=True,
                 vat_number=tax_number,
-                reverse_charge_eligible=True
+                reverse_charge_eligible=True,
             )
-            
+
         # Create billing profile
         billing_profile = CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=30,
-            preferred_currency="RON",
-            invoice_delivery_method="email"
+            customer=customer, payment_terms=30, preferred_currency="RON", invoice_delivery_method="email"
         )
-        
+
         # Attach 1-3 users to this customer
         customer_users = random.sample(users, random.randint(1, min(3, len(users))))
         for user in customer_users:
             CustomerMembership.objects.create(
                 user=user,
-                customer=customer, 
+                customer=customer,
                 role=random.choice(["owner", "billing", "tech"]),
-                is_primary=random.choice([True, False])
+                is_primary=random.choice([True, False]),
             )
-            
+
         # Create related data
         self.create_customer_services(fake, customer, config.services_count)
         orders = self.create_customer_orders(fake, customer, config.orders_count)
         self.create_customer_invoices(fake, customer, orders, config.invoices_count)
-        self.create_customer_proformas(fake, customer, orders, config.proformas_count) 
+        self.create_customer_proformas(fake, customer, orders, config.proformas_count)
         self.create_customer_tickets(fake, customer, config.tickets_count)
-        
+
         return customer
 
     def create_customer_services(self, fake: Faker, customer: Customer, count: int) -> list[Service]:
@@ -828,21 +860,23 @@ class Command(BaseCommand):
                 "customer_email": customer.primary_email,
                 "customer_name": customer.name,
                 "customer_company": customer.company_name or "",
-                "created_at": fake.date_time_between(start_date="-1y", end_date="now", tzinfo=timezone.get_current_timezone()),
+                "created_at": fake.date_time_between(
+                    start_date="-1y", end_date="now", tzinfo=timezone.get_current_timezone()
+                ),
             }
-            
+
             order = Order.objects.create(**order_data)
-            
+
             # Add order items (link to services)
             if services:
                 num_items = random.randint(1, min(3, len(services)))
                 order_services = random.sample(services, num_items)
-                
+
                 for service in order_services:
                     unit_price_cents = int(service.price * 100)
-                    tax_cents = int(unit_price_cents * Decimal('0.21'))  # 21% VAT
+                    tax_cents = int(unit_price_cents * Decimal("0.21"))  # 21% VAT
                     line_total_cents = unit_price_cents + tax_cents
-                    
+
                     # Get the Product that corresponds to this service's plan
                     try:
                         product = Product.objects.get(slug=f"product-{service.service_plan.id}")
@@ -852,10 +886,10 @@ class Command(BaseCommand):
                             slug=f"product-{service.service_plan.id}",
                             name=service.service_plan.name,
                             description=service.service_plan.description,
-                            product_type='shared_hosting',
-                            is_active=True
+                            product_type="shared_hosting",
+                            is_active=True,
                         )
-                    
+
                     OrderItem.objects.create(
                         order=order,
                         product=product,
@@ -863,17 +897,19 @@ class Command(BaseCommand):
                         product_type=service.service_plan.plan_type,
                         quantity=1,
                         unit_price_cents=unit_price_cents,
-                        tax_rate=Decimal('0.2100'),
+                        tax_rate=Decimal("0.2100"),
                         tax_cents=tax_cents,
                         line_total_cents=line_total_cents,
-                        service=service  # Link to provisioned service
+                        service=service,  # Link to provisioned service
                     )
-                    
+
             orders.append(order)
-            
+
         return orders
 
-    def create_customer_invoices(self, fake: Faker, customer: Customer, orders: list[Order], count: int) -> list[Invoice]:
+    def create_customer_invoices(
+        self, fake: Faker, customer: Customer, orders: list[Order], count: int
+    ) -> list[Invoice]:
         """Create invoices for a customer linked to orders"""
         invoices = []
         currency = Currency.objects.get(code="RON")
@@ -888,11 +924,22 @@ class Command(BaseCommand):
                 "reverse_charge_eligible": True,
                 "is_eu_member": True,
                 "vies_required": True,
-            }
+            },
         )
-        
+
         # Invoice statuses: draft, issued, paid, overdue, void, refunded
-        invoice_statuses = ["draft", "issued", "paid", "overdue", "void", "refunded", "paid", "issued", "paid", "overdue"]
+        invoice_statuses = [
+            "draft",
+            "issued",
+            "paid",
+            "overdue",
+            "void",
+            "refunded",
+            "paid",
+            "issued",
+            "paid",
+            "overdue",
+        ]
 
         for i in range(count):
             # Some invoices are linked to orders, some are standalone
@@ -933,14 +980,14 @@ class Command(BaseCommand):
                 "bill_to_postal": customer.addresses.first().postal_code if customer.addresses.exists() else "",
                 "bill_to_tax_id": customer.get_tax_profile().cui if customer.get_tax_profile() else "",
             }
-            
+
             invoice = Invoice.objects.create(**invoice_data)
-            
+
             # Generate proper invoice number using sequence
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
             invoice.number = sequence.get_next_number("INV")
             invoice.save()
-            
+
             # Add invoice items
             InvoiceLine.objects.create(
                 invoice=invoice,
@@ -949,14 +996,16 @@ class Command(BaseCommand):
                 quantity=Decimal("1.000"),
                 unit_price_cents=base_amount_cents,
                 tax_rate=Decimal("0.2100"),
-                line_total_cents=base_amount_cents
+                line_total_cents=base_amount_cents,
             )
-            
+
             invoices.append(invoice)
-            
+
         return invoices
 
-    def create_customer_proformas(self, fake: Faker, customer: Customer, orders: list[Order], count: int) -> list[ProformaInvoice]:
+    def create_customer_proformas(
+        self, fake: Faker, customer: Customer, orders: list[Order], count: int
+    ) -> list[ProformaInvoice]:
         """Create proforma invoices for a customer"""
         proformas = []
         currency = Currency.objects.get(code="RON")
@@ -971,9 +1020,9 @@ class Command(BaseCommand):
                 "reverse_charge_eligible": True,
                 "is_eu_member": True,
                 "vies_required": True,
-            }
+            },
         )
-        
+
         # Proforma statuses: draft, sent, accepted, expired
         proforma_statuses = ["draft", "sent", "accepted", "expired"]
 
@@ -1016,27 +1065,27 @@ class Command(BaseCommand):
                 "bill_to_postal": customer.addresses.first().postal_code if customer.addresses.exists() else "",
                 "bill_to_tax_id": customer.get_tax_profile().cui if customer.get_tax_profile() else "",
             }
-            
+
             proforma = ProformaInvoice.objects.create(**proforma_data)
-            
+
             # Generate proper proforma number using sequence
             sequence, _ = ProformaSequence.objects.get_or_create(scope="default")
-            proforma.number = sequence.get_next_number("PRO")  
+            proforma.number = sequence.get_next_number("PRO")
             proforma.save()
-            
+
             # Add proforma items
             ProformaLine.objects.create(
                 proforma=proforma,
-                kind="service", 
+                kind="service",
                 description=f"Hosting services - {fake.month_name()} {fake.year()}",
                 quantity=Decimal("1.000"),
                 unit_price_cents=base_amount_cents,
                 tax_rate=Decimal("0.2100"),
-                line_total_cents=base_amount_cents
+                line_total_cents=base_amount_cents,
             )
-            
+
             proformas.append(proforma)
-            
+
         return proformas
 
     def create_customer_tickets(self, fake: Faker, customer: Customer, count: int) -> list[Ticket]:

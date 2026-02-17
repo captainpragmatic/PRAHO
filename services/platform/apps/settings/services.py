@@ -102,6 +102,8 @@ class SettingsService:
         "billing.credit_consecutive_bonus_12": 20,
         "billing.large_credit_limit_threshold": 10000,
         "billing.extended_payment_terms_threshold": 60,
+        "billing.metering_task_timeout": 300,
+        "billing.max_payment_retries": 5,
         # ── Users & Authentication ──────────────────────────────────────
         "users.session_timeout_minutes": 120,
         "users.mfa_required_for_staff": True,
@@ -115,6 +117,28 @@ class SettingsService:
         "users.credential_rotation_retry_limit": 3,
         "users.login_rate_limit_per_hour": 5,
         "users.security_lockout_failure_threshold": 5,
+        # ── Customers & CRM ───────────────────────────────────────────
+        "customers.orders_high_threshold": 10,
+        "customers.orders_medium_threshold": 5,
+        "customers.orders_low_threshold": 2,
+        "customers.payment_rate_excellent": 95,
+        "customers.payment_rate_good": 80,
+        "customers.payment_rate_fair": 60,
+        "customers.services_high_threshold": 3,
+        "customers.services_medium_threshold": 2,
+        "customers.task_soft_time_limit": 300,
+        "customers.task_time_limit": 600,
+        "customers.base_credit_score": 750,
+        "customers.credit_adjustments": {
+            "positive_payment": 15,
+            "early_payment": 25,
+            "failed_payment": -50,
+            "late_payment": -30,
+            "chargeback": -100,
+            "refund_issued": -10,
+            "account_age_bonus": 5,
+            "order_completed": 5,
+        },
         # ── Domain Management ───────────────────────────────────────────
         "domains.registration_enabled": True,
         "domains.auto_renewal_enabled": True,
@@ -124,6 +148,13 @@ class SettingsService:
         "domains.max_per_package": 100,
         "domains.max_subdomains_per_domain": 50,
         "domains.whois_privacy_price_cents": 500,
+        # ── Orders ─────────────────────────────────────────────────────
+        "orders.max_payment_failures_before_fail": 3,
+        "orders.task_soft_time_limit": 600,
+        "orders.task_time_limit": 900,
+        "orders.max_search_query_length": 200,
+        "orders.max_price_override_cents": 50000000,
+        "orders.max_price_override_multiplier": 10,
         # ── Service Provisioning ────────────────────────────────────────
         "provisioning.auto_setup_enabled": True,
         "provisioning.setup_timeout_minutes": 30,
@@ -141,6 +172,17 @@ class SettingsService:
         "provisioning.resource_usage_alert_threshold": 85,
         "provisioning.server_overload_threshold": 90,
         "provisioning.long_provisioning_threshold_minutes": 30,
+        "provisioning.cache_timeout": 3600,
+        "provisioning.ssh_timeout": 30,
+        "provisioning.sudo_command_timeout": 60,
+        "provisioning.max_username_uniqueness_attempts": 10,
+        "provisioning.task_soft_time_limit": 600,
+        "provisioning.task_time_limit": 1200,
+        "provisioning.bulk_operation_threshold": 10,
+        "provisioning.max_concurrent_health_checks": 5,
+        "provisioning.health_check_timeout_seconds": 10,
+        "provisioning.overall_health_check_timeout": 30,
+        "provisioning.max_error_display": 10,
         # ── Virtualmin Integration ──────────────────────────────────────
         "virtualmin.hostname": "localhost",
         "virtualmin.port": 10000,
@@ -185,6 +227,8 @@ class SettingsService:
         "security.registration_rate_limit_per_ip": 5,
         "security.invitation_rate_limit_per_user": 10,
         "security.company_check_rate_limit_per_ip": 30,
+        "security.session_validation_rate_limit": 60,
+        "security.max_session_age_seconds": 86400,
         # ── Monitoring & Alerts ─────────────────────────────────────────
         "monitoring.cpu_warning_threshold": 80,
         "monitoring.memory_warning_threshold": 85,
@@ -199,12 +243,25 @@ class SettingsService:
         "notifications.digest_frequency_hours": 24,
         "notifications.max_history": 1000,
         "notifications.email_max_retries": 3,
+        "notifications.max_template_size": 102400,
+        "notifications.max_subject_length": 200,
+        "notifications.max_name_length": 100,
         # ── GDPR & Data Retention ───────────────────────────────────────
         "gdpr.data_retention_years": 7,
         "gdpr.log_retention_months": 12,
         "gdpr.export_retention_days": 30,
         "gdpr.audit_log_retention_years": 10,
         "gdpr.failed_login_retention_months": 6,
+        # ── Audit & Compliance ─────────────────────────────────────────
+        "audit.compliant_score_threshold": 90,
+        "audit.partial_score_threshold": 70,
+        "audit.max_violations_displayed": 10,
+        "audit.high_complexity_filter_threshold": 5,
+        "audit.webhook_healthy_response_threshold": 300,
+        "audit.webhook_max_retry_threshold": 5,
+        "audit.webhook_suspicious_retry_threshold": 3,
+        "audit.file_hash_cache_timeout": 2592000,
+        "audit.max_files_displayed": 5,
         # ── External Integrations ───────────────────────────────────────
         "integrations.stripe_secret_key": "",
         "integrations.stripe_publishable_key": "",
@@ -220,10 +277,26 @@ class SettingsService:
         "ui.max_page_size": 100,
         "ui.min_page_size": 5,
         "ui.max_attachment_size_mb": 25,
+        # ── Products ───────────────────────────────────────────────────
+        "products.max_json_content_size": 102400,
+        "products.max_price_cents": 10000000000,
         # ── Promotions & Discounts ──────────────────────────────────────
         "promotions.max_discount_percent": 100,
         "promotions.max_discount_amount_cents": 100000000,
         "promotions.max_coupon_batch_size": 1000,
+        "promotions.max_code_generation_attempts": 100,
+        # ── Common & Performance ───────────────────────────────────────
+        "common.cache_timeout_short": 60,
+        "common.cache_timeout_medium": 300,
+        "common.cache_timeout_long": 3600,
+        "common.cache_timeout_very_long": 86400,
+        "common.query_warning_threshold": 10,
+        "common.max_header_json_length": 1000,
+        "common.sql_display_limit": 200,
+        "common.max_summarized_args": 3,
+        "common.value_summary_limit": 50,
+        "common.default_orphans": 3,
+        "common.proximity_line_threshold": 5,
         # ── System Configuration ────────────────────────────────────────
         "system.maintenance_mode": False,
         "system.backup_retention_days": 30,
@@ -427,7 +500,7 @@ class SettingsService:
         Returns:
             Result with updated setting or validation error
         """
-        from django.db import IntegrityError
+        from django.db import IntegrityError  # noqa: PLC0415
 
         try:
             # Infer data type
@@ -448,7 +521,7 @@ class SettingsService:
                         key=key,
                         name=cls._generate_name_from_key(key),
                         description=f"System setting: {key}",
-                        category=key.split(".")[0] if "." in key else "system",
+                        category=key.split(".", maxsplit=1)[0] if "." in key else "system",
                         data_type=data_type,
                         value=json_value,
                         default_value=json_default,

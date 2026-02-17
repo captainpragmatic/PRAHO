@@ -102,7 +102,7 @@ class EFacturaService:
     # --- Main Workflow Methods ---
 
     @transaction.atomic
-    def submit_invoice(self, invoice: Invoice, validate_first: bool = False) -> SubmissionResult:
+    def submit_invoice(self, invoice: Invoice, validate_first: bool = False) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912
         """
         Submit an invoice to e-Factura.
 
@@ -355,7 +355,7 @@ class EFacturaService:
         Returns:
             List of documents approaching deadline
         """
-        from apps.billing.invoice_models import Invoice
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
         deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
@@ -399,6 +399,7 @@ class EFacturaService:
 
         # Minimum amount check (e.g., simplified invoices under 100 RON might be exempt)
         from apps.settings.services import SettingsService  # noqa: PLC0415
+
         min_amount = SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000)
         return not invoice.total_cents < min_amount
 
@@ -462,7 +463,10 @@ class EFacturaService:
     ) -> None:
         """Log e-Factura event to audit system."""
         try:
-            from apps.audit.services import AuditService, ComplianceEventRequest
+            from apps.audit.services import (  # noqa: PLC0415
+                AuditService,
+                ComplianceEventRequest,
+            )
 
             status_map = {
                 "efactura_submitted": "success",

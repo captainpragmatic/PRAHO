@@ -11,7 +11,6 @@ This module provides centralized logging for SIEM integration with:
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -21,16 +20,14 @@ import socket
 import ssl
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
+from datetime import datetime
+from enum import Enum, StrEnum
 from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import models, transaction
 from django.utils import timezone
 
 if TYPE_CHECKING:
@@ -44,7 +41,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-class SIEMFormat(str, Enum):
+class SIEMFormat(StrEnum):
     """Supported SIEM log formats"""
 
     CEF = "cef"  # Common Event Format (ArcSight, Splunk)
@@ -217,11 +214,7 @@ class SIEMLogEntry:
             separators=(",", ":"),
         )
 
-        return hmac.new(
-            secret_key.encode(),
-            canonical_data.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        return hmac.new(secret_key.encode(), canonical_data.encode(), hashlib.sha256).hexdigest()
 
 
 # =============================================================================
@@ -261,13 +254,20 @@ class CEFFormatter(SIEMLogFormatter):
             f"cat={entry.category}",
             f"act={entry.action}",
             f"msg={self._escape_cef(entry.description)}",
-            f"cs1={entry.request_id or ''}", f"cs1Label=RequestID",
-            f"cs2={entry.session_id or ''}", f"cs2Label=SessionID",
-            f"cs3={entry.target_type or ''}", f"cs3Label=TargetType",
-            f"cs4={entry.target_id or ''}", f"cs4Label=TargetID",
-            f"cs5={entry.entry_hash}", f"cs5Label=EntryHash",
-            f"cs6={','.join(entry.compliance_frameworks)}", f"cs6Label=ComplianceFrameworks",
-            f"cn1={entry.sequence_number}", f"cn1Label=SequenceNumber",
+            f"cs1={entry.request_id or ''}",
+            "cs1Label=RequestID",
+            f"cs2={entry.session_id or ''}",
+            "cs2Label=SessionID",
+            f"cs3={entry.target_type or ''}",
+            "cs3Label=TargetType",
+            f"cs4={entry.target_id or ''}",
+            "cs4Label=TargetID",
+            f"cs5={entry.entry_hash}",
+            "cs5Label=EntryHash",
+            f"cs6={','.join(entry.compliance_frameworks)}",
+            "cs6Label=ComplianceFrameworks",
+            f"cn1={entry.sequence_number}",
+            "cn1Label=SequenceNumber",
             f"deviceExternalId={entry.event_id}",
             f"dhost={entry.hostname}",
             f"dvc={entry.hostname}",
@@ -309,7 +309,7 @@ class LEEFFormatter(SIEMLogFormatter):
         # Build attribute pairs
         attrs = [
             f"devTime={entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"devTimeFormat=yyyy-MM-dd HH:mm:ss",
+            "devTimeFormat=yyyy-MM-dd HH:mm:ss",
             f"src={entry.source_ip or 'unknown'}",
             f"usrName={entry.user_email or 'system'}",
             f"identSrc={entry.user_id or 'system'}",
@@ -326,10 +326,7 @@ class LEEFFormatter(SIEMLogFormatter):
 
         attr_str = "\t".join(attrs)
 
-        return (
-            f"LEEF:2.0|{config.vendor}|{config.product}|{config.version}|"
-            f"{entry.action}|{attr_str}"
-        )
+        return f"LEEF:2.0|{config.vendor}|{config.product}|{config.version}|" f"{entry.action}|{attr_str}"
 
     @staticmethod
     def _escape_leef(value: str) -> str:
@@ -404,10 +401,10 @@ class SyslogFormatter(SIEMLogFormatter):
     """RFC 5424 Syslog formatter"""
 
     SEVERITY_MAP: ClassVar[dict[str, int]] = {
-        "low": 6,      # Informational
-        "medium": 4,   # Warning
-        "high": 3,     # Error
-        "critical": 2, # Critical
+        "low": 6,  # Informational
+        "medium": 4,  # Warning
+        "high": 3,  # Error
+        "critical": 2,  # Critical
     }
 
     def format(self, entry: SIEMLogEntry, config: SIEMConfig) -> str:
@@ -433,8 +430,7 @@ class SyslogFormatter(SIEMLogFormatter):
         timestamp = entry.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
         return (
-            f"<{pri}>1 {timestamp} {entry.hostname} {entry.application} "
-            f"- {entry.event_id} {sd} {entry.description}"
+            f"<{pri}>1 {timestamp} {entry.hostname} {entry.application} " f"- {entry.event_id} {sd} {entry.description}"
         )
 
 
@@ -571,9 +567,8 @@ class SIEMTransport:
         """Send log message to SIEM"""
         for attempt in range(self.config.max_retries):
             try:
-                if not self._socket:
-                    if not self.connect():
-                        continue
+                if not self._socket and not self.connect():
+                    continue
 
                 data = (message + "\n").encode("utf-8")
 
@@ -635,7 +630,7 @@ class HashChainManager:
         cache.set(
             self.CACHE_KEY,
             {"sequence": sequence, "hash": hash_value},
-            timeout=None  # No expiry for hash chain
+            timeout=None,  # No expiry for hash chain
         )
         self._local_sequence = sequence
         self._local_hash = hash_value
@@ -673,22 +668,16 @@ class HashChainManager:
         for i, entry in enumerate(entries):
             # Verify previous hash link
             if entry.previous_hash != prev_hash:
-                errors.append(
-                    f"Entry {entry.event_id}: Previous hash mismatch at sequence {entry.sequence_number}"
-                )
+                errors.append(f"Entry {entry.event_id}: Previous hash mismatch at sequence {entry.sequence_number}")
 
             # Verify sequence number
             if i > 0 and entry.sequence_number != entries[i - 1].sequence_number + 1:
-                errors.append(
-                    f"Entry {entry.event_id}: Sequence gap detected at {entry.sequence_number}"
-                )
+                errors.append(f"Entry {entry.event_id}: Sequence gap detected at {entry.sequence_number}")
 
             # Recompute and verify hash
             expected_hash = entry.compute_hash(self.secret_key)
             if entry.entry_hash != expected_hash:
-                errors.append(
-                    f"Entry {entry.event_id}: Hash mismatch - possible tampering"
-                )
+                errors.append(f"Entry {entry.event_id}: Hash mismatch - possible tampering")
 
             prev_hash = entry.entry_hash
 
@@ -747,7 +736,7 @@ class SIEMService:
     def start(self) -> None:
         """Start background log forwarding"""
         if not self.config.enabled:
-            logger.info("ℹ️ [SIEM] SIEM integration is disabled")
+            logger.info("ℹ️ [SIEM] SIEM integration is disabled")  # noqa: RUF001
             return
 
         self._running = True
@@ -835,9 +824,7 @@ class SIEMService:
 
     def _create_log_entry(self, audit_event: AuditEvent) -> SIEMLogEntry:
         """Convert AuditEvent to SIEMLogEntry"""
-        compliance_frameworks = self.COMPLIANCE_FRAMEWORKS.get(
-            audit_event.category, []
-        )
+        compliance_frameworks = self.COMPLIANCE_FRAMEWORKS.get(audit_event.category, [])
 
         return SIEMLogEntry(
             event_id=str(audit_event.id),
@@ -883,19 +870,12 @@ class SIEMService:
         log_dir = getattr(settings, "SIEM_LOG_DIR", "/var/log/praho/siem")
         os.makedirs(log_dir, exist_ok=True)
 
-        log_file = os.path.join(
-            log_dir,
-            f"audit-{timezone.now().strftime('%Y-%m-%d')}.log"
-        )
+        log_file = os.path.join(log_dir, f"audit-{timezone.now().strftime('%Y-%m-%d')}.log")
 
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(formatted + "\n")
 
-    def verify_log_integrity(
-        self,
-        start_date: datetime,
-        end_date: datetime
-    ) -> tuple[bool, list[str]]:
+    def verify_log_integrity(self, start_date: datetime, end_date: datetime) -> tuple[bool, list[str]]:
         """
         Verify integrity of audit logs for a date range.
 
@@ -906,13 +886,10 @@ class SIEMService:
         Returns:
             Tuple of (is_valid, list_of_errors)
         """
-        from apps.audit.models import AuditEvent
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         # Fetch events in order
-        events = AuditEvent.objects.filter(
-            timestamp__gte=start_date,
-            timestamp__lte=end_date
-        ).order_by("timestamp")
+        events = AuditEvent.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date).order_by("timestamp")
 
         errors = []
         prev_hash = ""
@@ -928,9 +905,7 @@ class SIEMService:
             if stored_hash:
                 # Verify chain link
                 if stored_prev_hash != prev_hash:
-                    errors.append(
-                        f"Event {event.id}: Chain link broken at sequence {stored_sequence}"
-                    )
+                    errors.append(f"Event {event.id}: Chain link broken at sequence {stored_sequence}")
 
                 # Verify hash
                 entry.previous_hash = stored_prev_hash
@@ -938,9 +913,7 @@ class SIEMService:
                 computed_hash = entry.compute_hash(self.hash_chain.secret_key)
 
                 if stored_hash != computed_hash:
-                    errors.append(
-                        f"Event {event.id}: Hash mismatch - possible tampering"
-                    )
+                    errors.append(f"Event {event.id}: Hash mismatch - possible tampering")
 
                 prev_hash = stored_hash
 
@@ -957,7 +930,7 @@ _siem_service: SIEMService | None = None
 
 def get_siem_service() -> SIEMService:
     """Get or create global SIEM service instance"""
-    global _siem_service
+    global _siem_service  # noqa: PLW0603
     if _siem_service is None:
         _siem_service = SIEMService()
     return _siem_service

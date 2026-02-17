@@ -89,29 +89,17 @@ class UsageMeter(models.Model):
 
     # Meter identification
     name = models.CharField(
-        max_length=100,
-        unique=True,
-        help_text=_("Internal meter name (e.g., 'disk_usage_gb', 'api_requests')")
+        max_length=100, unique=True, help_text=_("Internal meter name (e.g., 'disk_usage_gb', 'api_requests')")
     )
-    display_name = models.CharField(
-        max_length=200,
-        help_text=_("Human-readable name (e.g., 'Disk Space Usage')")
-    )
-    description = models.TextField(
-        blank=True,
-        help_text=_("Detailed description of what this meter tracks")
-    )
+    display_name = models.CharField(max_length=200, help_text=_("Human-readable name (e.g., 'Disk Space Usage')"))
+    description = models.TextField(blank=True, help_text=_("Detailed description of what this meter tracks"))
 
     # Stripe integration
     stripe_meter_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Stripe Meter ID for external billing sync")
+        max_length=100, blank=True, help_text=_("Stripe Meter ID for external billing sync")
     )
     stripe_meter_event_name = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Event name configured in Stripe Meter")
+        max_length=100, blank=True, help_text=_("Event name configured in Stripe Meter")
     )
 
     # Aggregation configuration
@@ -119,27 +107,18 @@ class UsageMeter(models.Model):
         max_length=20,
         choices=AGGREGATION_CHOICES,
         default="sum",
-        help_text=_("How to aggregate usage events over billing period")
+        help_text=_("How to aggregate usage events over billing period"),
     )
 
     # Units
-    unit = models.CharField(
-        max_length=20,
-        choices=UNIT_CHOICES,
-        default="count",
-        help_text=_("Unit of measurement")
-    )
+    unit = models.CharField(max_length=20, choices=UNIT_CHOICES, default="count", help_text=_("Unit of measurement"))
     unit_display = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Custom unit display name (e.g., 'GB', 'requests')")
+        max_length=50, blank=True, help_text=_("Custom unit display name (e.g., 'GB', 'requests')")
     )
 
     # Decimal precision
     decimal_places = models.PositiveSmallIntegerField(
-        default=2,
-        validators=[MaxValueValidator(8)],
-        help_text=_("Decimal places for usage values")
+        default=2, validators=[MaxValueValidator(8)], help_text=_("Decimal places for usage values")
     )
 
     # Rounding
@@ -153,13 +132,13 @@ class UsageMeter(models.Model):
         max_length=10,
         choices=ROUNDING_CHOICES,
         default="up",
-        help_text=_("How to round usage for billing (up favors provider)")
+        help_text=_("How to round usage for billing (up favors provider)"),
     )
     rounding_increment = models.DecimalField(
         max_digits=12,
         decimal_places=6,
         default=Decimal("1"),
-        help_text=_("Minimum billable increment (e.g., 0.001 for GB)")
+        help_text=_("Minimum billable increment (e.g., 0.001 for GB)"),
     )
 
     # Hosting-specific meter types
@@ -176,34 +155,20 @@ class UsageMeter(models.Model):
         ("other", _("Other")),
     )
     category = models.CharField(
-        max_length=20,
-        choices=METER_CATEGORY_CHOICES,
-        default="other",
-        help_text=_("Category for grouping and display")
+        max_length=20, choices=METER_CATEGORY_CHOICES, default="other", help_text=_("Category for grouping and display")
     )
 
     # Configuration
-    is_active = models.BooleanField(
-        default=True,
-        help_text=_("Whether this meter is actively collecting events")
-    )
-    is_billable = models.BooleanField(
-        default=True,
-        help_text=_("Whether usage from this meter generates charges")
-    )
+    is_active = models.BooleanField(default=True, help_text=_("Whether this meter is actively collecting events"))
+    is_billable = models.BooleanField(default=True, help_text=_("Whether usage from this meter generates charges"))
 
     # Event processing
     event_grace_period_hours = models.PositiveIntegerField(
-        default=24,
-        help_text=_("Hours in past to accept late events")
+        default=24, help_text=_("Hours in past to accept late events")
     )
 
     # Metadata
-    meta = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Additional meter configuration")
-    )
+    meta = models.JSONField(default=dict, blank=True, help_text=_("Additional meter configuration"))
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -244,16 +209,13 @@ class UsageEvent(models.Model):
 
     # Event identification
     meter = models.ForeignKey(
-        UsageMeter,
-        on_delete=models.PROTECT,
-        related_name="events",
-        help_text=_("Which meter this event belongs to")
+        UsageMeter, on_delete=models.PROTECT, related_name="events", help_text=_("Which meter this event belongs to")
     )
     customer = models.ForeignKey(
         "customers.Customer",
         on_delete=models.CASCADE,
         related_name="usage_events",
-        help_text=_("Customer who generated this usage")
+        help_text=_("Customer who generated this usage"),
     )
     subscription = models.ForeignKey(
         "billing.Subscription",
@@ -261,7 +223,7 @@ class UsageEvent(models.Model):
         null=True,
         blank=True,
         related_name="usage_events",
-        help_text=_("Subscription this usage is billed against")
+        help_text=_("Subscription this usage is billed against"),
     )
     service = models.ForeignKey(
         "provisioning.Service",
@@ -269,66 +231,44 @@ class UsageEvent(models.Model):
         null=True,
         blank=True,
         related_name="usage_events",
-        help_text=_("Service that generated this usage")
+        help_text=_("Service that generated this usage"),
     )
 
     # Idempotency
     idempotency_key = models.CharField(
-        max_length=255,
-        db_index=True,
-        help_text=_("Unique key to prevent duplicate event processing")
+        max_length=255, db_index=True, help_text=_("Unique key to prevent duplicate event processing")
     )
 
     # Event data
     value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        help_text=_("Usage value (interpretation depends on meter aggregation)")
+        max_digits=18, decimal_places=8, help_text=_("Usage value (interpretation depends on meter aggregation)")
     )
 
     # Timestamps
-    timestamp = models.DateTimeField(
-        db_index=True,
-        help_text=_("When the usage occurred (may differ from created_at)")
-    )
+    timestamp = models.DateTimeField(db_index=True, help_text=_("When the usage occurred (may differ from created_at)"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Event metadata for debugging and detailed tracking
     properties = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=_("Additional event properties (e.g., endpoint, resource_id)")
+        default=dict, blank=True, help_text=_("Additional event properties (e.g., endpoint, resource_id)")
     )
 
     # Source tracking
     source = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Source system (e.g., 'virtualmin', 'api_gateway', 'manual')")
+        max_length=50, blank=True, help_text=_("Source system (e.g., 'virtualmin', 'api_gateway', 'manual')")
     )
-    source_ip = models.GenericIPAddressField(
-        null=True,
-        blank=True,
-        help_text=_("IP address of event source")
-    )
+    source_ip = models.GenericIPAddressField(null=True, blank=True, help_text=_("IP address of event source"))
 
     # Processing status
-    is_processed = models.BooleanField(
-        default=False,
-        help_text=_("Whether event has been included in aggregation")
-    )
-    processed_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When event was processed into aggregation")
-    )
+    is_processed = models.BooleanField(default=False, help_text=_("Whether event has been included in aggregation"))
+    processed_at = models.DateTimeField(null=True, blank=True, help_text=_("When event was processed into aggregation"))
     aggregation = models.ForeignKey(
         "billing.UsageAggregation",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="events",
-        help_text=_("Aggregation record this event was processed into")
+        help_text=_("Aggregation record this event was processed into"),
     )
 
     class Meta:
@@ -337,10 +277,9 @@ class UsageEvent(models.Model):
         verbose_name_plural = _("Usage Events")
         ordering = ("-timestamp",)
         # Enforce idempotency at database level
-        constraints = [
+        constraints = [  # noqa: RUF012
             models.UniqueConstraint(
-                fields=["meter", "customer", "idempotency_key"],
-                name="unique_usage_event_idempotency"
+                fields=["meter", "customer", "idempotency_key"], name="unique_usage_event_idempotency"
             ),
         ]
         indexes = (
@@ -351,10 +290,7 @@ class UsageEvent(models.Model):
             models.Index(fields=["is_processed", "-timestamp"]),
             models.Index(fields=["meter", "customer", "timestamp"]),
             # For aggregation queries
-            models.Index(
-                fields=["meter", "customer", "is_processed"],
-                name="usage_evt_pending_agg"
-            ),
+            models.Index(fields=["meter", "customer", "is_processed"], name="usage_evt_pending_agg"),
         )
 
     def __str__(self) -> str:
@@ -396,55 +332,31 @@ class UsageAggregation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Aggregation scope
-    meter = models.ForeignKey(
-        UsageMeter,
-        on_delete=models.PROTECT,
-        related_name="aggregations"
-    )
-    customer = models.ForeignKey(
-        "customers.Customer",
-        on_delete=models.CASCADE,
-        related_name="usage_aggregations"
-    )
+    meter = models.ForeignKey(UsageMeter, on_delete=models.PROTECT, related_name="aggregations")
+    customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE, related_name="usage_aggregations")
     subscription = models.ForeignKey(
-        "billing.Subscription",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="usage_aggregations"
+        "billing.Subscription", on_delete=models.SET_NULL, null=True, blank=True, related_name="usage_aggregations"
     )
     billing_cycle = models.ForeignKey(
         "billing.BillingCycle",
         on_delete=models.CASCADE,
         related_name="usage_aggregations",
-        help_text=_("Billing cycle this aggregation belongs to")
+        help_text=_("Billing cycle this aggregation belongs to"),
     )
 
     # Period definition
-    period_start = models.DateTimeField(
-        help_text=_("Start of aggregation period")
-    )
-    period_end = models.DateTimeField(
-        help_text=_("End of aggregation period")
-    )
+    period_start = models.DateTimeField(help_text=_("Start of aggregation period"))
+    period_end = models.DateTimeField(help_text=_("End of aggregation period"))
 
     # Aggregated values
     total_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        default=Decimal("0"),
-        help_text=_("Aggregated usage value for the period")
+        max_digits=18, decimal_places=8, default=Decimal("0"), help_text=_("Aggregated usage value for the period")
     )
-    event_count = models.PositiveIntegerField(
-        default=0,
-        help_text=_("Number of events aggregated")
-    )
+    event_count = models.PositiveIntegerField(default=0, help_text=_("Number of events aggregated"))
 
     # For unique aggregation
     unique_values = models.JSONField(
-        default=list,
-        blank=True,
-        help_text=_("Set of unique values for unique-count aggregation")
+        default=list, blank=True, help_text=_("Set of unique values for unique-count aggregation")
     )
 
     # For max aggregation
@@ -453,53 +365,29 @@ class UsageAggregation(models.Model):
         decimal_places=8,
         null=True,
         blank=True,
-        help_text=_("Maximum value seen in period (for max aggregation)")
+        help_text=_("Maximum value seen in period (for max aggregation)"),
     )
 
     # For last aggregation
     last_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        null=True,
-        blank=True,
-        help_text=_("Most recent value (for last aggregation)")
+        max_digits=18, decimal_places=8, null=True, blank=True, help_text=_("Most recent value (for last aggregation)")
     )
-    last_value_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("Timestamp of last value")
-    )
+    last_value_at = models.DateTimeField(null=True, blank=True, help_text=_("Timestamp of last value"))
 
     # Billing calculation
     billable_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        default=Decimal("0"),
-        help_text=_("Final billable amount after rounding")
+        max_digits=18, decimal_places=8, default=Decimal("0"), help_text=_("Final billable amount after rounding")
     )
     included_allowance = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        default=Decimal("0"),
-        help_text=_("Usage included in subscription (no charge)")
+        max_digits=18, decimal_places=8, default=Decimal("0"), help_text=_("Usage included in subscription (no charge)")
     )
     overage_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        default=Decimal("0"),
-        help_text=_("Usage above included allowance (billable)")
+        max_digits=18, decimal_places=8, default=Decimal("0"), help_text=_("Usage above included allowance (billable)")
     )
 
     # Charge calculation (populated by rating engine)
-    charge_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Calculated charge in cents")
-    )
-    charge_calculated_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When charge was last calculated")
-    )
+    charge_cents = models.BigIntegerField(default=0, help_text=_("Calculated charge in cents"))
+    charge_calculated_at = models.DateTimeField(null=True, blank=True, help_text=_("When charge was last calculated"))
 
     # Status
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -509,11 +397,7 @@ class UsageAggregation(models.Model):
         ("invoiced", _("Invoiced")),
         ("finalized", _("Finalized")),
     )
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default="accumulating"
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="accumulating")
 
     # Invoice link
     invoice_line = models.ForeignKey(
@@ -522,20 +406,14 @@ class UsageAggregation(models.Model):
         null=True,
         blank=True,
         related_name="usage_aggregations",
-        help_text=_("Invoice line generated from this aggregation")
+        help_text=_("Invoice line generated from this aggregation"),
     )
 
     # Stripe sync
     stripe_usage_record_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Stripe usage record ID for reconciliation")
+        max_length=100, blank=True, help_text=_("Stripe usage record ID for reconciliation")
     )
-    stripe_synced_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When usage was synced to Stripe")
-    )
+    stripe_synced_at = models.DateTimeField(null=True, blank=True, help_text=_("When usage was synced to Stripe"))
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
@@ -547,11 +425,8 @@ class UsageAggregation(models.Model):
         verbose_name = _("Usage Aggregation")
         verbose_name_plural = _("Usage Aggregations")
         ordering = ("-period_start",)
-        constraints = [
-            models.UniqueConstraint(
-                fields=["meter", "customer", "billing_cycle"],
-                name="unique_meter_customer_cycle"
-            ),
+        constraints = [  # noqa: RUF012
+            models.UniqueConstraint(fields=["meter", "customer", "billing_cycle"], name="unique_meter_customer_cycle"),
         ]
         indexes = (
             models.Index(fields=["customer", "-period_start"]),
@@ -560,9 +435,7 @@ class UsageAggregation(models.Model):
             models.Index(fields=["status", "-period_start"]),
             # For invoice generation queries
             models.Index(
-                fields=["status", "customer"],
-                condition=models.Q(status="rated"),
-                name="usage_agg_ready_invoice"
+                fields=["status", "customer"], condition=models.Q(status="rated"), name="usage_agg_ready_invoice"
             ),
         )
 
@@ -583,7 +456,8 @@ class UsageAggregation(models.Model):
         elif self.meter.aggregation_type == "count":
             self.total_value = Decimal(events.count())
         elif self.meter.aggregation_type == "max":
-            from django.db.models import Max
+            from django.db.models import Max  # noqa: PLC0415
+
             result = events.aggregate(max_val=Max("value"))
             self.max_value = result["max_val"]
             self.total_value = self.max_value or Decimal("0")
@@ -626,74 +500,32 @@ class BillingCycle(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    subscription = models.ForeignKey(
-        "billing.Subscription",
-        on_delete=models.CASCADE,
-        related_name="billing_cycles"
-    )
+    subscription = models.ForeignKey("billing.Subscription", on_delete=models.CASCADE, related_name="billing_cycles")
 
     # Period
     period_start = models.DateTimeField()
     period_end = models.DateTimeField()
 
     # Status
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default="upcoming"
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="upcoming")
 
     # Totals (calculated during closing)
-    base_charge_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Fixed subscription charge for this period")
-    )
-    usage_charge_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Total usage-based charges for this period")
-    )
-    discount_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Discounts applied")
-    )
-    credit_applied_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Customer credit applied")
-    )
-    tax_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Tax amount")
-    )
-    total_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Total amount due for this cycle")
-    )
+    base_charge_cents = models.BigIntegerField(default=0, help_text=_("Fixed subscription charge for this period"))
+    usage_charge_cents = models.BigIntegerField(default=0, help_text=_("Total usage-based charges for this period"))
+    discount_cents = models.BigIntegerField(default=0, help_text=_("Discounts applied"))
+    credit_applied_cents = models.BigIntegerField(default=0, help_text=_("Customer credit applied"))
+    tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount"))
+    total_cents = models.BigIntegerField(default=0, help_text=_("Total amount due for this cycle"))
 
     # Invoice
     invoice = models.ForeignKey(
-        "billing.Invoice",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="billing_cycles"
+        "billing.Invoice", on_delete=models.SET_NULL, null=True, blank=True, related_name="billing_cycles"
     )
 
     # Processing timestamps
-    closed_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When cycle was closed for new events")
-    )
-    invoiced_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When invoice was generated")
-    )
-    finalized_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When cycle was fully finalized")
-    )
+    closed_at = models.DateTimeField(null=True, blank=True, help_text=_("When cycle was closed for new events"))
+    invoiced_at = models.DateTimeField(null=True, blank=True, help_text=_("When invoice was generated"))
+    finalized_at = models.DateTimeField(null=True, blank=True, help_text=_("When cycle was fully finalized"))
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
@@ -705,11 +537,8 @@ class BillingCycle(models.Model):
         verbose_name = _("Billing Cycle")
         verbose_name_plural = _("Billing Cycles")
         ordering = ("-period_start",)
-        constraints = [
-            models.UniqueConstraint(
-                fields=["subscription", "period_start"],
-                name="unique_subscription_period"
-            ),
+        constraints = [  # noqa: RUF012
+            models.UniqueConstraint(fields=["subscription", "period_start"], name="unique_subscription_period"),
         ]
         indexes = (
             models.Index(fields=["subscription", "-period_start"]),
@@ -782,63 +611,33 @@ class PricingTier(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Identification
-    name = models.CharField(
-        max_length=100,
-        help_text=_("Pricing tier name (e.g., 'Standard Bandwidth')")
-    )
+    name = models.CharField(max_length=100, help_text=_("Pricing tier name (e.g., 'Standard Bandwidth')"))
     description = models.TextField(blank=True)
 
     # Meter association
-    meter = models.ForeignKey(
-        UsageMeter,
-        on_delete=models.CASCADE,
-        related_name="pricing_tiers"
-    )
+    meter = models.ForeignKey(UsageMeter, on_delete=models.CASCADE, related_name="pricing_tiers")
 
     # Pricing model
-    pricing_model = models.CharField(
-        max_length=20,
-        choices=PRICING_MODEL_CHOICES,
-        default="per_unit"
-    )
+    pricing_model = models.CharField(max_length=20, choices=PRICING_MODEL_CHOICES, default="per_unit")
 
     # Currency
-    currency = models.ForeignKey(
-        Currency,
-        on_delete=models.PROTECT
-    )
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
 
     # Simple per-unit pricing
     unit_price_cents = models.BigIntegerField(
-        null=True,
-        blank=True,
-        help_text=_("Price per unit in cents (for per_unit model)")
+        null=True, blank=True, help_text=_("Price per unit in cents (for per_unit model)")
     )
 
     # Minimum charge
-    minimum_charge_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Minimum charge regardless of usage")
-    )
+    minimum_charge_cents = models.BigIntegerField(default=0, help_text=_("Minimum charge regardless of usage"))
 
     # Configuration
     is_active = models.BooleanField(default=True)
-    is_default = models.BooleanField(
-        default=False,
-        help_text=_("Default tier for this meter")
-    )
+    is_default = models.BooleanField(default=False, help_text=_("Default tier for this meter"))
 
     # Validity period
-    valid_from = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When this pricing becomes effective")
-    )
-    valid_until = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When this pricing expires")
-    )
+    valid_from = models.DateTimeField(null=True, blank=True, help_text=_("When this pricing becomes effective"))
+    valid_until = models.DateTimeField(null=True, blank=True, help_text=_("When this pricing expires"))
 
     # Metadata
     meta = models.JSONField(default=dict, blank=True)
@@ -882,34 +681,17 @@ class PricingTierBracket(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    pricing_tier = models.ForeignKey(
-        PricingTier,
-        on_delete=models.CASCADE,
-        related_name="brackets"
-    )
+    pricing_tier = models.ForeignKey(PricingTier, on_delete=models.CASCADE, related_name="brackets")
 
     # Range definition
-    from_quantity = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        help_text=_("Start of bracket (inclusive)")
-    )
+    from_quantity = models.DecimalField(max_digits=18, decimal_places=8, help_text=_("Start of bracket (inclusive)"))
     to_quantity = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        null=True,
-        blank=True,
-        help_text=_("End of bracket (null = unlimited)")
+        max_digits=18, decimal_places=8, null=True, blank=True, help_text=_("End of bracket (null = unlimited)")
     )
 
     # Pricing
-    unit_price_cents = models.BigIntegerField(
-        help_text=_("Price per unit in this bracket")
-    )
-    flat_fee_cents = models.BigIntegerField(
-        default=0,
-        help_text=_("Flat fee for this bracket (package pricing)")
-    )
+    unit_price_cents = models.BigIntegerField(help_text=_("Price per unit in this bracket"))
+    flat_fee_cents = models.BigIntegerField(default=0, help_text=_("Flat fee for this bracket (package pricing)"))
 
     # Ordering
     sort_order = models.PositiveIntegerField(default=0)
@@ -919,11 +701,8 @@ class PricingTierBracket(models.Model):
         verbose_name = _("Pricing Bracket")
         verbose_name_plural = _("Pricing Brackets")
         ordering = ("pricing_tier", "sort_order", "from_quantity")
-        constraints = [
-            models.UniqueConstraint(
-                fields=["pricing_tier", "from_quantity"],
-                name="unique_tier_bracket_start"
-            ),
+        constraints = [  # noqa: RUF012
+            models.UniqueConstraint(fields=["pricing_tier", "from_quantity"], name="unique_tier_bracket_start"),
         ]
 
     def __str__(self) -> str:
@@ -961,46 +740,26 @@ class UsageThreshold(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Scope
-    meter = models.ForeignKey(
-        UsageMeter,
-        on_delete=models.CASCADE,
-        related_name="thresholds"
-    )
+    meter = models.ForeignKey(UsageMeter, on_delete=models.CASCADE, related_name="thresholds")
     service_plan = models.ForeignKey(
         "provisioning.ServicePlan",
         on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="usage_thresholds",
-        help_text=_("Apply to specific plan (null = all plans)")
+        help_text=_("Apply to specific plan (null = all plans)"),
     )
 
     # Threshold definition
-    threshold_type = models.CharField(
-        max_length=20,
-        choices=THRESHOLD_TYPE_CHOICES,
-        default="percentage"
-    )
+    threshold_type = models.CharField(max_length=20, choices=THRESHOLD_TYPE_CHOICES, default="percentage")
     threshold_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        help_text=_("Threshold value (percentage or absolute)")
+        max_digits=18, decimal_places=8, help_text=_("Threshold value (percentage or absolute)")
     )
 
     # Notification configuration
-    notify_customer = models.BooleanField(
-        default=True,
-        help_text=_("Send notification to customer")
-    )
-    notify_staff = models.BooleanField(
-        default=False,
-        help_text=_("Send notification to staff")
-    )
-    email_template = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Email template to use for notification")
-    )
+    notify_customer = models.BooleanField(default=True, help_text=_("Send notification to customer"))
+    notify_staff = models.BooleanField(default=False, help_text=_("Send notification to staff"))
+    email_template = models.CharField(max_length=100, blank=True, help_text=_("Email template to use for notification"))
 
     # Actions
     action_on_breach = models.CharField(
@@ -1013,18 +772,14 @@ class UsageThreshold(models.Model):
             ("suspend", _("Suspend Service")),
             ("block_new", _("Block New Usage")),
         ],
-        help_text=_("Action to take when threshold is breached")
+        help_text=_("Action to take when threshold is breached"),
     )
 
     # Repeat settings
     repeat_notification = models.BooleanField(
-        default=False,
-        help_text=_("Send notification again if threshold remains breached")
+        default=False, help_text=_("Send notification again if threshold remains breached")
     )
-    repeat_interval_hours = models.PositiveIntegerField(
-        default=24,
-        help_text=_("Hours between repeat notifications")
-    )
+    repeat_interval_hours = models.PositiveIntegerField(default=24, help_text=_("Hours between repeat notifications"))
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1065,91 +820,46 @@ class UsageAlert(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # References
-    threshold = models.ForeignKey(
-        UsageThreshold,
-        on_delete=models.CASCADE,
-        related_name="alerts"
-    )
-    customer = models.ForeignKey(
-        "customers.Customer",
-        on_delete=models.CASCADE,
-        related_name="usage_alerts"
-    )
+    threshold = models.ForeignKey(UsageThreshold, on_delete=models.CASCADE, related_name="alerts")
+    customer = models.ForeignKey("customers.Customer", on_delete=models.CASCADE, related_name="usage_alerts")
     subscription = models.ForeignKey(
-        "billing.Subscription",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="usage_alerts"
+        "billing.Subscription", on_delete=models.SET_NULL, null=True, blank=True, related_name="usage_alerts"
     )
     aggregation = models.ForeignKey(
-        UsageAggregation,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="alerts"
+        UsageAggregation, on_delete=models.SET_NULL, null=True, blank=True, related_name="alerts"
     )
 
     # Alert details
-    status = models.CharField(
-        max_length=20,
-        choices=ALERT_STATUS_CHOICES,
-        default="pending"
-    )
+    status = models.CharField(max_length=20, choices=ALERT_STATUS_CHOICES, default="pending")
 
     # Usage at time of alert
     usage_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        help_text=_("Usage value when alert was triggered")
+        max_digits=18, decimal_places=8, help_text=_("Usage value when alert was triggered")
     )
     usage_percentage = models.DecimalField(
-        max_digits=8,
-        decimal_places=4,
-        null=True,
-        blank=True,
-        help_text=_("Usage as percentage of allowance")
+        max_digits=8, decimal_places=4, null=True, blank=True, help_text=_("Usage as percentage of allowance")
     )
     allowance_value = models.DecimalField(
-        max_digits=18,
-        decimal_places=8,
-        null=True,
-        blank=True,
-        help_text=_("Total allowance at time of alert")
+        max_digits=18, decimal_places=8, null=True, blank=True, help_text=_("Total allowance at time of alert")
     )
 
     # Notification tracking
-    notified_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=_("When notification was sent")
-    )
+    notified_at = models.DateTimeField(null=True, blank=True, help_text=_("When notification was sent"))
     notification_channel = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("How notification was sent (email, sms, webhook)")
+        max_length=50, blank=True, help_text=_("How notification was sent (email, sms, webhook)")
     )
-    notification_error = models.TextField(
-        blank=True,
-        help_text=_("Error message if notification failed")
-    )
+    notification_error = models.TextField(blank=True, help_text=_("Error message if notification failed"))
 
     # Action taken
     action_taken = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text=_("Action taken in response to threshold breach")
+        max_length=50, blank=True, help_text=_("Action taken in response to threshold breach")
     )
     action_at = models.DateTimeField(null=True, blank=True)
 
     # Resolution
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolved_by = models.ForeignKey(
-        "users.User",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="resolved_usage_alerts"
+        "users.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="resolved_usage_alerts"
     )
     resolution_notes = models.TextField(blank=True)
 
@@ -1170,7 +880,7 @@ class UsageAlert(models.Model):
             models.Index(
                 fields=["status", "customer"],
                 condition=models.Q(status__in=["pending", "sent"]),
-                name="usage_alert_unresolved"
+                name="usage_alert_unresolved",
             ),
         )
 
@@ -1196,6 +906,4 @@ class UsageAlert(models.Model):
         self.resolved_at = timezone.now()
         self.resolved_by = user
         self.resolution_notes = notes
-        self.save(update_fields=[
-            "status", "resolved_at", "resolved_by", "resolution_notes", "updated_at"
-        ])
+        self.save(update_fields=["status", "resolved_at", "resolved_by", "resolution_notes", "updated_at"])

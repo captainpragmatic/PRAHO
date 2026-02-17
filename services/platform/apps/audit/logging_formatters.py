@@ -16,10 +16,9 @@ import socket
 import threading
 import traceback
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from django.conf import settings
-
 
 # =============================================================================
 # THREAD-LOCAL STORAGE FOR REQUEST CONTEXT
@@ -105,7 +104,7 @@ class SIEMJSONFormatter(logging.Formatter):
     """
 
     # Mapping from Python log levels to severity numbers
-    SEVERITY_MAP = {
+    SEVERITY_MAP: ClassVar[dict] = {
         "DEBUG": 7,
         "INFO": 6,
         "WARNING": 4,
@@ -140,7 +139,6 @@ class SIEMJSONFormatter(logging.Formatter):
             # Timestamp (ISO 8601 format for SIEM compatibility)
             "@timestamp": timestamp,
             "timestamp": timestamp,
-
             # Event identification
             "event": {
                 "created": timestamp,
@@ -149,13 +147,11 @@ class SIEMJSONFormatter(logging.Formatter):
                 "type": [self._get_event_type(record)],
                 "severity": self.SEVERITY_MAP.get(record.levelname, 6),
             },
-
             # Log metadata
             "log": {
                 "level": record.levelname.lower(),
                 "logger": record.name,
             },
-
             # Source code location
             "log.origin": {
                 "file": {
@@ -164,21 +160,17 @@ class SIEMJSONFormatter(logging.Formatter):
                 },
                 "function": record.funcName,
             },
-
             # Host information
             "host": {
                 "name": self.hostname,
             },
-
             # Service information
             "service": {
                 "name": self.application,
                 "type": "django",
             },
-
             # Message
             "message": record.getMessage(),
-
             # Process/thread information
             "process": {
                 "pid": record.process,
@@ -187,7 +179,6 @@ class SIEMJSONFormatter(logging.Formatter):
                     "name": record.threadName,
                 },
             },
-
             # Request context (if available)
             "trace": {
                 "id": getattr(record, "request_id", None),
@@ -202,7 +193,6 @@ class SIEMJSONFormatter(logging.Formatter):
             "session": {
                 "id": getattr(record, "session_id", None),
             },
-
             # PRAHO-specific fields
             "praho": {
                 "customer_id": getattr(record, "customer_id", None),
@@ -224,7 +214,7 @@ class SIEMJSONFormatter(logging.Formatter):
             "stack_trace": "".join(traceback.format_exception(*exc_info)) if exc_tb else "",
         }
 
-    def _get_event_category(self, record: logging.LogRecord) -> str:
+    def _get_event_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
         """Determine event category from logger name"""
         logger_name = record.name.lower()
 
@@ -251,9 +241,7 @@ class SIEMJSONFormatter(logging.Formatter):
 
         if level in ("ERROR", "CRITICAL"):
             return "error"
-        elif level == "WARNING":
-            return "info"
-        elif level == "DEBUG":
+        elif level in {"WARNING", "DEBUG"}:
             return "info"
 
         return "info"
@@ -261,18 +249,42 @@ class SIEMJSONFormatter(logging.Formatter):
     def _extract_extra_fields(self, record: logging.LogRecord) -> dict[str, Any]:
         """Extract extra fields added to the log record"""
         standard_attrs = {
-            "name", "msg", "args", "created", "filename", "funcName",
-            "levelname", "levelno", "lineno", "module", "msecs",
-            "pathname", "process", "processName", "relativeCreated",
-            "stack_info", "exc_info", "exc_text", "thread", "threadName",
-            "message", "request_id", "user_id", "user_email", "ip_address",
-            "session_id", "customer_id", "hostname", "environment",
+            "name",
+            "msg",
+            "args",
+            "created",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "stack_info",
+            "exc_info",
+            "exc_text",
+            "thread",
+            "threadName",
+            "message",
+            "request_id",
+            "user_id",
+            "user_email",
+            "ip_address",
+            "session_id",
+            "customer_id",
+            "hostname",
+            "environment",
         }
 
-        extra = {}
-        for key, value in record.__dict__.items():
-            if key not in standard_attrs and not key.startswith("_"):
-                extra[key] = value
+        extra = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in standard_attrs and not key.startswith("_")
+        }
 
         if extra:
             return {"extra": extra}
@@ -302,7 +314,7 @@ class AuditLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format audit log record with integrity chain"""
-        import hashlib
+        import hashlib  # noqa: PLC0415
 
         self.sequence += 1
         timestamp = datetime.utcfromtimestamp(record.created).isoformat() + "Z"
@@ -350,7 +362,7 @@ class AuditLogFormatter(logging.Formatter):
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:
+    def _determine_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
         """Determine audit category from log record"""
         message = record.getMessage().lower()
 
@@ -407,7 +419,7 @@ class ComplianceLogFormatter(logging.Formatter):
     - SOC 2
     """
 
-    COMPLIANCE_FRAMEWORKS = {
+    COMPLIANCE_FRAMEWORKS: ClassVar[dict] = {
         "authentication": ["ISO27001-A.9.4", "SOC2-CC6.1", "GDPR-Art32"],
         "authorization": ["ISO27001-A.9.2", "SOC2-CC6.2"],
         "data_modification": ["GDPR-Art30", "ISO27001-A.12.4"],
@@ -453,7 +465,7 @@ class ComplianceLogFormatter(logging.Formatter):
 
         return json.dumps(compliance_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:
+    def _determine_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
         """Determine compliance category"""
         message = record.getMessage().lower()
 
@@ -476,7 +488,17 @@ class ComplianceLogFormatter(logging.Formatter):
         """Check if log contains sensitive data indicators"""
         message = record.getMessage().lower()
         sensitive_indicators = [
-            "password", "credit", "card", "ssn", "tax", "cui",
-            "bank", "account", "secret", "token", "key", "credential",
+            "password",
+            "credit",
+            "card",
+            "ssn",
+            "tax",
+            "cui",
+            "bank",
+            "account",
+            "secret",
+            "token",
+            "key",
+            "credential",
         ]
         return any(indicator in message for indicator in sensitive_indicators)

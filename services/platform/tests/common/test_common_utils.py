@@ -47,9 +47,9 @@ class TestRomanianDateFormatting(TestCase):
         """Test getting current time in Romanian timezone"""
         with patch('django.utils.timezone.now') as mock_now:
             mock_now.return_value = datetime(2023, 6, 15, 12, 0, 0, tzinfo=pytz.UTC)
-            
+
             result = get_romanian_now()
-            
+
             # Should be a datetime object
             self.assertIsInstance(result, datetime)
             # Should have timezone info
@@ -61,7 +61,7 @@ class TestRomanianDateFormatting(TestCase):
         test_date = datetime(2023, 1, 5, 9, 5, 30)
         date_result = format_romanian_date(test_date)
         datetime_result = format_romanian_datetime(test_date)
-        
+
         self.assertEqual(date_result, '05.01.2023')
         self.assertEqual(datetime_result, '05.01.2023 09:05')
 
@@ -83,7 +83,7 @@ class TestInvoiceNumberGeneration(TestCase):
     def test_invoice_number_specific_year(self):
         """Test invoice number generation for specific year"""
         result = generate_invoice_number(year=2024)
-        
+
         # Should start with specified year
         self.assertTrue(result.startswith('2024'))
         self.assertRegex(result, r'2024-\d{6}')
@@ -108,7 +108,7 @@ class TestDueDateCalculation(TestCase):
         """Test default 30-day payment terms"""
         invoice_date = datetime(2023, 6, 15, 10, 0, 0)
         due_date = calculate_due_date(invoice_date)
-        
+
         expected_due = invoice_date + timedelta(days=30)
         self.assertEqual(due_date, expected_due)
 
@@ -116,7 +116,7 @@ class TestDueDateCalculation(TestCase):
         """Test custom payment terms"""
         invoice_date = datetime(2023, 6, 15, 10, 0, 0)
         due_date = calculate_due_date(invoice_date, payment_terms=15)
-        
+
         expected_due = invoice_date + timedelta(days=15)
         self.assertEqual(due_date, expected_due)
 
@@ -124,14 +124,14 @@ class TestDueDateCalculation(TestCase):
         """Test immediate payment (0 days)"""
         invoice_date = datetime(2023, 6, 15, 10, 0, 0)
         due_date = calculate_due_date(invoice_date, payment_terms=0)
-        
+
         self.assertEqual(due_date, invoice_date)
 
     def test_negative_payment_terms(self):
         """Test negative payment terms (advance payment)"""
         invoice_date = datetime(2023, 6, 15, 10, 0, 0)
         due_date = calculate_due_date(invoice_date, payment_terms=-5)
-        
+
         expected_due = invoice_date - timedelta(days=5)
         self.assertEqual(due_date, expected_due)
 
@@ -142,7 +142,7 @@ class TestSecurityUtilities(TestCase):
     def test_generate_secure_token_default_length(self):
         """Test secure token generation with default length"""
         token = generate_secure_token()
-        
+
         # Default length should be 32 bytes, URL-safe base64 encoded
         self.assertGreaterEqual(len(token), 40)  # Base64 encoding makes it longer
         # Should only contain URL-safe base64 characters
@@ -151,7 +151,7 @@ class TestSecurityUtilities(TestCase):
     def test_generate_secure_token_custom_length(self):
         """Test secure token generation with custom length"""
         token = generate_secure_token(16)
-        
+
         # Should be 16 bytes, URL-safe base64 encoded (approximate length)
         self.assertGreaterEqual(len(token), 20)  # Base64 encoding makes it longer
         self.assertRegex(token, r'^[A-Za-z0-9_-]+$')
@@ -159,7 +159,7 @@ class TestSecurityUtilities(TestCase):
     def test_generate_secure_token_uniqueness(self):
         """Test that secure tokens are unique"""
         tokens = [generate_secure_token() for _ in range(100)]
-        
+
         # All tokens should be unique
         self.assertEqual(len(tokens), len(set(tokens)))
 
@@ -167,15 +167,15 @@ class TestSecurityUtilities(TestCase):
         """Test sensitive data hashing"""
         data = "sensitive_information"
         hashed = hash_sensitive_data(data)
-        
+
         # Should be SHA-256 hash (64 characters)
         self.assertEqual(len(hashed), 64)
         self.assertRegex(hashed, r'^[0-9a-f]+$')
-        
+
         # Same input should produce same hash
         hashed2 = hash_sensitive_data(data)
         self.assertEqual(hashed, hashed2)
-        
+
         # Different input should produce different hash
         hashed3 = hash_sensitive_data("different_data")
         self.assertNotEqual(hashed, hashed3)
@@ -183,10 +183,10 @@ class TestSecurityUtilities(TestCase):
     def test_hash_sensitive_data_consistency(self):
         """Test that hashing produces consistent results"""
         data = "test@example.com"
-        
+
         result1 = hash_sensitive_data(data)
         result2 = hash_sensitive_data(data)
-        
+
         # Same input should produce same hash
         self.assertEqual(result1, result2)
         # Should be SHA-256 hash (64 characters)
@@ -197,7 +197,7 @@ class TestSecurityUtilities(TestCase):
         """Test sensitive data masking with default parameters"""
         data = "1234567890123456"  # Credit card number
         masked = mask_sensitive_data(data)
-        
+
         # Should show only last 4 characters
         self.assertEqual(masked, "************3456")
 
@@ -205,7 +205,7 @@ class TestSecurityUtilities(TestCase):
         """Test sensitive data masking with custom show_last parameter"""
         data = "test@example.com"
         masked = mask_sensitive_data(data, show_last=6)
-        
+
         # Should show last 6 characters
         expected_length = len(data)
         expected_masked = "*" * (expected_length - 6) + "le.com"
@@ -215,7 +215,7 @@ class TestSecurityUtilities(TestCase):
         """Test masking data shorter than show_last"""
         data = "abc"
         masked = mask_sensitive_data(data, show_last=10)
-        
+
         # Should mask all characters when data is shorter than show_last
         self.assertEqual(masked, "***")
 
@@ -223,7 +223,7 @@ class TestSecurityUtilities(TestCase):
         """Test masking empty data"""
         data = ""
         masked = mask_sensitive_data(data)
-        
+
         self.assertEqual(masked, "")
 
 
@@ -233,10 +233,10 @@ class TestJSONResponseUtilities(TestCase):
     def test_json_success_default(self):
         """Test JSON success response with default parameters"""
         response = json_success()
-        
+
         self.assertIsInstance(response, JsonResponse)
         self.assertEqual(response.status_code, 200)
-        
+
         # Check response content
         content = response.content.decode()
         self.assertIn('"success": true', content)
@@ -246,9 +246,9 @@ class TestJSONResponseUtilities(TestCase):
         """Test JSON success response with data"""
         test_data = {'user_id': 123, 'name': 'John Doe'}
         response = json_success(data=test_data, message="User created")
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         content = response.content.decode()
         self.assertIn('"success": true', content)
         self.assertIn('"message": "User created"', content)
@@ -258,7 +258,7 @@ class TestJSONResponseUtilities(TestCase):
     def test_json_success_with_none_data(self):
         """Test JSON success response with None data"""
         response = json_success(data=None, message="Operation completed")
-        
+
         content = response.content.decode()
         self.assertIn('"success": true', content)
         self.assertIn('"message": "Operation completed"', content)
@@ -268,10 +268,10 @@ class TestJSONResponseUtilities(TestCase):
     def test_json_error_default(self):
         """Test JSON error response with default parameters"""
         response = json_error("Something went wrong")
-        
+
         self.assertIsInstance(response, JsonResponse)
         self.assertEqual(response.status_code, 400)
-        
+
         content = response.content.decode()
         self.assertIn('"success": false', content)
         self.assertIn('"message": "Something went wrong"', content)
@@ -280,13 +280,13 @@ class TestJSONResponseUtilities(TestCase):
     def test_json_error_custom_parameters(self):
         """Test JSON error response with custom parameters"""
         response = json_error(
-            message="Validation failed", 
-            code="VALIDATION_ERROR", 
+            message="Validation failed",
+            code="VALIDATION_ERROR",
             status=422
         )
-        
+
         self.assertEqual(response.status_code, 422)
-        
+
         content = response.content.decode()
         self.assertIn('"success": false', content)
         self.assertIn('"message": "Validation failed"', content)
@@ -295,7 +295,7 @@ class TestJSONResponseUtilities(TestCase):
     def test_json_error_various_status_codes(self):
         """Test JSON error response with various status codes"""
         status_codes = [400, 401, 403, 404, 422, 500]
-        
+
         for status in status_codes:
             response = json_error("Test error", status=status)
             self.assertEqual(response.status_code, status)
@@ -316,7 +316,7 @@ class TestVATCalculationIntegration(TestCase):
 
         for amount in test_amounts:
             result = calculate_romanian_vat(amount)
-            
+
             # Verify it returns a dictionary with expected keys
             self.assertIsInstance(result, dict)
             self.assertIn('amount_without_vat', result)
@@ -344,7 +344,7 @@ class TestVATCalculationIntegration(TestCase):
         """Test VAT calculation maintains proper decimal precision"""
         amount = Decimal('123.456789')
         result = calculate_romanian_vat(amount)
-        
+
         # Verify it returns a dictionary with expected keys
         self.assertIsInstance(result, dict)
         self.assertIn('amount_without_vat', result)
