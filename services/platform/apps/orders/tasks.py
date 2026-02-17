@@ -30,7 +30,7 @@ MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
 try:
     from apps.provisioning.models import Service
 except ImportError:
-    Service = None  # type: ignore[misc,assignment]  # Handle case where provisioning app is not available
+    Service = None  # Handle case where provisioning app is not available
 
 logger = logging.getLogger(__name__)
 
@@ -561,11 +561,11 @@ def sync_order_payment_status() -> dict[str, Any]:
                     payment_updated = True
 
                 # Process payment failures
-                if _process_payment_failures(order, payments, results):  # type: ignore[arg-type]
+                if _process_payment_failures(order, payments, results):
                     payment_updated = True
 
                 # Process refunds
-                if _process_refunds(order, payments, total_paid_cents, results):  # type: ignore[arg-type]
+                if _process_refunds(order, payments, total_paid_cents, results):
                     payment_updated = True
 
                 # Track updated order details
@@ -657,7 +657,7 @@ def process_recurring_orders() -> dict[str, Any]:
                     order_service = OrderService()
                     renewal_order_data = _create_renewal_order_data(service)
 
-                    create_result = order_service.create_order(renewal_order_data)  # type: ignore[arg-type]
+                    create_result = order_service.create_order(renewal_order_data)
 
                     if create_result.is_ok():
                         renewal_order = create_result.unwrap()

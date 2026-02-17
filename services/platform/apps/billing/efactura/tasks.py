@@ -23,33 +23,33 @@ logger = logging.getLogger(__name__)
 
 # Expose imports at module scope for patching in tests
 try:
-    from apps.billing.invoice_models import Invoice  # type: ignore
-    InvoiceDoesNotExist = Invoice.DoesNotExist  # type: ignore[attr-defined]
+    from apps.billing.invoice_models import Invoice
+    InvoiceDoesNotExist = Invoice.DoesNotExist
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
-    Invoice = None  # type: ignore
-    InvoiceDoesNotExist = Exception  # type: ignore
+    Invoice = None
+    InvoiceDoesNotExist = Exception
 
 try:
-    from django_q.models import Schedule  # type: ignore
+    from django_q.models import Schedule
 except Exception:  # pragma: no cover - optional dependency
-    Schedule = None  # type: ignore
+    Schedule = None
 
 try:
-    from django_q.tasks import async_task  # type: ignore
+    from django_q.tasks import async_task
 except Exception:  # pragma: no cover - optional dependency
-    async_task = None  # type: ignore
+    async_task = None
 
 try:
-    from .models import EFacturaDocument  # type: ignore
-    EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist  # type: ignore[attr-defined]
+    from .models import EFacturaDocument
+    EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
-    EFacturaDocument = None  # type: ignore
-    EFacturaDocumentDoesNotExist = Exception  # type: ignore
+    EFacturaDocument = None
+    EFacturaDocumentDoesNotExist = Exception
 
 try:
-    from .service import EFacturaService  # type: ignore
+    from .service import EFacturaService
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
-    EFacturaService = None  # type: ignore
+    EFacturaService = None
 
 # Task timeout in seconds
 TASK_TIMEOUT = 300  # 5 minutes

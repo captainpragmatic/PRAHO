@@ -34,7 +34,7 @@ class StaffRequiredMixin(UserPassesTestMixin):
         return HttpResponseForbidden()
 
 
-class EmailTemplateListView(LoginRequiredMixin, AdminRequiredMixin, ListView):  # type: ignore[type-arg]
+class EmailTemplateListView(LoginRequiredMixin, AdminRequiredMixin, ListView):
     model = EmailTemplate
     template_name = "notifications/template_list.html"  # not used in tests
 
@@ -49,12 +49,12 @@ class EmailTemplateListView(LoginRequiredMixin, AdminRequiredMixin, ListView):  
         return super().get_queryset()
 
 
-class EmailTemplateDetailView(LoginRequiredMixin, AdminRequiredMixin, DetailView):  # type: ignore[type-arg]
+class EmailTemplateDetailView(LoginRequiredMixin, AdminRequiredMixin, DetailView):
     model = EmailTemplate
     template_name = "notifications/template_detail.html"  # not used in tests
 
 
-class EmailLogListView(LoginRequiredMixin, StaffRequiredMixin, ListView):  # type: ignore[type-arg]
+class EmailLogListView(LoginRequiredMixin, StaffRequiredMixin, ListView):
     model = EmailLog
     template_name = "notifications/email_log_list.html"  # not used in tests
 

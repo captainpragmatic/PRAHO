@@ -93,7 +93,7 @@ class SettingsAPIView(View):
     validation, and audit logging.
     """
 
-    http_method_names: ClassVar[list[str]] = ["get", "post", "put", "delete"]  # type: ignore[misc]
+    http_method_names: ClassVar[list[str]] = ["get", "post", "put", "delete"]
 
     def get(self, request: HttpRequest, key: str | None = None) -> JsonResponse:
         """

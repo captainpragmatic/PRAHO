@@ -39,7 +39,7 @@ class LoginForm(forms.Form):
     )
 
 
-class UserRegistrationForm(UserCreationForm):  # type: ignore[type-arg]
+class UserRegistrationForm(UserCreationForm):
     """Romanian user registration form"""
 
     email = forms.EmailField(
@@ -196,10 +196,10 @@ class UserRegistrationForm(UserCreationForm):  # type: ignore[type-arg]
             user.gdpr_consent_date = timezone.now()
             user.save(update_fields=["gdpr_consent_date"])
 
-        return user  # type: ignore[no-any-return]
+        return user
 
 
-class UserProfileForm(forms.ModelForm):  # type: ignore[type-arg]
+class UserProfileForm(forms.ModelForm):
     """User profile editing form"""
 
     # Add user fields to the form
@@ -295,7 +295,7 @@ class UserProfileForm(forms.ModelForm):  # type: ignore[type-arg]
         if commit:
             profile.save()
 
-        return profile  # type: ignore[no-any-return]
+        return profile
 
 
 class TwoFactorSetupForm(forms.Form):
@@ -367,7 +367,7 @@ class PasswordResetRequestForm(forms.Form):
         return email or ""
 
 
-class CustomerMembershipForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerMembershipForm(forms.ModelForm):
     """Form for managing customer memberships (PostgreSQL-aligned)"""
 
     class Meta:
@@ -383,7 +383,7 @@ class CustomerMembershipForm(forms.ModelForm):  # type: ignore[type-arg]
         }
 
 
-class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type-arg]
+class CustomerOnboardingRegistrationForm(UserCreationForm):
     """
     🏢 Enhanced registration form with customer organization creation
     Ensures every user is properly associated with a customer entity

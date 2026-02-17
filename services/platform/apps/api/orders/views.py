@@ -621,7 +621,7 @@ def create_order(request: Request, customer: Customer) -> Response:
             preflight = None
             if auto_pending:
                 try:
-                    status_change = StatusChangeData(new_status='pending', notes='Auto-pending from API', changed_by=None)  # type: ignore[arg-type]
+                    status_change = StatusChangeData(new_status='pending', notes='Auto-pending from API', changed_by=None)
                     promote_result = OrderService.update_order_status(order, status_change)
                     if promote_result.is_ok():
                         order.refresh_from_db()

@@ -15,7 +15,7 @@ from enum import Enum
 from types import TracebackType
 from typing import Any
 
-import paramiko  # type: ignore[import-untyped]
+import paramiko
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone

@@ -113,17 +113,17 @@ class RequestIDFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Add request_id attribute to log record"""
         if not hasattr(record, "request_id"):
-            record.request_id = getattr(_request_context, "request_id", "-")  # type: ignore[attr-defined]
+            record.request_id = getattr(_request_context, "request_id", "-")
 
         # Add other context if available
         if not hasattr(record, "user_id"):
-            record.user_id = getattr(_request_context, "user_id", None)  # type: ignore[attr-defined]
+            record.user_id = getattr(_request_context, "user_id", None)
         if not hasattr(record, "user_email"):
-            record.user_email = getattr(_request_context, "user_email", None)  # type: ignore[attr-defined]
+            record.user_email = getattr(_request_context, "user_email", None)
         if not hasattr(record, "ip_address"):
-            record.ip_address = getattr(_request_context, "ip_address", None)  # type: ignore[attr-defined]
+            record.ip_address = getattr(_request_context, "ip_address", None)
         if not hasattr(record, "session_id"):
-            record.session_id = getattr(_request_context, "session_id", None)  # type: ignore[attr-defined]
+            record.session_id = getattr(_request_context, "session_id", None)
 
         return True
 

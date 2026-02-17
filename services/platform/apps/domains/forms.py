@@ -9,7 +9,7 @@ from apps.settings.encryption import settings_encryption
 from .models import TLD, Registrar
 
 
-class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
+class RegistrarForm(forms.ModelForm):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Do not prefill sensitive fields
@@ -75,10 +75,10 @@ class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
         # webhook_secret may be used raw by webhooks; keep as provided (write-only)
         if commit:
             instance.save()
-        return instance  # type: ignore[no-any-return]
+        return instance
 
 
-class TLDForm(forms.ModelForm):  # type: ignore[type-arg]
+class TLDForm(forms.ModelForm):
     class Meta:
         model = TLD
         fields: ClassVar = [

@@ -15,7 +15,7 @@ from pathlib import Path
 
 # Optional dependency for enhanced MIME type detection
 try:
-    import magic  # type: ignore[import-not-found]
+    import magic
 
     HAS_PYTHON_MAGIC = True
 except ImportError:

@@ -38,7 +38,7 @@ from apps.common.logging import clear_request_id, set_request_id
 try:
     from apps.users.services import SessionSecurityService
 except ImportError:
-    SessionSecurityService = None  # type: ignore[assignment,misc]
+    SessionSecurityService = None
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -277,7 +277,7 @@ class GDPRComplianceMiddleware:
         # Track consent for cookies and data processing
         if not request.session.get("gdpr_consent_shown"):
             # Mark that GDPR banner should be shown
-            request.gdpr_banner_required = True  # type: ignore[attr-defined]
+            request.gdpr_banner_required = True
             request.session["gdpr_consent_shown"] = True
 
         response = self.get_response(request)

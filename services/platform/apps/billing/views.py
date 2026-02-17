@@ -178,7 +178,7 @@ def _validate_financial_document_access_with_redirect(
                 redirect_response = HttpResponseRedirect(reverse("billing:invoice_list"))
         else:
             # Already a response (e.g., redirect), pass it through
-            redirect_response = result  # type: ignore[assignment]
+            redirect_response = result
     except PermissionDenied:
         if request is None or document is None:
             redirect_response = HttpResponseRedirect(reverse("users:login"))  # type: ignore[unreachable]
@@ -422,7 +422,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         ]
 
         # Sort by creation date (newest first)
-        proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)  # type: ignore[arg-type,return-value]
+        proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)
 
         # ⚡ PERFORMANCE: Paginate using DEFAULT_PAGE_SIZE
         paginator = Paginator(proforma_documents, DEFAULT_PAGE_SIZE)

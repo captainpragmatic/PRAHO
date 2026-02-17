@@ -256,7 +256,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                         }
                     )
 
-                    results["patterns_detected"]["multiple_failed_ips"] += 1  # type: ignore[index]
+                    results["patterns_detected"]["multiple_failed_ips"] += 1
 
                     # Generate security alert
                     AuditService.log_security_event(
@@ -338,7 +338,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                 )
 
                 if login.country not in previous_countries:
-                    results["patterns_detected"]["new_locations"] += 1  # type: ignore[index]
+                    results["patterns_detected"]["new_locations"] += 1
 
                     # Log new location login
                     AuditService.log_security_event(
@@ -358,8 +358,8 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
 
         logger.info(
             f"🕵️ [UserSecurity] Suspicious pattern audit completed: "
-            f"{len(results['suspicious_users'])} suspicious users, "  # type: ignore[arg-type]
-            f"{len(results['suspicious_ips'])} suspicious IPs, "  # type: ignore[arg-type]
+            f"{len(results['suspicious_users'])} suspicious users, "
+            f"{len(results['suspicious_ips'])} suspicious IPs, "
             f"{results['alerts_generated']} alerts generated"
         )
 

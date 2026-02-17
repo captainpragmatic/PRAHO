@@ -718,7 +718,7 @@ class VirtualminGateway:
 
         try:
             # Get certificate from response
-            cert_der = response.raw.connection.sock.getpeercert(binary_form=True)  # type: ignore[union-attr]
+            cert_der = response.raw.connection.sock.getpeercert(binary_form=True)
             cert_sha256 = hashlib.sha256(cert_der).hexdigest()
 
             expected = self.config.cert_fingerprint.replace("sha256:", "").lower()

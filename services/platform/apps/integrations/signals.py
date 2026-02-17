@@ -53,35 +53,35 @@ def capture_webhook_status_change(sender: type[WebhookEvent], instance: WebhookE
         if instance.pk:
             # Get the old instance from database to compare status and timing
             old_instance = WebhookEvent.objects.get(pk=instance.pk)
-            instance._old_status = old_instance.status  # type: ignore[attr-defined]
-            instance._old_processed_at = old_instance.processed_at  # type: ignore[attr-defined]
-            instance._old_retry_count = old_instance.retry_count  # type: ignore[attr-defined]
+            instance._old_status = old_instance.status
+            instance._old_processed_at = old_instance.processed_at
+            instance._old_retry_count = old_instance.retry_count
 
             # Calculate response time if transitioning to processed
             if old_instance.status == "pending" and instance.status == "processed" and instance.processed_at:
                 processing_duration = instance.processed_at - instance.received_at
-                instance._response_time_ms = int(processing_duration.total_seconds() * 1000)  # type: ignore[attr-defined]
+                instance._response_time_ms = int(processing_duration.total_seconds() * 1000)
             else:
-                instance._response_time_ms = None  # type: ignore[attr-defined]
+                instance._response_time_ms = None
         else:
             # New webhook - no old status
-            instance._old_status = None  # type: ignore[attr-defined]
-            instance._old_processed_at = None  # type: ignore[attr-defined]
-            instance._old_retry_count = 0  # type: ignore[attr-defined]
-            instance._response_time_ms = None  # type: ignore[attr-defined]
+            instance._old_status = None
+            instance._old_processed_at = None
+            instance._old_retry_count = 0
+            instance._response_time_ms = None
 
     except WebhookEvent.DoesNotExist:
         # Edge case: instance has PK but doesn't exist in DB
-        instance._old_status = None  # type: ignore[attr-defined]
-        instance._old_processed_at = None  # type: ignore[attr-defined]
-        instance._old_retry_count = 0  # type: ignore[attr-defined]
-        instance._response_time_ms = None  # type: ignore[attr-defined]
+        instance._old_status = None
+        instance._old_processed_at = None
+        instance._old_retry_count = 0
+        instance._response_time_ms = None
     except Exception as e:
         logger.error(f"🔥 [Integrations Signal] Failed to capture old webhook state for {instance.pk}: {e}")
-        instance._old_status = None  # type: ignore[attr-defined]
-        instance._old_processed_at = None  # type: ignore[attr-defined]
-        instance._old_retry_count = 0  # type: ignore[attr-defined]
-        instance._response_time_ms = None  # type: ignore[attr-defined]
+        instance._old_status = None
+        instance._old_processed_at = None
+        instance._old_retry_count = 0
+        instance._response_time_ms = None
 
 
 @receiver(post_save, sender=WebhookEvent)
@@ -360,7 +360,7 @@ def _analyze_security_indicators(webhook_event: WebhookEvent) -> dict[str, bool]
 
     try:
         # Check for invalid signature
-        if webhook_event.signature and "invalid" in webhook_event.error_message.lower():  # type: ignore[attr-defined]
+        if webhook_event.signature and "invalid" in webhook_event.error_message.lower():
             security_flags["invalid_signature"] = True
 
         # Check for malformed payload

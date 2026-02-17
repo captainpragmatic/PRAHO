@@ -27,7 +27,7 @@ from django.views.generic import (
     TemplateView,
     UpdateView,
 )
-from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
+from django_ratelimit.decorators import ratelimit
 
 from .models import (
     Coupon,
@@ -111,8 +111,8 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
     return False
 
 
-@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")
 class ValidateCouponView(View):
     """
     API endpoint for validating a coupon code.
@@ -215,8 +215,8 @@ class ValidateCouponView(View):
         })
 
 
-@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")
 class ApplyCouponView(View):
     """
     API endpoint for applying a coupon to an order.
@@ -299,7 +299,7 @@ class ApplyCouponView(View):
             })
 
 
-@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")
 class RemoveCouponView(View):
     """
     API endpoint for removing a coupon from an order.
@@ -416,8 +416,8 @@ class AvailableCouponsView(View):
 # ===============================================================================
 
 
-@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")
 class ValidateGiftCardView(View):
     """
     API endpoint for validating a gift card.
@@ -462,8 +462,8 @@ class ValidateGiftCardView(View):
             })
 
 
-@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")
 class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 

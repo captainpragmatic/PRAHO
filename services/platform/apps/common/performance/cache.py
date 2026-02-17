@@ -310,18 +310,18 @@ class CacheInvalidationMixin:
     cache_dependencies: list[str] = []
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        super().save(*args, **kwargs)  # type: ignore[misc]
+        super().save(*args, **kwargs)
         self._invalidate_caches()
 
     def delete(self, *args: Any, **kwargs: Any) -> Any:
-        result = super().delete(*args, **kwargs)  # type: ignore[misc]
+        result = super().delete(*args, **kwargs)
         self._invalidate_caches()
         return result
 
     def _invalidate_caches(self) -> None:
         """Invalidate all related caches."""
         # Invalidate own cache
-        invalidate_model_cache(self)  # type: ignore[arg-type]
+        invalidate_model_cache(self)
 
         # Invalidate dependent caches
         for dep in self.cache_dependencies:

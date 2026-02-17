@@ -490,7 +490,7 @@ class CustomerIsolationMixin:
 
     def for_customer(self, customer_id: int) -> "models.QuerySet[Any]":
         """Filter queryset by customer ID."""
-        return self.filter(customer_id=customer_id)  # type: ignore[attr-defined]
+        return self.filter(customer_id=customer_id)
 
     def for_request(self, request: HttpRequest) -> "models.QuerySet[Any]":
         """Filter queryset by customer from request."""
@@ -502,7 +502,7 @@ class CustomerIsolationMixin:
             return self.for_customer(customer_id)
 
         # No customer context - return empty queryset for safety
-        return self.none()  # type: ignore[attr-defined]
+        return self.none()
 
 
 def get_customer_isolated_queryset(

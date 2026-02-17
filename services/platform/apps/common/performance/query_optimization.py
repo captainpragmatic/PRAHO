@@ -49,14 +49,14 @@ class OptimizedQuerySetMixin:
         # Apply select_related
         select_fields = select if select is not None else self.select_related_fields
         if select_fields:
-            qs = qs.select_related(*select_fields)  # type: ignore[attr-defined]
+            qs = qs.select_related(*select_fields)
 
         # Apply prefetch_related
         prefetch_fields = prefetch if prefetch is not None else self.prefetch_related_fields
         if prefetch_fields:
-            qs = qs.prefetch_related(*prefetch_fields)  # type: ignore[attr-defined]
+            qs = qs.prefetch_related(*prefetch_fields)
 
-        return qs  # type: ignore[return-value]
+        return qs
 
     def optimized_for_list(self) -> QuerySet[Any]:
         """Apply light optimizations suitable for list views."""
@@ -89,7 +89,7 @@ class OptimizedManager(models.Manager[T]):
         """Get an optimized queryset."""
         qs = self.get_queryset()
         if hasattr(qs, "optimized"):
-            return qs.optimized()  # type: ignore[return-value]
+            return qs.optimized()
         return qs
 
 

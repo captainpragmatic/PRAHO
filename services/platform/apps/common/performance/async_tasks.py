@@ -325,7 +325,7 @@ def async_task(
             return task_id
 
         # Add method to run synchronously for testing
-        wrapper.sync = func  # type: ignore[attr-defined]
+        wrapper.sync = func
 
         return wrapper
     return decorator

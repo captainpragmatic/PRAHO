@@ -25,7 +25,7 @@ from django.conf import settings
 from django.http import HttpRequest
 
 try:
-    from ipware import get_client_ip  # type: ignore[import-untyped]
+    from ipware import get_client_ip
 except ImportError:  # pragma: no cover
     # Fallback if django-ipware is not installed
     def get_client_ip(request: HttpRequest, **kwargs: Any) -> tuple[str, bool]:

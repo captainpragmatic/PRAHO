@@ -578,10 +578,10 @@ class Coupon(models.Model):
 
         # Customer target check
         if self.customer_target == "new":
-            if customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
+            if customer.orders.exclude(status="draft").exists():
                 return False, "Coupon only valid for new customers"
         elif self.customer_target == "existing":
-            if not customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
+            if not customer.orders.exclude(status="draft").exists():
                 return False, "Coupon only valid for existing customers"
         elif self.customer_target == "specific":
             if not self.assigned_customer:
@@ -589,7 +589,7 @@ class Coupon(models.Model):
 
         # First order only check
         if self.first_order_only:
-            if customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
+            if customer.orders.exclude(status="draft").exists():
                 return False, "Coupon only valid for first order"
 
         # Per-customer usage limit

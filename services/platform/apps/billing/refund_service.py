@@ -841,7 +841,7 @@ class RefundService:
 
             # Create status history
             with contextlib.suppress(DatabaseError):
-                RefundStatusHistory.objects.create(  # type: ignore[misc]
+                RefundStatusHistory.objects.create(
                     refund=refund, previous_status="", new_status="pending", change_reason="Refund initiated"
                 )
 

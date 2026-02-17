@@ -49,7 +49,7 @@ def validate_safe_url_wrapper(value: Any) -> None:
 # ===============================================================================
 
 
-class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerForm(forms.ModelForm):
     """
     Core customer information form.
     Only essential identifying information.
@@ -131,7 +131,7 @@ class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerTaxProfileForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerTaxProfileForm(forms.ModelForm):
     """
     Romanian tax compliance form - CUI, VAT, registration.
     """
@@ -216,7 +216,7 @@ class CustomerTaxProfileForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerBillingProfileForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerBillingProfileForm(forms.ModelForm):
     """
     Customer billing and financial information form.
     """
@@ -261,7 +261,7 @@ class CustomerBillingProfileForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerAddressForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerAddressForm(forms.ModelForm):
     """
     Customer address form with Romanian fields.
     """
@@ -333,7 +333,7 @@ class CustomerAddressForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerNoteForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerNoteForm(forms.ModelForm):
     """
     Customer interaction notes form.
     """
