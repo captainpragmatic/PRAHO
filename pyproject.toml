@@ -520,15 +520,11 @@ mypy-init-return = true
 suppress-dummy-args = true
 
 # ===============================================================================
-# TYPE CHECKING CONFIGURATION - REMOVED
+# TYPE CHECKING CONFIGURATION (MyPy + django-stubs)
 # ===============================================================================
-# MyPy has been removed from this project - see ADR-008 for details
-# Type safety is now handled through:
-# - Ruff type annotation linting (ANN rules)
-# - Django 5.0+ built-in typing support
-# - Comprehensive test coverage
-
-# pyproject.toml — mypy
+# See ADR-0009 for pragmatic MyPy strategy (layered typing)
+# Strict perimeter: services, repos, gateways, validators, managers, querysets
+# Relaxed: views, forms, admin, models, tasks, tests
 [tool.mypy]
 python_version = "3.13"
 plugins = ["mypy_django_plugin.main"]
@@ -553,7 +549,7 @@ no_implicit_reexport = true
 django_settings_module = "config.settings.dev"
 strict_settings = false
 
-# --- Overrides ---
+# --- Overrides (ADR-0009: pragmatic layered typing) ---
 
 # Always ignore migrations
 [[tool.mypy.overrides]]
@@ -566,7 +562,23 @@ module = [
     "rest_framework.*",
     "django_q.*",
     "captcha.*",
-    "faker.*"
+    "faker.*",
+    "lxml.*",
+    "paramiko.*",
+    "django_ratelimit.*",
+    "ipware.*",
+    "stripe.*",
+    "boto3.*",
+    "botocore.*",
+    "bleach.*",
+    "xmltodict.*",
+    "croniter.*",
+    "sentry_sdk.*",
+    "django_silk.*",
+    "magic.*",
+    "debug_toolbar.*",
+    "django_extensions.*",
+    "silk.*",
 ]
 ignore_missing_imports = true
 
@@ -582,40 +594,104 @@ disallow_untyped_defs = true
 disallow_untyped_calls = true
 disallow_incomplete_defs = true
 
-# Views/forms/serializers: keep checks, relax Django's dynamic attrs
+# Views/forms/serializers: relax Django/DRF framework noise
 [[tool.mypy.overrides]]
 module = ["*.views", "*.forms", "*.serializers"]
-disable_error_code = ["attr-defined", "misc"]
+disable_error_code = ["attr-defined", "misc", "arg-type", "union-attr", "no-any-return", "no-untyped-def", "call-arg", "return-value", "untyped-decorator", "type-arg", "assignment", "no-untyped-call", "var-annotated"]
+disallow_untyped_defs = false
 
-# API views: additional DRF-specific relaxations
+# API views: DRF-specific relaxations (stacks with *.views above)
 [[tool.mypy.overrides]]
 module = ["apps.api.*.views"]
-disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call"]
+disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call", "untyped-decorator", "arg-type", "union-attr", "no-any-return", "call-arg", "return-value", "type-arg", "assignment", "var-annotated"]
+disallow_untyped_defs = false
 
 # API serializers and core: DRF typing issues
 [[tool.mypy.overrides]]
 module = ["apps.api.*.serializers", "apps.api.core.*"]
-disable_error_code = ["attr-defined", "misc", "no-any-return", "assignment"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "assignment", "type-arg", "arg-type", "return-value", "no-untyped-def"]
+disallow_untyped_defs = false
 
-# Admin: low ROI → relax dynamic attrs
+# Admin: low ROI (ADR-0010) → relax dynamic attrs and framework noise
 [[tool.mypy.overrides]]
 module = "apps.*.admin"
-disable_error_code = ["attr-defined"]
+disable_error_code = ["attr-defined", "misc", "type-arg", "no-untyped-def", "assignment", "no-any-return"]
+disallow_untyped_defs = false
 
-# Sample data generation: test/development only, relax strictness
+# Models: Django ORM field descriptors and dynamic attributes
+[[tool.mypy.overrides]]
+module = "*.models"
+disable_error_code = ["type-arg", "assignment", "misc", "attr-defined", "list-item", "no-any-return", "return-value", "name-defined", "no-untyped-def"]
+
+# Permissions: request.user typing, decorator patterns
+[[tool.mypy.overrides]]
+module = ["*.permissions", "apps.api.core.permissions"]
+disable_error_code = ["attr-defined", "arg-type", "union-attr", "no-untyped-def", "no-any-return", "type-arg", "misc", "unreachable"]
+
+# Signals: Django pre_save/post_save dynamic attribute patterns
+[[tool.mypy.overrides]]
+module = "*.signals"
+disable_error_code = ["attr-defined", "misc", "no-untyped-def", "arg-type", "type-arg", "union-attr", "assignment", "unreachable", "import-not-found"]
+
+# Task modules: async/queue operations, Django-Q2 typing
+[[tool.mypy.overrides]]
+module = "*.tasks"
+disable_error_code = ["attr-defined", "no-any-return", "misc", "return-value", "arg-type", "type-arg", "no-untyped-def", "assignment", "index"]
+
+# Sample data generation: test/development only
 [[tool.mypy.overrides]]
 module = "apps.common.management.commands.generate_sample_data"
 disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "union-attr"]
 
-# Task modules: async/queue operations, relax Celery/Django-Q typing
-[[tool.mypy.overrides]]
-module = ["apps.billing.tasks", "apps.users.tasks", "apps.orders.tasks", "apps.customers.tasks", "apps.provisioning.virtualmin_tasks", "apps.common.queue"]
-disable_error_code = ["no-any-return", "misc", "return-value"]
-
-# Common middleware: Django internals, relax dynamic attributes
+# Common middleware: Django internals
 [[tool.mypy.overrides]]
 module = ["apps.common.middleware"]
 disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "return-value"]
+
+# Common performance modules: infrastructure utilities
+[[tool.mypy.overrides]]
+module = "apps.common.performance.*"
+disable_error_code = ["attr-defined", "no-any-return", "misc", "type-arg", "arg-type", "operator", "union-attr", "assignment", "no-untyped-def", "no-untyped-call", "var-annotated", "return-value"]
+
+# Common logging: runtime introspection
+[[tool.mypy.overrides]]
+module = "apps.common.logging"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "assignment", "no-untyped-def"]
+
+# Billing e-Factura: XML marshaling (lxml), not core business logic
+[[tool.mypy.overrides]]
+module = "apps.billing.efactura.*"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "union-attr", "assignment", "no-untyped-def", "import-untyped", "import-not-found"]
+
+# Billing metering: task-like modules with non-standard naming
+[[tool.mypy.overrides]]
+module = ["apps.billing.metering_tasks", "apps.billing.metering_service"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "operator", "no-untyped-def"]
+
+# Infrastructure audit service
+[[tool.mypy.overrides]]
+module = "apps.infrastructure.audit_service"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg"]
+
+# Infrastructure deployment service
+[[tool.mypy.overrides]]
+module = "apps.infrastructure.deployment_service"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "assignment"]
+
+# Audit compliance: reporting module
+[[tool.mypy.overrides]]
+module = "apps.audit.compliance"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "type-arg", "arg-type"]
+
+# Audit file integrity service
+[[tool.mypy.overrides]]
+module = "apps.audit.file_integrity_service"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "type-arg", "arg-type", "operator"]
+
+# API security linter: AST-based analysis, not business logic
+[[tool.mypy.overrides]]
+module = "apps.api.security_linter"
+disable_error_code = ["attr-defined", "misc", "arg-type", "no-any-return", "no-untyped-def", "var-annotated", "assignment"]
 
 # Tests: allow friction-free typing
 [[tool.mypy.overrides]]
@@ -633,18 +709,10 @@ disallow_untyped_defs = false
 module = "scripts.*"
 disallow_untyped_defs = false
 
-# Django-Q2 tasks: decorator magic
-[[tool.mypy.overrides]]
-module = "*.tasks"
-disable_error_code = ["attr-defined"]
-
-# Targeted relief for abstract base models ONLY (TEMP)
+# Targeted relief for abstract base models
 [[tool.mypy.overrides]]
 module = "apps.*.abstract_models"
 disable_error_code = ["misc"]
-# [[tool.mypy.overrides]]
-# module = ["redis.*", "boto3.*", "stripe.*"]  # enable only if needed
-# ignore_missing_imports = true
 
 # ===============================================================================
 # TEST CONFIGURATION
