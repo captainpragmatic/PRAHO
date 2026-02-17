@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Changed
+- **Lint Zero-Debt**: Eliminated all Ruff violations across Platform and Portal services — zero warnings, zero errors
+- **Portal Lint**: Reduced portal lint debt with code fixes and type annotations
+- **Platform Lint**: Reduced lint debt across billing, orders, API, audit, common, and remaining apps
+- **Lint Infrastructure**: Fixed URL collisions, deploy check, and test suppressions in lint tooling
+- **SettingsService Coverage**: Wired 78 hardcoded constants to `SettingsService` with getter functions, backward-compatible aliases, and `DEFAULT_SETTINGS` entries (224 total keys)
+
+### Added
+- **Type Stubs**: Added type stubs and expanded MyPy overrides for third-party libraries
+- **Settings Allowlist**: Added `scripts/settings_allowlist.txt` for structural constants that cannot be runtime-configurable
+
+### Fixed
+- **pyproject.toml**: Updated lint configuration — scoped Ruff rules for runtime import architecture, expanded MyPy overrides
 
 ---
 
