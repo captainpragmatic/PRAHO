@@ -51,7 +51,7 @@ class SecurityEventTracker:
     @property
     def alert_threshold(self) -> int:
         """Alert threshold from SettingsService (cached by SettingsService layer)."""
-        return SettingsService.get_integer_setting(
+        return SettingsService.get_integer_setting(  # type: ignore[no-any-return]
             "tickets.security_alert_threshold", _DEFAULT_SECURITY_ALERT_THRESHOLD
         )
 

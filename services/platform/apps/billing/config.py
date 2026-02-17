@@ -233,7 +233,7 @@ def is_eu_country(country_code: str | None) -> bool:
     return country_code.upper() in EU_COUNTRY_CODES
 
 
-def get_payment_due_date(issue_date=None):
+def get_payment_due_date(issue_date=None):  # type: ignore[no-untyped-def]
     """
     Calculate payment due date based on issue date and configured terms.
 

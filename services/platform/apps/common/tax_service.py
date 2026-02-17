@@ -206,7 +206,7 @@ class TaxConfiguration:
             return {
                 'vat_cents': 0,
                 'total_cents': amount_cents,
-                'vat_rate_percent': Decimal('0.0'),
+                'vat_rate_percent': Decimal('0.0'),  # type: ignore[dict-item]
             }
 
         # Get VAT rate as decimal (e.g., 0.21 for 21%)
@@ -219,7 +219,7 @@ class TaxConfiguration:
         return {
             'vat_cents': vat_cents,
             'total_cents': amount_cents + vat_cents,
-            'vat_rate_percent': vat_rate * 100
+            'vat_rate_percent': vat_rate * 100  # type: ignore[dict-item]
         }
 
     @classmethod

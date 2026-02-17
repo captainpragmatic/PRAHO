@@ -165,7 +165,7 @@ class Command(BaseCommand):
             fail_severity = self._get_severity(options["fail_severity"])
             failing_issues = [
                 i for i in result.issues
-                if i.severity >= fail_severity
+                if i.severity >= fail_severity  # type: ignore[operator]
             ]
             if failing_issues:
                 sys.exit(1)
@@ -219,7 +219,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Found {len(result.issues)} issues:\n")
 
             # Group by severity
-            issues_by_severity = {}
+            issues_by_severity = {}  # type: ignore[var-annotated]
             for issue in result.issues:
                 severity = issue.severity.value
                 if severity not in issues_by_severity:

@@ -451,7 +451,7 @@ class PortalServiceHMACMiddleware:
 
             # Build canonical string and verify signature
             if not error_msg:
-                method = request.method.upper()
+                method = request.method.upper()  # type: ignore[union-attr]
                 full_path = request.get_full_path()
                 parsed = urllib.parse.urlsplit(full_path)
                 query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -543,7 +543,7 @@ class PortalServiceHMACMiddleware:
                     and getattr(request.user, 'is_staff', False)
                     and any(request.path.startswith(p) for p in STAFF_SESSION_ALLOWED_PREFIXES)
                 ):
-                    logger.debug(f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}")
+                    logger.debug(f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}")  # type: ignore[union-attr]
                     return self.get_response(request)
 
                 logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
@@ -739,4 +739,4 @@ class StaffOnlyPlatformMiddleware:
             return redirect("users:login")
         
         # Fallback - continue with request  
-        return self.get_response(request)
+        return self.get_response(request)  # type: ignore[unreachable]

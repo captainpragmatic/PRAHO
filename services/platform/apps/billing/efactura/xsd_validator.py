@@ -166,14 +166,14 @@ class XSDValidator:
         """Detect document type from root element namespace."""
         root_tag = xml_doc.tag
 
-        if self.INVOICE_NS in root_tag or root_tag.endswith("}Invoice"):
+        if self.INVOICE_NS in root_tag or root_tag.endswith("}Invoice"):  # type: ignore[operator]
             return "invoice"
-        elif self.CREDIT_NOTE_NS in root_tag or root_tag.endswith("}CreditNote"):
+        elif self.CREDIT_NOTE_NS in root_tag or root_tag.endswith("}CreditNote"):  # type: ignore[operator]
             return "credit_note"
         else:
             return "unknown"
 
-    def _parse_errors(self, error_log: etree._ErrorLog) -> tuple[list[XSDValidationError], list[XSDValidationError]]:
+    def _parse_errors(self, error_log: etree._ErrorLog) -> tuple[list[XSDValidationError], list[XSDValidationError]]:  # type: ignore[valid-type]
         """Parse lxml error log into structured errors and warnings."""
         errors = []
         warnings = []

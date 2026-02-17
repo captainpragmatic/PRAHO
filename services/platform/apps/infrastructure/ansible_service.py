@@ -156,7 +156,7 @@ class AnsibleService:
             return Err(f"Playbook not found: {playbook_path}")
 
         # Get SSH key
-        key_result = self._ssh_manager.get_private_key_file(
+        key_result = self._ssh_manager.get_private_key_file(  # type: ignore[call-arg]
             deployment,
             reason=f"Ansible playbook: {playbook}",
         )

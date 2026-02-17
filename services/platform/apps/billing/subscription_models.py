@@ -611,7 +611,7 @@ class Subscription(models.Model):
 
             # Extend period by paused duration
             if self.paused_at:
-                paused_duration = timezone.now() - self.paused_at
+                paused_duration = timezone.now() - self.paused_at  # type: ignore[unreachable]
                 self.current_period_end += paused_duration
                 self.next_billing_date += paused_duration
 

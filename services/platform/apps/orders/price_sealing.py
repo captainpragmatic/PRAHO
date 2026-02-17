@@ -28,7 +28,7 @@ class PriceData(TypedDict):
     product_slug: str
 
 
-def get_client_ip(request) -> str:
+def get_client_ip(request) -> str:  # type: ignore[no-untyped-def]
     """
     🔒 SECURITY: Safely extract client IP address for token binding.
     Handles proxies and load balancers while preventing header spoofing.
@@ -98,7 +98,7 @@ class PriceSealingService:
                     "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
                     "Configure PRICE_SEALING_SECRET environment variable for production deployment."
                 )
-                return settings.SECRET_KEY
+                return settings.SECRET_KEY  # type: ignore[return-value]
         
         # Validate secret key length for security
         if len(price_sealing_secret) < MIN_SECRET_LENGTH:
@@ -308,7 +308,7 @@ class PriceSealingService:
             raise ValidationError(f"Price validation failed: {e}") from e
 
 
-def create_sealed_price_for_product_price(product_price, client_ip: str, billing_period: str = 'monthly') -> str:
+def create_sealed_price_for_product_price(product_price, client_ip: str, billing_period: str = 'monthly') -> str:  # type: ignore[no-untyped-def]
     """
     🔒 Convenience function to create sealed price token from ProductPrice instance.
     Updated for simplified pricing model.

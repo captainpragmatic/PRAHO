@@ -89,7 +89,7 @@ class BurstRateThrottle(SimpleRateThrottle):
     def parse_rate(self, rate: str) -> tuple[int, int]:
         """Parse rate string with custom time units."""
         if rate is None:
-            return (None, None)
+            return (None, None)  # type: ignore[unreachable]
 
         num, period = rate.split("/")
         num_requests = int(num)

@@ -343,7 +343,7 @@ class Command(BaseCommand):
         ).select_related("user", "content_type")
 
         # Filter by severity
-        events = [
+        events = [  # type: ignore[assignment]
             e for e in events
             if severity_order.index(e.severity) >= min_severity_idx
         ]

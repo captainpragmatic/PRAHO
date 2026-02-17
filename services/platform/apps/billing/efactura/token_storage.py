@@ -169,7 +169,7 @@ class OAuthToken(models.Model):
             from apps.settings.encryption import SettingsEncryption
 
             encryption = SettingsEncryption()
-            return encryption.encrypt_value(value)
+            return encryption.encrypt_value(value)  # type: ignore[return-value]
         except ImportError:
             logger.warning("Encryption service not available, storing token unencrypted")
             return value

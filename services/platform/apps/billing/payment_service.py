@@ -93,10 +93,10 @@ class PaymentService:
                     currency_obj = None
                     if currency:
                         currency_obj, _ = Currency.objects.get_or_create(
-                            code=currency.upper(),
+                            code=currency.upper(),  # type: ignore[union-attr]
                             defaults={
-                                'name': currency.upper(),
-                                'symbol': 'RON' if currency.upper() == 'RON' else currency.upper(),
+                                'name': currency.upper(),  # type: ignore[union-attr]
+                                'symbol': 'RON' if currency.upper() == 'RON' else currency.upper(),  # type: ignore[union-attr]
                                 'decimals': 2
                             }
                         )

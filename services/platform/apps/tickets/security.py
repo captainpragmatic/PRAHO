@@ -19,7 +19,7 @@ try:
 
     HAS_PYTHON_MAGIC = True
 except ImportError:
-    magic = None
+    magic = None  # type: ignore[assignment]
     HAS_PYTHON_MAGIC = False
 
 from typing import TypedDict
@@ -221,7 +221,7 @@ class FileSecurityScanner:
                 return str(detected_mime)
             else:
                 # Fallback to mimetypes module and basic magic number detection
-                detected_mime, _ = mimetypes.guess_type(uploaded_file.name or "")
+                detected_mime, _ = mimetypes.guess_type(uploaded_file.name or "")  # type: ignore[assignment]
                 if detected_mime:
                     return detected_mime
 

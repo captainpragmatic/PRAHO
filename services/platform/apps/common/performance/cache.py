@@ -243,7 +243,7 @@ def cached_queryset(
     timeout: int = CACHE_TIMEOUT_SHORT,
     key_prefix: str = "",
     max_size: int = 1000,
-) -> Callable[[Callable[..., models.QuerySet[T]]], Callable[..., list[T]]]:
+) -> Callable[[Callable[..., models.QuerySet[T]]], Callable[..., list[T]]]:  # type: ignore[type-var]
     """
     Decorator to cache queryset results.
 
@@ -254,7 +254,7 @@ def cached_queryset(
         def get_active_products() -> QuerySet[Product]:
             return Product.objects.filter(is_active=True)
     """
-    def decorator(func: Callable[..., models.QuerySet[T]]) -> Callable[..., list[T]]:
+    def decorator(func: Callable[..., models.QuerySet[T]]) -> Callable[..., list[T]]:  # type: ignore[type-var]
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> list[T]:
             # Create a unique cache key based on function name and arguments

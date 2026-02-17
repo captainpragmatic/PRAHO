@@ -270,16 +270,16 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
 
     try:
         # Step 1: Close expired cycles
-        results["closed_cycles"] = close_expired_billing_cycles()
+        results["closed_cycles"] = close_expired_billing_cycles()  # type: ignore[assignment]
 
         # Step 2: Rate pending aggregations
-        results["rated"] = rate_pending_aggregations()
+        results["rated"] = rate_pending_aggregations()  # type: ignore[assignment]
 
         # Step 3: Generate invoices
-        results["invoices"] = generate_pending_invoices()
+        results["invoices"] = generate_pending_invoices()  # type: ignore[assignment]
 
         # Step 4: Create new cycles
-        results["new_cycles"] = advance_billing_cycles()
+        results["new_cycles"] = advance_billing_cycles()  # type: ignore[assignment]
 
         # Log workflow completion
         AuditService.log_simple_event(

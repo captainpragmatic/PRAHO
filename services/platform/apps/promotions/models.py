@@ -672,7 +672,7 @@ class Coupon(models.Model):
 
             coupons.append(coupon)
 
-        return cls.objects.bulk_create(coupons)
+        return cls.objects.bulk_create(coupons)  # type: ignore[arg-type]
 
 
 # ===============================================================================

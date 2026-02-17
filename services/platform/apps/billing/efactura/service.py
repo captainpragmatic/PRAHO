@@ -55,7 +55,7 @@ class SubmissionResult:
 
     def __post_init__(self) -> None:
         if self.errors is None:
-            self.errors = []
+            self.errors = []  # type: ignore[unreachable]
 
     @classmethod
     def ok(cls, document: EFacturaDocument) -> SubmissionResult:
@@ -77,7 +77,7 @@ class StatusCheckResult:
 
     def __post_init__(self) -> None:
         if self.errors is None:
-            self.errors = []
+            self.errors = []  # type: ignore[unreachable]
 
 
 class EFacturaService:

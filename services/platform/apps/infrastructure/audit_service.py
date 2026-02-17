@@ -43,7 +43,7 @@ class InfrastructureAuditContext:
     user_agent: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self):  # type: ignore[no-untyped-def]
         """Extract IP and user agent from request if available"""
         if self.request and not self.ip_address:
             self.ip_address = get_safe_client_ip(self.request)

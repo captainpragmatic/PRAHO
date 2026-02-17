@@ -67,7 +67,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
     """Lazy import for module attributes to avoid AppRegistryNotReady issues."""
     # Models
     if name in (

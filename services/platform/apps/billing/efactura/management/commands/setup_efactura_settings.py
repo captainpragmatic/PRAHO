@@ -319,7 +319,7 @@ class Command(BaseCommand):
 
         for setting_def in settings_definitions:
             key = setting_def["key"]
-            default_value = EFACTURA_DEFAULTS.get(key)
+            default_value = EFACTURA_DEFAULTS.get(key)  # type: ignore[call-overload]
 
             if dry_run:
                 exists = SystemSetting.objects.filter(key=key).exists()

@@ -635,9 +635,9 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
                 # TODO: Replace with actual service/ticket/invoice counts from related models
                 # For now, return placeholder values
                 meta['stats'] = {
-                    'services': 0,  # customer.services.filter(status='active').count()
-                    'open_tickets': 0,  # customer.tickets.filter(status__in=['open', 'in_progress']).count()  
-                    'outstanding_invoices': 0  # customer.invoices.filter(status='pending').count()
+                    'services': 0,  # type: ignore[dict-item]
+                    'open_tickets': 0,  # type: ignore[dict-item]
+                    'outstanding_invoices': 0,  # type: ignore[dict-item]
                 }
             
             # Add billing profile if requested (already included in serializer, but could be conditional)

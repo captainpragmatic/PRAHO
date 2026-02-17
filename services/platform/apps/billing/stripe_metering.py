@@ -215,7 +215,7 @@ class StripeMeterEventService:
 
             if timestamp:
                 # Stripe expects Unix timestamp
-                event_params["timestamp"] = int(timestamp.timestamp())
+                event_params["timestamp"] = int(timestamp.timestamp())  # type: ignore[assignment]
 
             if identifier:
                 event_params["identifier"] = identifier

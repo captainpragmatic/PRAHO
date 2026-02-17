@@ -452,7 +452,7 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
 
 
 @login_required
-@ratelimit(key="user", rate="30/m", method="GET", block=False)
+@ratelimit(key="user", rate="30/m", method="GET", block=False)  # type: ignore[untyped-decorator]
 def customer_search_api(request: HttpRequest) -> JsonResponse:
     """
     🔍 AJAX customer search for dropdowns with rate limiting
@@ -671,7 +671,7 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
 
 
 @login_required
-@ratelimit(key="user", rate="60/m", method="GET", block=False)
+@ratelimit(key="user", rate="60/m", method="GET", block=False)  # type: ignore[untyped-decorator]
 def customer_services_api(request: HttpRequest, customer_id: int) -> JsonResponse:
     """
     🔗 API endpoint for customer services (for ticket form) with rate limiting

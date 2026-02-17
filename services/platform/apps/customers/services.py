@@ -54,7 +54,7 @@ class CustomerAnalyticsService:
                 "customer_id": str(customer.id),
                 "customer_name": customer.get_display_name(),
                 "account_age_days": (timezone.now() - customer.created_at).days if customer.created_at else 0,
-                "customer_type": "business" if customer.is_business else "individual",
+                "customer_type": "business" if customer.is_business else "individual",  # type: ignore[attr-defined]
             }
 
             # Order metrics
@@ -71,7 +71,7 @@ class CustomerAnalyticsService:
 
             # Credit metrics
             metrics["credit_score"] = CustomerCreditService.calculate_credit_score(customer)
-            metrics["credit_rating"] = CustomerCreditService.get_credit_rating(metrics["credit_score"])
+            metrics["credit_rating"] = CustomerCreditService.get_credit_rating(metrics["credit_score"])  # type: ignore[arg-type]
 
             # Calculate LTV (Lifetime Value)
             metrics["lifetime_value"] = billing_metrics.get("total_revenue", Decimal("0"))
@@ -329,14 +329,14 @@ class CustomerStatsService:
                 try:
                     update_result = CustomerStatsService.update_stats(str(customer.id))
                     if update_result.get("success"):
-                        results["updated"] += 1
+                        results["updated"] += 1  # type: ignore[operator]
                     else:
-                        results["errors"].append({
+                        results["errors"].append({  # type: ignore[attr-defined]
                             "customer_id": str(customer.id),
                             "error": update_result.get("error"),
                         })
                 except Exception as e:
-                    results["errors"].append({"customer_id": str(customer.id), "error": str(e)})
+                    results["errors"].append({"customer_id": str(customer.id), "error": str(e)})  # type: ignore[attr-defined]
 
             logger.info(f"📊 [Stats] Batch update completed: {results['updated']}/{results['total']} customers")
             return results

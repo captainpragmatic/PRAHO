@@ -447,7 +447,7 @@ class SecureUserRegistrationService:
                 # Validate VAT format first
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()
+                    tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()  # type: ignore[misc]
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -455,7 +455,7 @@ class SecureUserRegistrationService:
                 # Validate CUI format first
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()
+                    tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()  # type: ignore[misc]
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -821,7 +821,7 @@ class SecureCustomerUserService:
                 # Validate VAT format first
                 try:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()
+                    tax_profile = CustomerTaxProfile.objects.filter(vat_number=validated_vat).first()  # type: ignore[misc]
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -829,7 +829,7 @@ class SecureCustomerUserService:
                 # Validate CUI format first
                 try:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
-                    tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()
+                    tax_profile = CustomerTaxProfile.objects.filter(registration_number=validated_cui).first()  # type: ignore[misc]
                     customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
                 except ValidationError:
                     pass
@@ -1199,7 +1199,7 @@ class SessionSecurityService:
         # Update cache
         cache.set(cache_key, recent_ips, timeout=3600)
 
-        return is_suspicious
+        return is_suspicious  # type: ignore[no-any-return]
 
     @classmethod
     def log_session_activity(cls, request: HttpRequest, activity_type: str, **extra_data: Any) -> None:

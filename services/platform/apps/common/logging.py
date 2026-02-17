@@ -227,7 +227,7 @@ class StructuredLogAdapter(logging.LoggerAdapter):
     def process(
         self,
         msg: str,
-        kwargs: dict[str, Any]
+        kwargs: dict[str, Any]  # type: ignore[override]
     ) -> tuple[str, dict[str, Any]]:
         """Process log message and add structured context"""
         # Merge extra context

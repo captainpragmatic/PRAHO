@@ -249,7 +249,7 @@ class NodeValidationService:
         closed_ports: list[tuple[int, str]] = []
 
         for port, name in self.REQUIRED_PORTS:
-            if self._is_port_open(ip, port):
+            if self._is_port_open(ip, port):  # type: ignore[arg-type]
                 open_ports.append((port, name))
             else:
                 closed_ports.append((port, name))

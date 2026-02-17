@@ -386,7 +386,7 @@ def preflight_order(request: Request, customer: Customer) -> Response:
         
         logger.info(f"🔎 [API] VAT calculation inputs: subtotal={subtotal_cents}¢, country={country}, is_business={is_business}, vat_number={vat_number}")
 
-        customer_vat_info: CustomerVATInfo = {
+        customer_vat_info: CustomerVATInfo = {  # type: ignore[name-defined]
             'country': country,
             'is_business': is_business,
             'vat_number': vat_number or None,

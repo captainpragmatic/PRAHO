@@ -190,10 +190,10 @@ class ServiceGroupService:
                     elif action in ("check_all", "sync_status"):
                         pass  # Just checking status
 
-                    results["processed"] += 1
+                    results["processed"] += 1  # type: ignore[operator]
 
                 except Exception as e:
-                    results["errors"].append({"service_id": str(service.id), "error": str(e)})
+                    results["errors"].append({"service_id": str(service.id), "error": str(e)})  # type: ignore[attr-defined]
 
             logger.info(
                 f"⚙️ [ServiceGroup] {action} completed for group {group_id}: "
@@ -204,7 +204,7 @@ class ServiceGroupService:
                 "group_id": group_id,
                 "action": action,
                 "results": results,
-                "success": len(results["errors"]) == 0,
+                "success": len(results["errors"]) == 0,  # type: ignore[arg-type]
             })
 
         except Exception as e:

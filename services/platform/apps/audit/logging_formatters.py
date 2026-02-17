@@ -345,7 +345,7 @@ class AuditLogFormatter(logging.Formatter):
         entry_json = json.dumps(audit_entry, sort_keys=True, default=str)
         entry_hash = hashlib.sha256(entry_json.encode()).hexdigest()
 
-        audit_entry["integrity"]["hash"] = entry_hash
+        audit_entry["integrity"]["hash"] = entry_hash  # type: ignore[index]
         self.previous_hash = entry_hash
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)

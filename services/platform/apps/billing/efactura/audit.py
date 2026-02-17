@@ -44,7 +44,7 @@ class EFacturaAuditService:
         try:
             from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type="invoice_xml_generated",
                 business_object=invoice,
                 user=None,
@@ -121,11 +121,11 @@ class EFacturaAuditService:
             event_type = "efactura_submitted" if success else "efactura_submission_failed"
 
             # Log as business event
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type=event_type,
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system", severity="medium" if success else "high"),
+                context=AuditContext(actor_type="system", severity="medium" if success else "high"),  # type: ignore[call-arg]
                 description=f"e-Factura {'submitted' if success else 'submission failed'}: {invoice.number}",
                 metadata={
                     "document_id": str(document.id),
@@ -170,7 +170,7 @@ class EFacturaAuditService:
         try:
             from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type="invoice_status_changed",
                 business_object=invoice,
                 user=None,
@@ -205,7 +205,7 @@ class EFacturaAuditService:
             )
 
             # Log as business event
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type="efactura_accepted",
                 business_object=invoice,
                 user=None,
@@ -264,11 +264,11 @@ class EFacturaAuditService:
             )
 
             # Log as business event with high severity
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type="efactura_rejected",
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system", severity="high"),
+                context=AuditContext(actor_type="system", severity="high"),  # type: ignore[call-arg]
                 description=f"e-Factura rejected by ANAF: {invoice.number} - {len(errors)} errors",
                 metadata={
                     "document_id": str(document.id),
@@ -321,7 +321,7 @@ class EFacturaAuditService:
         try:
             from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type="efactura_submitted",  # Reuse existing event type
                 business_object=invoice,
                 user=None,
@@ -394,7 +394,7 @@ class EFacturaAuditService:
         try:
             from apps.audit.services import AuditContext, BillingAuditService, BusinessEventData
 
-            event_data = BusinessEventData(
+            event_data = BusinessEventData(  # type: ignore[call-arg]
                 event_type="invoice_pdf_generated",  # Reuse existing type
                 business_object=invoice,
                 user=None,

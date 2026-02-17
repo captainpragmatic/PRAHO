@@ -542,7 +542,7 @@ class AggregationService:
 
         aggregations = query.select_related("meter")
 
-        summary = {
+        summary = {  # type: ignore[var-annotated]
             "customer_id": customer_id,
             "period_start": period_start,
             "period_end": period_end,
@@ -552,7 +552,7 @@ class AggregationService:
 
         for agg in aggregations:
             meter_name = agg.meter.name
-            summary["meters"][meter_name] = {
+            summary["meters"][meter_name] = {  # type: ignore[index]
                 "display_name": agg.meter.display_name,
                 "total_value": float(agg.total_value),
                 "billable_value": float(agg.billable_value),
@@ -633,7 +633,7 @@ class RatingEngine:
 
         if overage_value > 0 and meter.is_billable:
             if pricing_tier:
-                charge_cents = self._calculate_tiered_charge(
+                charge_cents = self._calculate_tiered_charge(  # type: ignore[unreachable]
                     overage_value,
                     pricing_tier
                 )

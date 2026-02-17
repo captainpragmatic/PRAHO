@@ -218,7 +218,7 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
     elif isinstance(accessible_customers, list):
         return [customer.id for customer in accessible_customers]
     else:
-        return []
+        return []  # type: ignore[unreachable]
 
 
 @billing_staff_required

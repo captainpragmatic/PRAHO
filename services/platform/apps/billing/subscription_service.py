@@ -795,13 +795,13 @@ class RecurringBillingService:
                         else:
                             result["payments_failed"] += 1
                             subscription.mark_payment_failed()
-                            result["errors"].append(f"Payment failed for {subscription.subscription_number}: {payment_result.error}")
+                            result["errors"].append(f"Payment failed for {subscription.subscription_number}: {payment_result.error}")  # type: ignore[union-attr]
                     else:
                         # No payment method, just renew (manual payment expected)
                         subscription.renew()
 
                 else:
-                    result["errors"].append(f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}")
+                    result["errors"].append(f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}")  # type: ignore[union-attr]
 
             except Exception as e:
                 logger.exception(f"Error processing subscription {subscription.id}: {e}")

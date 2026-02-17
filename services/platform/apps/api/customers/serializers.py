@@ -129,7 +129,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
     user_data = UserRegistrationDataSerializer()
     customer_data = CustomerRegistrationDataSerializer()
     
-    def create(self, validated_data: dict[str, Any]) -> User:
+    def create(self, validated_data: dict[str, Any]) -> User:  # type: ignore[valid-type]
         """
         Create new customer owner using secure registration service.
         """
@@ -425,7 +425,7 @@ class CustomerProfileSerializer(serializers.Serializer):
             raise serializers.ValidationError("Invalid Romanian phone number format.")
         return value
     
-    def update(self, instance: User, validated_data: dict[str, Any]) -> User:
+    def update(self, instance: User, validated_data: dict[str, Any]) -> User:  # type: ignore[valid-type]
         """
         Update user profile data.
         """
@@ -457,7 +457,7 @@ class CustomerProfileSerializer(serializers.Serializer):
         
         return instance
     
-    def to_representation(self, instance: User) -> dict[str, Any]:
+    def to_representation(self, instance: User) -> dict[str, Any]:  # type: ignore[valid-type]
         """
         Convert user and profile data to API response format.
         """

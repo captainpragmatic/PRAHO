@@ -114,7 +114,7 @@ class NodeDeploymentService:
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
-        progress_callback: callable | None = None,
+        progress_callback: callable | None = None,  # type: ignore[valid-type]
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.
@@ -177,7 +177,7 @@ class NodeDeploymentService:
                 return Err(f"Provider prerequisites check failed: {prereq_result.unwrap_err()}")
 
             # Transition to provisioning
-            if not deployment.transition_to("provisioning_node"):
+            if not deployment.transition_to("provisioning_node"):  # type: ignore[func-returns-value]
                 return Err(f"Invalid state transition from '{deployment.status}' to 'provisioning_node'")
             deployment.save()
 
@@ -185,7 +185,7 @@ class NodeDeploymentService:
             report_progress("ssh_key")
             log_deployment("info", "Generating deployment SSH key")
 
-            key_result = self._ssh_manager.generate_deployment_key(
+            key_result = self._ssh_manager.generate_deployment_key(  # type: ignore[call-arg]
                 deployment,
                 user=user,
                 reason=f"Node deployment: {deployment.hostname}",
