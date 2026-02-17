@@ -26,10 +26,42 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 # Cache timeout constants (seconds)
-CACHE_TIMEOUT_SHORT = 60  # 1 minute
-CACHE_TIMEOUT_MEDIUM = 300  # 5 minutes
-CACHE_TIMEOUT_LONG = 3600  # 1 hour
-CACHE_TIMEOUT_VERY_LONG = 86400  # 24 hours
+_DEFAULT_CACHE_TIMEOUT_SHORT = 60  # 1 minute
+CACHE_TIMEOUT_SHORT = _DEFAULT_CACHE_TIMEOUT_SHORT
+_DEFAULT_CACHE_TIMEOUT_MEDIUM = 300  # 5 minutes
+CACHE_TIMEOUT_MEDIUM = _DEFAULT_CACHE_TIMEOUT_MEDIUM
+_DEFAULT_CACHE_TIMEOUT_LONG = 3600  # 1 hour
+CACHE_TIMEOUT_LONG = _DEFAULT_CACHE_TIMEOUT_LONG
+_DEFAULT_CACHE_TIMEOUT_VERY_LONG = 86400  # 24 hours
+CACHE_TIMEOUT_VERY_LONG = _DEFAULT_CACHE_TIMEOUT_VERY_LONG
+
+
+def get_cache_timeout_short() -> int:
+    """Get cache timeout short from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_short", _DEFAULT_CACHE_TIMEOUT_SHORT)
+
+
+def get_cache_timeout_medium() -> int:
+    """Get cache timeout medium from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_medium", _DEFAULT_CACHE_TIMEOUT_MEDIUM)
+
+
+def get_cache_timeout_long() -> int:
+    """Get cache timeout long from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_long", _DEFAULT_CACHE_TIMEOUT_LONG)
+
+
+def get_cache_timeout_very_long() -> int:
+    """Get cache timeout very long from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.cache_timeout_very_long", _DEFAULT_CACHE_TIMEOUT_VERY_LONG)
 
 
 class CacheService:

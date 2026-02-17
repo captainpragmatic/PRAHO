@@ -36,7 +36,8 @@ from .models import (
 
 # Constants for audit operations
 ONE_HOUR_SECONDS = 3600  # 1 hour in seconds for gap detection
-HIGH_COMPLEXITY_FILTER_THRESHOLD = 5  # Number of filters that indicate high complexity
+_DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD = 5  # Number of filters that indicate high complexity
+HIGH_COMPLEXITY_FILTER_THRESHOLD = _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
 MIN_SEARCH_QUERY_LENGTH = 2  # Minimum length for search queries
 
 # Business logic constants
@@ -45,11 +46,50 @@ SERVER_OVERLOAD_THRESHOLD_PERCENT = 85  # 85% resource usage threshold
 LONG_RUNNING_TASK_THRESHOLD_SECONDS = 1800  # 30 minutes (1800 seconds)
 
 # Webhook health and reliability constants
-WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = 300  # HTTP status < 300 indicates healthy endpoint
+_DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = 300  # HTTP status < 300 indicates healthy endpoint
+WEBHOOK_HEALTHY_RESPONSE_THRESHOLD = _DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD
 WEBHOOK_FAST_RESPONSE_THRESHOLD_MS = 1000  # < 1000ms is considered fast response
 WEBHOOK_MEDIUM_RESPONSE_THRESHOLD_MS = 3000  # < 3000ms is considered medium response
-WEBHOOK_MAX_RETRY_THRESHOLD = 5  # Maximum retry attempts before failure
-WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = 3  # Retry count indicating suspicious behavior
+_DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD = 5  # Maximum retry attempts before failure
+WEBHOOK_MAX_RETRY_THRESHOLD = _DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD
+_DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = 3  # Retry count indicating suspicious behavior
+WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
+
+
+def get_high_complexity_filter_threshold() -> int:
+    """Get high complexity filter threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.high_complexity_filter_threshold", _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
+    )
+
+
+def get_webhook_healthy_response_threshold() -> int:
+    """Get webhook healthy response threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.webhook_healthy_response_threshold", _DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD
+    )
+
+
+def get_webhook_max_retry_threshold() -> int:
+    """Get webhook max retry threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.webhook_max_retry_threshold", _DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD
+    )
+
+
+def get_webhook_suspicious_retry_threshold() -> int:
+    """Get webhook suspicious retry threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "audit.webhook_suspicious_retry_threshold", _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
+    )
 
 
 # Type definitions for security audit service

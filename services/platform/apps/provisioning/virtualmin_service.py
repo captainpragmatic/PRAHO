@@ -40,7 +40,17 @@ logger = logging.getLogger(__name__)
 
 # Username generation constants
 MIN_USERNAME_LENGTH = 3
-MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+_DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
+MAX_USERNAME_UNIQUENESS_ATTEMPTS = _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
+
+
+def get_max_username_uniqueness_attempts() -> int:
+    """Get max username uniqueness attempts from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "provisioning.max_username_uniqueness_attempts", _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
+    )
 
 
 @dataclass

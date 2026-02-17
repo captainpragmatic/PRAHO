@@ -35,7 +35,19 @@ from .serializers import (
 )
 
 # Rate limiting and security constants
-SESSION_VALIDATION_RATE_LIMIT = 60  # requests per minute
+_DEFAULT_SESSION_VALIDATION_RATE_LIMIT = 60  # requests per minute
+SESSION_VALIDATION_RATE_LIMIT = _DEFAULT_SESSION_VALIDATION_RATE_LIMIT
+
+
+def get_session_validation_rate_limit() -> int:
+    """Get session validation rate limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "security.session_validation_rate_limit", _DEFAULT_SESSION_VALIDATION_RATE_LIMIT
+    )
+
+
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)

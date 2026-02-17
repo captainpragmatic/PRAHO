@@ -31,9 +31,25 @@ logger = logging.getLogger(__name__)
 
 # Cache keys for file integrity monitoring
 FILE_HASH_CACHE_PREFIX = "file_integrity_hash:"
-FILE_HASH_CACHE_TIMEOUT = 86400 * 30  # 30 days
+_DEFAULT_FILE_HASH_CACHE_TIMEOUT = 86400 * 30  # 30 days
+FILE_HASH_CACHE_TIMEOUT = _DEFAULT_FILE_HASH_CACHE_TIMEOUT
 
-MAX_FILES_DISPLAYED = 5
+_DEFAULT_MAX_FILES_DISPLAYED = 5
+MAX_FILES_DISPLAYED = _DEFAULT_MAX_FILES_DISPLAYED
+
+
+def get_file_hash_cache_timeout() -> int:
+    """Get file hash cache timeout from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("audit.file_hash_cache_timeout", _DEFAULT_FILE_HASH_CACHE_TIMEOUT)
+
+
+def get_max_files_displayed() -> int:
+    """Get max files displayed from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("audit.max_files_displayed", _DEFAULT_MAX_FILES_DISPLAYED)
 
 
 def run_integrity_check(

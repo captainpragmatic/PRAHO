@@ -56,12 +56,15 @@ MAX_JSON_SIZE = 10_000
 
 def get_max_discount_percent() -> Decimal:
     """Get max discount percent from SettingsService at runtime."""
-    return Decimal(str(SettingsService.get_integer_setting("promotions.max_discount_percent", 100)))
+    val = SettingsService.get_setting("promotions.max_discount_percent", _DEFAULT_MAX_DISCOUNT_PERCENT)
+    return Decimal(str(val))
 
 
 def get_max_discount_amount_cents() -> int:
     """Get max discount amount in cents from SettingsService at runtime."""
-    return SettingsService.get_integer_setting("promotions.max_discount_amount_cents", 100_000_000)
+    return SettingsService.get_integer_setting(
+        "promotions.max_discount_amount_cents", _DEFAULT_MAX_DISCOUNT_AMOUNT_CENTS
+    )
 
 
 class CouponMetadata(TypedDict, total=False):

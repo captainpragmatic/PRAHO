@@ -21,7 +21,15 @@ from django.http import HttpRequest
 # Generic type variable removed for Python 3.13 compatibility
 from apps.common.constants import DEFAULT_PAGE_SIZE
 
-DEFAULT_ORPHANS = 3
+_DEFAULT_DEFAULT_ORPHANS = 3
+DEFAULT_ORPHANS = _DEFAULT_DEFAULT_ORPHANS
+
+
+def get_orphans() -> int:
+    """Get default orphans from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.default_orphans", _DEFAULT_DEFAULT_ORPHANS)
 
 
 def get_pagination_context(

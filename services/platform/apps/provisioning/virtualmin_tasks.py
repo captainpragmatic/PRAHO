@@ -73,8 +73,24 @@ def get_task_timeouts() -> dict[str, int]:
 # Legacy constants for backward compatibility
 TASK_RETRY_DELAY = 300  # 5 minutes - DEPRECATED: Use get_task_timeouts()['TASK_RETRY_DELAY']
 TASK_MAX_RETRIES = 3  # DEPRECATED: Use get_task_timeouts()['TASK_MAX_RETRIES']
-TASK_SOFT_TIME_LIMIT = 600  # 10 minutes - DEPRECATED: Use get_task_timeouts()['TASK_SOFT_TIME_LIMIT']
-TASK_TIME_LIMIT = 900  # 15 minutes - DEPRECATED: Use get_task_timeouts()['TASK_TIME_LIMIT']
+_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes - DEPRECATED: Use get_task_timeouts()['TASK_SOFT_TIME_LIMIT']
+TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
+_DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes - DEPRECATED: Use get_task_timeouts()['TASK_TIME_LIMIT']
+TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
+
+
+def get_task_soft_time_limit() -> int:
+    """Get task soft time limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("provisioning.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
+
+
+def get_task_time_limit() -> int:
+    """Get task time limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("provisioning.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
 
 @dataclass

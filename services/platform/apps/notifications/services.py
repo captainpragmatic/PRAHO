@@ -50,6 +50,15 @@ logger = logging.getLogger(__name__)
 # Security constants
 MAX_CONTEXT_VALUE_LENGTH = 1000  # Maximum length for template context values
 _DEFAULT_MAX_RECIPIENTS_PER_BATCH = 50  # Maximum recipients per batch send
+
+
+def get_max_recipients_per_batch() -> int:
+    """Get max recipients per batch from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "notifications.max_recipients_per_batch", _DEFAULT_MAX_RECIPIENTS_PER_BATCH
+    )
+
+
 TEMPLATE_CACHE_PREFIX = "email_template:"
 TEMPLATE_CACHE_TIMEOUT = 3600  # 1 hour
 SUPPRESSION_CACHE_PREFIX = "email_suppressed:"

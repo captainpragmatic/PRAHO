@@ -30,14 +30,80 @@ DAYS_YEAR = 365
 DAYS_HALF_YEAR = 180
 DAYS_QUARTER = 90
 DAYS_MONTH = 30
-ORDERS_HIGH_THRESHOLD = 10
-ORDERS_MEDIUM_THRESHOLD = 5
-ORDERS_LOW_THRESHOLD = 2
-PAYMENT_RATE_EXCELLENT = 95
-PAYMENT_RATE_GOOD = 80
-PAYMENT_RATE_FAIR = 60
-SERVICES_HIGH_THRESHOLD = 3
-SERVICES_MEDIUM_THRESHOLD = 2
+_DEFAULT_ORDERS_HIGH_THRESHOLD = 10
+ORDERS_HIGH_THRESHOLD = _DEFAULT_ORDERS_HIGH_THRESHOLD
+_DEFAULT_ORDERS_MEDIUM_THRESHOLD = 5
+ORDERS_MEDIUM_THRESHOLD = _DEFAULT_ORDERS_MEDIUM_THRESHOLD
+_DEFAULT_ORDERS_LOW_THRESHOLD = 2
+ORDERS_LOW_THRESHOLD = _DEFAULT_ORDERS_LOW_THRESHOLD
+_DEFAULT_PAYMENT_RATE_EXCELLENT = 95
+PAYMENT_RATE_EXCELLENT = _DEFAULT_PAYMENT_RATE_EXCELLENT
+_DEFAULT_PAYMENT_RATE_GOOD = 80
+PAYMENT_RATE_GOOD = _DEFAULT_PAYMENT_RATE_GOOD
+_DEFAULT_PAYMENT_RATE_FAIR = 60
+PAYMENT_RATE_FAIR = _DEFAULT_PAYMENT_RATE_FAIR
+_DEFAULT_SERVICES_HIGH_THRESHOLD = 3
+SERVICES_HIGH_THRESHOLD = _DEFAULT_SERVICES_HIGH_THRESHOLD
+_DEFAULT_SERVICES_MEDIUM_THRESHOLD = 2
+SERVICES_MEDIUM_THRESHOLD = _DEFAULT_SERVICES_MEDIUM_THRESHOLD
+
+
+def get_orders_high_threshold() -> int:
+    """Get orders high threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_high_threshold", _DEFAULT_ORDERS_HIGH_THRESHOLD)
+
+
+def get_orders_medium_threshold() -> int:
+    """Get orders medium threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_medium_threshold", _DEFAULT_ORDERS_MEDIUM_THRESHOLD)
+
+
+def get_orders_low_threshold() -> int:
+    """Get orders low threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_low_threshold", _DEFAULT_ORDERS_LOW_THRESHOLD)
+
+
+def get_payment_rate_excellent() -> int:
+    """Get payment rate excellent from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_excellent", _DEFAULT_PAYMENT_RATE_EXCELLENT)
+
+
+def get_payment_rate_good() -> int:
+    """Get payment rate good from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_good", _DEFAULT_PAYMENT_RATE_GOOD)
+
+
+def get_payment_rate_fair() -> int:
+    """Get payment rate fair from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_fair", _DEFAULT_PAYMENT_RATE_FAIR)
+
+
+def get_services_high_threshold() -> int:
+    """Get services high threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.services_high_threshold", _DEFAULT_SERVICES_HIGH_THRESHOLD)
+
+
+def get_services_medium_threshold() -> int:
+    """Get services medium threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "customers.services_medium_threshold", _DEFAULT_SERVICES_MEDIUM_THRESHOLD
+    )
 
 
 class CustomerAnalyticsService:

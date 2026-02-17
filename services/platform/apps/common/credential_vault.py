@@ -39,6 +39,22 @@ CREDENTIAL_EXPIRY_DAYS = 30  # Default credential expiration
 _DEFAULT_MAX_CREDENTIAL_AGE_DAYS = 90  # Maximum age before forced rotation
 _DEFAULT_ROTATION_RETRY_LIMIT = 3
 ACCESS_LOG_RETENTION_DAYS = 365  # Keep access logs for 1 year
+
+
+def get_max_credential_age_days() -> int:
+    """Get max credential age from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("users.credential_max_age_days", _DEFAULT_MAX_CREDENTIAL_AGE_DAYS)
+
+
+def get_rotation_retry_limit() -> int:
+    """Get rotation retry limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("users.credential_rotation_retry_limit", _DEFAULT_ROTATION_RETRY_LIMIT)
+
+
 VAULT_CACHE_TIMEOUT = 300  # 5 minutes for credential caching
 
 

@@ -65,6 +65,28 @@ _DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD = 85  # 85% resource usage alert thresho
 _DEFAULT_SERVER_OVERLOAD_THRESHOLD = 90  # 90% resource usage threshold
 _DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES = 30  # 30 minutes for provisioning timeout
 
+
+def get_resource_usage_alert_threshold() -> int:
+    """Get resource usage alert threshold from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "provisioning.resource_usage_alert_threshold", _DEFAULT_RESOURCE_USAGE_ALERT_THRESHOLD
+    )
+
+
+def get_server_overload_threshold() -> int:
+    """Get server overload threshold from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "provisioning.server_overload_threshold", _DEFAULT_SERVER_OVERLOAD_THRESHOLD
+    )
+
+
+def get_long_provisioning_threshold_minutes() -> int:
+    """Get long provisioning threshold from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting(
+        "provisioning.long_provisioning_threshold_minutes", _DEFAULT_LONG_PROVISIONING_THRESHOLD_MINUTES
+    )
+
+
 # Structural constants (not configurable via SettingsService)
 ENTERPRISE_DISK_THRESHOLD = 100  # 100 GB threshold for enterprise plans
 MAX_SERVICES_WARNING_THRESHOLD = 0.8  # 80% of max services capacity

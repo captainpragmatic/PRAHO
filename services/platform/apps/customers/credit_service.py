@@ -41,6 +41,18 @@ _DEFAULT_CREDIT_ADJUSTMENTS = {
 BASE_CREDIT_SCORE = _DEFAULT_BASE_CREDIT_SCORE
 CREDIT_ADJUSTMENTS = _DEFAULT_CREDIT_ADJUSTMENTS
 
+
+def get_base_credit_score() -> int:
+    """Get base credit score from SettingsService (runtime)."""
+    return SettingsService.get_integer_setting("customers.base_credit_score", _DEFAULT_BASE_CREDIT_SCORE)
+
+
+def get_credit_adjustments() -> dict[str, int]:
+    """Get credit score adjustments from SettingsService (runtime)."""
+    val = SettingsService.get_setting("customers.credit_adjustments", _DEFAULT_CREDIT_ADJUSTMENTS)
+    return val if isinstance(val, dict) else _DEFAULT_CREDIT_ADJUSTMENTS
+
+
 CONSECUTIVE_PAYMENTS_TIER_2 = 12
 CONSECUTIVE_PAYMENTS_TIER_1 = 6
 MAX_CREDIT_HISTORY_EVENTS = 100

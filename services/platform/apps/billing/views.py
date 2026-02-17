@@ -78,7 +78,7 @@ def _get_max_payment_amount_cents() -> int:
     """Get max payment amount from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    return SettingsService.get_integer_setting("billing.max_payment_amount_cents", 100000000)
+    return SettingsService.get_integer_setting("billing.max_payment_amount_cents", _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS)
 
 
 def _validate_financial_document_access(

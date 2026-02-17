@@ -45,7 +45,15 @@ from apps.common.logging import (
 
 logger = logging.getLogger(__name__)
 
-MAX_HEADER_JSON_LENGTH = 1000
+_DEFAULT_MAX_HEADER_JSON_LENGTH = 1000
+MAX_HEADER_JSON_LENGTH = _DEFAULT_MAX_HEADER_JSON_LENGTH
+
+
+def get_max_header_json_length() -> int:
+    """Get max header json length from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
 
 
 class TraceMiddleware:

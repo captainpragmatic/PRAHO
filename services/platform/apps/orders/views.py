@@ -47,9 +47,36 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 # Constants for validation and limits
-MAX_SEARCH_QUERY_LENGTH = 100
-MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
-MAX_PRICE_OVERRIDE_MULTIPLIER = 10
+_DEFAULT_MAX_SEARCH_QUERY_LENGTH = 100
+MAX_SEARCH_QUERY_LENGTH = _DEFAULT_MAX_SEARCH_QUERY_LENGTH
+_DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
+MAX_PRICE_OVERRIDE_CENTS = _DEFAULT_MAX_PRICE_OVERRIDE_CENTS
+_DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
+MAX_PRICE_OVERRIDE_MULTIPLIER = _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
+
+
+def get_max_search_query_length() -> int:
+    """Get max search query length from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("orders.max_search_query_length", _DEFAULT_MAX_SEARCH_QUERY_LENGTH)
+
+
+def get_max_price_override_cents() -> int:
+    """Get max price override cents from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("orders.max_price_override_cents", _DEFAULT_MAX_PRICE_OVERRIDE_CENTS)
+
+
+def get_max_price_override_multiplier() -> int:
+    """Get max price override multiplier from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "orders.max_price_override_multiplier", _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
+    )
+
 
 # ===============================================================================
 # SECURITY VALIDATION FUNCTIONS

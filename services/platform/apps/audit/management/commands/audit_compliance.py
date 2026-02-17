@@ -27,7 +27,15 @@ from apps.audit.compliance import (
 )
 from apps.audit.siem import SIEMFormat, get_siem_service
 
-MAX_VIOLATIONS_DISPLAYED = 10
+_DEFAULT_MAX_VIOLATIONS_DISPLAYED = 10
+MAX_VIOLATIONS_DISPLAYED = _DEFAULT_MAX_VIOLATIONS_DISPLAYED
+
+
+def get_max_violations_displayed() -> int:
+    """Get max violations displayed from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("audit.max_violations_displayed", _DEFAULT_MAX_VIOLATIONS_DISPLAYED)
 
 
 class Command(BaseCommand):

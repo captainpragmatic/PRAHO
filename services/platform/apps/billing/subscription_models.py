@@ -60,7 +60,9 @@ def get_subscription_grace_period_days() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        return max(1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", 7))
+        return max(
+            1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", _DEFAULT_GRACE_PERIOD_DAYS)
+        )
     except Exception:
         return _DEFAULT_GRACE_PERIOD_DAYS
 
@@ -70,7 +72,12 @@ def get_max_payment_retry_attempts() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        return max(1, SettingsService.get_integer_setting("billing.max_payment_retry_attempts", 5))
+        return max(
+            1,
+            SettingsService.get_integer_setting(
+                "billing.max_payment_retry_attempts", _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
+            ),
+        )
     except Exception:
         return _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
 

@@ -28,14 +28,14 @@ def _get_task_retry_delay() -> int:
     """Get task retry delay seconds from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", 300)
+    return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY)
 
 
 def _get_task_max_retries() -> int:
     """Get task max retries from SettingsService."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    return SettingsService.get_integer_setting("billing.task_max_retries", 3)
+    return SettingsService.get_integer_setting("billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES)
 
 
 # Backward-compatible module-level aliases (for code that imports them)

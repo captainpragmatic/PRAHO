@@ -34,7 +34,15 @@ from apps.common.flow_analysis.data_flow import DataFlowAnalyzer
 
 logger = logging.getLogger(__name__)
 
-PROXIMITY_LINE_THRESHOLD = 5
+_DEFAULT_PROXIMITY_LINE_THRESHOLD = 5
+PROXIMITY_LINE_THRESHOLD = _DEFAULT_PROXIMITY_LINE_THRESHOLD
+
+
+def get_proximity_line_threshold() -> int:
+    """Get proximity line threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD)
 
 
 @dataclass

@@ -45,6 +45,25 @@ _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
 _DEFAULT_RATE_LIMIT_INVITATION_PER_USER = 10  # per hour
 _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
+
+def get_registration_rate_limit() -> int:
+    """Get registration rate limit per IP from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "security.registration_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
+    )
+
+
+def get_invitation_rate_limit() -> int:
+    """Get invitation rate limit per user from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "security.invitation_rate_limit_per_user", _DEFAULT_RATE_LIMIT_INVITATION_PER_USER
+    )
+
+
 # Input size limits (DoS prevention)
 MAX_EMAIL_LENGTH = 254
 MAX_NAME_LENGTH = 100

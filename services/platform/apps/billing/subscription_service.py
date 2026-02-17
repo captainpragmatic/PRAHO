@@ -37,7 +37,15 @@ from .validators import log_security_event
 
 logger = logging.getLogger(__name__)
 
-MAX_PAYMENT_RETRIES = 5
+_DEFAULT_MAX_PAYMENT_RETRIES = 5
+MAX_PAYMENT_RETRIES = _DEFAULT_MAX_PAYMENT_RETRIES
+
+
+def get_max_payment_retries() -> int:
+    """Get max payment retries from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("billing.max_payment_retries", _DEFAULT_MAX_PAYMENT_RETRIES)
 
 
 # ===============================================================================

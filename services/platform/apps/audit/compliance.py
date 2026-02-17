@@ -31,8 +31,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-COMPLIANT_SCORE_THRESHOLD = 90
-PARTIAL_SCORE_THRESHOLD = 70
+_DEFAULT_COMPLIANT_SCORE_THRESHOLD = 90
+COMPLIANT_SCORE_THRESHOLD = _DEFAULT_COMPLIANT_SCORE_THRESHOLD
+_DEFAULT_PARTIAL_SCORE_THRESHOLD = 70
+PARTIAL_SCORE_THRESHOLD = _DEFAULT_PARTIAL_SCORE_THRESHOLD
+
+
+def get_compliant_score_threshold() -> int:
+    """Get compliant score threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("audit.compliant_score_threshold", _DEFAULT_COMPLIANT_SCORE_THRESHOLD)
+
+
+def get_partial_score_threshold() -> int:
+    """Get partial score threshold from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("audit.partial_score_threshold", _DEFAULT_PARTIAL_SCORE_THRESHOLD)
+
 
 User = get_user_model()
 

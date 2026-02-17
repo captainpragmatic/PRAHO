@@ -49,9 +49,33 @@ _request_context = threading.local()
 
 logger = logging.getLogger(__name__)
 
-SQL_DISPLAY_LIMIT = 200
-MAX_SUMMARIZED_ARGS = 3
-VALUE_SUMMARY_LIMIT = 50
+_DEFAULT_SQL_DISPLAY_LIMIT = 200
+SQL_DISPLAY_LIMIT = _DEFAULT_SQL_DISPLAY_LIMIT
+_DEFAULT_MAX_SUMMARIZED_ARGS = 3
+MAX_SUMMARIZED_ARGS = _DEFAULT_MAX_SUMMARIZED_ARGS
+_DEFAULT_VALUE_SUMMARY_LIMIT = 50
+VALUE_SUMMARY_LIMIT = _DEFAULT_VALUE_SUMMARY_LIMIT
+
+
+def get_sql_display_limit() -> int:
+    """Get sql display limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.sql_display_limit", _DEFAULT_SQL_DISPLAY_LIMIT)
+
+
+def get_max_summarized_args() -> int:
+    """Get max summarized args from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.max_summarized_args", _DEFAULT_MAX_SUMMARIZED_ARGS)
+
+
+def get_value_summary_limit() -> int:
+    """Get value summary limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("common.value_summary_limit", _DEFAULT_VALUE_SUMMARY_LIMIT)
 
 
 F = TypeVar("F", bound=Callable[..., Any])

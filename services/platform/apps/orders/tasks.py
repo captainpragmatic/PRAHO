@@ -24,7 +24,8 @@ from apps.orders.models import Order
 from apps.orders.services import OrderService
 
 # Constants
-MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
+_DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
+MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL
 
 # Import at module level to avoid PLC0415
 try:
@@ -49,8 +50,33 @@ class OrderProcessingResults(TypedDict):
 # Task configuration
 TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
-TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
-TASK_TIME_LIMIT = 600  # 10 minutes
+_DEFAULT_TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
+TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
+_DEFAULT_TASK_TIME_LIMIT = 600  # 10 minutes
+TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
+
+
+def get_max_payment_failures_before_order_fail() -> int:
+    """Get max payment failures before order fail from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting(
+        "orders.max_payment_failures_before_fail", _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL
+    )
+
+
+def get_task_soft_time_limit() -> int:
+    """Get task soft time limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("orders.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
+
+
+def get_task_time_limit() -> int:
+    """Get task time limit from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("orders.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
 
 def process_pending_orders() -> dict[str, Any]:

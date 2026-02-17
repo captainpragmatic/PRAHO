@@ -131,7 +131,10 @@ def get_event_grace_period_hours() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        return max(1, SettingsService.get_integer_setting("billing.event_grace_period_hours", 24))
+        return max(
+            1,
+            SettingsService.get_integer_setting("billing.event_grace_period_hours", _DEFAULT_EVENT_GRACE_PERIOD_HOURS),
+        )
     except Exception:
         logger.warning("Failed to read event_grace_period_hours from SettingsService, using fallback", exc_info=True)
         return _get_positive_int("BILLING_EVENT_GRACE_PERIOD_HOURS", _DEFAULT_EVENT_GRACE_PERIOD_HOURS)
@@ -142,7 +145,12 @@ def get_future_event_drift_minutes() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        return max(1, SettingsService.get_integer_setting("billing.future_event_drift_minutes", 5))
+        return max(
+            1,
+            SettingsService.get_integer_setting(
+                "billing.future_event_drift_minutes", _DEFAULT_FUTURE_EVENT_DRIFT_MINUTES
+            ),
+        )
     except Exception:
         logger.warning("Failed to read future_event_drift_minutes from SettingsService, using fallback", exc_info=True)
         return _get_positive_int("BILLING_MAX_FUTURE_EVENT_MINUTES", _DEFAULT_FUTURE_EVENT_DRIFT_MINUTES)
@@ -187,7 +195,9 @@ def get_alert_cooldown_hours() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        return max(1, SettingsService.get_integer_setting("billing.alert_cooldown_hours", 24))
+        return max(
+            1, SettingsService.get_integer_setting("billing.alert_cooldown_hours", _DEFAULT_ALERT_COOLDOWN_HOURS)
+        )
     except Exception:
         logger.warning("Failed to read alert_cooldown_hours from SettingsService, using fallback", exc_info=True)
         return _get_positive_int("BILLING_ALERT_COOLDOWN_HOURS", _DEFAULT_ALERT_COOLDOWN_HOURS)
@@ -210,7 +220,12 @@ def get_efactura_minimum_amount_cents() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        return max(1, SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000))
+        return max(
+            1,
+            SettingsService.get_integer_setting(
+                "billing.efactura_minimum_amount_cents", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
+            ),
+        )
     except Exception:
         logger.warning(
             "Failed to read efactura_minimum_amount_cents from SettingsService, using fallback", exc_info=True

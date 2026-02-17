@@ -15,7 +15,15 @@ from django.core.checks import Warning as DjangoWarning
 # Constants
 SSL_HEADER_TUPLE_LENGTH = 2
 MIN_HSTS_SECONDS = 300  # 5 minutes minimum
-MAX_SESSION_AGE_HOURS = 86400  # 24 hours in seconds
+_DEFAULT_MAX_SESSION_AGE_HOURS = 86400  # 24 hours in seconds
+MAX_SESSION_AGE_HOURS = _DEFAULT_MAX_SESSION_AGE_HOURS
+
+
+def get_max_session_age_hours() -> int:
+    """Get max session age hours from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("security.max_session_age_seconds", _DEFAULT_MAX_SESSION_AGE_HOURS)
 
 
 def _validate_proxy_entries(trusted_proxies: list[Any]) -> list[Any]:

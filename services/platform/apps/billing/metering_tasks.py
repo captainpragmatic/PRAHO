@@ -26,7 +26,17 @@ from . import config as billing_config
 logger = logging.getLogger(__name__)
 
 # Task configuration
-TASK_TIMEOUT = 300  # 5 minutes
+_DEFAULT_TASK_TIMEOUT = 300  # 5 minutes
+TASK_TIMEOUT = _DEFAULT_TASK_TIMEOUT
+
+
+def get_task_timeout() -> int:
+    """Get task timeout from SettingsService (runtime)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("billing.metering_task_timeout", _DEFAULT_TASK_TIMEOUT)
+
+
 TASK_RETRY_DELAY = 60  # 1 minute
 
 
