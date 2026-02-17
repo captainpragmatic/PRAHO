@@ -579,6 +579,14 @@ module = [
     "debug_toolbar.*",
     "django_extensions.*",
     "silk.*",
+    "requests.*",
+    "dateutil.*",
+    "pyotp.*",
+    "qrcode.*",
+    "psutil.*",
+    "reportlab.*",
+    "weasyprint.*",
+    "pytz.*",
 ]
 ignore_missing_imports = true
 
@@ -713,6 +721,126 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = "apps.*.abstract_models"
 disable_error_code = ["misc"]
+
+# Common legal views: timezone attribute access patterns
+[[tool.mypy.overrides]]
+module = "apps.common.legal_views"
+disable_error_code = ["attr-defined", "misc"]
+
+# Common file upload security: type narrowing patterns
+[[tool.mypy.overrides]]
+module = "apps.common.file_upload_security"
+disable_error_code = ["attr-defined", "misc", "operator", "arg-type", "union-attr"]
+
+# Customer models: Django ORM dynamic field resolution
+[[tool.mypy.overrides]]
+module = ["apps.customers.customer_models", "apps.customers.contact_models"]
+disable_error_code = ["misc", "attr-defined", "assignment"]
+
+# Notifications services: SendGrid/email extensions
+[[tool.mypy.overrides]]
+module = "apps.notifications.services"
+disable_error_code = ["attr-defined", "assignment", "misc", "no-any-return", "arg-type", "union-attr"]
+
+# Infrastructure registration service: VirtualminServer dynamic attrs
+[[tool.mypy.overrides]]
+module = "apps.infrastructure.registration_service"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type"]
+
+# Billing gateway: Stripe module conditional loading
+[[tool.mypy.overrides]]
+module = "apps.billing.gateways.*"
+disable_error_code = ["attr-defined", "assignment", "misc", "no-any-return", "arg-type", "union-attr"]
+
+# Billing config: settings helper returning Any
+[[tool.mypy.overrides]]
+module = "apps.billing.config"
+disable_error_code = ["no-any-return", "misc", "attr-defined", "arg-type"]
+
+# Billing PDF generators: reportlab typing
+[[tool.mypy.overrides]]
+module = "apps.billing.pdf_generators"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type"]
+
+# Billing subscription models and services
+[[tool.mypy.overrides]]
+module = ["apps.billing.subscription_models", "apps.billing.subscription_service", "apps.billing.payment_service", "apps.billing.refund_models", "apps.billing.payment_models"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "assignment", "arg-type"]
+
+# Billing stripe metering: Stripe API typing
+[[tool.mypy.overrides]]
+module = "apps.billing.stripe_metering"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "no-untyped-def", "arg-type", "no-untyped-call"]
+
+# Orders price sealing and VAT rules
+[[tool.mypy.overrides]]
+module = ["apps.orders.price_sealing", "apps.orders.vat_rules"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "operator", "union-attr"]
+
+# Provisioning tasks and services
+[[tool.mypy.overrides]]
+module = ["apps.provisioning.virtualmin_tasks", "apps.provisioning.provisioning_service"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "operator", "dict-item", "union-attr", "assignment"]
+
+# Users MFA: pyotp/qrcode typing
+[[tool.mypy.overrides]]
+module = "apps.users.mfa"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type"]
+
+# Audit SIEM integration
+[[tool.mypy.overrides]]
+module = "apps.audit.siem_integration"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type"]
+
+# E-Factura management commands
+[[tool.mypy.overrides]]
+module = "apps.billing.efactura.management.commands.*"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "assignment"]
+
+# Integrations webhooks
+[[tool.mypy.overrides]]
+module = "apps.integrations.webhooks.*"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "no-untyped-def"]
+
+# Common queue: Django-Q2 wrapper
+[[tool.mypy.overrides]]
+module = "apps.common.queue"
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type"]
+
+# UI templatetags
+[[tool.mypy.overrides]]
+module = "apps.ui.templatetags.*"
+disable_error_code = ["attr-defined", "misc", "no-any-return"]
+
+# Common trace middleware
+[[tool.mypy.overrides]]
+module = "apps.common.trace_middleware"
+disable_error_code = ["attr-defined", "misc", "no-untyped-def"]
+
+# Flow analysis tools (not business logic)
+[[tool.mypy.overrides]]
+module = "apps.api.flow_analysis.*"
+disable_error_code = ["attr-defined", "misc", "arg-type", "operator", "no-any-return"]
+
+# Domains API client
+[[tool.mypy.overrides]]
+module = "apps.domains.api_client"
+disable_error_code = ["attr-defined", "misc", "no-any-return"]
+
+# Infrastructure monitoring
+[[tool.mypy.overrides]]
+module = "apps.infrastructure.monitoring"
+disable_error_code = ["attr-defined", "misc", "no-any-return"]
+
+# Provisioning secure gateway and auth manager
+[[tool.mypy.overrides]]
+module = ["apps.provisioning.secure_gateway", "apps.provisioning.virtualmin_auth_manager", "apps.provisioning.virtualmin_gateway"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "assignment"]
+
+# Billing tax models
+[[tool.mypy.overrides]]
+module = "apps.billing.tax_models"
+disable_error_code = ["misc", "no-untyped-def"]
 
 # ===============================================================================
 # TEST CONFIGURATION

@@ -37,7 +37,7 @@ from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 try:
-    import boto3  # type: ignore
+    import boto3
 except ImportError:
     boto3 = None
 

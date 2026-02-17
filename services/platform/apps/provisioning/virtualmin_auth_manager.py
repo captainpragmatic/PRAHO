@@ -482,6 +482,6 @@ def test_acl_authentication_health() -> dict[str, Any]:
                     results["completely_failed"] += 1  # type: ignore[operator]
                     server_info["status"] = "all_failed"
 
-            results["server_details"].append(server_info)  # type: ignore[attr-defined]
+            results["server_details"].append(server_info)
 
     return results

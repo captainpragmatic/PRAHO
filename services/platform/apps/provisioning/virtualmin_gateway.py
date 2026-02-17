@@ -394,7 +394,7 @@ class VirtualminConfig:
         temp_server.get_api_password = lambda: password
 
         return cls(
-            server=temp_server,  # type: ignore[arg-type]  # We know this works
+            server=temp_server,  # We know this works
             timeout=timeout,
             verify_ssl=verify_ssl,
             cert_fingerprint=cert_fingerprint,
@@ -563,7 +563,7 @@ class VirtualminGateway:
             # Import here to avoid circular imports
             from .virtualmin_auth_manager import VirtualminAuthenticationManager  # noqa: PLC0415
 
-            self._auth_manager = VirtualminAuthenticationManager(self.server)  # type: ignore[assignment]
+            self._auth_manager = VirtualminAuthenticationManager(self.server)
         return self._auth_manager  # type: ignore[return-value]
 
     def _get_credential_vault(self) -> CredentialVault:
@@ -571,7 +571,7 @@ class VirtualminGateway:
         if not self._credential_vault:
             from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
 
-            self._credential_vault = get_credential_vault()  # type: ignore[assignment]
+            self._credential_vault = get_credential_vault()
         return self._credential_vault  # type: ignore[return-value]
 
     def _get_credentials(self, reason: str = "Virtualmin API call") -> Result[tuple[str, str], str]:
@@ -995,11 +995,11 @@ class VirtualminGateway:
 
         # Handle different response formats
         if "domains" in data:
-            return data["domains"]  # type: ignore[no-any-return]
+            return data["domains"]
         elif "data" in data:
             return self._parse_table_format_domains(data["data"], name_only)
         elif "items" in data:
-            return data["items"]  # type: ignore[no-any-return]
+            return data["items"]
         else:
             return self._parse_raw_response_domains(data)  # type: ignore[return-value]
 
