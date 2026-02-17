@@ -516,7 +516,7 @@ ALLOWED_CAMPAIGN_FILTER_FIELDS = frozenset(
 )
 
 
-def _apply_safe_customer_filter(queryset, custom_filter: dict[str, Any]):
+def _apply_safe_customer_filter(queryset: object, custom_filter: dict[str, Any]) -> Any:
     """
     Apply a custom filter to customers queryset with whitelist validation.
 
@@ -582,7 +582,7 @@ def send_scheduled_campaign(campaign_id: str) -> dict[str, Any]:
     }
 
 
-def _get_campaign_recipients(campaign) -> list[tuple[str, dict[str, Any]]]:
+def _get_campaign_recipients(campaign: object) -> list[tuple[str, dict[str, Any]]]:
     """Get recipients for a campaign based on audience filter."""
     from apps.customers.models import Customer  # noqa: PLC0415
 

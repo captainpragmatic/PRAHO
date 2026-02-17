@@ -25,6 +25,20 @@ from .profile_service import ProfileService
 
 logger = logging.getLogger(__name__)
 
+# Engagement scoring thresholds
+DAYS_YEAR = 365
+DAYS_HALF_YEAR = 180
+DAYS_QUARTER = 90
+DAYS_MONTH = 30
+ORDERS_HIGH_THRESHOLD = 10
+ORDERS_MEDIUM_THRESHOLD = 5
+ORDERS_LOW_THRESHOLD = 2
+PAYMENT_RATE_EXCELLENT = 95
+PAYMENT_RATE_GOOD = 80
+PAYMENT_RATE_FAIR = 60
+SERVICES_HIGH_THRESHOLD = 3
+SERVICES_MEDIUM_THRESHOLD = 2
+
 
 class CustomerAnalyticsService:
     """Service for customer analytics and metrics tracking."""
@@ -194,40 +208,40 @@ class CustomerAnalyticsService:
 
         # Account age factor (max 20 points)
         account_age_days = metrics.get("account_age_days", 0)
-        if account_age_days > 365:
+        if account_age_days > DAYS_YEAR:
             score += 20
-        elif account_age_days > 180:
+        elif account_age_days > DAYS_HALF_YEAR:
             score += 15
-        elif account_age_days > 90:
+        elif account_age_days > DAYS_QUARTER:
             score += 10
-        elif account_age_days > 30:
+        elif account_age_days > DAYS_MONTH:
             score += 5
 
         # Order activity factor (max 30 points)
         total_orders = metrics.get("total_orders", 0)
-        if total_orders >= 10:
+        if total_orders >= ORDERS_HIGH_THRESHOLD:
             score += 30
-        elif total_orders >= 5:
+        elif total_orders >= ORDERS_MEDIUM_THRESHOLD:
             score += 20
-        elif total_orders >= 2:
+        elif total_orders >= ORDERS_LOW_THRESHOLD:
             score += 10
         elif total_orders >= 1:
             score += 5
 
         # Payment behavior factor (max 25 points)
         payment_rate = metrics.get("payment_rate", 100)
-        if payment_rate >= 95:
+        if payment_rate >= PAYMENT_RATE_EXCELLENT:
             score += 25
-        elif payment_rate >= 80:
+        elif payment_rate >= PAYMENT_RATE_GOOD:
             score += 15
-        elif payment_rate >= 60:
+        elif payment_rate >= PAYMENT_RATE_FAIR:
             score += 5
 
         # Active services factor (max 25 points)
         active_services = metrics.get("active_services", 0)
-        if active_services >= 3:
+        if active_services >= SERVICES_HIGH_THRESHOLD:
             score += 25
-        elif active_services >= 2:
+        elif active_services >= SERVICES_MEDIUM_THRESHOLD:
             score += 15
         elif active_services >= 1:
             score += 10
@@ -317,6 +331,8 @@ class CustomerStatsService:
             Dictionary with batch update results
         """
         from apps.customers.models import Customer  # noqa: PLC0415
+
+        # Engagement scoring thresholds
 
         try:
             # Update oldest first

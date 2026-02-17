@@ -184,7 +184,7 @@ class ExternalServicePool:
     _lock = threading.Lock()
 
     # Default configuration for known services
-    SERVICE_CONFIGS = {
+    SERVICE_CONFIGS: ClassVar[dict] = {
         "virtualmin": {
             "pool_connections": 5,
             "pool_maxsize": 10,

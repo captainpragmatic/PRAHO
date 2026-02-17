@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.http import HttpRequest
 
 if TYPE_CHECKING:
     from apps.products.models import ProductPrice
@@ -32,7 +33,7 @@ class PriceData(TypedDict):
     product_slug: str
 
 
-def get_client_ip(request) -> str:
+def get_client_ip(request: HttpRequest) -> str:
     """
     🔒 SECURITY: Safely extract client IP address for token binding.
     Handles proxies and load balancers while preventing header spoofing.

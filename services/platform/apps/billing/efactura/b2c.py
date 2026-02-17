@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from .settings import efactura_settings
 
@@ -24,6 +24,9 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+CNP_CHECKSUM_SPECIAL = 10
+CNP_LENGTH = 13
 
 
 @dataclass
@@ -52,7 +55,7 @@ class CNPValidator:
     """
 
     # Gender/century codes
-    GENDER_CODES = {
+    GENDER_CODES: ClassVar[dict] = {
         "1": ("M", 1900),  # Male, 1900-1999
         "2": ("F", 1900),  # Female, 1900-1999
         "3": ("M", 1800),  # Male, 1800-1899
@@ -65,7 +68,7 @@ class CNPValidator:
     }
 
     # County codes (JJ)
-    COUNTY_CODES = {
+    COUNTY_CODES: ClassVar[dict] = {
         "01": "Alba",
         "02": "Arad",
         "03": "Argeș",
@@ -117,7 +120,7 @@ class CNPValidator:
     }
 
     # Check digit weights
-    CHECK_WEIGHTS = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9]
+    CHECK_WEIGHTS: ClassVar[list] = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9]
 
     @classmethod
     def validate(cls, cnp: str) -> CNPValidationResult:
@@ -197,13 +200,13 @@ class CNPValidator:
         """Calculate check digit for first 12 digits of CNP."""
         total = sum(int(d) * w for d, w in zip(cnp_12, cls.CHECK_WEIGHTS, strict=False))
         remainder = total % 11
-        return 1 if remainder == 10 else remainder
+        return 1 if remainder == CNP_CHECKSUM_SPECIAL else remainder
 
     @classmethod
     def format(cls, cnp: str) -> str:
         """Format CNP for display (e.g., 1 850101 12 345 6)."""
         cnp = cnp.strip().replace(" ", "")
-        if len(cnp) != 13:
+        if len(cnp) != CNP_LENGTH:
             return cnp
         return f"{cnp[0]} {cnp[1:7]} {cnp[7:9]} {cnp[9:12]} {cnp[12]}"
 

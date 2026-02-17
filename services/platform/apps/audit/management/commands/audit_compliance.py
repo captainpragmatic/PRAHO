@@ -27,6 +27,8 @@ from apps.audit.compliance import (
 )
 from apps.audit.siem import SIEMFormat, get_siem_service
 
+MAX_VIOLATIONS_DISPLAYED = 10
+
 
 class Command(BaseCommand):
     help = "Audit and compliance management operations"
@@ -204,12 +206,12 @@ class Command(BaseCommand):
         if report.violations:
             self.stdout.write("")
             self.stdout.write(self.style.WARNING("VIOLATIONS:"))
-            for v in report.violations[:10]:  # Show first 10
+            for v in report.violations[:MAX_VIOLATIONS_DISPLAYED]:  # Show first 10
                 severity_style = self._get_severity_style(v.severity)
                 self.stdout.write(f"  [{severity_style}] {v.framework} {v.control_id}: {v.description}")
 
-            if len(report.violations) > 10:
-                self.stdout.write(f"  ... and {len(report.violations) - 10} more")
+            if len(report.violations) > MAX_VIOLATIONS_DISPLAYED:
+                self.stdout.write(f"  ... and {len(report.violations) - MAX_VIOLATIONS_DISPLAYED} more")
 
     def handle_verify_integrity(self, options: dict[str, Any]) -> None:
         """Verify audit log integrity"""

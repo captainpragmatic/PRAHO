@@ -240,7 +240,7 @@ class OrderService:
     """Main service for order management operations"""
 
     @staticmethod
-    def build_billing_address_from_customer(customer) -> BillingAddressData:
+    def build_billing_address_from_customer(customer: Customer) -> BillingAddressData:
         """
         Build billing address data from customer profile (database lookup).
         This ensures we always use the most current customer data.

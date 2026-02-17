@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from django.db import transaction
 from django.utils import timezone
@@ -82,7 +82,7 @@ class NodeDeploymentService:
     """
 
     # Deployment stages with progress percentages
-    STAGES = {
+    STAGES: ClassVar[dict] = {
         "init": (0, "Initializing deployment"),
         "ssh_key": (5, "Generating SSH key"),
         "terraform_init": (10, "Initializing Terraform"),

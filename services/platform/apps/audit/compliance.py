@@ -30,6 +30,10 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+COMPLIANT_SCORE_THRESHOLD = 90
+PARTIAL_SCORE_THRESHOLD = 70
+
 User = get_user_model()
 
 
@@ -763,9 +767,9 @@ class ComplianceReportService:
         report.compliance_score = max(0, 100 - total_penalty)
 
         # Determine overall status
-        if report.compliance_score >= 90:
+        if report.compliance_score >= COMPLIANT_SCORE_THRESHOLD:
             report.overall_status = "compliant"
-        elif report.compliance_score >= 70:
+        elif report.compliance_score >= PARTIAL_SCORE_THRESHOLD:
             report.overall_status = "partial"
         else:
             report.overall_status = "non_compliant"

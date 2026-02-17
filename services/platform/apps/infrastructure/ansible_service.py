@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
@@ -55,7 +55,7 @@ class AnsibleService:
     """
 
     # Panel-aware playbook execution order
-    PANEL_PLAYBOOKS: dict[str, list[str]] = {
+    PANEL_PLAYBOOKS: ClassVar[dict[str, list[str]]] = {
         "virtualmin": [
             "common_base.yml",
             "virtualmin.yml",

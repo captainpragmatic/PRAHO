@@ -347,7 +347,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_infrastructure_view
-def deployment_detail(request: HttpRequest, pk) -> HttpResponse:
+def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """Deployment detail view with logs and actions."""
 
     deployment = get_object_or_404(
@@ -411,7 +411,7 @@ def deployment_detail(request: HttpRequest, pk) -> HttpResponse:
 
 @login_required
 @require_infrastructure_view
-def deployment_logs(request: HttpRequest, pk) -> HttpResponse:
+def deployment_logs(request: HttpRequest, pk: int) -> HttpResponse:
     """Full deployment logs view."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -438,7 +438,7 @@ def deployment_logs(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deploy_permission
 @require_POST
-def deployment_retry(request: HttpRequest, pk) -> HttpResponse:
+def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
     """Retry a failed deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -473,7 +473,7 @@ def deployment_retry(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_destroy_permission
 @require_http_methods(["GET", "POST"])
-def deployment_destroy(request: HttpRequest, pk) -> HttpResponse:
+def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
     """Destroy a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -539,7 +539,7 @@ def deployment_destroy(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_http_methods(["GET", "POST"])
-def deployment_upgrade(request: HttpRequest, pk) -> HttpResponse:
+def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
     """Upgrade a deployment to a new size."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -619,7 +619,7 @@ def deployment_upgrade(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
-def deployment_stop(request: HttpRequest, pk) -> HttpResponse:
+def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
     """Stop (power off) a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -651,7 +651,7 @@ def deployment_stop(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
-def deployment_start(request: HttpRequest, pk) -> HttpResponse:
+def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
     """Start (power on) a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -683,7 +683,7 @@ def deployment_start(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
-def deployment_reboot(request: HttpRequest, pk) -> HttpResponse:
+def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
     """Reboot a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -715,7 +715,7 @@ def deployment_reboot(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_http_methods(["GET", "POST"])
-def deployment_maintenance(request: HttpRequest, pk) -> HttpResponse:
+def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
     """Run maintenance tasks on a deployment."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -789,7 +789,7 @@ def deployment_maintenance(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_infrastructure_view
 @require_GET
-def deployment_status_partial(request: HttpRequest, pk) -> HttpResponse:
+def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
     """HTMX partial for deployment status updates."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -830,7 +830,7 @@ def deployment_status_partial(request: HttpRequest, pk) -> HttpResponse:
 @login_required
 @require_infrastructure_view
 @require_GET
-def deployment_logs_partial(request: HttpRequest, pk) -> HttpResponse:
+def deployment_logs_partial(request: HttpRequest, pk: int) -> HttpResponse:
     """HTMX partial for deployment logs."""
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
@@ -965,7 +965,7 @@ def provider_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_provider_management
-def provider_edit(request: HttpRequest, pk) -> HttpResponse:
+def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit cloud provider."""
 
     provider = get_object_or_404(CloudProvider, id=pk)
@@ -1069,7 +1069,7 @@ def size_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_size_management
-def size_edit(request: HttpRequest, pk) -> HttpResponse:
+def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit node size."""
 
     size = get_object_or_404(NodeSize, id=pk)
@@ -1140,7 +1140,7 @@ def region_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_region_management
 @require_POST
-def region_toggle(request: HttpRequest, pk) -> HttpResponse:
+def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     """Toggle region active status."""
 
     region = get_object_or_404(NodeRegion, id=pk)

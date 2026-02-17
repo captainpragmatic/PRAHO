@@ -16,6 +16,10 @@ from apps.common.validators import log_security_event
 
 logger = logging.getLogger(__name__)
 
+COUNTRY_CODE_LENGTH = 2
+MIN_VAT_NUMBER_LENGTH = 4
+MAX_VAT_NUMBER_LENGTH = 15
+
 
 class VATScenario(Enum):
     """VAT calculation scenarios for audit logging"""
@@ -255,7 +259,7 @@ class OrderVATCalculator:
                 return VATScenario.EU_B2C, vat_rate, is_business, vat_number
 
         # Unknown/Invalid country codes - DEFAULT TO ROMANIAN VAT for compliance
-        elif not country_code or len(country_code) != 2:
+        elif not country_code or len(country_code) != COUNTRY_CODE_LENGTH:
             # Apply Romanian VAT when country is unclear
             vat_rate = cls._get_vat_rate("RO")
             return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
@@ -360,7 +364,7 @@ class OrderVATCalculator:
             return bool(re.match(pattern, vat_clean))
 
         # For countries without specific patterns, basic length check
-        return len(vat_clean) >= 4 and len(vat_clean) <= 15
+        return len(vat_clean) >= MIN_VAT_NUMBER_LENGTH and len(vat_clean) <= MAX_VAT_NUMBER_LENGTH
 
     @classmethod
     def get_vat_rates_for_country(cls, country_code: str) -> dict[str, any]:

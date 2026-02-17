@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+CRITICAL_DEADLINE_HOURS = 12
+
 
 class EFacturaAuditService:
     """
@@ -385,7 +387,7 @@ class EFacturaAuditService:
             AuditService.log_compliance_event(compliance_request)
 
             # Create or update alert
-            severity = "critical" if hours_remaining < 12 else "high"
+            severity = "critical" if hours_remaining < CRITICAL_DEADLINE_HOURS else "high"
             AuditAlert.objects.update_or_create(
                 alert_type="compliance_violation",
                 title=f"e-Factura Deadline: {invoice.number}",

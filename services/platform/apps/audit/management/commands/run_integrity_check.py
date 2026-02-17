@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
@@ -35,7 +35,7 @@ class Command(BaseCommand):
     help = "Run audit data integrity checks and file integrity monitoring"
 
     # Check types supported
-    CHECK_TYPES = [
+    CHECK_TYPES: ClassVar[list] = [
         "hash_verification",
         "sequence_check",
         "gdpr_compliance",
@@ -43,7 +43,7 @@ class Command(BaseCommand):
     ]
 
     # Period shortcuts
-    PERIOD_MAP = {
+    PERIOD_MAP: ClassVar[dict] = {
         "1h": timedelta(hours=1),
         "6h": timedelta(hours=6),
         "12h": timedelta(hours=12),

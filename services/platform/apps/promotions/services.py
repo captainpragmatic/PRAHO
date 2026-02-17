@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 MAX_CODE_GENERATION_ATTEMPTS = 100  # Prevent infinite loops in code generation (structural safety limit)
 
+COUPON_EXPIRY_WARNING_DAYS = 3
+
 
 # ===============================================================================
 # Data Classes for Results
@@ -296,7 +298,7 @@ class CouponService:
         warnings = []
         if coupon.valid_until:
             days_left = (coupon.valid_until - timezone.now()).days
-            if days_left <= 3:
+            if days_left <= COUPON_EXPIRY_WARNING_DAYS:
                 warnings.append(f"Coupon expires in {days_left} day(s)")
 
         return ValidationResult(is_valid=True, warnings=warnings or None)

@@ -89,7 +89,7 @@ class APISecurityLinter:
         """Check for violations using AST analysis"""
 
         class APIVisitor(ast.NodeVisitor):
-            def __init__(self, linter, file_path, lines) -> None:
+            def __init__(self, linter: object, file_path: str, lines: list[str]) -> None:
                 self.linter = linter
                 self.file_path = file_path
                 self.lines = lines
@@ -97,7 +97,7 @@ class APISecurityLinter:
                 self.current_function = None
                 self.http_methods = set()
 
-            def visit_FunctionDef(self, node) -> None:
+            def visit_FunctionDef(self, node: object) -> None:
                 self.current_function = node.name
 
                 # Check for @api_view decorators
@@ -123,7 +123,7 @@ class APISecurityLinter:
                 self.in_api_view = False
                 self.http_methods = set()
 
-            def _check_function_violations(self, node) -> None:
+            def _check_function_violations(self, node: object) -> None:
                 """Check specific function for security violations"""
 
                 function_source = ast.get_source_segment(content, node)

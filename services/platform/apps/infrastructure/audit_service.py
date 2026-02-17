@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from apps.audit.services import AuditService
 from apps.common.request_ip import get_safe_client_ip
@@ -39,7 +39,7 @@ class InfrastructureAuditContext:
     user_agent: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Extract IP and user agent from request if available"""
         if self.request and not self.ip_address:
             self.ip_address = get_safe_client_ip(self.request)
@@ -61,7 +61,7 @@ class InfrastructureAuditService:
     CATEGORY = "system_admin"
 
     # Severity mapping for different event types
-    SEVERITY_MAP = {
+    SEVERITY_MAP: ClassVar[dict] = {
         "node_deployment_created": "medium",
         "node_deployment_started": "low",
         "node_deployment_completed": "medium",

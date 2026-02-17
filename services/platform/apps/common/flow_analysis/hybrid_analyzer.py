@@ -34,6 +34,8 @@ from apps.common.flow_analysis.data_flow import DataFlowAnalyzer
 
 logger = logging.getLogger(__name__)
 
+PROXIMITY_LINE_THRESHOLD = 5
+
 
 @dataclass
 class AnalysisPass:
@@ -356,7 +358,7 @@ class HybridFlowAnalyzer:
             # Look for nearby tainted data usage
             for data_issue in data_issues:
                 line_diff = abs(data_issue.location.line_number - exc_issue.location.line_number)
-                if line_diff <= 5:  # Within 5 lines
+                if line_diff <= PROXIMITY_LINE_THRESHOLD:  # Within 5 lines
                     cross_ref_issues.append(
                         FlowIssue(
                             category=IssueCategory.TAINTED_DATA,

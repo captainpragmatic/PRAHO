@@ -25,7 +25,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductPrice
-        fields = [
+        fields = [  # noqa: RUF012
             "id",
             "monthly_price",
             "semiannual_price",
@@ -81,7 +81,7 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = [
+        fields = [  # noqa: RUF012
             "id",
             "slug",
             "name",
@@ -103,7 +103,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = [
+        fields = [  # noqa: RUF012
             "id",
             "slug",
             "name",
@@ -134,7 +134,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = [
+        fields = [  # noqa: RUF012
             "id",
             "product_name",
             "product_type",
@@ -162,7 +162,7 @@ class OrderListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = [
+        fields = [  # noqa: RUF012
             "id",
             "order_number",
             "status",
@@ -189,7 +189,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = [
+        fields = [  # noqa: RUF012
             "id",
             "order_number",
             "status",

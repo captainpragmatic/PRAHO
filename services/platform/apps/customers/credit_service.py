@@ -41,6 +41,12 @@ _DEFAULT_CREDIT_ADJUSTMENTS = {
 BASE_CREDIT_SCORE = _DEFAULT_BASE_CREDIT_SCORE
 CREDIT_ADJUSTMENTS = _DEFAULT_CREDIT_ADJUSTMENTS
 
+CONSECUTIVE_PAYMENTS_TIER_2 = 12
+CONSECUTIVE_PAYMENTS_TIER_1 = 6
+MAX_CREDIT_HISTORY_EVENTS = 100
+GOOD_CREDIT_THRESHOLD = 700
+FAIR_CREDIT_THRESHOLD = 600
+
 
 class CustomerCreditService:
     """
@@ -78,9 +84,9 @@ class CustomerCreditService:
                 consecutive_on_time = CustomerCreditService._get_consecutive_on_time_payments(customer)
                 consecutive_bonus_6 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_6", 10)
                 consecutive_bonus_12 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_12", 20)
-                if consecutive_on_time >= 12:
+                if consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_2:
                     adjustment += consecutive_bonus_12  # Larger bonus for 12+ consecutive
-                elif consecutive_on_time >= 6:
+                elif consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_1:
                     adjustment += consecutive_bonus_6  # Bonus for 6+ consecutive on-time payments
 
             # Calculate new score (clamped to valid range)
@@ -99,8 +105,8 @@ class CustomerCreditService:
             credit_history.append(credit_event)
 
             # Keep only last 100 events
-            if len(credit_history) > 100:
-                credit_history = credit_history[-100:]
+            if len(credit_history) > MAX_CREDIT_HISTORY_EVENTS:
+                credit_history = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]
 
             if hasattr(customer, "meta"):
                 customer.meta["credit_history"] = credit_history
@@ -179,7 +185,7 @@ class CustomerCreditService:
                     "recorded_at": timezone.now().isoformat(),
                 }
                 credit_history.append(reversion_event)
-                customer.meta["credit_history"] = credit_history[-100:]  # Keep last 100
+                customer.meta["credit_history"] = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]  # Keep last 100
                 customer.meta["credit_score"] = new_score
                 customer.meta["credit_updated_at"] = timezone.now().isoformat()
                 customer.save(update_fields=["meta", "updated_at"])
@@ -294,9 +300,9 @@ class CustomerCreditService:
         """Get a human-readable credit rating from score."""
         if score >= EXCELLENT_CREDIT_THRESHOLD:
             return "Excellent"
-        elif score >= 700:
+        elif score >= GOOD_CREDIT_THRESHOLD:
             return "Good"
-        elif score >= 600:
+        elif score >= FAIR_CREDIT_THRESHOLD:
             return "Fair"
         elif score >= POOR_CREDIT_THRESHOLD:
             return "Poor"

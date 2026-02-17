@@ -16,7 +16,7 @@ import socket
 import threading
 import traceback
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from django.conf import settings
 
@@ -104,7 +104,7 @@ class SIEMJSONFormatter(logging.Formatter):
     """
 
     # Mapping from Python log levels to severity numbers
-    SEVERITY_MAP = {
+    SEVERITY_MAP: ClassVar[dict] = {
         "DEBUG": 7,
         "INFO": 6,
         "WARNING": 4,
@@ -419,7 +419,7 @@ class ComplianceLogFormatter(logging.Formatter):
     - SOC 2
     """
 
-    COMPLIANCE_FRAMEWORKS = {
+    COMPLIANCE_FRAMEWORKS: ClassVar[dict] = {
         "authentication": ["ISO27001-A.9.4", "SOC2-CC6.1", "GDPR-Art32"],
         "authorization": ["ISO27001-A.9.2", "SOC2-CC6.2"],
         "data_modification": ["GDPR-Art30", "ISO27001-A.12.4"],

@@ -703,7 +703,7 @@ def create_order(request: Request, customer: Customer) -> Response:  # noqa: C90
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def order_list(request: Request, customer) -> Response:
+def order_list(request: Request, customer: Customer) -> Response:
     """
     List orders for authenticated customer.
     """
@@ -736,7 +736,7 @@ def order_list(request: Request, customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def order_detail(request: Request, customer, order_id: str) -> Response:
+def order_detail(request: Request, customer: Customer, order_id: str) -> Response:
     """
     Get order details for authenticated customer.
     """
@@ -832,7 +832,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def confirm_order(request: Request, customer, order_id: str) -> Response:
+def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:
     """
     Confirm order after successful payment and trigger service provisioning.
     """

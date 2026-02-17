@@ -7,6 +7,7 @@ to ensure DRY compliance and easy maintenance.
 
 import logging
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from django.conf import settings
 
@@ -269,7 +270,7 @@ def is_eu_country(country_code: str | None) -> bool:
     return country_code.upper() in EU_COUNTRY_CODES
 
 
-def get_payment_due_date(issue_date=None):
+def get_payment_due_date(issue_date: object = None) -> Any:
     """
     Calculate payment due date based on issue date and configured terms.
 

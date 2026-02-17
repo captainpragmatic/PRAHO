@@ -45,6 +45,8 @@ PBKDF2_ITERATIONS = 310_000  # OWASP 2023 recommendation for PBKDF2-HMAC-SHA256
 VERSION_AES256_GCM = b"\x01"  # Current version: AES-256-GCM
 VERSION_FERNET_LEGACY = b"\x00"  # Legacy Fernet-encrypted data
 
+FERNET_VERSION_BYTE = 0x80
+
 
 class AES256EncryptionError(Exception):
     """Base exception for AES-256 encryption operations"""
@@ -245,7 +247,7 @@ class AES256Cipher:
     def _is_fernet_token(self, data: bytes) -> bool:
         """Check if data looks like a Fernet token."""
         # Fernet tokens start with version byte 0x80
-        return len(data) > 0 and data[0] == 0x80
+        return len(data) > 0 and data[0] == FERNET_VERSION_BYTE
 
     def _decrypt_fernet_legacy(self, ciphertext: str) -> str:
         """Decrypt legacy Fernet-encrypted data."""

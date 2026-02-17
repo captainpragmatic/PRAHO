@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from functools import wraps
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
@@ -178,7 +178,7 @@ def require_infrastructure_view(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_view_infrastructure(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to view infrastructure")
             raise PermissionDenied("You do not have permission to view infrastructure.")
@@ -198,7 +198,7 @@ def require_deployment_management(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_manage_deployments(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage deployment")
             raise PermissionDenied("You do not have permission to manage deployments.")
@@ -218,7 +218,7 @@ def require_deploy_permission(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_deploy_nodes(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to deploy node")
             raise PermissionDenied("You do not have permission to deploy nodes.")
@@ -238,7 +238,7 @@ def require_destroy_permission(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_destroy_nodes(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to destroy node")
             raise PermissionDenied("You do not have permission to destroy nodes.")
@@ -258,7 +258,7 @@ def require_provider_management(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_manage_providers(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage providers")
             raise PermissionDenied("You do not have permission to manage providers.")
@@ -278,7 +278,7 @@ def require_size_management(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_manage_sizes(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage sizes")
             raise PermissionDenied("You do not have permission to manage sizes.")
@@ -298,7 +298,7 @@ def require_region_management(view_func: Callable) -> Callable:
     """
 
     @wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not can_manage_regions(request.user):
             logger.warning(f"[Permissions] Access denied: {request.user.email} tried to manage regions")
             raise PermissionDenied("You do not have permission to manage regions.")
@@ -315,7 +315,7 @@ def require_region_management(view_func: Callable) -> Callable:
 class InfrastructureViewMixin:
     """Mixin requiring infrastructure view permission"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if not can_view_infrastructure(request.user):
             raise PermissionDenied("You do not have permission to view infrastructure.")
         return super().dispatch(request, *args, **kwargs)
@@ -324,7 +324,7 @@ class InfrastructureViewMixin:
 class DeploymentManagementMixin:
     """Mixin requiring deployment management permission"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if not can_manage_deployments(request.user):
             raise PermissionDenied("You do not have permission to manage deployments.")
         return super().dispatch(request, *args, **kwargs)
@@ -333,7 +333,7 @@ class DeploymentManagementMixin:
 class DeployNodeMixin:
     """Mixin requiring node deployment permission"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if not can_deploy_nodes(request.user):
             raise PermissionDenied("You do not have permission to deploy nodes.")
         return super().dispatch(request, *args, **kwargs)
@@ -342,7 +342,7 @@ class DeployNodeMixin:
 class DestroyNodeMixin:
     """Mixin requiring node destruction permission"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if not can_destroy_nodes(request.user):
             raise PermissionDenied("You do not have permission to destroy nodes.")
         return super().dispatch(request, *args, **kwargs)

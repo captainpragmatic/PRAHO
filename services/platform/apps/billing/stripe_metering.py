@@ -58,7 +58,7 @@ class Result:
         return self._error
 
 
-def get_stripe():
+def get_stripe() -> Any:
     """Get configured Stripe module"""
     try:
         import stripe  # noqa: PLC0415

@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Callable
+from http import HTTPStatus
 from typing import Any
 
 from django.conf import settings
@@ -335,7 +336,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
         return True, f"Skipped SetupIntent event: {event_type}"
 
-    def _notify_portal_payment_success(self, payment, payment_intent: dict[str, Any]) -> None:
+    def _notify_portal_payment_success(self, payment: object, payment_intent: dict[str, Any]) -> None:
         """
         🔔 Notify Portal service of payment success
 
@@ -398,7 +399,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 headers={"Content-Type": "application/json", "User-Agent": "PRAHO-Platform/1.0"},
             )
 
-            if response.status_code == 200:
+            if response.status_code == HTTPStatus.OK:
                 logger.info(f"✅ Successfully notified Portal: {response.status_code}")
             else:
                 logger.warning(f"⚠️ Portal notification failed: {response.status_code} - {response.text}")

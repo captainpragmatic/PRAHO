@@ -17,7 +17,7 @@ from .provisioning_service import ProvisioningService
 logger = logging.getLogger(__name__)
 
 
-def provision_service_task(service_id: int, **kwargs) -> dict[str, Any]:
+def provision_service_task(service_id: int, **kwargs: Any) -> dict[str, Any]:
     """
     Background task to provision a service.
     This runs asynchronously in Django-Q2 queue.
@@ -86,7 +86,7 @@ def queue_service_provisioning(service: Service, delay_seconds: int = 0) -> str:
     return task_id
 
 
-def provisioning_complete_hook(task) -> None:
+def provisioning_complete_hook(task: object) -> None:
     """
     Hook called when provisioning task completes (success or failure).
     """

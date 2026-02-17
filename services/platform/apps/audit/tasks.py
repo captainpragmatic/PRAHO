@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 FILE_HASH_CACHE_PREFIX = "file_integrity_hash:"
 FILE_HASH_CACHE_TIMEOUT = 86400 * 30  # 30 days
 
+MAX_FILES_DISPLAYED = 5
+
 
 def run_integrity_check(
     check_type: str = "all",
@@ -287,8 +289,12 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
             title=f"File Integrity: {len(changed_files)} Critical Files Modified",
             description=(
                 f"File integrity monitoring detected changes to critical "
-                f"application files: {', '.join(changed_files[:5])}"
-                + (f" and {len(changed_files) - 5} more" if len(changed_files) > 5 else "")
+                f"application files: {', '.join(changed_files[:MAX_FILES_DISPLAYED])}"
+                + (
+                    f" and {len(changed_files) - MAX_FILES_DISPLAYED} more"
+                    if len(changed_files) > MAX_FILES_DISPLAYED
+                    else ""
+                )
             ),
             evidence={
                 "changes": results["changes_detected"],

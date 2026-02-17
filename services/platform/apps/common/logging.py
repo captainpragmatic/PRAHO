@@ -39,7 +39,7 @@ from collections import defaultdict
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.db import connection, reset_queries
@@ -48,6 +48,11 @@ from django.db import connection, reset_queries
 _request_context = threading.local()
 
 logger = logging.getLogger(__name__)
+
+SQL_DISPLAY_LIMIT = 200
+MAX_SUMMARIZED_ARGS = 3
+VALUE_SUMMARY_LIMIT = 50
+
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -135,14 +140,14 @@ class SecurityEventFilter(logging.Filter):
     or come from security-related loggers.
     """
 
-    SECURITY_LOGGERS = [
+    SECURITY_LOGGERS: ClassVar[list] = [
         "apps.users",
         "apps.audit",
         "django.security",
         "apps.common.middleware",
     ]
 
-    SECURITY_KEYWORDS = [
+    SECURITY_KEYWORDS: ClassVar[list] = [
         "login",
         "logout",
         "auth",
@@ -180,7 +185,7 @@ class SensitiveDataFilter(logging.Filter):
     and credit card numbers from appearing in logs.
     """
 
-    SENSITIVE_PATTERNS = [
+    SENSITIVE_PATTERNS: ClassVar[list] = [
         "password",
         "secret",
         "token",
@@ -442,7 +447,7 @@ class QueryTracer:
             "unique_queries": len(self._query_hashes),
             "queries": [
                 {
-                    "sql": q.sql[:200] + "..." if len(q.sql) > 200 else q.sql,
+                    "sql": q.sql[:SQL_DISPLAY_LIMIT] + "..." if len(q.sql) > SQL_DISPLAY_LIMIT else q.sql,
                     "time_ms": q.time_ms,
                     "is_duplicate": q.is_duplicate,
                     "stack": q.stack_trace[:3] if q.stack_trace else [],
@@ -518,8 +523,8 @@ class MethodTracer:
         traces = MethodTracer.get_all_traces()
     """
 
-    _traces: list[MethodTrace] = []
-    _trace_stack: list[MethodTrace] = []
+    _traces: ClassVar[list[MethodTrace]] = []
+    _trace_stack: ClassVar[list[MethodTrace]] = []
     _lock = threading.Lock()
     _enabled = True
 
@@ -626,11 +631,11 @@ class MethodTracer:
     def _summarize_args(cls, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
         """Create a summary of function arguments."""
         parts = []
-        for i, arg in enumerate(args[:3]):  # Limit to first 3 args
+        for i, arg in enumerate(args[:MAX_SUMMARIZED_ARGS]):  # Limit to first 3 args
             parts.append(f"arg{i}={cls._summarize_value(arg)}")
-        for key, value in list(kwargs.items())[:3]:  # Limit to first 3 kwargs
+        for key, value in list(kwargs.items())[:MAX_SUMMARIZED_ARGS]:  # Limit to first 3 kwargs
             parts.append(f"{key}={cls._summarize_value(value)}")
-        if len(args) > 3 or len(kwargs) > 3:
+        if len(args) > MAX_SUMMARIZED_ARGS or len(kwargs) > MAX_SUMMARIZED_ARGS:
             parts.append("...")
         return ", ".join(parts)
 
@@ -640,7 +645,7 @@ class MethodTracer:
         if value is None:
             return "None"
         if isinstance(value, str):
-            return f'"{value[:50]}..."' if len(value) > 50 else f'"{value}"'
+            return f'"{value[:VALUE_SUMMARY_LIMIT]}..."' if len(value) > VALUE_SUMMARY_LIMIT else f'"{value}"'
         if isinstance(value, (list, tuple)):
             return f"{type(value).__name__}[{len(value)}]"
         if isinstance(value, dict):

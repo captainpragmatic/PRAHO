@@ -15,7 +15,7 @@ import logging
 import socket
 import ssl
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import paramiko
 
@@ -63,7 +63,7 @@ class NodeValidationService:
     """
 
     # Required ports for a Virtualmin hosting server
-    REQUIRED_PORTS = [
+    REQUIRED_PORTS: ClassVar[list] = [
         (22, "SSH"),
         (80, "HTTP"),
         (443, "HTTPS"),
@@ -71,7 +71,7 @@ class NodeValidationService:
     ]
 
     # Optional ports (warn if not open)
-    OPTIONAL_PORTS = [
+    OPTIONAL_PORTS: ClassVar[list] = [
         (25, "SMTP"),
         (993, "IMAPS"),
         (995, "POP3S"),

@@ -25,6 +25,10 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+WARNING_USAGE_PERCENT = 80.0
+DECEMBER = 12
+
+
 T = TypeVar("T")
 
 
@@ -74,7 +78,7 @@ class CustomerQuota:
     @property
     def is_warning(self) -> bool:
         """Check if quota is approaching limit (80%)."""
-        return self.usage_percentage >= 80.0
+        return self.usage_percentage >= WARNING_USAGE_PERCENT
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -351,13 +355,13 @@ class QuotaEnforcer:
         # API requests reset monthly
         if quota_type == QuotaType.API_REQUESTS:
             # First day of next month
-            if now.month == 12:
+            if now.month == DECEMBER:
                 return now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0)
             return now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0)
 
         # Bandwidth resets monthly
         if quota_type == QuotaType.BANDWIDTH_MB:
-            if now.month == 12:
+            if now.month == DECEMBER:
                 return now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0)
             return now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0)
 

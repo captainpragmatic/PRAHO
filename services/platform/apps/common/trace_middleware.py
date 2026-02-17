@@ -45,6 +45,8 @@ from apps.common.logging import (
 
 logger = logging.getLogger(__name__)
 
+MAX_HEADER_JSON_LENGTH = 1000
+
 
 class TraceMiddleware:
     """
@@ -173,7 +175,7 @@ class TraceMiddleware:
         # Add summary as JSON
         try:
             summary_json = json.dumps(trace_data, default=str)
-            if len(summary_json) < 1000:  # Only if not too large
+            if len(summary_json) < MAX_HEADER_JSON_LENGTH:  # Only if not too large
                 response[f"{prefix}-Summary"] = summary_json
         except (TypeError, ValueError):
             pass
@@ -302,7 +304,7 @@ def trace_view(
     max_queries: int = 50,
     warn_on_n_plus_one: bool = True,
     log_performance: bool = True,
-):
+) -> Callable[..., Any]:
     """
     Decorator to trace a specific view function.
 
@@ -313,9 +315,9 @@ def trace_view(
     """
     from functools import wraps  # noqa: PLC0415
 
-    def decorator(view_func):
+    def decorator(view_func: Callable[..., Any]) -> Any:
         @wraps(view_func)
-        def wrapped(request, *args, **kwargs):
+        def wrapped(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
             budget = QueryBudget(
                 max_queries=max_queries,
                 warn_on_exceed=warn_on_n_plus_one,

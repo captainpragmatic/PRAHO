@@ -15,7 +15,7 @@ import functools
 import hashlib
 import logging
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.core.cache import cache, caches
@@ -311,7 +311,7 @@ class CacheInvalidationMixin:
     """
 
     # Override in subclass to specify related models that should be invalidated
-    cache_dependencies: list[str] = []
+    cache_dependencies: ClassVar[list[str]] = []
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         super().save(*args, **kwargs)  # type: ignore[misc]

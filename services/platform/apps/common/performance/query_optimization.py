@@ -13,13 +13,16 @@ from __future__ import annotations
 import functools
 import logging
 import time
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.db import connection, models, reset_queries
 from django.db.models import Count, Prefetch, QuerySet
 
 logger = logging.getLogger(__name__)
+
+QUERY_WARNING_THRESHOLD = 10
+
 
 T = TypeVar("T", bound=models.Model)
 
@@ -39,8 +42,8 @@ class OptimizedQuerySetMixin:
     """
 
     # Override in subclass to define default relations to select/prefetch
-    select_related_fields: list[str] = []
-    prefetch_related_fields: list[str] = []
+    select_related_fields: ClassVar[list[str]] = []
+    prefetch_related_fields: ClassVar[list[str]] = []
 
     def optimized(self, select: list[str] | None = None, prefetch: list[str] | None = None) -> QuerySet[Any]:
         """Apply optimizations to the queryset."""
@@ -256,7 +259,7 @@ class QueryProfiler:
         if settings.DEBUG:
             self.query_count = len(connection.queries) - self._start_queries
 
-            if self.log_queries or self.query_count > 10:
+            if self.log_queries or self.query_count > QUERY_WARNING_THRESHOLD:
                 logger.warning(
                     f"⚠️ Query profiler [{self.name}]: " f"{self.query_count} queries in {self.total_time:.2f}ms"
                 )

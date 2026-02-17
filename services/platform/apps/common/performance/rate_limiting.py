@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
@@ -37,7 +37,7 @@ class CustomerRateThrottle(SimpleRateThrottle):
     cache_format = "throttle_customer_%(scope)s_%(ident)s"
 
     # Default rates by customer tier
-    TIER_RATES = {
+    TIER_RATES: ClassVar[dict] = {
         "basic": "100/minute",
         "professional": "500/minute",
         "enterprise": "2000/minute",
@@ -134,7 +134,7 @@ class ServiceRateThrottle(BaseThrottle):
     """
 
     # Tokens per operation type
-    OPERATION_COSTS = {
+    OPERATION_COSTS: ClassVar[dict] = {
         "provision": 10,
         "backup": 5,
         "sync": 2,

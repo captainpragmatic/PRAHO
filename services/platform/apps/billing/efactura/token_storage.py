@@ -142,8 +142,8 @@ class OAuthToken(models.Model):
         db_table = "billing_efactura_oauth_token"
         verbose_name = "e-Factura OAuth Token"
         verbose_name_plural = "e-Factura OAuth Tokens"
-        ordering = ["-created_at"]
-        indexes = [
+        ordering = ["-created_at"]  # noqa: RUF012
+        indexes = [  # noqa: RUF012
             models.Index(fields=["cui", "is_active"]),
             models.Index(fields=["expires_at"]),
         ]

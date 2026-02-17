@@ -37,6 +37,8 @@ from .validators import log_security_event
 
 logger = logging.getLogger(__name__)
 
+MAX_PAYMENT_RETRIES = 5
+
 
 # ===============================================================================
 # TYPE DEFINITIONS
@@ -950,7 +952,7 @@ class RecurringBillingService:
 
         for subscription in expired_grace:
             try:
-                if subscription.failed_payment_count >= 5:
+                if subscription.failed_payment_count >= MAX_PAYMENT_RETRIES:
                     # Max retries exceeded - cancel
                     subscription.cancel(
                         reason="non_payment",

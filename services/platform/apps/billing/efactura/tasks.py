@@ -56,6 +56,8 @@ except Exception:  # pragma: no cover - import guard for test/runtime isolation
 # Task timeout in seconds
 TASK_TIMEOUT = 300  # 5 minutes
 
+CRITICAL_DEADLINE_HOURS = 12
+
 
 def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
     """
@@ -303,7 +305,7 @@ def _create_deadline_alerts(approaching_documents: list) -> None:
                 alert_type="compliance_violation",
                 title=f"e-Factura Deadline: {document.invoice.number}",
                 defaults={
-                    "severity": "critical" if hours_remaining < 12 else "high",
+                    "severity": "critical" if hours_remaining < CRITICAL_DEADLINE_HOURS else "high",
                     "description": (
                         f"Invoice {document.invoice.number} must be submitted to e-Factura "
                         f"within {hours_remaining:.1f} hours (deadline: {deadline})"

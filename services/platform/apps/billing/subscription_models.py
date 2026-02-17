@@ -351,7 +351,7 @@ class Subscription(models.Model):
                 name="idx_active_billing_date",
             ),
         )
-        constraints = [
+        constraints: ClassVar[list] = [
             models.CheckConstraint(
                 condition=Q(unit_price_cents__gte=0),
                 name="subscription_price_non_negative",
