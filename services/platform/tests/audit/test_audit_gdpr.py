@@ -365,7 +365,7 @@ class GDPRSecurityTest(TestCase):
             response = self.client.get(url)
             # Should redirect to login
             self.assertEqual(response.status_code, 302)
-            self.assertIn('/users/login/', response.url)
+            self.assertIn('/auth/login/', response.url)
 
     def test_export_data_sanitization(self):
         """Test exported data doesn't contain sensitive system information"""

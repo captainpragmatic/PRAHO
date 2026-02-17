@@ -808,8 +808,8 @@ def test_proforma_form_vat_rate_dropdown_shows_21_percent(page: Page) -> None:
     print("🧪 Testing proforma form VAT rate dropdown (21% compliance)")
 
     with ComprehensivePageMonitor(page, "proforma VAT rate compliance",
-                                 check_console=False,
-                                 check_network=False,
+                                 check_console=False,  # DOM-only VAT dropdown validation, no JS behavior
+                                 check_network=False,  # DOM-only VAT dropdown validation, no API calls
                                  check_html=False,
                                  check_css=False,
                                  check_accessibility=False):

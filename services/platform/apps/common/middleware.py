@@ -707,8 +707,6 @@ class StaffOnlyPlatformMiddleware:
         public_paths = {
             "/auth/login/",
             "/auth/logout/",
-            "/users/login/",
-            "/users/logout/",
             "/admin/",  # Django admin has its own authentication
             "/api/",  # API has its own authentication via portal service
             "/i18n/",  # Language switching

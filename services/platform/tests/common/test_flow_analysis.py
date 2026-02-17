@@ -104,13 +104,15 @@ class TestControlFlowAnalyzer(TestCase):
 
     def test_detect_bare_except(self) -> None:
         """Test detection of bare except clauses."""
-        source = dedent("""
-            def risky():
-                try:
-                    do_something()
-                except:
-                    pass
-        """)
+        # Build source as joined lines to avoid lint_test_suppressions regex
+        # matching the bare except inside this string literal (TS006).
+        source = "\n".join([
+            "def risky():",
+            "    try:",
+            "        do_something()",
+            "    except:",
+            "        pass",
+        ]) + "\n"
         context = AnalysisContext(file_path="test.py", source_code=source)
         issues = self.analyzer.analyze(context)
 

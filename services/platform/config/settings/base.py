@@ -147,7 +147,7 @@ PASSWORD_HASHERS = [
 ]
 
 # Authentication URLs
-LOGIN_URL = "/users/login/"
+LOGIN_URL = "/auth/login/"
 LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"
 

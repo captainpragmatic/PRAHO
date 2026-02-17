@@ -41,7 +41,7 @@ class OrderViewsAuthenticationTestCase(TestCase):
 
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/users/login/', response.url)
+        self.assertIn('/auth/login/', response.url)
 
     def test_order_detail_requires_authentication(self):
         """Test that order detail requires authentication"""
@@ -56,7 +56,7 @@ class OrderViewsAuthenticationTestCase(TestCase):
 
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/users/login/', response.url)
+        self.assertIn('/auth/login/', response.url)
 
     # NOTE: test_staff_only_views_require_staff was removed because
     # StaffOnlyPlatformMiddleware now blocks customer users at middleware level

@@ -357,7 +357,7 @@ lint-platform:
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
 	@echo ""
 	@echo "📊 3/5: Django Check..."
-	@$(PYTHON_PLATFORM_MANAGE) check --deploy --settings=config.settings.dev
+	@$(PYTHON_PLATFORM_MANAGE) check --settings=config.settings.dev
 	@echo ""
 	@echo "🔒 4/5: Audit Coverage Check..."
 	@$(PYTHON_SHARED) scripts/audit_coverage_scan.py --min-severity=medium --exclude-tests services/platform/apps

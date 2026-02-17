@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def _build_login_url(request: HttpRequest) -> str:
     """Build login URL with optional return path."""
-    login_url = "/users/login/"
+    login_url = "/auth/login/"
     full_path_getter = getattr(request, "get_full_path", None)
     if callable(full_path_getter):
         try:

@@ -57,7 +57,6 @@ MIDDLEWARE = [
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",
     "apps.common.middleware.GDPRComplianceMiddleware",
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
 ]
 
 # ===============================================================================
