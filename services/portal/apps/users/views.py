@@ -191,7 +191,7 @@ def _get_safe_redirect_target(request: HttpRequest, fallback: str = "/dashboard/
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
-def login_view(request: HttpRequest) -> HttpResponse:
+def login_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     """
     Portal login view using Django sessions.
     Validates credentials via Platform API and creates secure sessions.
@@ -989,7 +989,7 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @require_billing_access()
 @log_access_attempt
-def company_profile_edit_view(request: HttpRequest) -> HttpResponse:
+def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912
     """
     🔒 Company profile edit view - allows editing company information.
     Updates company details via Platform API with form validation.

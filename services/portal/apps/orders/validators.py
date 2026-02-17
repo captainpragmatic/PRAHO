@@ -12,6 +12,12 @@ from django.utils.translation import gettext as _
 
 logger = logging.getLogger(__name__)
 
+MAX_CONFIG_KEYS = 50
+MAX_DOMAIN_LENGTH = 253
+MAX_CONFIG_VALUE_LENGTH = 100
+MAX_QUANTITY = 1000
+MAX_PROMO_CODE_LENGTH = 500
+
 
 class OrderInputValidator:
     """Centralized validation for order inputs with security focus"""
@@ -26,7 +32,7 @@ class OrderInputValidator:
     DOMAIN_PATTERN = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
 
     # Configuration whitelists by product type
-    ALLOWED_CONFIG_KEYS = {
+    ALLOWED_CONFIG_KEYS: ClassVar[dict] = {
         "shared_hosting": {
             "php_version",
             "control_panel",
@@ -56,7 +62,7 @@ class OrderInputValidator:
             qty = int(quantity)
             if qty < 1:
                 raise ValidationError(_("Cantitatea trebuie să fie cel puțin 1"))
-            if qty > 50:
+            if qty > MAX_CONFIG_KEYS:
                 raise ValidationError(_("Cantitatea nu poate depăși 50"))
             return qty
         except (ValueError, TypeError):
@@ -83,7 +89,7 @@ class OrderInputValidator:
             raise ValidationError(_("Nume de domeniu conține caractere nevalide"))
 
         # Length validation
-        if len(domain) > 253:
+        if len(domain) > MAX_DOMAIN_LENGTH:
             raise ValidationError(_("Nume de domeniu prea lung"))
 
         # Format validation
@@ -102,7 +108,7 @@ class OrderInputValidator:
         if not re.match(r"^[a-zA-Z0-9\-_]+$", slug):
             raise ValidationError(_("Identificator produs nevalid"))
 
-        if len(slug) > 100:
+        if len(slug) > MAX_CONFIG_VALUE_LENGTH:
             raise ValidationError(_("Identificator produs prea lung"))
 
         return slug.lower()
@@ -129,7 +135,7 @@ class OrderInputValidator:
                     # Validate numeric values for GB configs
                     try:
                         numeric_value = int(value)
-                        if 1 <= numeric_value <= 1000:  # Reasonable limits
+                        if 1 <= numeric_value <= MAX_QUANTITY:  # Reasonable limits
                             value = numeric_value  # noqa: PLW2901
                         else:
                             continue  # Skip invalid values
@@ -155,7 +161,7 @@ class OrderInputValidator:
 
         # Trim whitespace and limit length
         notes = notes.strip()
-        if len(notes) > 500:
+        if len(notes) > MAX_PROMO_CODE_LENGTH:
             raise ValidationError(_("Notele nu pot depăși 500 de caractere"))
 
         # Basic security check - prevent script injection

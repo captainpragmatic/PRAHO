@@ -8,7 +8,7 @@ import secrets
 import time
 
 from django.core.cache import cache
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.utils.translation import gettext as _
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ class OrderSecurityHardening:
     # Cache failure handling
     CACHE_FAILURE_BLOCK_TIME = 300  # 5 minutes when cache fails
     MAX_POST_FIELDS = 50
+    MAX_FIELD_VALUE_LENGTH = 10000
 
     @staticmethod
     def uniform_response_delay() -> None:
@@ -71,7 +72,7 @@ class OrderSecurityHardening:
             )
 
     @staticmethod
-    def validate_request_size(request, max_size_bytes: int = 10240) -> JsonResponse | None:
+    def validate_request_size(request: HttpRequest, max_size_bytes: int = 10240) -> JsonResponse | None:
         """
         🔒 SECURITY: Validate request body size to prevent DoS via large payloads.
 
@@ -112,7 +113,7 @@ class OrderSecurityHardening:
         return None
 
     @staticmethod
-    def check_suspicious_patterns(request) -> JsonResponse | None:
+    def check_suspicious_patterns(request: HttpRequest) -> JsonResponse | None:
         """
         🔒 SECURITY: Check for suspicious request patterns that might indicate attacks.
 
@@ -141,7 +142,9 @@ class OrderSecurityHardening:
                 if field_name == "config":
                     # Large JSON config blobs are handled by total request-size validation (413).
                     continue
-                if isinstance(field_value, str) and len(field_value) > 10000:  # 10KB per field
+                if (
+                    isinstance(field_value, str) and len(field_value) > OrderSecurityHardening.MAX_FIELD_VALUE_LENGTH
+                ):  # 10KB per field
                     logger.warning(f"🚨 [Security] Oversized field blocked: {field_name} ({len(field_value)} chars)")
 
                     OrderSecurityHardening.uniform_response_delay()

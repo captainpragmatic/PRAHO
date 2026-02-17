@@ -152,7 +152,7 @@ def require_authentication(view_func: Callable) -> Callable:
     return wrapper
 
 
-def require_customer_role(required_roles: list[str] | None = None, realtime_verification: bool = False) -> Callable:
+def require_customer_role(required_roles: list[str] | None = None, realtime_verification: bool = False) -> Callable:  # noqa: C901
     """
     🔒 Require specific customer role(s) for access
 
@@ -163,9 +163,9 @@ def require_customer_role(required_roles: list[str] | None = None, realtime_veri
     if required_roles is None:
         required_roles = ["viewer"]  # Default minimum role
 
-    def decorator(view_func: Callable) -> Callable:
+    def decorator(view_func: Callable) -> Callable:  # noqa: C901
         @wraps(view_func)
-        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:  # noqa: PLR0911
             # Check basic authentication first
             if not request.session.get("customer_id") or not request.session.get("user_id"):
                 if request.headers.get("Accept") == "application/json":

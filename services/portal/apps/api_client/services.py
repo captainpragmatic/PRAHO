@@ -26,6 +26,7 @@ import re
 import secrets
 import time
 import urllib.parse
+from http import HTTPStatus
 from typing import Any
 
 import requests
@@ -37,6 +38,9 @@ HTTP_OK = 200
 HTTP_MULTIPLE_CHOICES = 300
 
 logger = logging.getLogger(__name__)
+
+HMAC_TIMING_THRESHOLD = 0.002
+
 
 _HMAC_SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
@@ -218,7 +222,7 @@ class PlatformAPIClient:
                 return value
         return None
 
-    def _headers_allow_success_fallback(self, headers: dict[str, Any]) -> bool:
+    def _headers_allow_success_fallback(self, headers: dict[str, Any]) -> bool:  # noqa: PLR0911
         """
         Allow lenient fallback for mock Platform responses that only include
         {"success": true}, while still rejecting obviously malformed auth headers.
@@ -264,7 +268,7 @@ class PlatformAPIClient:
             response_data=error_data,
         )
 
-    def _make_request(
+    def _make_request(  # noqa: C901, PLR0912, PLR0913
         self,
         method: str,
         endpoint: str,
@@ -319,7 +323,7 @@ class PlatformAPIClient:
 
                 if (
                     not legacy_retry_attempted
-                    and response.status_code == 401
+                    and response.status_code == HTTPStatus.UNAUTHORIZED
                     and urllib.parse.urlsplit(url).scheme.lower() == "https"
                     and not self._should_use_legacy_canonical(url)
                 ):
@@ -483,7 +487,7 @@ class PlatformAPIClient:
             elapsed = time.perf_counter() - start_time
             if elapsed < min_duration:
                 remaining = min_duration - elapsed
-                if remaining > 0.002:
+                if remaining > HMAC_TIMING_THRESHOLD:
                     time.sleep(remaining - 0.001)
                 while (time.perf_counter() - start_time) < min_duration:
                     pass

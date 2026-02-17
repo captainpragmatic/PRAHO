@@ -7,6 +7,7 @@ Also handles language activation from session for i18n.
 import logging
 import random
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
@@ -60,7 +61,7 @@ class PortalAuthenticationMiddleware:
     def __init__(self, get_response: Any) -> None:
         self.get_response = get_response
 
-    def __call__(self, request: HttpRequest) -> HttpResponse:
+    def __call__(self, request: HttpRequest) -> HttpResponse:  # noqa: C901
         # Ensure CSRF cookie is available on responses (including redirects).
         get_token(request)
 
@@ -350,10 +351,10 @@ class SessionLanguageMiddleware:
     Must be placed AFTER Django's LocaleMiddleware in MIDDLEWARE setting.
     """
 
-    def __init__(self, get_response) -> None:
+    def __init__(self, get_response: Callable[..., Any]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         # Check if there's a language stored in session
         session_language = request.session.get("_language")
 

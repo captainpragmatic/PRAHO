@@ -7,8 +7,23 @@ import logging
 import math
 import os
 import re
+from typing import ClassVar
 
 logger = logging.getLogger(__name__)
+
+# Entropy thresholds for secret strength evaluation
+MIN_ENTROPY_THRESHOLD = 3.5
+GOOD_ENTROPY_THRESHOLD = 4.0
+CHARSET_RATIO_THRESHOLD = 0.6
+# Score thresholds for overall validation rating
+STRONG_SCORE_THRESHOLD = 70
+MODERATE_SCORE_THRESHOLD = 50
+WEAK_SCORE_THRESHOLD = 20
+RECOMMENDATION_SCORE_THRESHOLD = 80
+
+
+# Entropy thresholds for secret strength evaluation
+# Score thresholds for overall validation rating
 
 
 class SecretValidationResult:
@@ -35,7 +50,7 @@ class SecretValidator:
     """
 
     # Known weak/development secrets to flag immediately
-    KNOWN_WEAK_SECRETS = {
+    KNOWN_WEAK_SECRETS: ClassVar[dict] = {
         "portal-dev-key-change-in-production",
         "dev-shared-secret",
         "dev-shared-secret-change-in-production",
@@ -53,7 +68,7 @@ class SecretValidator:
     }
 
     # Common patterns that indicate weak secrets
-    WEAK_PATTERNS = [
+    WEAK_PATTERNS: ClassVar[list] = [
         r"^dev[-_]",  # Starts with "dev-" or "dev_"
         r"[-_]dev[-_]",  # Contains "-dev-" or "_dev_"
         r"test[-_]",  # Contains "test-" or "test_"
@@ -111,16 +126,16 @@ class SecretValidator:
 
         # Entropy analysis
         entropy_score = self._calculate_entropy(secret)
-        if entropy_score < 3.5:  # Very low entropy
+        if entropy_score < MIN_ENTROPY_THRESHOLD:  # Very low entropy
             issues.append(f"Secret has very low entropy ({entropy_score:.2f})")
             score -= 30
-        elif entropy_score < 4.0:  # Low entropy
+        elif entropy_score < GOOD_ENTROPY_THRESHOLD:  # Low entropy
             issues.append(f"Secret has low entropy ({entropy_score:.2f})")
             score -= 15
 
         # Character variety check
         variety_score = self._check_character_variety(secret)
-        if variety_score < 0.6:
+        if variety_score < CHARSET_RATIO_THRESHOLD:
             issues.append("Secret lacks character variety (missing uppercase, lowercase, numbers, or symbols)")
             score -= 10
 
@@ -196,13 +211,13 @@ class SecretValidator:
         """Determine if secret is valid based on environment and score"""
         if self.environment == "production":
             # Production: Strict validation
-            return score >= 70  # High bar for production
+            return score >= STRONG_SCORE_THRESHOLD  # High bar for production
         elif self.environment == "staging":
             # Staging: Medium validation (catch issues before prod)
-            return score >= 50
+            return score >= MODERATE_SCORE_THRESHOLD
         else:
             # Development: Permissive (allow weak secrets for dev ease)
-            return score >= 20  # Only block obviously broken secrets
+            return score >= WEAK_SCORE_THRESHOLD  # Only block obviously broken secrets
 
     def validate_and_warn(self, secret: str, secret_name: str, min_length: int = 32) -> bool:
         """
@@ -222,7 +237,7 @@ class SecretValidator:
         result = self.validate_secret(secret, secret_name, min_length)
 
         if result.is_valid:
-            if result.score < 80:  # Good but not great
+            if result.score < RECOMMENDATION_SCORE_THRESHOLD:  # Good but not great
                 logger.info(f"✅ [Security] {secret_name} passed validation (score: {result.score}/100)")
             else:
                 logger.debug(f"✅ [Security] {secret_name} has strong security (score: {result.score}/100)")

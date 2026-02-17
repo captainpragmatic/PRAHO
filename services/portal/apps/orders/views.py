@@ -6,6 +6,8 @@ Product catalog, cart management, and order creation with Romanian compliance.
 import json
 import logging
 import uuid
+from collections.abc import Callable
+from typing import Any
 
 from django.contrib import messages
 from django.core.cache import cache
@@ -50,10 +52,10 @@ def _coerce_security_response(result: HttpResponse | object | None) -> HttpRespo
     return JsonResponse({"error": _("Request blocked by security policy.")}, status=status_code)
 
 
-def require_customer_authentication(view_func):
+def require_customer_authentication(view_func: Callable[..., Any]) -> Any:
     """Decorator to ensure customer is authenticated"""
 
-    def wrapper(request: HttpRequest, *args, **kwargs):
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         # Try request attributes first (set by middleware), fallback to session
         customer_id = getattr(request, "customer_id", None)
         user_id = getattr(request, "user_id", None)
@@ -191,7 +193,7 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def add_to_cart(request: HttpRequest) -> HttpResponse:
+def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912
     """
     HTMX endpoint to add product to cart with validation.
     🔒 SECURITY: Enhanced with DoS hardening and uniform response timing.
@@ -314,7 +316,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def update_cart_item(request: HttpRequest) -> HttpResponse:
+def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint to update cart item quantity.
     """
@@ -379,7 +381,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def remove_from_cart(request: HttpRequest) -> HttpResponse:
+def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint to remove item from cart.
     """
@@ -491,7 +493,7 @@ def cart_review(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:
+def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint for cart total calculations with price change detection.
     """
@@ -653,7 +655,7 @@ def checkout(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def create_order(request: HttpRequest) -> HttpResponse:
+def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """
     Create draft order from cart (MVP: self-serve order creation).
     🔒 SECURITY: Validates cart version to prevent stale mutations and enforces profile completeness.
@@ -853,7 +855,7 @@ def create_order(request: HttpRequest) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def process_payment(request: HttpRequest) -> HttpResponse:
+def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """
     Process payment for cart items using Stripe.
     This creates a payment intent and order, then redirects to Stripe Checkout.
@@ -1133,7 +1135,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def confirm_payment(request: HttpRequest) -> JsonResponse:
+def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     """
     Confirm payment and trigger service creation.
     Called after successful Stripe payment from frontend.

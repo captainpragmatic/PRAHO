@@ -23,6 +23,12 @@ CNP_LENGTH = 13  # Romanian Personal Numeric Code length
 REGISTRATION_PASSWORD_MIN_LENGTH = 12
 CHANGE_PASSWORD_MIN_LENGTH = 8
 
+MIN_NAME_LENGTH = 3
+MIN_NAME_PARTS = 2
+MAX_NAME_PARTS = 10
+MAX_PHONE_PREFIX_DIGITS = 9
+MIN_PHONE_DIGITS = 6
+
 
 class CustomerLoginForm(forms.Form):
     """
@@ -958,14 +964,14 @@ class CompanyCreationForm(forms.Form):
         help_text=_("You must agree to create a company profile"),
     )
 
-    def clean_company_name(self):
+    def clean_company_name(self) -> str:
         """Validate company name"""
         company_name = self.cleaned_data.get("company_name", "").strip()
 
         if not company_name:
             raise forms.ValidationError(_("Company name is required"))
 
-        if len(company_name) < 3:
+        if len(company_name) < MIN_NAME_LENGTH:
             raise forms.ValidationError(_("Company name must be at least 3 characters long"))
 
         # Check for common Romanian business suffixes
@@ -977,7 +983,7 @@ class CompanyCreationForm(forms.Form):
 
         return company_name
 
-    def clean_vat_number(self):
+    def clean_vat_number(self) -> str:
         """Validate Romanian VAT number (CUI)"""
         vat_number = self.cleaned_data.get("vat_number", "").strip()
 
@@ -993,12 +999,12 @@ class CompanyCreationForm(forms.Form):
         if not vat_number.isdigit():
             raise forms.ValidationError(_("VAT number must contain only numbers (after RO prefix)"))
 
-        if len(vat_number) < 2 or len(vat_number) > 10:
+        if len(vat_number) < MIN_NAME_PARTS or len(vat_number) > MAX_NAME_PARTS:
             raise forms.ValidationError(_("Romanian VAT number must be between 2-10 digits"))
 
         return f"RO{vat_number}"
 
-    def clean_primary_phone(self):
+    def clean_primary_phone(self) -> str:
         """Validate Romanian phone number"""
         phone = self.cleaned_data.get("primary_phone", "").strip()
 
@@ -1021,7 +1027,7 @@ class CompanyCreationForm(forms.Form):
             phone_clean = phone_clean[1:]
 
         # Check if it's a valid Romanian mobile/landline
-        if not phone_clean.isdigit() or len(phone_clean) != 9:
+        if not phone_clean.isdigit() or len(phone_clean) != MAX_PHONE_PREFIX_DIGITS:
             raise forms.ValidationError(_("Please enter a valid Romanian phone number"))
 
         # Check if it starts with valid prefixes
@@ -1031,7 +1037,7 @@ class CompanyCreationForm(forms.Form):
 
         return f"+40{phone_clean}"
 
-    def clean_postal_code(self):
+    def clean_postal_code(self) -> str:
         """Validate Romanian postal code"""
         postal_code = self.cleaned_data.get("postal_code", "").strip()
 
@@ -1039,12 +1045,12 @@ class CompanyCreationForm(forms.Form):
             return postal_code
 
         # Romanian postal codes are 6 digits
-        if not postal_code.isdigit() or len(postal_code) != 6:
+        if not postal_code.isdigit() or len(postal_code) != MIN_PHONE_DIGITS:
             raise forms.ValidationError(_("Romanian postal code must be exactly 6 digits"))
 
         return postal_code
 
-    def clean(self):
+    def clean(self) -> str:
         """Cross-field validation"""
         cleaned_data = super().clean()
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -139,7 +140,7 @@ class HMACPriceSealer:
         return True
 
     @staticmethod
-    def verify_seal_metadata(
+    def verify_seal_metadata(  # noqa: PLR0911
         sealed_data: dict[str, Any],
         client_ip: str = "127.0.0.1",
         max_age_seconds: int = 61,
@@ -287,7 +288,7 @@ class CartRateLimiter:
             cache.set(ip_hour_key, ip_hour_count + 1, CartRateLimiter.IP_TIME_WINDOW_HOUR)
 
     @staticmethod
-    def get_client_ip(request) -> str:
+    def get_client_ip(request: HttpRequest) -> str:
         """Extract client IP address safely"""
         # Check forwarded headers
         forwarded_headers = [
@@ -317,7 +318,7 @@ class GDPRCompliantCartSession:
     SESSION_KEY = "praho_portal_cart_v1"
     CART_EXPIRY_HOURS = 24
 
-    def __init__(self, session) -> None:
+    def __init__(self, session: object) -> None:
         self.session = session
         self._load_cart()
 
@@ -811,7 +812,7 @@ class OrderCreationService:
             }
 
     @staticmethod
-    def create_draft_order(
+    def create_draft_order(  # noqa: PLR0913
         cart: GDPRCompliantCartSession,
         customer_id: str,
         user_id: str,
