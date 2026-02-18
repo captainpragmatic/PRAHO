@@ -608,12 +608,6 @@ module = ["*.views", "*.forms", "*.serializers"]
 disable_error_code = ["attr-defined", "misc", "arg-type", "union-attr", "no-any-return", "no-untyped-def", "call-arg", "return-value", "untyped-decorator", "type-arg", "assignment", "no-untyped-call", "var-annotated"]
 disallow_untyped_defs = false
 
-# API views: DRF-specific relaxations (stacks with *.views above)
-[[tool.mypy.overrides]]
-module = ["apps.api.*.views"]
-disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call", "untyped-decorator", "arg-type", "union-attr", "no-any-return", "call-arg", "return-value", "type-arg", "assignment", "var-annotated"]
-disallow_untyped_defs = false
-
 # API serializers and core: DRF typing issues
 [[tool.mypy.overrides]]
 module = ["apps.api.*.serializers", "apps.api.core.*"]
@@ -669,12 +663,12 @@ disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type
 # Billing e-Factura: XML marshaling (lxml), not core business logic
 [[tool.mypy.overrides]]
 module = "apps.billing.efactura.*"
-disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "union-attr", "assignment", "no-untyped-def", "import-untyped", "import-not-found"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "union-attr", "assignment", "no-untyped-def", "import-untyped", "import-not-found", "unreachable"]
 
 # Billing metering: task-like modules with non-standard naming
 [[tool.mypy.overrides]]
 module = ["apps.billing.metering_tasks", "apps.billing.metering_service"]
-disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "operator", "no-untyped-def"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "operator", "no-untyped-def", "unreachable"]
 
 # Infrastructure audit service
 [[tool.mypy.overrides]]
@@ -721,11 +715,6 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = "apps.*.abstract_models"
 disable_error_code = ["misc"]
-
-# Common legal views: timezone attribute access patterns
-[[tool.mypy.overrides]]
-module = "apps.common.legal_views"
-disable_error_code = ["attr-defined", "misc"]
 
 # Common file upload security: type narrowing patterns
 [[tool.mypy.overrides]]
@@ -834,8 +823,8 @@ disable_error_code = ["attr-defined", "misc", "no-any-return"]
 
 # Provisioning secure gateway and auth manager
 [[tool.mypy.overrides]]
-module = ["apps.provisioning.secure_gateway", "apps.provisioning.virtualmin_auth_manager", "apps.provisioning.virtualmin_gateway"]
-disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "assignment"]
+module = ["apps.provisioning.secure_gateway", "apps.provisioning.virtualmin_auth_manager", "apps.provisioning.virtualmin_gateway", "apps.provisioning.virtualmin_backup_service"]
+disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "assignment", "unreachable"]
 
 # Billing tax models
 [[tool.mypy.overrides]]

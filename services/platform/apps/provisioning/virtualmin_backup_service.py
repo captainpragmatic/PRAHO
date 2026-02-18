@@ -486,7 +486,7 @@ class VirtualminBackupService:
             if self._backup_bucket is None:
                 raise ValueError("S3 backup bucket name is not configured")
 
-        return self._backup_bucket  # type: ignore[unreachable]
+        return self._backup_bucket
 
     def _generate_backup_id(self, account: VirtualminAccount) -> str:
         """Generate unique backup identifier."""

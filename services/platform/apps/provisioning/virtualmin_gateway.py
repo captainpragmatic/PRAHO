@@ -491,7 +491,7 @@ class VirtualminResponseParser:
                 "message": data.get("message", ""),
             }
 
-        return {"success": False, "error": "Invalid JSON structure", "data": data}  # type: ignore[unreachable]
+        return {"success": False, "error": "Invalid JSON structure", "data": data}
 
     @staticmethod
     def _parse_xml_response(response_text: str) -> dict[str, Any]:
@@ -991,7 +991,7 @@ class VirtualminGateway:
     def _parse_domains_response(self, data: dict[str, Any], name_only: bool) -> list[dict[str, Any]]:
         """Parse domains response based on different formats"""
         if not isinstance(data, dict):
-            return []  # type: ignore[unreachable]
+            return []
 
         # Handle different response formats
         if "domains" in data:

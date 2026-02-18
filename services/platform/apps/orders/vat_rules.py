@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from django.utils import timezone
 
@@ -302,9 +302,6 @@ class OrderVATCalculator:
 
         elif scenario == VATScenario.NON_EU_ZERO_VAT:
             return f"Non-EU country ({country_code}) - export, 0% VAT"
-
-        else:
-            return "Unknown VAT scenario"  # type: ignore[unreachable]
     
     @classmethod
     def _audit_vat_calculation(cls, result: VATCalculationResult) -> None:
@@ -361,7 +358,7 @@ class OrderVATCalculator:
         return len(vat_clean) >= 4 and len(vat_clean) <= 15
     
     @classmethod
-    def get_vat_rates_for_country(cls, country_code: str) -> dict[str, any]:  # type: ignore[valid-type]
+    def get_vat_rates_for_country(cls, country_code: str) -> dict[str, Any]:
         """Get VAT information for a specific country"""
         
         country_code = country_code.upper()

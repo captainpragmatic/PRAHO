@@ -633,7 +633,7 @@ class RatingEngine:
 
         if overage_value > 0 and meter.is_billable:
             if pricing_tier:
-                charge_cents = self._calculate_tiered_charge(  # type: ignore[unreachable]
+                charge_cents = self._calculate_tiered_charge(
                     overage_value,
                     pricing_tier
                 )

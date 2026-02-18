@@ -516,8 +516,3 @@ def analyze_code(
                 total_lines=len(source.splitlines()),
                 analysis_mode=AnalysisMode.HYBRID,
             )
-
-    return AnalysisResult(  # type: ignore[unreachable]
-        errors=["Invalid source provided"],
-        analysis_mode=AnalysisMode.HYBRID,
-    )

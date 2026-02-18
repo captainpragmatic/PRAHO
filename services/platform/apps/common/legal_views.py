@@ -10,10 +10,10 @@ Cookie consent recording is now via Portal → Platform GDPR API
 """
 
 import logging
+from datetime import UTC, datetime
 
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 def privacy_policy(request: HttpRequest) -> HttpResponse:
     """GDPR-compliant Privacy Policy page."""
     context = {
-        "last_updated": timezone.datetime(2024, 12, 27, tzinfo=timezone.utc),
-        "effective_date": timezone.datetime(2024, 12, 27, tzinfo=timezone.utc),
+        "last_updated": datetime(2024, 12, 27, tzinfo=UTC),
+        "effective_date": datetime(2024, 12, 27, tzinfo=UTC),
     }
     return render(request, "legal/privacy_policy.html", context)
 
@@ -30,8 +30,8 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
 def terms_of_service(request: HttpRequest) -> HttpResponse:
     """Terms of Service page."""
     context = {
-        "last_updated": timezone.datetime(2024, 12, 27, tzinfo=timezone.utc),
-        "effective_date": timezone.datetime(2024, 12, 27, tzinfo=timezone.utc),
+        "last_updated": datetime(2024, 12, 27, tzinfo=UTC),
+        "effective_date": datetime(2024, 12, 27, tzinfo=UTC),
     }
     return render(request, "legal/terms_of_service.html", context)
 
@@ -45,7 +45,7 @@ def cookie_policy(request: HttpRequest) -> HttpResponse:
     (privacy policy, terms of service, etc.) resolve correctly.
     """
     context = {
-        "last_updated": timezone.datetime(2024, 12, 27, tzinfo=timezone.utc),
+        "last_updated": datetime(2024, 12, 27, tzinfo=UTC),
     }
     return render(request, "legal/cookie_policy.html", context)
 
@@ -53,6 +53,6 @@ def cookie_policy(request: HttpRequest) -> HttpResponse:
 def data_processors(request: HttpRequest) -> HttpResponse:
     """Third-party data processors disclosure page."""
     context = {
-        "last_updated": timezone.datetime(2024, 12, 27, tzinfo=timezone.utc),
+        "last_updated": datetime(2024, 12, 27, tzinfo=UTC),
     }
     return render(request, "legal/data_processors.html", context)

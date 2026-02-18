@@ -13,9 +13,10 @@ Orchestrates the complete node deployment pipeline:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from django.db import transaction
 from django.utils import timezone
@@ -114,7 +115,7 @@ class NodeDeploymentService:
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
-        progress_callback: callable | None = None,  # type: ignore[valid-type]
+        progress_callback: Callable[..., None] | None = None,
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.

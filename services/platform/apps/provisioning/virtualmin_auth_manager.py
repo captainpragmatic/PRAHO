@@ -186,8 +186,6 @@ class VirtualminAuthenticationManager:
             return self._execute_master_proxy(program, parameters)
         elif method == AuthMethod.SSH_SUDO:
             return self._execute_ssh_sudo(program, parameters)
-        else:
-            return create_error_result(f"Unknown authentication method: {method}")  # type: ignore[unreachable]
 
     def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
         """Execute using current ACL user authentication"""

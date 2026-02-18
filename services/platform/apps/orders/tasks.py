@@ -404,10 +404,7 @@ def _process_free_order(order: Order, order_result: dict[str, Any], results: dic
 
 def _check_service_availability() -> bool:
     """Check if Service model is available."""
-    if Service is None:
-        logger.warning("🚨 [RecurringOrders] Provisioning Service model not available, skipping recurring orders")  # type: ignore[unreachable]
-        return False
-    return True
+    return Service is not None
 
 
 def _find_services_to_renew() -> Any:

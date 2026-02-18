@@ -180,9 +180,7 @@ def _validate_financial_document_access_with_redirect(
             # Already a response (e.g., redirect), pass it through
             redirect_response = result
     except PermissionDenied:
-        if request is None or document is None:
-            redirect_response = HttpResponseRedirect(reverse("users:login"))  # type: ignore[unreachable]
-        elif not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
+        if not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
             login_url = reverse("users:login")
             full_path_getter = getattr(request, "get_full_path", None)
             if callable(full_path_getter):

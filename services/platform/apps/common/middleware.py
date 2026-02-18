@@ -737,6 +737,3 @@ class StaffOnlyPlatformMiddleware:
                 _("❌ Customers cannot access the platform. Please use the customer portal instead.")
             )
             return redirect("users:login")
-        
-        # Fallback - continue with request  
-        return self.get_response(request)  # type: ignore[unreachable]

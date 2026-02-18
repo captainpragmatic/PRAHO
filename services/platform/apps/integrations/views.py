@@ -360,9 +360,6 @@ def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
             case Err(error):
                 # result is Err type - safe to access .error
                 return _create_retry_error_response(error)
-            case _:
-                # Fallback for any unexpected cases
-                return JsonResponse({"error": "Unknown result type"}, status=500)  # type: ignore[unreachable]
 
     except Exception:
         logger.exception(f"Error retrying webhook {webhook_id}")

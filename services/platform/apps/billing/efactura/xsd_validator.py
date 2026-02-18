@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from lxml import etree
 
@@ -173,7 +173,7 @@ class XSDValidator:
         else:
             return "unknown"
 
-    def _parse_errors(self, error_log: etree._ErrorLog) -> tuple[list[XSDValidationError], list[XSDValidationError]]:  # type: ignore[valid-type]
+    def _parse_errors(self, error_log: Any) -> tuple[list[XSDValidationError], list[XSDValidationError]]:
         """Parse lxml error log into structured errors and warnings."""
         errors = []
         warnings = []
