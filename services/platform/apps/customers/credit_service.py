@@ -374,4 +374,4 @@ class CustomerCreditService:
 try:
     from django.db import models
 except ImportError:
-    models = None  # type: ignore
+    models = None  # type: ignore[assignment]

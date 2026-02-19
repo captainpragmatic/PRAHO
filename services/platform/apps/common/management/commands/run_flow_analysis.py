@@ -36,6 +36,7 @@ from apps.common.flow_analysis import (
     AnalysisMode,
     AnalysisResult,
     AnalysisSeverity,
+    FlowIssue,
     HybridFlowAnalyzer,
 )
 from apps.common.flow_analysis.hybrid_analyzer import HybridAnalysisConfig
@@ -219,7 +220,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Found {len(result.issues)} issues:\n")
 
             # Group by severity
-            issues_by_severity = {}  # type: ignore[var-annotated]
+            issues_by_severity: dict[str, list[FlowIssue]] = {}
             for issue in result.issues:
                 severity = issue.severity.value
                 if severity not in issues_by_severity:

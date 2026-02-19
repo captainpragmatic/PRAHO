@@ -436,7 +436,7 @@ def test_acl_authentication_health() -> dict[str, Any]:
     Returns summary of which servers have working ACL auth
     and which need fallback methods.
     """
-    results = {
+    results: dict[str, Any] = {
         "servers_tested": 0,
         "acl_working": 0,
         "acl_failed": 0,
@@ -448,7 +448,7 @@ def test_acl_authentication_health() -> dict[str, Any]:
     servers = VirtualminServer.objects.filter(status="active")
 
     for server in servers:
-        results["servers_tested"] += 1  # type: ignore[operator]
+        results["servers_tested"] += 1
 
         with get_virtualmin_auth_manager(server) as auth_manager:
             health_results = auth_manager.health_check_all_methods()
@@ -463,10 +463,10 @@ def test_acl_authentication_health() -> dict[str, Any]:
             }
 
             if acl_result and acl_result.success:
-                results["acl_working"] += 1  # type: ignore[operator]
+                results["acl_working"] += 1
                 server_info["status"] = "acl_healthy"
             else:
-                results["acl_failed"] += 1  # type: ignore[operator]
+                results["acl_failed"] += 1
 
                 # Check if any fallback method works
                 fallback_working = any(
@@ -474,10 +474,10 @@ def test_acl_authentication_health() -> dict[str, Any]:
                 )
 
                 if fallback_working:
-                    results["fallback_working"] += 1  # type: ignore[operator]
+                    results["fallback_working"] += 1
                     server_info["status"] = "fallback_available"
                 else:
-                    results["completely_failed"] += 1  # type: ignore[operator]
+                    results["completely_failed"] += 1
                     server_info["status"] = "all_failed"
 
             results["server_details"].append(server_info)

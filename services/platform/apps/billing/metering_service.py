@@ -542,7 +542,7 @@ class AggregationService:
 
         aggregations = query.select_related("meter")
 
-        summary = {  # type: ignore[var-annotated]
+        summary: dict[str, Any] = {
             "customer_id": customer_id,
             "period_start": period_start,
             "period_end": period_end,
@@ -552,7 +552,7 @@ class AggregationService:
 
         for agg in aggregations:
             meter_name = agg.meter.name
-            summary["meters"][meter_name] = {  # type: ignore[index]
+            summary["meters"][meter_name] = {
                 "display_name": agg.meter.display_name,
                 "total_value": float(agg.total_value),
                 "billable_value": float(agg.billable_value),

@@ -774,7 +774,7 @@ class SIEMService:
 
     def _flush_buffer(self) -> None:
         """Flush buffered logs to SIEM"""
-        batch = []  # type: ignore[var-annotated]
+        batch: list[str] = []
         while not self._buffer.empty() and len(batch) < self.config.batch_size:
             try:
                 batch.append(self._buffer.get_nowait())

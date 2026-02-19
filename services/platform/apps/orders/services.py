@@ -123,8 +123,8 @@ class OrderCalculationService:
     """
 
     @staticmethod
-    def calculate_order_totals(items: list[OrderItemData], customer: Customer = None,  # type: ignore[assignment]
-                              billing_address: dict | None = None) -> dict[str, int]:  # type: ignore[type-arg]
+    def calculate_order_totals(items: list[OrderItemData], customer: Customer | None = None,
+                              billing_address: dict[str, Any] | None = None) -> dict[str, int]:
         """
         Calculate order subtotal, VAT, and total in cents using authoritative VAT calculator.
 
@@ -346,14 +346,14 @@ class OrderService:
 
                 # Determine VAT using comprehensive VAT rules (per customer country/business)
                 try:
-                    from .vat_rules import OrderVATCalculator  # noqa: PLC0415
+                    from .vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
                     # Extract customer VAT context from billing address snapshot
                     customer_country = (data.billing_address.get("country") or "RO").upper()
-                    vat_number = data.billing_address.get("vat_number") or data.billing_address.get("vat_id") or ""
+                    vat_number = str(data.billing_address.get("vat_number") or data.billing_address.get("vat_id") or "")
                     is_business = bool(data.billing_address.get("company_name")) or bool(vat_number)
 
-                    customer_vat_info: CustomerVATInfo = {  # type: ignore[name-defined]
+                    customer_vat_info: CustomerVATInfo = {
                         'country': customer_country,
                         'is_business': is_business,
                         'vat_number': vat_number,

@@ -337,7 +337,7 @@ class GDPRConsentRule(ComplianceRule):
         period_start: datetime,
         period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
-        violations = []  # type: ignore[var-annotated]
+        violations: list[ComplianceViolation] = []
 
         # Check for consent withdrawal without proper handling
         consent_events = [
@@ -602,7 +602,7 @@ class ComplianceReportService:
         auth_events = [e for e in events if e.category == "authentication"]
 
         # Group by action type
-        action_counts = {}  # type: ignore[var-annotated]
+        action_counts: dict[str, int] = {}
         for event in auth_events:
             action_counts[event.action] = action_counts.get(event.action, 0) + 1
 
@@ -773,7 +773,7 @@ class ComplianceReportService:
     ) -> None:
         """Generate a generic report for unhandled report types"""
         # Group by category
-        category_counts = {}  # type: ignore[var-annotated]
+        category_counts: dict[str, int] = {}
         for event in events:
             category_counts[event.category] = category_counts.get(event.category, 0) + 1
 
@@ -1034,7 +1034,7 @@ class LogRetentionService:
 
         logger.info("🗄️ [Retention] Applying retention policies...")
 
-        summary = {
+        summary: dict[str, Any] = {
             "processed_categories": [],
             "archived": 0,
             "deleted": 0,
@@ -1046,9 +1046,9 @@ class LogRetentionService:
             try:
                 result = self._process_category(category, config)
                 summary["processed_categories"].append(category)
-                summary["archived"] += result.get("archived", 0)  # type: ignore[operator]
-                summary["deleted"] += result.get("deleted", 0)  # type: ignore[operator]
-                summary["anonymized"] += result.get("anonymized", 0)  # type: ignore[operator]
+                summary["archived"] += result.get("archived", 0)
+                summary["deleted"] += result.get("deleted", 0)
+                summary["anonymized"] += result.get("anonymized", 0)
             except Exception as e:
                 logger.error(f"🔥 [Retention] Error processing {category}: {e}")
                 summary["errors"].append({"category": category, "error": str(e)})

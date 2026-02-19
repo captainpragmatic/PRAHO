@@ -368,8 +368,8 @@ def preflight_order(request: Request, customer: Customer) -> Response:
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         # Calculate VAT using the VAT calculator
-        from apps.orders.vat_rules import OrderVATCalculator
-        
+        from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
+
         company_name = billing_address.get('company_name', '')
         vat_number = billing_address.get('vat_number', '')
         country_raw = billing_address.get('country', 'România')
@@ -383,10 +383,10 @@ def preflight_order(request: Request, customer: Customer) -> Response:
             if len(country) != ISO_COUNTRY_CODE_LENGTH:
                 country = 'RO'
         is_business = bool(company_name)
-        
+
         logger.info(f"🔎 [API] VAT calculation inputs: subtotal={subtotal_cents}¢, country={country}, is_business={is_business}, vat_number={vat_number}")
 
-        customer_vat_info: CustomerVATInfo = {  # type: ignore[name-defined]
+        customer_vat_info: CustomerVATInfo = {
             'country': country,
             'is_business': is_business,
             'vat_number': vat_number or None,

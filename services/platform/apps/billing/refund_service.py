@@ -39,20 +39,20 @@ class Result(Generic[T, E]):
     def unwrap(self) -> T:
         """Get the success value (raises if error)"""
         if self._is_success:
-            return self._value  # type: ignore
+            return self._value  # type: ignore[return-value]
         raise RuntimeError(f"Called unwrap on error result: {self._value}")
 
     def unwrap_err(self) -> E:
         """Get the error value (raises if success)"""
         if not self._is_success:
-            return self._value  # type: ignore
+            return self._value  # type: ignore[return-value]
         raise RuntimeError("Called unwrap_err on success result")
 
     @property
     def error(self) -> E:
         """Get the error value"""
         if not self._is_success:
-            return self._value  # type: ignore
+            return self._value  # type: ignore[return-value]
         raise RuntimeError("Called error on success result")
 
     @property
@@ -1250,10 +1250,11 @@ class RefundQueryService:
 
             # First, try to get the entity to check metadata
             try:
+                entity: Order | Invoice
                 if entity_type == "order":
                     entity = Order.objects.get(id=entity_id)
                 else:  # invoice
-                    entity = Invoice.objects.get(id=entity_id)  # type: ignore[assignment]
+                    entity = Invoice.objects.get(id=entity_id)
 
                 # Check metadata for refunds first
                 if hasattr(entity, "meta") and isinstance(entity.meta, dict):

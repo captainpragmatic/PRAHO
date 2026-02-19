@@ -70,7 +70,7 @@ def process_pending_orders() -> dict[str, Any]:
     """
     logger.info("🔄 [OrderProcessor] Starting pending order processing")
 
-    results = {
+    results: dict[str, Any] = {
         "processed_orders": [],
         "confirmed_orders": 0,
         "timed_out_orders": 0,
@@ -134,7 +134,7 @@ def process_pending_orders() -> dict[str, Any]:
                 except Exception as e:
                     logger.error(f"🔥 [OrderProcessor] Error processing order {order.order_number}: {e}")
                     results["errors"].append(f"Order {order.order_number}: {e}")
-                    results["failed_orders"] += 1  # type: ignore[operator]
+                    results["failed_orders"] += 1
 
             logger.info(
                 f"✅ [OrderProcessor] Pending order processing completed: "
@@ -518,7 +518,7 @@ def sync_order_payment_status() -> dict[str, Any]:
     """
     logger.info("💳 [PaymentSync] Starting payment status synchronization")
 
-    results = {
+    results: dict[str, Any] = {
         "checked_payments": 0,
         "updated_orders": [],
         "payment_confirmations": 0,
@@ -545,7 +545,7 @@ def sync_order_payment_status() -> dict[str, Any]:
 
                 # Check payments for this invoice
                 payments = Payment.objects.filter(invoice=invoice)
-                results["checked_payments"] += payments.count()  # type: ignore[operator]
+                results["checked_payments"] += payments.count()
 
                 old_status = order.status
                 payment_updated = False
@@ -608,7 +608,7 @@ def process_recurring_orders() -> dict[str, Any]:
     """
     logger.info("🔄 [RecurringOrders] Starting recurring order processing")
 
-    results = {
+    results: dict[str, Any] = {
         "services_checked": 0,
         "renewal_orders_created": 0,
         "auto_renewals_processed": 0,
@@ -658,7 +658,7 @@ def process_recurring_orders() -> dict[str, Any]:
 
                     if create_result.is_ok():
                         renewal_order = create_result.unwrap()
-                        results["renewal_orders_created"] += 1  # type: ignore[operator]
+                        results["renewal_orders_created"] += 1
 
                         results["created_orders"].append(
                             {
@@ -687,12 +687,12 @@ def process_recurring_orders() -> dict[str, Any]:
                             f"🔥 [RecurringOrders] Failed to create renewal order for service {service.id}: {error}"
                         )
                         results["errors"].append(f"Service {service.id}: {error}")
-                        results["renewal_failures"] += 1  # type: ignore[operator]  # type: ignore[operator]
+                        results["renewal_failures"] += 1
 
                 except Exception as e:
                     logger.error(f"🔥 [RecurringOrders] Error processing service {service.id}: {e}")
                     results["errors"].append(f"Service {service.id}: {e}")
-                    results["renewal_failures"] += 1  # type: ignore[operator]
+                    results["renewal_failures"] += 1
 
             logger.info(
                 f"✅ [RecurringOrders] Recurring order processing completed: "

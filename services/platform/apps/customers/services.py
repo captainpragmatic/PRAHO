@@ -323,20 +323,20 @@ class CustomerStatsService:
             # Update oldest first
             customers = Customer.objects.order_by("updated_at")[:limit]
 
-            results = {"total": customers.count(), "updated": 0, "errors": []}
+            results: dict[str, Any] = {"total": customers.count(), "updated": 0, "errors": []}
 
             for customer in customers:
                 try:
                     update_result = CustomerStatsService.update_stats(str(customer.id))
                     if update_result.get("success"):
-                        results["updated"] += 1  # type: ignore[operator]
+                        results["updated"] += 1
                     else:
-                        results["errors"].append({  # type: ignore[attr-defined]
+                        results["errors"].append({
                             "customer_id": str(customer.id),
                             "error": update_result.get("error"),
                         })
                 except Exception as e:
-                    results["errors"].append({"customer_id": str(customer.id), "error": str(e)})  # type: ignore[attr-defined]
+                    results["errors"].append({"customer_id": str(customer.id), "error": str(e)})
 
             logger.info(f"📊 [Stats] Batch update completed: {results['updated']}/{results['total']} customers")
             return results

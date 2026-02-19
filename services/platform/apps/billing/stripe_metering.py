@@ -208,14 +208,14 @@ class StripeMeterEventService:
             }
 
             # Prepare event params
-            event_params = {
+            event_params: dict[str, Any] = {
                 "event_name": event_name,
                 "payload": payload,
             }
 
             if timestamp:
                 # Stripe expects Unix timestamp
-                event_params["timestamp"] = int(timestamp.timestamp())  # type: ignore[assignment]
+                event_params["timestamp"] = int(timestamp.timestamp())
 
             if identifier:
                 event_params["identifier"] = identifier
