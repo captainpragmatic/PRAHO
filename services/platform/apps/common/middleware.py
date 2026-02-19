@@ -38,7 +38,7 @@ from apps.common.logging import clear_request_id, set_request_id
 try:
     from apps.users.services import SessionSecurityService
 except ImportError:
-    SessionSecurityService = None
+    SessionSecurityService = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 User = get_user_model()

@@ -138,6 +138,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
             value_truncated = True
 
     # Use Django's template engine for rendering
+    rendered: str
     try:
         template = Template(template_content)
         rendered = template.render(Context(sanitized_context))
@@ -188,7 +189,7 @@ class EmailSuppressionService:
         # Check cache first
         cached = cache.get(cache_key)
         if cached is not None:
-            return cached  # Returns True or False
+            return bool(cached)
 
         # Check database
         from apps.notifications.models import EmailSuppression
@@ -524,6 +525,7 @@ class EmailService:
 
         try:
             # Build email message
+            msg: EmailMessage
             if body_html:
                 msg = EmailMultiAlternatives(
                     subject=subject,

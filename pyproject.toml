@@ -645,20 +645,20 @@ disable_error_code = ["attr-defined", "no-any-return", "misc", "return-value", "
 module = "apps.common.management.commands.generate_sample_data"
 disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "union-attr"]
 
-# Common middleware: Django internals
+# Common middleware: Django internals — tightened, only framework noise
 [[tool.mypy.overrides]]
 module = ["apps.common.middleware"]
-disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "return-value"]
+disable_error_code = ["attr-defined", "misc"]
 
 # Common performance modules: infrastructure utilities
 [[tool.mypy.overrides]]
 module = "apps.common.performance.*"
 disable_error_code = ["attr-defined", "no-any-return", "misc", "type-arg", "arg-type", "operator", "union-attr", "assignment", "no-untyped-def", "no-untyped-call", "var-annotated", "return-value"]
 
-# Common logging: runtime introspection
+# Common logging: runtime introspection — tightened, only framework noise
 [[tool.mypy.overrides]]
 module = "apps.common.logging"
-disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type", "type-arg", "assignment", "no-untyped-def"]
+disable_error_code = ["attr-defined", "misc"]
 
 # Billing e-Factura: XML marshaling (lxml), not core business logic
 [[tool.mypy.overrides]]
@@ -690,10 +690,10 @@ disable_error_code = ["attr-defined", "misc", "no-any-return", "type-arg", "arg-
 module = "apps.audit.file_integrity_service"
 disable_error_code = ["attr-defined", "misc", "no-any-return", "type-arg", "arg-type", "operator"]
 
-# API security linter: AST-based analysis, not business logic
+# API security linter: AST-based analysis — tightened, only framework noise
 [[tool.mypy.overrides]]
 module = "apps.api.security_linter"
-disable_error_code = ["attr-defined", "misc", "arg-type", "no-any-return", "no-untyped-def", "var-annotated", "assignment"]
+disable_error_code = ["attr-defined", "misc"]
 
 # Tests: allow friction-free typing
 [[tool.mypy.overrides]]
@@ -726,20 +726,20 @@ disable_error_code = ["attr-defined", "misc", "operator", "arg-type", "union-att
 module = ["apps.customers.customer_models", "apps.customers.contact_models"]
 disable_error_code = ["misc", "attr-defined", "assignment"]
 
-# Notifications services: SendGrid/email extensions
+# Notifications services: SendGrid/email extensions — tightened, only framework noise
 [[tool.mypy.overrides]]
 module = "apps.notifications.services"
-disable_error_code = ["attr-defined", "assignment", "misc", "no-any-return", "arg-type", "union-attr"]
+disable_error_code = ["attr-defined", "misc"]
 
 # Infrastructure registration service: VirtualminServer dynamic attrs
 [[tool.mypy.overrides]]
 module = "apps.infrastructure.registration_service"
 disable_error_code = ["attr-defined", "misc", "no-any-return", "arg-type"]
 
-# Billing gateway: Stripe module conditional loading
+# Billing gateway: Stripe module conditional loading — tightened, only framework noise
 [[tool.mypy.overrides]]
 module = "apps.billing.gateways.*"
-disable_error_code = ["attr-defined", "assignment", "misc", "no-any-return", "arg-type", "union-attr"]
+disable_error_code = ["attr-defined", "misc"]
 
 # Billing config: settings helper returning Any
 [[tool.mypy.overrides]]

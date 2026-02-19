@@ -212,7 +212,7 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
-class StructuredLogAdapter(logging.LoggerAdapter):
+class StructuredLogAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
     """
     Log adapter that adds structured context to all log messages.
 
