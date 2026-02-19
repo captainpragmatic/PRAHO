@@ -3,6 +3,7 @@
 Handles URL validation for e-Factura integration and other security concerns.
 """
 
+import ipaddress
 import re
 import urllib.parse
 
@@ -12,20 +13,17 @@ from django.utils.translation import gettext_lazy as _
 # Allowed e-Factura government endpoints
 ALLOWED_EFACTURA_DOMAINS = ["anaf.ro", "mfinante.gov.ro", "efactura.mfinante.ro", "webservicesp.anaf.ro"]
 
-# Blocked internal/private network ranges
-BLOCKED_IP_PATTERNS = [
-    r"^127\.",  # Loopback
-    r"^10\.",  # Private Class A
-    r"^172\.(1[6-9]|2[0-9]|3[0-1])\.",  # Private Class B
-    r"^192\.168\.",  # Private Class C
-    r"^169\.254\.",  # Link-local
-    r"^::1$",  # IPv6 loopback
-    r"^fc00:",  # IPv6 private
-    r"^fe80:",  # IPv6 link-local
-]
-
 # Blocked protocols for SSRF prevention
 BLOCKED_PROTOCOLS = ["file", "ftp", "gopher", "ldap", "dict", "tftp", "ssh"]
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    """Check if an IP address is private, loopback, link-local, or otherwise non-public."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
+    except ValueError:
+        return False
 
 
 def _is_valid_domain_suffix(domain: str, allowed_domains: list[str]) -> bool:
@@ -78,12 +76,10 @@ def validate_efactura_url(url: str) -> str:
             f"Domain '{domain}' not in allowed e-Factura endpoints: {', '.join(ALLOWED_EFACTURA_DOMAINS)}"
         )
 
-    # Check for blocked IP patterns
+    # Check for blocked IP patterns using ipaddress module
     hostname = parsed.hostname
-    if hostname:
-        for pattern in BLOCKED_IP_PATTERNS:
-            if re.match(pattern, hostname):
-                raise ValidationError(f"Access to IP range '{hostname}' is blocked for security")
+    if hostname and _is_private_ip(hostname):
+        raise ValidationError(f"Access to IP range '{hostname}' is blocked for security")
 
     # Check for suspicious URL patterns
     if any(suspicious in url.lower() for suspicious in ["localhost", "0.0.0.0", "metadata"]):
@@ -113,12 +109,10 @@ def validate_external_api_url(url: str, allowed_domains: list[str]) -> str:
     if not _is_valid_domain_suffix(domain, allowed_domains):
         raise ValidationError(f"Domain '{domain}' not in allowed list")
 
-    # Check for blocked IPs
+    # Check for blocked IPs using ipaddress module
     hostname = parsed.hostname
-    if hostname:
-        for pattern in BLOCKED_IP_PATTERNS:
-            if re.match(pattern, hostname):
-                raise ValidationError(f"Access to IP range '{hostname}' is blocked")
+    if hostname and _is_private_ip(hostname):
+        raise ValidationError(f"Access to IP range '{hostname}' is blocked")
 
     return url
 

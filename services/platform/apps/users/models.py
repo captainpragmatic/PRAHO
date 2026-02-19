@@ -157,7 +157,7 @@ class User(AbstractUser):
         falls back to database query if not prefetched.
         """
         # Try to use prefetched data first (O(1) if prefetched)
-        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {}) or {}
         if "customer_memberships" in prefetched_cache:
             return len(prefetched_cache["customer_memberships"]) > 0
 
@@ -172,7 +172,7 @@ class User(AbstractUser):
         falls back to optimized database query if not prefetched.
         """
         # Try to use prefetched data first (O(N) where N = user's memberships, typically small)
-        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {}) or {}
         if "customer_memberships" in prefetched_cache:
             for membership in prefetched_cache["customer_memberships"]:
                 if membership.is_primary:
@@ -194,7 +194,7 @@ class User(AbstractUser):
             return Customer.objects.all()
 
         # Try to use prefetched data first (O(N) where N = user's memberships)
-        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {}) or {}
         if "customer_memberships" in prefetched_cache:
             return [membership.customer for membership in prefetched_cache["customer_memberships"]]
 

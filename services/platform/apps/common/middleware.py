@@ -412,6 +412,11 @@ class PortalServiceHMACMiddleware:
             if not all([portal_id, nonce, timestamp, body_hash, signature]):
                 error_msg = "Missing HMAC authentication headers"
 
+            # Validate nonce format (must be sufficient length to prevent collisions)
+            if not error_msg:
+                if len(nonce) < 32 or len(nonce) > 256:
+                    error_msg = "Invalid nonce format"
+
             # Validate timestamp (5-minute window)
             request_body = b""
             if not error_msg:
@@ -430,6 +435,13 @@ class PortalServiceHMACMiddleware:
                 added = cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS)
                 if not added:
                     error_msg = "Nonce already used (replay attack)"
+
+            # Enforce body size limit before reading into memory (DoS prevention)
+            if not error_msg:
+                max_body_size = 10 * 1024 * 1024  # 10 MB
+                content_length = int(request.META.get("CONTENT_LENGTH") or 0)
+                if content_length > max_body_size:
+                    error_msg = "Request body too large"
 
             # Verify body hash
             if not error_msg:
@@ -499,9 +511,11 @@ class PortalServiceHMACMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
         if request.path.startswith("/api/"):
-            # Skip HMAC validation for authentication endpoints (can't be pre-authenticated)
+            # Skip HMAC validation for public endpoints only.
+            # NOTE: /api/users/login/ is NOT exempt - the portal service signs
+            # login requests with HMAC, so we validate portal origin to prevent
+            # direct credential brute-force from external attackers.
             auth_exempt_paths = [
-                "/api/users/login/",
                 "/api/users/register/",
                 "/api/users/password/reset/",
                 "/api/users/health/",
