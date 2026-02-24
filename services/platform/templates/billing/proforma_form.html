@@ -318,7 +318,7 @@
 
             <!-- Line item count -->
             <div class="text-xs text-slate-400 pt-2 border-t border-slate-700">
-              <span id="line-count">1</span> {% trans 'line item(s)' %}
+              <span id="proforma-line-count">1</span> {% trans 'line item(s)' %}
             </div>
           </div>
         </div>
@@ -426,7 +426,7 @@
     }
 
     // Update line count
-    document.getElementById('line-count').textContent = document.querySelectorAll('.proforma-line').length;
+    document.getElementById('proforma-line-count').textContent = document.querySelectorAll('.proforma-line').length;
   }
 
   // Add new line item

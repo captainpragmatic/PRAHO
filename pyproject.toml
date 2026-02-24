@@ -265,6 +265,8 @@ line-length = 120  # Modern screens, but not strictly enforced
 target-version = "py311"
 exclude = [
     ".venv",
+    ".venv-darwin",
+    ".venv-linux",
     "migrations",
     "__pycache__",
     ".git",
@@ -561,7 +563,7 @@ python_version = "3.13"
 plugins = ["mypy_django_plugin.main"]
 strict = false
 mypy_path = ["services/platform/stubs"]
-exclude = '(^|/)(migrations|static|media|htmlcov|node_modules|\.venv)(/|$)'
+exclude = '(^|/)(migrations|static|media|htmlcov|node_modules|\.venv[^/]*)(/|$)'
 
 # Guardrails
 show_error_codes = true
@@ -699,6 +701,7 @@ omit = [
     "*/venv/*",
     "*/env/*",
     "*/.venv/*",
+    "*/.venv-*/*",
     "manage.py",
     "*/settings/*",
     "*/wsgi.py",

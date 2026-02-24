@@ -35,7 +35,9 @@ db.sqlite3-journal
 /staticfiles/
 
 # Virtual Environment
+# .venv-darwin/ = macOS host  |  .venv-linux/ = Linux container/CI
 .venv/
+.venv-*/
 venv/
 ENV/
 env/

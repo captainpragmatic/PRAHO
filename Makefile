@@ -9,16 +9,22 @@
 # SCOPED PYTHON ENVIRONMENTS 🔒
 # ===============================================================================
 
+# Detect OS for platform-specific venv (shared macOS/Linux volume support).
+# Produces: .venv-darwin (macOS host) or .venv-linux (container/CI).
+UNAME_S  := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+VENV_DIR := .venv-$(UNAME_S)
+export UV_PROJECT_ENVIRONMENT := $(VENV_DIR)
+
 # Platform-specific Python with scoped PYTHONPATH (database access)
-PYTHON_PLATFORM = cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python
+PYTHON_PLATFORM = cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PLATFORM_MANAGE = $(PYTHON_PLATFORM) manage.py
 
 # Portal-specific Python (NO PYTHONPATH - cannot import platform code)
-PYTHON_PORTAL = cd services/portal && $(PWD)/.venv/bin/python
+PYTHON_PORTAL = cd services/portal && $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PORTAL_MANAGE = $(PYTHON_PORTAL) manage.py
 
 # Shared Python for workspace-level tasks
-PYTHON_SHARED = .venv/bin/python
+PYTHON_SHARED = $(VENV_DIR)/bin/python
 
 # ===============================================================================
 # HELP & SETUP 📖
@@ -122,17 +128,24 @@ help:
 # ===============================================================================
 
 install:
-	@echo "🔧 Setting up PRAHO services development environment..."
+	@echo "🔧 Setting up PRAHO services development environment ($(UNAME_S))..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@if ! command -v uv >/dev/null 2>&1; then \
 		echo "📦 Installing uv..."; \
 		curl -LsSf https://astral.sh/uv/install.sh | sh; \
 	fi
-	@echo "📦 Syncing all dependency groups via uv..."
+	@if [ -d .venv ] && [ ! -L .venv ]; then \
+		echo "🗑️  Removing legacy .venv/ (migrating to $(VENV_DIR)/)..."; \
+		rm -rf .venv; \
+	fi
+	@echo "📦 Syncing all dependency groups via uv → $(VENV_DIR)/..."
 	uv sync --all-groups
+	@echo "🔗 Installing pre-commit hooks..."
+	$(VENV_DIR)/bin/pre-commit install
+	@echo "🔧 Patching pre-commit hook for cross-platform dynamic resolution..."
+	$(VENV_DIR)/bin/python scripts/patch_precommit_hook.py
 	@echo ""
-	@echo "✅ Environment ready! Services isolated with scoped PYTHONPATH"
-	@echo "🔒 Security: Portal cannot import platform code"
+	@echo "✅ Environment ready! 🐍 $(VENV_DIR)/ | 🔒 Portal cannot import platform code"
 
 # ===============================================================================
 # DEVELOPMENT SERVERS 🚀
@@ -214,26 +227,26 @@ test-platform:
 test-platform-pytest:
 	@echo "🧪 [Platform] Testing with pytest (database cache)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest -v
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest -v
 	@echo "✅ Platform pytest tests completed successfully!"
 
 test-portal:
 	@echo "🧪 [Portal] Testing without database access (strict isolation)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -m pytest -v
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest -v
 	@echo "✅ Portal tests completed - database access properly blocked!"
 
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Running integration tests..."
-	@$(PWD)/.venv/bin/python -m pytest tests/integration/ -v
+	@$(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
 	@echo "💾 [Cache] Testing database cache functionality (post Redis removal)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PWD)/.venv/bin/python -m pytest tests/integration/test_database_cache.py -v -m cache
+	@$(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/test_database_cache.py -v -m cache
 	@echo "✅ Database cache tests passed!"
 
 test-security:
@@ -241,25 +254,25 @@ test-security:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Testing portal cannot import platform-specific modules..."
 	@cd services/portal && \
-		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then \
+		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then \
 			echo "❌ SECURITY BREACH: Portal can import apps.customers.customer_models"; \
 			exit 1; \
 		fi && \
-		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then \
+		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then \
 			echo "❌ SECURITY BREACH: Portal can import apps.billing.invoice_models"; \
 			exit 1; \
 		fi && \
-		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then \
+		if PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then \
 			echo "❌ SECURITY BREACH: Portal can import apps.orders.signals_extended"; \
 			exit 1; \
 		fi && \
 		echo "✅ Portal properly isolated from platform modules"
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/.venv/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"
 
 test-e2e:
@@ -270,13 +283,15 @@ test-e2e:
 	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev' first." && exit 1)
 	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev' first." && exit 1)
 	@echo "✅ Both services are running"
+	@echo "🧹 Clearing stale bytecode cache..."
+	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@echo "🎭 Running Playwright E2E tests..."
 	@if [ "$$RATELIMIT_ENABLE" != "false" ]; then \
 		echo "⚠️  WARNING: Rate limiting (django-ratelimit + DRF throttling) may be active."; \
 		echo "   Start services with: RATELIMIT_ENABLE=false make dev"; \
 		echo "   Or use: make dev-e2e (starts services with rate limiting disabled)"; \
 	fi
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/ -v
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"
 
 test-with-e2e: test-e2e
@@ -286,7 +301,8 @@ test-e2e-platform:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "⚠️  Requires platform service running (make dev-platform)"
 	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700." && exit 1)
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/platform/ -v
+	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/platform/ -v
 	@echo "✅ Platform E2E tests completed!"
 
 test-e2e-portal:
@@ -294,13 +310,15 @@ test-e2e-portal:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "⚠️  Requires portal service running (make dev-portal)"
 	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701." && exit 1)
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/portal/ -v
+	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/ -v
 	@echo "✅ Portal E2E tests completed!"
 
 test-e2e-orm:
 	@echo "🎭 [E2E ORM] Running ORM-based E2E tests (no server needed)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/python -m pytest tests/e2e/orm/ -v
+	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/orm/ -v
 	@echo "✅ ORM E2E tests completed!"
 
 test:
@@ -351,10 +369,10 @@ lint-platform:
 	@echo "🏗️ [Platform] Comprehensive code quality check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔍 1/5: Performance & Security Analysis (Ruff)..."
-	@cd services/platform && $(PWD)/.venv/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
+	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
 	@echo "🏷️  2/5: Type Safety Check (MyPy)..."
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
 	@echo ""
 	@echo "📊 3/5: Django Check..."
 	@$(PYTHON_PLATFORM_MANAGE) check --settings=config.settings.dev
@@ -375,7 +393,7 @@ lint-portal:
 	@echo "🌐 [Portal] Code quality check (NO database access)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔍 1/2: Performance & Security Analysis (Ruff)..."
-	@cd services/portal && $(PWD)/.venv/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
 	@echo "📊 2/2: Django Check (NO DB)..."
 	@$(PYTHON_PORTAL_MANAGE) check
@@ -387,21 +405,21 @@ lint:
 	@echo "📋 Phase 0: Ruff no-new-debt gate"
 	@BASE_REF=$$(git merge-base HEAD origin/master 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo HEAD); \
 		echo "🔍 Comparing new Ruff violations against: $$BASE_REF"; \
-		.venv/bin/python scripts/ruff_new_violations.py --baseline-ref "$$BASE_REF"
+		$(VENV_DIR)/bin/python scripts/ruff_new_violations.py --baseline-ref "$$BASE_REF"
 	@echo "📋 Phase 1: Platform service"
 	@$(MAKE) lint-platform
 	@echo "📋 Phase 2: Portal service"
 	@$(MAKE) lint-portal
 	@echo "📋 Phase 3: Test suppression scan (ADR-0014)"
-	@.venv/bin/python scripts/lint_test_suppressions.py --fail-on critical
+	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "🎉 All services linting complete!"
 
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@SEMGREP_BIN=""; SEMGREP_EXIT=0; \
-	if [ -x "$(PWD)/.venv/bin/semgrep" ]; then \
-		SEMGREP_BIN="$(PWD)/.venv/bin/semgrep"; \
+	if [ -x "$(PWD)/$(VENV_DIR)/bin/semgrep" ]; then \
+		SEMGREP_BIN="$(PWD)/$(VENV_DIR)/bin/semgrep"; \
 	elif command -v semgrep >/dev/null 2>&1; then \
 		SEMGREP_BIN="$$(command -v semgrep)"; \
 	else \
@@ -426,10 +444,10 @@ lint-credentials:
 	@echo "🔑 [Credentials] Hardcoded credentials security check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🏗️  Platform service:"
-	@cd services/platform && $(PWD)/.venv/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || echo "⚠️ Credentials check skipped"
+	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || echo "⚠️ Credentials check skipped"
 	@echo ""
 	@echo "🌐 Portal service:"
-	@cd services/portal && $(PWD)/.venv/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || echo "⚠️ Credentials check skipped"
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --select=S105,S106,S107,S108 --output-format=concise || echo "⚠️ Credentials check skipped"
 	@echo "✅ Credentials check complete!"
 
 # ===============================================================================
@@ -439,8 +457,8 @@ lint-credentials:
 type-check:
 	@echo "🏷️ [All Services] Comprehensive type checking..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/.venv/bin/mypy apps/ --config-file=../../pyproject.toml || echo "⚠️ MyPy not configured"
-	@cd services/portal && $(PWD)/.venv/bin/mypy portal/ --config-file=../../pyproject.toml || echo "⚠️ MyPy not configured"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml || echo "⚠️ MyPy not configured"
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/mypy portal/ --config-file=../../pyproject.toml || echo "⚠️ MyPy not configured"
 	@echo "🎉 All services type checking complete!"
 
 # ===============================================================================
@@ -450,12 +468,12 @@ type-check:
 pre-commit:
 	@echo "🔗 Running pre-commit hooks across services..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@if ! command -v .venv/bin/pre-commit >/dev/null 2>&1; then \
+	@if ! command -v $(VENV_DIR)/bin/pre-commit >/dev/null 2>&1; then \
 		echo "❌ pre-commit not found. Installing..."; \
 		uv sync --group dev; \
-		.venv/bin/pre-commit install || echo "⚠️ Pre-commit config not found"; \
+		$(VENV_DIR)/bin/pre-commit install || echo "⚠️ Pre-commit config not found"; \
 	fi
-	@.venv/bin/pre-commit run --all-files || echo "⚠️ Pre-commit hooks skipped"
+	@$(VENV_DIR)/bin/pre-commit run --all-files || echo "⚠️ Pre-commit hooks skipped"
 	@echo "✅ Pre-commit completed!"
 
 # ===============================================================================

@@ -50,7 +50,7 @@ repos:
       # Block only newly-introduced Ruff issues; tolerate historical debt.
       - id: ruff-new-violations
         name: "Ruff: Block New Violations Only"
-        entry: .venv/bin/python
+        entry: uv run python
         args: [scripts/ruff_new_violations.py, --staged]
         language: system
         files: \.py$
@@ -61,7 +61,7 @@ repos:
       # Only check modified Python files for performance
       - id: type-check-modified
         name: "Type Check Modified Files"
-        entry: .venv/bin/python
+        entry: uv run python
         args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
         files: \.py$
@@ -72,7 +72,7 @@ repos:
       # Prevent new # type: ignore comments to avoid regression
       - id: prevent-type-ignore
         name: "Block New Type Ignore Comments"
-        entry: .venv/bin/python
+        entry: uv run python
         args: [services/platform/scripts/prevent_type_ignore.py, --staged-only]
         language: system
         files: \.py$
@@ -89,7 +89,7 @@ repos:
     hooks:
       - id: django-template-check
         name: "Django Template Syntax Check"
-        entry: .venv/bin/python
+        entry: uv run python
         args: [services/platform/scripts/fix_template_comparisons.py, --check]
         language: system
         files: \.html$
@@ -110,15 +110,15 @@ repos:
           - |
             # Validate runtime import isolation from portal context.
             cd services/portal || exit 1
-            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ${UV_PROJECT_ENVIRONMENT}/bin/python -c "import apps.customers.customer_models" 2>/dev/null; then
               echo "❌ SECURITY BREACH: Portal can import apps.customers.customer_models"
               exit 1
             fi
-            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ${UV_PROJECT_ENVIRONMENT}/bin/python -c "import apps.billing.invoice_models" 2>/dev/null; then
               echo "❌ SECURITY BREACH: Portal can import apps.billing.invoice_models"
               exit 1
             fi
-            if PYTHONPATH= PYTHONNOUSERSITE=1 ../../.venv/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then
+            if PYTHONPATH= PYTHONNOUSERSITE=1 ${UV_PROJECT_ENVIRONMENT}/bin/python -c "import apps.orders.signals_extended" 2>/dev/null; then
               echo "❌ SECURITY BREACH: Portal can import apps.orders.signals_extended"
               exit 1
             fi
@@ -130,7 +130,7 @@ repos:
       # Audit coverage regression check
       - id: audit-coverage-check
         name: "Security: Audit Coverage Check"
-        entry: .venv/bin/python
+        entry: uv run python
         args: [scripts/audit_coverage_scan.py, --min-severity=high, --exclude-tests, services/platform/apps]
         language: system
         files: ^services/platform/apps/.*\.py$
@@ -145,7 +145,7 @@ repos:
           - -c
           - |
             # Use ruff to check for hardcoded credentials
-            .venv/bin/ruff check --select=S105,S106,S107,S108 --output-format=concise --quiet $@ || true
+            ${UV_PROJECT_ENVIRONMENT}/bin/ruff check --select=S105,S106,S107,S108 --output-format=concise --quiet $@ || true
             # Always pass - this is informational only
             exit 0
         language: system
@@ -168,7 +168,7 @@ repos:
           - -c
           - |
             # Check for performance issues in modified files
-            .venv/bin/ruff check --select=PERF,C90,PIE,SIM --output-format=concise --quiet $@ || true
+            ${UV_PROJECT_ENVIRONMENT}/bin/ruff check --select=PERF,C90,PIE,SIM --output-format=concise --quiet $@ || true
             # Always pass - this is informational only
             exit 0
         language: system

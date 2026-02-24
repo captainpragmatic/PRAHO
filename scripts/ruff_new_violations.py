@@ -21,7 +21,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
-DEFAULT_RUFF = REPO_ROOT / ".venv" / "bin" / "ruff"
+
+# Honour UV_PROJECT_ENVIRONMENT for platform-specific venvs (.venv-darwin / .venv-linux).
+# Falls back to the legacy .venv location for environments that don't set this.
+import os as _os
+
+_uv_env = _os.environ.get("UV_PROJECT_ENVIRONMENT")
+DEFAULT_RUFF = Path(_uv_env) / "bin" / "ruff" if _uv_env else REPO_ROOT / ".venv" / "bin" / "ruff"
+del _os, _uv_env
 
 
 @dataclass(frozen=True)
