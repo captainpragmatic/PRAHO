@@ -502,8 +502,8 @@ def test_signup_then_login_flow(page: Page) -> None:
         check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
+        check_css=False,  # Page navigates during signup→login flow, destroying execution context
+        check_accessibility=False):
         # Generate unique test data
         test_email = generate_test_email()
         test_password = generate_test_password()
@@ -768,8 +768,8 @@ def test_complete_new_customer_journey(page: Page) -> None:
         check_console=False,  # Alpine.js CSP eval errors expected on signup forms
         check_network=True,
         check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
+        check_css=False,  # Multi-page journey (signup→login→dashboard) destroys execution context
+        check_accessibility=False):
         test_email = generate_test_email()
         test_password = generate_test_password()
         test_company = generate_test_company_name()
