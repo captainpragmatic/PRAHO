@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.17.0] - 2026-02-24
+
 ### Added
 - **Security Scanner**: `scripts/security_scanner.py` — AST-based static security scanner covering OWASP Top 10 categories; detects hardcoded secrets, dangerous function calls (eval/exec with dynamic args, pickle.loads), SQL injection patterns, and insecure subprocess usage; integrates pip-audit/safety for dependency vulnerability scanning; supports JSON and console output modes with configurable severity thresholds; invokable standalone or via `make lint-security`
 - **Architecture Diagrams**: New `docs/architecture/` directory with seven Mermaid diagram files — system overview, entity relationships, data flow, deployment topology, and app dependencies; accompanied by `README.md` (diagram index and render instructions) and `CHANGELOG.md` (diagram history)
@@ -16,17 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **E2E Portal Navigation Assertions**: `verify_role_based_content` now treats `superuser` and `customer` identically on the portal — both check for `/tickets/` and `/billing/` links; removed the stale `superuser` branch that asserted `/app/` and `/customers/` which are platform-only routes at :8700
-- **E2E Test Quality and Security Scanner**: Address Codex review findings — `navigation.py` catches only `PlaywrightTimeoutError` in admin-blocked check (unknown exceptions now return `False` instead of silently passing), replaces stale `/admin/` expectation with `/app/`, and lets `verify_role_based_content` failures propagate; `monitoring.py` skips HTMX extended selectors (`closest`/`find`/`next`) in `hx-target` check; `test_navigation.py` raises success threshold from `>0` to `>=75%` of sections; `security_scanner.py` replaces lexicographic severity comparison with a numeric rank map
-- **E2E Signup Flow Tests**: Disabled CSS monitor (`check_css=False`) on `test_signup_then_login_flow` and `test_complete_new_customer_journey` — both tests navigate across multiple pages (signup -> login -> dashboard), destroying the original page execution context and causing the CSS monitor to raise spurious failures; also corrects over-indented `check_accessibility=False` argument left from previous refactoring
+- **E2E Test Quality**: `navigation.py` catches only `PlaywrightTimeoutError` in admin-blocked check (unknown exceptions now return `False` instead of silently passing), replaces stale `/admin/` expectation with `/app/`, and lets `verify_role_based_content` failures propagate; `monitoring.py` skips HTMX extended selectors (`closest`/`find`/`next`) in `hx-target` check; `test_navigation.py` raises success threshold from `>0` to `>=75%` of sections
+- **Security Scanner Severity Filter**: `security_scanner.py` replaces lexicographic severity string comparison with a numeric rank map (`CRITICAL=4` … `INFO=0`) so `--min-severity HIGH` correctly includes `CRITICAL` findings
+- **E2E Signup Flow Tests**: Disabled CSS monitor (`check_css=False`) on `test_signup_then_login_flow` and `test_complete_new_customer_journey` — both tests navigate across multiple pages (signup -> login -> dashboard), destroying the original page execution context and causing the CSS monitor to raise spurious failures
 - **E2E Test Suite**: Fixed 37 test issues (19 assertion failures + 18 teardown errors) caused by stale `.pyc` cache and incorrect test selectors/assumptions — zero app code changes, all test bugs
 - **E2E Cache Prevention**: Added `PYTHONDONTWRITEBYTECODE=1` to `conftest.py` and `__pycache__` cleanup to all `make test-e2e*` Makefile targets to prevent stale bytecode issues in Docker bind mounts
 
 ### Changed
+- **E2E Helpers Refactor**: Extracted focused helpers package (`tests/e2e/helpers/`) from monolithic `utils.py` — navigation, monitoring, interactions, auth, and constants are now separate modules
 - **OS-Scoped Dev Database**: Platform dev database is now `db-{darwin,linux}.sqlite3` to prevent SQLite corruption when macOS host and Docker container share the same bind-mounted directory (VirtioFS cannot coordinate file locks cross-platform)
 - **E2E Rate Limit Guard**: `make test-e2e` now detects active rate limiting and fails fast with actionable error instead of running 179 tests that will all fail
 - **CSS Build Portability**: `make build-css` gracefully skips when npm is not available (Docker container support)
-- **CLAUDE.md**: Strengthened Makefile-only directive — agents must always use `make` targets, never run `pytest` directly
-- **Makefile**: All E2E targets reference `make dev-e2e` as prerequisite in error messages; `check-css-tooling` now gracefully skips when npm is absent instead of erroring
 - **pre-commit hook patching**: `scripts/patch_precommit_hook.py` now patches all pre-commit-generated hooks (not just `pre-commit`), uses a versioned `PATCHED_MARKER` sentinel for true idempotency, switches from `uname -s | tr` to a POSIX `case` statement for OS detection, and resolves repo root via `git rev-parse --show-toplevel`
 
 ---

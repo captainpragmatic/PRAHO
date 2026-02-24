@@ -10,7 +10,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "praho-platform-service"
-version = "0.16.0"
+version = "0.17.0"
 description = "PRAHO Platform Service - Admin platform with database access"
 requires-python = ">=3.11"
 authors = [
