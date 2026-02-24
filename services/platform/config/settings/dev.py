@@ -50,11 +50,17 @@ INSTALLED_APPS += [
 # ===============================================================================
 
 if os.environ.get("USE_POSTGRES") != "true":
-    # Override DATABASES for development with SQLite
+    # Override DATABASES for development with SQLite.
+    # OS-scoped DB name prevents corruption when macOS host and Docker container
+    # both access the same bind-mounted directory — VirtioFS cannot reliably
+    # coordinate SQLite file locks across the macOS/Linux boundary.
+    import sys as _sys
+
+    _db_suffix = "darwin" if _sys.platform == "darwin" else "linux"
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": str(BASE_DIR / "db.sqlite3"),
+            "NAME": str(BASE_DIR / f"db-{_db_suffix}.sqlite3"),
         }
     }
 
