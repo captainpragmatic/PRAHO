@@ -20,7 +20,6 @@ Created: 2025-12-25
 Framework: Playwright + pytest
 """
 
-import pytest
 from playwright.sync_api import Page
 
 # Import shared utilities
@@ -29,10 +28,6 @@ from tests.e2e.utils import (
     ComprehensivePageMonitor,
     ensure_fresh_platform_session,
     login_platform_user,
-    navigate_to_platform_page,
-    require_authentication,
-    run_responsive_breakpoints_test,
-    safe_click_element,
 )
 
 # Base URL for infrastructure
@@ -149,7 +144,7 @@ def test_deployment_create_page_loads(page: Page) -> None:
     """
     Test the deployment create page loads with form.
     """
-    print("➕ Testing deployment create page")
+    print("+ Testing deployment create page")
 
     with ComprehensivePageMonitor(page, "deployment create page",
                                  check_console=True,
@@ -375,7 +370,6 @@ def test_infrastructure_dashboard_responsive(page: Page) -> None:
 
     for bp in breakpoints:
         page.set_viewport_size({"width": bp["width"], "height": bp["height"]})
-        page.wait_for_timeout(500)
 
         # Verify content is still visible
         main_content = page.locator("main, [class*='container'], [class*='content']")

@@ -12,10 +12,12 @@ Uses shared utilities from tests.e2e.utils for consistency.
 """
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
+    BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
     SUPERUSER_EMAIL,
@@ -53,71 +55,48 @@ def test_navigation_cross_page_flow(page: Page) -> None:
                                  check_accessibility=False,  # Keep fast for navigation flow
                                  allow_accessibility_skip=True,
                                  check_performance=False):   # Keep fast for navigation flow
-        # Login as superuser for maximum navigation access
+        # Login as customer — portal navigation requires a customer account
+        # (superuser may not have a customer profile on the portal)
         ensure_fresh_session(page)
-        if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+        if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
-    try:
-        require_authentication(page)
-
-        # Define navigation test cases with expected sections
-        navigation_tests = [
-            ("customers", "customer management"),
-            ("admin", "administration panel"),
-        ]
-
-        success_count = 0
-
-        for section, description in navigation_tests:
-            print(f"  🔗 Testing navigation to {description}")
-
-            # Start from dashboard
-            navigate_to_dashboard(page)
+        try:
             require_authentication(page)
 
-            # Look for navigation link
-            if section == "admin":
-                link_selector = 'a[href*="/admin/"], a:has-text("Admin")'
-            else:
-                link_selector = f'a[href*="/{section}/"], a:has-text("{section.title()}")'
+            # Define navigation test cases — direct URL navigation
+            # Portal nav links are inside Alpine.js dropdowns (hidden until opened),
+            # so we test cross-page navigation via direct URL access.
+            navigation_tests = [
+                ("/tickets/", "support tickets"),
+                ("/billing/invoices/", "billing system"),
+            ]
 
-            link = page.locator(link_selector).first
+            success_count = 0
 
-            if link.count() == 0:
-                print(f"    ⚠️ {description} navigation not found - may not be available")
-                continue
+            for url_path, description in navigation_tests:
+                print(f"  🔗 Testing navigation to {description}")
 
-            if not link.is_visible():
-                print(f"    ⚠️ {description} navigation not visible")
-                continue
-
-            try:
-                # Click navigation link
-                link.click()
+                page.goto(f"{BASE_URL}{url_path}")
                 page.wait_for_load_state("networkidle", timeout=5000)
 
                 current_url = page.url
-
-                # Verify navigation worked
-                if f"/{section}/" in current_url or (section == "admin" and "/admin/" in current_url):
+                if url_path in current_url:
                     print(f"    ✅ Successfully navigated to {description}")
                     success_count += 1
                 else:
-                    print(f"    ❌ Navigation failed - expected {section}, got {current_url}")
+                    print(f"    ⚠️ {description} navigation redirected to {current_url}")
 
-            except Exception as e:
-                print(f"    ❌ Navigation to {description} failed: {str(e)[:50]}")
+            print(f"📊 Navigation success: {success_count}/{len(navigation_tests)} sections")
+            assert success_count > 0, "At least one navigation section should be accessible"
 
-        print(f"📊 Navigation success: {success_count}/{len(navigation_tests)} sections")
+            # Verify we can return to dashboard
+            navigate_to_dashboard(page)
+            require_authentication(page)
+            assert is_logged_in_url(page.url), "Should be able to return to dashboard"
 
-        # Verify we can return to dashboard
-        navigate_to_dashboard(page)
-        require_authentication(page)
-        assert is_logged_in_url(page.url), "Should be able to return to dashboard"
-
-    except AuthenticationError:
-        pytest.fail("Lost authentication during navigation flow test")
+        except AuthenticationError:
+            pytest.fail("Lost authentication during navigation flow test")
 
 
 def test_navigation_header_interactions(page: Page) -> None:
@@ -153,7 +132,7 @@ def test_navigation_header_interactions(page: Page) -> None:
                     successful_tests += 1
                 else:
                     skipped_users.append(user_type)
-            except Exception as e:
+            except (TimeoutError, PlaywrightError) as e:
                 print(f"    ❌ {user_type} navigation test failed: {str(e)[:100]}")
 
         # Require all user scenarios to complete successfully
@@ -221,7 +200,8 @@ def _test_navigation_elements(page: Page, navigation_elements: list, user_type: 
                 if is_login_url(page.url):
                     break
 
-        except Exception as selector_error:
+        except (TimeoutError, PlaywrightError) as selector_error:
+            # Optional element — continue if not found
             print(f"      ❌ Selector error for {element_type}: {str(selector_error)[:100]}")
             continue
 
@@ -243,7 +223,8 @@ def _test_element_clicks(page: Page, selector: str, count: int, user_type: str) 
             if clicked:
                 clicked_count += 1
 
-        except Exception as element_error:
+        except (TimeoutError, PlaywrightError) as element_error:
+            # Optional element — continue if not found
             print(f"        ❌ Element error: {str(element_error)[:100]}")
             continue
 
@@ -328,7 +309,7 @@ def test_navigation_menu_visibility_by_role(page: Page) -> None:
         print("\n  👑 Testing superuser navigation access")
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             require_authentication(page)
@@ -347,7 +328,7 @@ def test_navigation_menu_visibility_by_role(page: Page) -> None:
         print("\n  👤 Testing customer navigation restrictions")
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             require_authentication(page)
@@ -390,44 +371,43 @@ def test_navigation_dropdown_interactions(page: Page) -> None:
         ensure_fresh_session(page)
         assert login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
 
-    # Test dropdown elements
-    dropdown_selectors = [
-        ('.dropdown-toggle', 'dropdown toggles'),
-        ('[data-toggle="dropdown"]', 'data dropdown toggles'),
-        ('.nav-item.dropdown', 'navigation dropdown items'),
-        ('.user-menu', 'user menu elements'),
-        ('.navbar-toggler', 'mobile menu toggles'),
-    ]
+        # Test dropdown elements
+        dropdown_selectors = [
+            ('.dropdown-toggle', 'dropdown toggles'),
+            ('[data-toggle="dropdown"]', 'data dropdown toggles'),
+            ('.nav-item.dropdown', 'navigation dropdown items'),
+            ('.user-menu', 'user menu elements'),
+            ('.navbar-toggler', 'mobile menu toggles'),
+        ]
 
-    total_dropdowns = 0
-    total_clicked = 0
+        total_dropdowns = 0
+        total_clicked = 0
 
-    for selector, description in dropdown_selectors:
-        count = count_elements(page, selector, description)
-        total_dropdowns += count
+        for selector, description in dropdown_selectors:
+            count = count_elements(page, selector, description)
+            total_dropdowns += count
 
-        if count > 0 and safe_click_element(page, f"{selector}:first-child", f"first {description}"):
-            total_clicked += 1
+            if count > 0 and safe_click_element(page, f"{selector}:first-child", f"first {description}"):
+                total_clicked += 1
 
-            # Wait a moment for dropdown to appear
-            page.wait_for_timeout(500)
+                # Wait a moment for dropdown to appear
+                page.wait_for_load_state("domcontentloaded")
 
-            # Check if dropdown content is visible
-            dropdown_content_selectors = [
-                '.dropdown-menu:visible',
-                '.dropdown-content:visible',
-                '[aria-expanded="true"]'
-            ]
+                # Check if dropdown content is visible
+                dropdown_content_selectors = [
+                    '.dropdown-menu:visible',
+                    '.dropdown-content:visible',
+                    '[aria-expanded="true"]'
+                ]
 
-            for content_selector in dropdown_content_selectors:
-                content_count = count_elements(page, content_selector, 'dropdown content')
-                if content_count > 0:
-                    print(f"      ✅ Dropdown content appeared: {content_count} items")
-                    break
+                for content_selector in dropdown_content_selectors:
+                    content_count = count_elements(page, content_selector, 'dropdown content')
+                    if content_count > 0:
+                        print(f"      ✅ Dropdown content appeared: {content_count} items")
+                        break
 
-            # Click somewhere else to close dropdown
-            page.click('body')
-            page.wait_for_timeout(200)
+                # Click somewhere else to close dropdown
+                page.click('body')
 
         print(f"  📊 Summary: Found {total_dropdowns} dropdown elements, successfully clicked {total_clicked}")
 
@@ -543,7 +523,7 @@ def test_navigation_responsive_breakpoints(page: Page) -> None:
 
                     return has_navigation
 
-                except Exception as e:
+                except (TimeoutError, PlaywrightError) as e:
                     print(f"      ❌ Navigation test failed: {str(e)[:50]}")
                     return False
 

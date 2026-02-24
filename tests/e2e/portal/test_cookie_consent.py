@@ -39,7 +39,7 @@ def test_banner_shows_on_first_visit(page: Page) -> None:
 
     # Expand preferences to verify "Always On" badge for essential cookies
     page.locator('#cookie-consent-banner button', has_text='Customize').click()
-    page.wait_for_timeout(500)
+    page.wait_for_load_state("domcontentloaded")
     always_on = banner.locator('text=Always On')
     expect(always_on).to_be_visible()
 
@@ -88,7 +88,7 @@ def test_custom_preferences(page: Page) -> None:
 
     # Click Customize to expand preferences panel
     page.locator('#cookie-consent-banner button', has_text='Customize').click()
-    page.wait_for_timeout(500)
+    page.wait_for_load_state("domcontentloaded")
 
     # Click the <label> wrapping the functional toggle (the sr-only checkbox
     # is hidden and its visual sibling div intercepts pointer events)

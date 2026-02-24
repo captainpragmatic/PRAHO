@@ -21,20 +21,17 @@ Created: 2025-08-29
 Framework: Playwright + pytest
 """
 
-import pytest
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
     PLATFORM_BASE_URL,
     ComprehensivePageMonitor,
-    MobileTestContext,
     ensure_fresh_platform_session,
     login_platform_user,
     navigate_to_platform_page,
     require_authentication,
     run_responsive_breakpoints_test,
-    safe_click_element,
 )
 
 
@@ -116,7 +113,7 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
             assert tab.count() > 0, f"Status tab {tab_icon} not found"
 
         # Check for New Service button (staff only)
-        new_service_btn = page.locator('a[href*="/create/"], a:has-text("New Service"), a:has-text("➕")')
+        new_service_btn = page.locator('a[href*="/create/"], a:has-text("New Service"), a:has-text("➕")')  # noqa: RUF001 — locator matches actual UI emoji
         if new_service_btn.count() > 0:
             print("  ✅ New Service button available for staff")
 
@@ -136,7 +133,7 @@ def test_staff_service_creation_workflow(page: Page) -> None:
 
     Validates the complete service creation process including form validation.
     """
-    print("➕ Testing staff service creation workflow")
+    print("+ Testing staff service creation workflow")
 
     with ComprehensivePageMonitor(page, "staff service creation workflow",
                                  check_console=True,
@@ -188,11 +185,11 @@ def test_staff_service_creation_workflow(page: Page) -> None:
 
                     print("  ✅ Service creation form can be filled")
                 else:
-                    print("  ℹ️ Service creation form structure different than expected")
+                    print("  [i] Service creation form structure different than expected")
             else:
-                print("  ℹ️ New Service button redirected elsewhere")
+                print("  [i] New Service button redirected elsewhere")
         else:
-            print("  ℹ️ New Service button not available (may require specific permissions)")
+            print("  [i] New Service button not available (may require specific permissions)")
 
 
 def test_staff_service_management_actions(page: Page) -> None:
@@ -256,13 +253,13 @@ def test_staff_service_management_actions(page: Page) -> None:
                     if actions_found:
                         print(f"  ✅ Service management actions available: {', '.join(actions_found)}")
                     else:
-                        print("  ℹ️ Service management actions may require specific service states")
+                        print("  [i] Service management actions may require specific service states")
                 else:
-                    print("  ℹ️ Service link led to unexpected page")
+                    print("  [i] Service link led to unexpected page")
             else:
-                print("  ℹ️ Service link is create link, skipping")
+                print("  [i] Service link is create link, skipping")
         else:
-            print("  ℹ️ No services available for testing management actions")
+            print("  [i] No services available for testing management actions")
             # Check if there's a "No services" message
             no_services_msg = page.locator('text="No services", text="No data", text="empty"')
             if no_services_msg.count() > 0:
@@ -314,9 +311,9 @@ def test_staff_service_status_filtering(page: Page) -> None:
                 if f"status={status}" in current_url:
                     print(f"    ✅ {status} filter applied successfully")
                 else:
-                    print(f"    ℹ️ {status} filter URL structure different")
+                    print(f"    [i] {status} filter URL structure different")
             else:
-                print(f"    ℹ️ {status} status tab not found")
+                print(f"    [i] {status} status tab not found")
 
         # Return to all services
         all_services_tab = page.locator('a:has-text("📊")')
@@ -359,7 +356,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
             if "/servers/" in page.url:
                 print("  ✅ Servers section accessible")
             else:
-                print("  ℹ️ Servers button led to different page")
+                print("  [i] Servers button led to different page")
 
             # Go back to services
             navigate_to_platform_page(page, "/provisioning/services/")
@@ -375,7 +372,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
             if "/plans/" in page.url:
                 print("  ✅ Plans section accessible")
             else:
-                print("  ℹ️ Plans button led to different page")
+                print("  [i] Plans button led to different page")
 
 
 def test_staff_provisioning_system_mobile_responsiveness(page: Page) -> None:
@@ -504,7 +501,6 @@ def test_staff_provisioning_system_responsive_breakpoints(page: Page) -> None:
         for viewport_name, width, height in viewports:
             print(f"\n  🖥️  Testing {viewport_name} viewport: {width}x{height}")
             page.set_viewport_size({"width": width, "height": height})
-            page.wait_for_timeout(500)  # Allow layout to adjust
 
             success = test_staff_provisioning_functionality(page, viewport_name)
             results.append((viewport_name, success))
@@ -593,9 +589,9 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
                 if actions.count() > 0:
                     print("    ✅ Service management actions available")
             else:
-                print("    ℹ️ Service detail page structure different")
+                print("    [i] Service detail page structure different")
         else:
-            print("    ℹ️ No services available for detail testing")
+            print("    [i] No services available for detail testing")
 
         print("  🖥️ Phase 4: Supporting sections access")
 

@@ -12,15 +12,9 @@ Uses portal service at :8701.
 import pytest
 from playwright.sync_api import Page
 
-# Import shared utilities
 from tests.e2e.utils import (
     BASE_URL,
-    CUSTOMER_EMAIL,
-    CUSTOMER_PASSWORD,
     AuthenticationError,
-    ComprehensivePageMonitor,
-    ensure_fresh_session,
-    login_user,
 )
 
 
@@ -149,26 +143,13 @@ def verify_tickets_functionality(page: Page, user_type: str) -> bool:
         return False
 
 
-def test_customer_tickets_functionality(page: Page) -> None:
+def test_customer_tickets_functionality(monitored_customer_page: Page) -> None:
     """Test customer ticket access displays correct content and functions properly."""
     print("🧪 Testing customer ticket functionality with comprehensive monitoring")
 
-    with ComprehensivePageMonitor(page, "customer tickets test",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=True,   # Enable full validation
-                                 check_performance=False):   # Keep fast for customer test
-        # Ensure fresh session and login as customer
-        ensure_fresh_session(page)
-        if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+    try:
+        assert verify_tickets_functionality(monitored_customer_page, "customer"), \
+            "Customer ticket functionality verification failed"
 
-        try:
-            # Verify customer ticket functionality
-            assert verify_tickets_functionality(page, "customer"), \
-                "Customer ticket functionality verification failed"
-
-        except AuthenticationError:
-            pytest.fail("Lost authentication during customer tickets test")
+    except AuthenticationError:
+        pytest.fail("Lost authentication during customer tickets test")

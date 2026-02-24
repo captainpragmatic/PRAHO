@@ -17,26 +17,25 @@ Uses shared utilities from tests.e2e.utils for consistency.
 Based on real customer workflows for Romanian billing transparency.
 """
 
-import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
     BASE_URL,
-    CUSTOMER_EMAIL,
-    CUSTOMER_PASSWORD,
     CUSTOMER2_EMAIL,
     CUSTOMER2_PASSWORD,
+    CUSTOMER_EMAIL,
+    CUSTOMER_PASSWORD,
     ComprehensivePageMonitor,
     MobileTestContext,
+    assert_responsive_results,
     ensure_fresh_session,
     login_user,
-    navigate_to_dashboard,
     require_authentication,
     run_responsive_breakpoints_test,
-    safe_click_element,
+    run_standard_mobile_test,
 )
-
 
 # ===============================================================================
 # CUSTOMER BILLING SYSTEM ACCESS AND NAVIGATION TESTS
@@ -107,7 +106,7 @@ def test_customer_billing_list_display_own_invoices_only(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Verify customer can access the billing system (support both English and Romanian)
@@ -124,6 +123,7 @@ def test_customer_billing_list_display_own_invoices_only(page: Page) -> None:
         # Check if billing documents are displayed and verify they belong to customer
         document_items = page.locator('tr:has-text("PRO-"), tr:has-text("INV-"), div:has-text("PRO-"), div:has-text("INV-")')
         document_count = document_items.count()
+        assert document_count > 0, "Customer should see at least one billing document"
         if document_count > 0:
             print(f"  ✅ Customer sees {document_count} billing documents (should be own company only)")
 
@@ -136,7 +136,7 @@ def test_customer_billing_list_display_own_invoices_only(page: Page) -> None:
             if customer_company.is_visible():
                 print("  ✅ Billing documents show correct customer company association")
         else:
-            print("  ℹ️ No billing documents currently exist for this customer")
+            print("  [i] No billing documents currently exist for this customer")
 
         # Verify billing statistics are customer-specific
         total_count = page.locator('text="Total:", text="Total Amount:"')
@@ -174,7 +174,7 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Find first invoice to view (customer's own invoices only)
@@ -195,6 +195,7 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
 
             # Verify document detail elements are present
             document_info = page.locator('h1:has-text("INV-"), h1:has-text("PRO-"), h1:has-text("#")')
+            assert document_info.is_visible(), "Billing document information should be displayed"
             if document_info.is_visible():
                 print("  ✅ Billing document information displayed")
 
@@ -216,7 +217,7 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
                 # Note: In a real test, we would verify the PDF download works
                 # For now, just verify the link is present and accessible
             else:
-                print("  ℹ️ PDF download feature not immediately visible")
+                print("  [i] PDF download feature not immediately visible")
 
             # Verify Romanian VAT information is displayed
             vat_info = page.locator('text="VAT", text="TVA", text="19%"')
@@ -225,6 +226,7 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
 
             # Check for line items display
             line_items = page.locator('table:has-text("Description"), div:has-text("Line Item")')
+            assert line_items.is_visible(), "Invoice line items should be displayed for customer review"
             if line_items.is_visible():
                 print("  ✅ Invoice line items displayed for customer review")
 
@@ -235,11 +237,12 @@ def test_customer_invoice_detail_and_pdf_access(page: Page) -> None:
 
             # Check payment status visibility
             payment_status = page.locator('span:has-text("Paid"), span:has-text("Outstanding"), span:has-text("Pending")')
+            assert payment_status.is_visible(), "Payment status should be visible to customer"
             if payment_status.is_visible():
                 print("  ✅ Payment status visible to customer")
 
         else:
-            print("  ℹ️ No billing documents found for customer")
+            print("  [i] No billing documents found for customer")
 
         print("  ✅ Customer invoice detail and PDF access functionality verified")
 
@@ -267,7 +270,7 @@ def test_customer_payment_status_and_history(page: Page) -> None:
         # Login and navigate to billing
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Check for payment status indicators in the main list
@@ -307,14 +310,14 @@ def test_customer_payment_status_and_history(page: Page) -> None:
             if payment_history.is_visible():
                 print("  ✅ Payment history section available to customer")
             else:
-                print("  ℹ️ Payment history section may not be implemented")
+                print("  [i] Payment history section may not be implemented")
 
         else:
-            print("  ℹ️ No billing documents available for payment testing")
+            print("  [i] No billing documents available for payment testing")
 
         # Note: Portal billing has no separate /billing/payments/ endpoint.
         # Payment status is shown inline on invoice detail pages.
-        print("  ℹ️ Payment status displayed within invoice details (no separate payments endpoint)")
+        print("  [i] Payment status displayed within invoice details (no separate payments endpoint)")
 
         print("  ✅ Customer payment status and history functionality verified")
 
@@ -348,7 +351,7 @@ def test_customer_billing_access_control_security(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
         # Navigate directly to billing URL
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Should successfully load billing system for customer
@@ -365,7 +368,7 @@ def test_customer_billing_access_control_security(page: Page) -> None:
 
         # Verify that proforma creation URL is not accessible to customers
         # Portal treats "create" as a proforma number lookup, which returns "Not Found"
-        page.goto("http://localhost:8701/billing/proformas/create/")
+        page.goto(f"{BASE_URL}/billing/proformas/create/")
         page.wait_for_load_state("networkidle")
 
         # The portal renders a "Proforma Not Found" page (no creation form exists)
@@ -376,6 +379,66 @@ def test_customer_billing_access_control_security(page: Page) -> None:
         print("    ✅ Customer properly restricted from proforma creation")
 
         print("  ✅ Customer billing access control and security working correctly")
+
+
+def _billing_isolation_phase1_customer1(page: Page) -> None:
+    """Phase 1: Verify Customer 1 can only see their own billing documents."""
+    print("    🔍 Phase 1: Testing Customer 1 billing visibility")
+    ensure_fresh_session(page)
+    assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+    page.goto(f"{BASE_URL}/billing/invoices/")
+    page.wait_for_load_state("networkidle")
+
+    title = page.title()
+    assert ("Billing" in title or "Invoice" in title or "Facturare" in title), "Expected billing page for customer 1"
+
+    document_rows = page.locator('tr:has-text("INV-"), tr:has-text("PRO-"), div:has-text("INV-"), div:has-text("PRO-")')
+    customer1_visible_documents = document_rows.count()
+    print(f"      Customer 1 sees {customer1_visible_documents} billing documents")
+
+    customer1_company = page.locator('text="Test Company SRL"')
+    if customer1_company.count() > 0:
+        print("      ✅ Customer 1 can see their own company billing documents")
+
+    customer2_document_count = page.locator('text="Second Test Company SRL"').count()
+    if customer2_document_count == 0:
+        print("      ✅ SECURITY: Customer 1 cannot see Customer 2's billing documents")
+    else:
+        print(f"      🚨 SECURITY BREACH: Customer 1 can see {customer2_document_count} billing documents belonging to Customer 2!")
+        raise AssertionError("Customer billing isolation failed - Customer 1 can see Customer 2's billing documents")
+
+
+def _billing_isolation_phase2_customer2(page: Page) -> None:
+    """Phase 2: Verify Customer 2 can only see their own billing documents."""
+    print("    🔍 Phase 2: Testing Customer 2 billing visibility")
+    ensure_fresh_session(page)
+    customer2_logged_in = login_user(page, CUSTOMER2_EMAIL, CUSTOMER2_PASSWORD)
+
+    if not customer2_logged_in:
+        print("      ⚠️ Customer 2 login failed (user may not exist in E2E fixtures) - skipping phase 2")
+        print("      [i] Phase 1 isolation verified: Customer 1 cannot see Customer 2's data")
+        return
+
+    page.goto(f"{BASE_URL}/billing/invoices/")
+    page.wait_for_load_state("networkidle")
+
+    title = page.title()
+    assert ("Billing" in title or "Invoice" in title or "Facturare" in title), "Expected billing page for customer 2"
+
+    document_rows = page.locator('tr:has-text("INV-"), tr:has-text("PRO-"), div:has-text("INV-"), div:has-text("PRO-")')
+    customer2_visible_documents = document_rows.count()
+    print(f"      Customer 2 sees {customer2_visible_documents} billing documents")
+
+    if page.locator('text="Second Test Company SRL"').count() > 0:
+        print("      ✅ Customer 2 can see their own company billing documents")
+
+    customer1_document_count = page.locator('text="Test Company SRL"').count()
+    if customer1_document_count == 0:
+        print("      ✅ SECURITY: Customer 2 cannot see Customer 1's billing documents")
+    else:
+        print(f"      🚨 SECURITY BREACH: Customer 2 can see {customer1_document_count} billing documents belonging to Customer 1!")
+        raise AssertionError("Customer billing isolation failed - Customer 2 can see Customer 1's billing documents")
 
 
 def test_customer_billing_isolation_comprehensive_security(page: Page) -> None:
@@ -399,73 +462,8 @@ def test_customer_billing_isolation_comprehensive_security(page: Page) -> None:
                                  check_accessibility=False,
                                  allow_accessibility_skip=True):
 
-        # === PHASE 1: Customer 1 Billing Visibility Test ===
-        print("    🔍 Phase 1: Testing Customer 1 billing visibility")
-        ensure_fresh_session(page)
-        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-
-        # Navigate to billing page
-        page.goto("http://localhost:8701/billing/invoices/")
-        page.wait_for_load_state("networkidle")
-
-        # Verify customer 1 can access their billing
-        title = page.title()
-        assert ("Billing" in title or "Invoice" in title or "Facturare" in title), f"Expected billing page for customer 1"
-
-        # Count documents visible to customer 1
-        document_rows = page.locator('tr:has-text("INV-"), tr:has-text("PRO-"), div:has-text("INV-"), div:has-text("PRO-")')
-        customer1_visible_documents = document_rows.count()
-        print(f"      Customer 1 sees {customer1_visible_documents} billing documents")
-
-        # Look for customer 1's specific company indicators
-        customer1_company = page.locator('text="Test Company SRL"')
-        if customer1_company.count() > 0:
-            print("      ✅ Customer 1 can see their own company billing documents")
-
-        # CRITICAL: Verify customer 1 CANNOT see customer 2's billing documents
-        customer2_company = page.locator('text="Second Test Company SRL"')
-        customer2_document_count = customer2_company.count()
-        if customer2_document_count == 0:
-            print("      ✅ SECURITY: Customer 1 cannot see Customer 2's billing documents")
-        else:
-            print(f"      🚨 SECURITY BREACH: Customer 1 can see {customer2_document_count} billing documents belonging to Customer 2!")
-            assert False, "Customer billing isolation failed - Customer 1 can see Customer 2's billing documents"
-
-        # === PHASE 2: Customer 2 Billing Visibility Test ===
-        print("    🔍 Phase 2: Testing Customer 2 billing visibility")
-        ensure_fresh_session(page)
-        customer2_logged_in = login_user(page, CUSTOMER2_EMAIL, CUSTOMER2_PASSWORD)
-
-        if not customer2_logged_in:
-            print("      ⚠️ Customer 2 login failed (user may not exist in E2E fixtures) - skipping phase 2")
-            print("      ℹ️ Phase 1 isolation verified: Customer 1 cannot see Customer 2's data")
-        else:
-            # Navigate to billing page
-            page.goto("http://localhost:8701/billing/invoices/")
-            page.wait_for_load_state("networkidle")
-
-            # Verify customer 2 can access billing system
-            title = page.title()
-            assert ("Billing" in title or "Invoice" in title or "Facturare" in title), f"Expected billing page for customer 2"
-
-            # Count documents visible to customer 2
-            document_rows = page.locator('tr:has-text("INV-"), tr:has-text("PRO-"), div:has-text("INV-"), div:has-text("PRO-")')
-            customer2_visible_documents = document_rows.count()
-            print(f"      Customer 2 sees {customer2_visible_documents} billing documents")
-
-            # Look for customer 2's specific company indicators
-            customer2_company = page.locator('text="Second Test Company SRL"')
-            if customer2_company.count() > 0:
-                print("      ✅ Customer 2 can see their own company billing documents")
-
-            # CRITICAL: Verify customer 2 CANNOT see customer 1's billing documents
-            customer1_company = page.locator('text="Test Company SRL"')
-            customer1_document_count = customer1_company.count()
-            if customer1_document_count == 0:
-                print("      ✅ SECURITY: Customer 2 cannot see Customer 1's billing documents")
-            else:
-                print(f"      🚨 SECURITY BREACH: Customer 2 can see {customer1_document_count} billing documents belonging to Customer 1!")
-                assert False, "Customer billing isolation failed - Customer 2 can see Customer 1's billing documents"
+        _billing_isolation_phase1_customer1(page)
+        _billing_isolation_phase2_customer2(page)
 
         # === PHASE 3: Direct URL Access Security Test ===
         print("    🔍 Phase 3: Testing direct billing document URL access security")
@@ -498,7 +496,7 @@ def test_customer_cannot_access_other_customers_billing(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
         # Navigate to billing
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Get list of documents visible to this customer
@@ -514,7 +512,7 @@ def test_customer_cannot_access_other_customers_billing(page: Page) -> None:
             if test_company.is_visible():
                 print("  ✅ Billing documents show correct customer company")
         else:
-            print("  ℹ️ No billing documents visible to customer (expected if no documents exist)")
+            print("  [i] No billing documents visible to customer (expected if no documents exist)")
 
         # Security test: Try to access a hypothetical document ID that might belong to another customer
         # This is a security test - customer should get access denied or 404
@@ -522,7 +520,7 @@ def test_customer_cannot_access_other_customers_billing(page: Page) -> None:
 
         # Try accessing document IDs that might exist but don't belong to this customer
         for test_id in [999, 1000, 1001]:  # High IDs unlikely to be customer's documents
-            page.goto(f"http://localhost:8701/billing/invoices/{test_id}/")
+            page.goto(f"{BASE_URL}/billing/invoices/{test_id}/")
             page.wait_for_load_state("networkidle")
 
             # Should either redirect away or show access denied
@@ -569,42 +567,21 @@ def test_customer_billing_system_mobile_responsiveness(page: Page) -> None:
         # Login and navigate to billing on desktop first
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Test mobile viewport
         with MobileTestContext(page, 'mobile_medium') as mobile:
             print("    📱 Testing customer billing system on mobile viewport")
 
-            # Reload page to ensure mobile layout
-            page.reload()
-            page.wait_for_load_state("networkidle")
-
-            # Test mobile navigation to billing
-            mobile_nav_count = mobile.test_mobile_navigation()
-            print(f"      Mobile navigation elements: {mobile_nav_count}")
-
-            # Check responsive layout issues
-            layout_issues = mobile.check_responsive_layout()
-            critical_issues = [issue for issue in layout_issues
-                             if any(keyword in issue.lower()
-                                  for keyword in ['horizontal scroll', 'small touch'])]
-
-            if critical_issues:
-                print(f"      ⚠️ Critical mobile layout issues: {len(critical_issues)}")
-                for issue in critical_issues[:3]:  # Show first 3 issues
-                    print(f"        - {issue}")
-            else:
-                print("      ✅ No critical mobile layout issues found")
-
-            # Test touch interactions on key elements
-            touch_success = mobile.test_touch_interactions()
-            print(f"      Touch interactions: {'✅ Working' if touch_success else '⚠️ Limited'}")
+            run_standard_mobile_test(page, mobile, context_label="customer billing")
 
             # Verify key mobile elements are accessible for customers
             billing_heading = page.locator('h1:has-text("My Billing Documents"), h1:has-text("Billing Documents")').first
             if billing_heading.is_visible():
                 print("      ✅ Billing system heading visible on mobile")
+            else:
+                print("      [i] Billing heading hidden on mobile (responsive header collapse)")
 
             # Test PDF download on mobile (if documents exist)
             pdf_links = page.locator('a:has-text("PDF"), a[href*="/pdf/"]')
@@ -663,11 +640,12 @@ def test_customer_complete_billing_workflow(page: Page) -> None:
 
         # Step 1: View billing document list
         print("    Step 1: Viewing billing document list...")
-        page.goto("http://localhost:8701/billing/invoices/")
+        page.goto(f"{BASE_URL}/billing/invoices/")
         page.wait_for_load_state("networkidle")
 
         # Verify billing access
         billing_heading = page.locator('h1:has-text("My Billing Documents"), h1:has-text("Billing Documents")').first
+        assert billing_heading.is_visible(), "Customer billing list should be accessible"
         if billing_heading.is_visible():
             print("      ✅ Customer billing list accessible")
 
@@ -682,6 +660,7 @@ def test_customer_complete_billing_workflow(page: Page) -> None:
 
                 # Verify document detail page
                 document_heading = page.locator('h1:has-text("INV-"), h1:has-text("PRO-"), h1:has-text("#")')
+                assert document_heading.is_visible(), "Customer document detail page should load"
                 if document_heading.is_visible():
                     print("      ✅ Customer document detail page loaded")
 
@@ -695,7 +674,7 @@ def test_customer_complete_billing_workflow(page: Page) -> None:
                         # Note: In a real test, we would verify the actual PDF download
                         # For now, just verify the link is accessible
                     else:
-                        print("      ℹ️ PDF download not immediately visible")
+                        print("      [i] PDF download not immediately visible")
 
                     # Step 4: Check payment information
                     print("    Step 4: Checking payment status information...")
@@ -724,7 +703,7 @@ def test_customer_complete_billing_workflow(page: Page) -> None:
                 else:
                     print("  ⚠️ Document detail page did not load correctly")
             else:
-                print("  ℹ️ No billing documents available for workflow testing")
+                print("  [i] No billing documents available for workflow testing")
         else:
             print("  ❌ Customer billing list not accessible")
 
@@ -755,7 +734,7 @@ def test_customer_billing_system_responsive_breakpoints(page: Page) -> None:
             """Test core customer billing functionality across viewports."""
             try:
                 # Navigate to billing
-                test_page.goto("http://localhost:8701/billing/invoices/")
+                test_page.goto(f"{BASE_URL}/billing/invoices/")
                 test_page.wait_for_load_state("networkidle")
 
                 # Verify authentication maintained
@@ -778,7 +757,7 @@ def test_customer_billing_system_responsive_breakpoints(page: Page) -> None:
                     print(f"      ❌ Core billing elements missing in {context}")
                     return False
 
-            except Exception as e:
+            except (TimeoutError, PlaywrightError) as e:
                 print(f"      ❌ Billing system test failed in {context}: {str(e)[:50]}")
                 return False
 
@@ -786,12 +765,6 @@ def test_customer_billing_system_responsive_breakpoints(page: Page) -> None:
         results = run_responsive_breakpoints_test(page, test_customer_billing_functionality)
 
         # Verify all breakpoints pass
-        desktop_pass = results.get('desktop', False)
-        tablet_pass = results.get('tablet_landscape', False)
-        mobile_pass = results.get('mobile', False)
-
-        assert desktop_pass, "Customer billing system should work on desktop viewport"
-        assert tablet_pass, "Customer billing system should work on tablet viewport"
-        assert mobile_pass, "Customer billing system should work on mobile viewport"
+        assert_responsive_results(results, "Customer billing system")
 
         print("  ✅ Customer billing system validated across all responsive breakpoints")

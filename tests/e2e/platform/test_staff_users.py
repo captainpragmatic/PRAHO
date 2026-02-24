@@ -15,25 +15,224 @@ Uses shared utilities from tests.e2e.utils for consistency.
 Based on real staff workflows for user administration and management.
 """
 
-import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
     PLATFORM_BASE_URL,
-    CUSTOMER_EMAIL,
-    CUSTOMER_PASSWORD,
     REGISTER_URL,
     ComprehensivePageMonitor,
     MobileTestContext,
+    assert_responsive_results,
     ensure_fresh_platform_session,
     login_platform_user,
-    login_user,
     navigate_to_platform_page,
     require_authentication,
     run_responsive_breakpoints_test,
-    safe_click_element,
+    run_standard_mobile_test,
 )
+
+# ===============================================================================
+# PRIVATE PHASE HELPERS
+# ===============================================================================
+
+
+def _perform_user_search(page: Page, query: str) -> int:
+    """Fill in search field with query, submit, and return result count.
+
+    Returns the number of matching rows found, or 0 if no search field is visible.
+    Resets the search field to empty after checking results.
+    """
+    search_field = page.locator('input[type="search"], input[name="search"]')
+    if not search_field.is_visible():
+        return 0
+    search_field.clear()
+    search_field.fill(query)
+    search_field.press("Enter")
+    page.wait_for_load_state("networkidle")
+    results = page.locator('table tbody tr, .user-item').count()
+    search_field.clear()
+    search_field.press("Enter")
+    return results
+
+
+def _verify_role_filter(page: Page) -> None:
+    """Test role/staff/status/customer filter dropdowns if present."""
+    filter_options = [
+        ('select[name*="role"]', 'role filter'),
+        ('select[name*="staff"]', 'staff filter'),
+        ('select[name*="status"]', 'status filter'),
+        ('select[name*="customer"]', 'customer filter'),
+    ]
+    for selector, filter_name in filter_options:
+        filter_element = page.locator(selector)
+        if not filter_element.is_visible():
+            continue
+        print(f"    ✅ {filter_name} available")
+        if page.locator(f'{selector} option').count() > 1:
+            page.select_option(selector, index=1)
+            page.wait_for_load_state("networkidle")
+            filtered_results = page.locator('table tbody tr, .user-item').count()
+            print(f"      ✅ {filter_name} returned {filtered_results} results")
+            page.select_option(selector, index=0)
+
+
+def _verify_bulk_operations(page: Page) -> None:
+    """Test bulk selection checkboxes and associated action controls."""
+    bulk_checkboxes = page.locator('input[type="checkbox"][name*="select"], .bulk-select')
+    if bulk_checkboxes.count() == 0:
+        print("  [i] Bulk selection not available")
+        return
+
+    print(f"    ✅ Found {bulk_checkboxes.count()} bulk selection options")
+    for i in range(min(2, bulk_checkboxes.count())):
+        bulk_checkboxes.nth(i).check()
+    print("    ✅ Selected users for bulk operations")
+
+    bulk_actions = [
+        ('button:has-text("Export"), a:has-text("Export")', 'export users'),
+        ('button:has-text("Delete"), a:has-text("Delete")', 'bulk delete'),
+        ('select[name*="action"]', 'action dropdown'),
+        ('button:has-text("Apply"), button:has-text("Execute")', 'execute actions'),
+    ]
+    available = 0
+    for selector, name in bulk_actions:
+        if page.locator(selector).count() > 0:
+            print(f"    ✅ {name} available")
+            available += 1
+    if available > 0:
+        print(f"    📊 {available} bulk actions available")
+    else:
+        print("    [i] Bulk actions may not be implemented yet")
+
+
+def _verify_sorting(page: Page) -> None:
+    """Test sortable column headers if present."""
+    sortable_headers = page.locator('th a, th[data-sort], .sortable')
+    if sortable_headers.count() == 0:
+        print("  [i] Column sorting not available")
+        return
+    print(f"    ✅ Found {sortable_headers.count()} sortable columns")
+    sortable_headers.first.click()
+    page.wait_for_load_state("networkidle")
+    print("    ✅ Column sorting functionality tested")
+
+
+def _verify_customer_assignment_from_detail(page: Page) -> None:
+    """Probe customer membership management controls on the current user detail page."""
+    customer_sections = [
+        ('div:has-text("Customer"), section:has-text("Customer")', 'customer section'),
+        ('div:has-text("Member"), div:has-text("Membership")', 'membership section'),
+        ('table:has-text("Organization"), .customer-list', 'customer organization list'),
+        ('a:has-text("Assign"), button:has-text("Add Customer")', 'customer assignment actions'),
+    ]
+    found = 0
+    for selector, feature_name in customer_sections:
+        if page.locator(selector).count() > 0:
+            print(f"    ✅ {feature_name} available")
+            found += 1
+
+    if found == 0:
+        print("  [i] Customer management features not found in user detail")
+        return
+
+    print(f"    📊 {found} customer management features found")
+    assign_button = page.locator('a:has-text("Assign"), button:has-text("Add"), a:has-text("Customer")')
+    if assign_button.count() == 0:
+        return
+
+    print("    🔗 Testing customer assignment functionality")
+    assign_button.first.click()
+    page.wait_for_load_state("networkidle")
+    customer_form = page.locator('form, select[name*="customer"], .customer-select')
+    if customer_form.count() == 0:
+        print("      [i] Customer assignment form not found")
+        return
+
+    print("      ✅ Customer assignment form available")
+    customer_select = page.locator('select[name*="customer"]')
+    if customer_select.is_visible():
+        options = page.locator('select[name*="customer"] option').count()
+        if options > 1:
+            print(f"      ✅ {options} customer options available")
+        else:
+            print("      [i] Limited customer options (may need test data)")
+
+
+def _verify_customer_filter_from_list(page: Page) -> None:
+    """Test customer-based user filtering from the user list page."""
+    navigate_to_platform_page(page, "/auth/users/")
+    page.wait_for_load_state("networkidle")
+    customer_filter = page.locator('select[name*="customer"], .customer-filter')
+    if not customer_filter.is_visible():
+        print("    [i] Customer-based filtering not available")
+        return
+
+    print("    ✅ Customer-based filtering available")
+    if page.locator('select[name*="customer"] option').count() > 1:
+        page.select_option('select[name*="customer"]', index=1)
+        page.wait_for_load_state("networkidle")
+        filtered_users = page.locator('table tbody tr, .user-item').count()
+        print(f"    ✅ Customer filter returned {filtered_users} users")
+
+
+def _examine_user_detail_page(page: Page) -> None:
+    """Navigate into the first user detail link and assert required information is present."""
+    user_detail_links = page.locator('a[href*="/auth/users/"]:not([href$="/auth/users/"])')
+    if user_detail_links.count() == 0:
+        print("      [i] User detail links not yet implemented — list shows emails only")
+        return
+
+    user_detail_links.first.click()
+    page.wait_for_load_state("networkidle")
+
+    assert "/auth/users/" in page.url, "Should navigate to user detail page"
+    print("      ✅ User detail page accessible")
+
+    user_info_elements = [
+        ('div:has-text("Email"), td:has-text("@")', 'email'),
+        ('div:has-text("Name"), td', 'name'),
+        ('div:has-text("Role"), div:has-text("Staff")', 'role'),
+        ('div:has-text("Customer"), div:has-text("Member")', 'customer info'),
+        ('div:has-text("Login"), div:has-text("Activity")', 'activity'),
+    ]
+    for selector, info_type in user_info_elements:
+        assert page.locator(selector).count() > 0, f"User detail should display {info_type} information"
+        print(f"        ✅ {info_type} information displayed")
+
+    mgmt_actions = page.locator('a:has-text("Edit"), button:has-text("Edit"), a:has-text("Delete")').count()
+    if mgmt_actions > 0:
+        print(f"        ✅ {mgmt_actions} management actions available")
+
+    navigate_to_platform_page(page, "/auth/users/")
+    page.wait_for_load_state("networkidle")
+
+
+def _verify_registration_form_fields(page: Page) -> None:
+    """Assert the registration form fields are present (soft — form may be hidden when logged in)."""
+    navigate_to_platform_page(page, REGISTER_URL)
+    page.wait_for_load_state("networkidle")
+
+    assert "/register" in page.url, "Registration page should be accessible to staff"
+    print("      ✅ User registration page accessible to staff")
+
+    registration_form = page.locator('form')
+    if not registration_form.is_visible():
+        print("      [i] Registration form not visible (staff may already be logged in)")
+        return
+
+    form_fields = page.locator('input, select, textarea').count()
+    assert form_fields > 0, "Registration form should have fields"
+    print(f"      ✅ Registration form has {form_fields} fields")
+
+    required_fields = ['email', 'first_name', 'last_name', 'password']
+    for field_name in required_fields:
+        field = page.locator(f'input[name="{field_name}"], input[name="{field_name}1"]')
+        if field.is_visible():
+            print(f"        ✅ {field_name} field available")
+        else:
+            print(f"        [i] {field_name} field not found on registration form")
 
 
 # ===============================================================================
@@ -71,53 +270,43 @@ def test_staff_user_management_access_via_navigation(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Verify we're on the user management page
-        if "/auth/users/" in page.url:
-            print("  ✅ Staff can access user management URL directly")
+        assert "/auth/users/" in page.url, "Staff should be able to access user management URL directly"
+        print("  ✅ Staff can access user management URL directly")
 
-            # Verify page title and staff-specific content
-            title = page.title()
-            if any(word in title.lower() for word in ["user", "users", "management"]):
-                print(f"  ✅ Appropriate user management page title: {title}")
-            else:
-                print(f"  ℹ️ Page title: {title}")
-
-            # Check for user management heading
-            user_heading = page.locator('h1:has-text("User"), h1:has-text("Users")').first
-            if user_heading.is_visible():
-                print("  ✅ User management heading visible")
-
-            # Check for user list or table
-            user_list = page.locator('table, .user-list, .user-item, tbody tr')
-            user_count = user_list.count()
-            if user_count > 0:
-                print(f"  ✅ User list displayed with {user_count} users/entries")
-            else:
-                print("  ℹ️ No users displayed (may be empty system or different layout)")
-
-            # Check for staff management features
-            staff_features = [
-                ('a:has-text("Create"), a:has-text("Add"), a:has-text("New User")', "user creation"),
-                ('input[type="search"], input[name="search"]', "user search"),
-                ('select, .filter', "filtering options"),
-                ('a[href*="/users/"], .user-link', "user detail links")
-            ]
-
-            for selector, feature_name in staff_features:
-                feature_count = page.locator(selector).count()
-                if feature_count > 0:
-                    print(f"  ✅ {feature_name} available ({feature_count} found)")
-                else:
-                    print(f"  ℹ️ {feature_name} not found")
+        # Verify page title and staff-specific content
+        title = page.title()
+        if any(word in title.lower() for word in ["user", "users", "management"]):
+            print(f"  ✅ Appropriate user management page title: {title}")
         else:
-            # Check if redirected to dashboard or permission denied
-            current_url = page.url
-            page_content = page.content().lower()
+            print(f"  [i] Page title: {title}")
 
-            if "permission" in page_content or "denied" in page_content:
-                print("  ❌ Staff user denied access to user management - permission issue")
-                assert False, "Staff should have access to user management"
+        # Check for user management heading
+        user_heading = page.locator('h1:has-text("User"), h1:has-text("Users")').first
+        assert user_heading.is_visible(), "User management heading should be visible"
+        print("  ✅ User management heading visible")
+
+        # Check for user list (may be table or ul/li depending on implementation)
+        # Wait for user list content to render (may be loaded via HTMX)
+        page.locator('ul li, table tbody tr').first.wait_for(state="attached", timeout=5000)
+        user_list = page.locator('table, .user-list, .user-item, tbody tr, ul li')
+        user_count = user_list.count()
+        assert user_count > 0, "User list should display users/entries"
+        print(f"  ✅ User list displayed with {user_count} users/entries")
+
+        # Check for staff management features
+        staff_features = [
+            ('a:has-text("Create"), a:has-text("Add"), a:has-text("New User")', "user creation"),
+            ('input[type="search"], input[name="search"]', "user search"),
+            ('select, .filter', "filtering options"),
+            ('a[href*="/users/"], .user-link', "user detail links")
+        ]
+
+        for selector, feature_name in staff_features:
+            feature_count = page.locator(selector).count()
+            if feature_count > 0:
+                print(f"  ✅ {feature_name} available ({feature_count} found)")
             else:
-                print(f"  ⚠️ Redirected to {current_url} - may need alternative navigation")
+                print(f"  [i] {feature_name} not found")
 
         print("  ✅ Staff user management access verification completed")
 
@@ -152,7 +341,7 @@ def test_staff_user_list_display_and_filtering(page: Page) -> None:
             ('table tbody tr', 'table rows'),
             ('.user-item', 'user items'),
             ('div:has-text("@")', 'user entries with emails'),
-            ('a[href*="/users/"]', 'user detail links')
+            ('a[href*="/users/"]', 'user detail links'),
         ]
 
         total_users_found = 0
@@ -162,74 +351,27 @@ def test_staff_user_list_display_and_filtering(page: Page) -> None:
             if count > 0:
                 print(f"  ✅ Found {count} {description}")
 
-        if total_users_found > 0:
-            print(f"  ✅ User list displays {total_users_found} users")
-        else:
-            print("  ℹ️ No users displayed - may be empty system or loading issue")
+        assert total_users_found > 0, "User list should display users"
+        print(f"  ✅ User list displays {total_users_found} users")
 
         # Test search functionality
-        search_field = page.locator('input[type="search"], input[name="search"]')
-        if search_field.is_visible():
-            print("  🔍 Testing user search functionality")
-
-            # Search for test customer
-            search_field.fill("customer")
-
-            # Look for search button or auto-search
-            search_button = page.locator('button:has-text("Search"), input[type="submit"]')
-            if search_button.is_visible():
-                search_button.click()
-            else:
-                # Try pressing Enter for auto-search
-                search_field.press("Enter")
-
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(1000)
-
-            # Check if search results appear
-            search_results = page.locator('table tbody tr, .user-item').count()
-            if search_results > 0:
-                print(f"    ✅ Search returned {search_results} results")
-            else:
-                print("    ℹ️ No search results or search not yet implemented")
-
-            # Clear search to restore full list
-            search_field.clear()
-            search_field.press("Enter")
-            page.wait_for_timeout(500)
+        print("  🔍 Testing user search functionality")
+        search_results = _perform_user_search(page, "customer")
+        if search_results > 0:
+            print(f"    ✅ Search returned {search_results} results")
         else:
-            print("  ℹ️ Search functionality not found")
+            print("    [i] No search results or search field not present")
 
         # Test filtering options
         filter_elements = page.locator('select, .filter-option').count()
         if filter_elements > 0:
             print(f"  ✅ Found {filter_elements} filtering options")
-
-            # Test role-based filtering if available
-            role_filter = page.locator('select[name*="role"], select[name*="staff"]')
-            if role_filter.is_visible():
-                print("    🔍 Testing role-based filtering")
-
-                # Get current option count
-                options_before = page.locator('option').count()
-
-                # Select a filter option
-                if page.locator('option').count() > 1:
-                    page.select_option(role_filter.first, index=1)
-                    page.wait_for_load_state("networkidle")
-
-                    # Check if results changed
-                    filtered_results = page.locator('table tbody tr, .user-item').count()
-                    print(f"    ✅ Filtered results: {filtered_results} users")
-        else:
-            print("  ℹ️ Filtering options not found")
+            _verify_role_filter(page)
 
         # Test pagination if present
         pagination = page.locator('.pagination, a:has-text("Next"), a:has-text("Previous")')
         if pagination.count() > 0:
             print("  ✅ Pagination controls available")
-        else:
-            print("  ℹ️ No pagination (may not be needed)")
 
         print("  ✅ Staff user list display and filtering test completed")
 
@@ -264,7 +406,13 @@ def test_staff_user_detail_view_and_management(page: Page) -> None:
         navigate_to_platform_page(page, "/auth/users/")
         page.wait_for_load_state("networkidle")
 
-        # Find a user detail link to test
+        # Hard assertion: page loads and is correct
+        assert "/auth/users/" in page.url
+        user_heading = page.locator('h1:has-text("Users")')
+        assert user_heading.is_visible(), "User management heading should be visible"
+        print("  ✅ User management heading visible on user list page")
+
+        # Soft check: user detail links not yet implemented in the list view
         user_links = page.locator('a[href*="/auth/users/"]:not([href$="/auth/users/"])')
 
         if user_links.count() == 0:
@@ -272,6 +420,8 @@ def test_staff_user_detail_view_and_management(page: Page) -> None:
             user_links = page.locator('table a[href*="/users/"], .user-list a[href*="/users/"]')
 
         if user_links.count() > 0:
+            print("  ✅ User detail links available")
+
             # Click on first user detail link
             first_user_link = user_links.first
             first_user_link.click()
@@ -279,57 +429,58 @@ def test_staff_user_detail_view_and_management(page: Page) -> None:
 
             # Verify we're on a user detail page
             current_url = page.url
-            if "/auth/users/" in current_url and current_url.split("/")[-2].isdigit():
-                print("  ✅ Successfully navigated to user detail page")
+            assert "/auth/users/" in current_url and current_url.split("/")[-2].isdigit(), \
+                f"Should navigate to user detail page, got: {current_url}"
+            print("  ✅ Successfully navigated to user detail page")
 
-                # Check for user detail information
-                detail_sections = [
-                    ('h1', 'user heading'),
-                    ('div:has-text("Email"), td:has-text("@")', 'email information'),
-                    ('div:has-text("Name"), td:has-text("Name")', 'name information'),
-                    ('div:has-text("Role"), div:has-text("Staff")', 'role information'),
-                    ('div:has-text("Joined"), div:has-text("Created")', 'account creation info'),
-                    ('div:has-text("Login"), div:has-text("Last")', 'login activity')
-                ]
+            # Check for user detail information
+            detail_sections = [
+                ('h1', 'user heading'),
+                ('div:has-text("Email"), td:has-text("@")', 'email information'),
+                ('div:has-text("Name"), td:has-text("Name")', 'name information'),
+                ('div:has-text("Role"), div:has-text("Staff")', 'role information'),
+                ('div:has-text("Joined"), div:has-text("Created")', 'account creation info'),
+                ('div:has-text("Login"), div:has-text("Last")', 'login activity')
+            ]
 
-                for selector, description in detail_sections:
-                    if page.locator(selector).count() > 0:
-                        print(f"    ✅ {description} displayed")
-
-                # Check for management actions
-                management_actions = [
-                    ('a:has-text("Edit"), button:has-text("Edit")', 'edit user'),
-                    ('a:has-text("Delete"), button:has-text("Delete")', 'delete user'),
-                    ('a:has-text("Disable"), button:has-text("Deactivate")', 'disable user'),
-                    ('a:has-text("Permissions"), a:has-text("Role")', 'permission management'),
-                    ('a:has-text("Reset"), a:has-text("Password")', 'password reset')
-                ]
-
-                available_actions = 0
-                for selector, description in management_actions:
-                    if page.locator(selector).count() > 0:
-                        print(f"    ✅ {description} action available")
-                        available_actions += 1
-
-                if available_actions > 0:
-                    print(f"    📊 {available_actions} management actions available")
+            for selector, description in detail_sections:
+                if page.locator(selector).count() > 0:
+                    print(f"    ✅ {description} displayed")
                 else:
-                    print("    ℹ️ User management actions may not be implemented yet")
+                    print(f"    [i] {description} not found on detail page")
 
-                # Check for customer membership information
-                membership_info = page.locator('div:has-text("Customer"), div:has-text("Member"), table')
-                if membership_info.count() > 0:
-                    print("    ✅ Customer membership information displayed")
+            # Check for management actions (OPTIONAL - may depend on permissions)
+            management_actions = [
+                ('a:has-text("Edit"), button:has-text("Edit")', 'edit user'),
+                ('a:has-text("Delete"), button:has-text("Delete")', 'delete user'),
+                ('a:has-text("Disable"), button:has-text("Deactivate")', 'disable user'),
+                ('a:has-text("Permissions"), a:has-text("Role")', 'permission management'),
+                ('a:has-text("Reset"), a:has-text("Password")', 'password reset')
+            ]
 
-                # Check for user activity/login history
-                activity_info = page.locator('table:has-text("Login"), div:has-text("Activity"), .history')
-                if activity_info.count() > 0:
-                    print("    ✅ User activity/login history available")
+            available_actions = 0
+            for selector, description in management_actions:
+                if page.locator(selector).count() > 0:
+                    print(f"    ✅ {description} action available")
+                    available_actions += 1
 
+            if available_actions > 0:
+                print(f"    📊 {available_actions} management actions available")
             else:
-                print(f"  ⚠️ User detail page navigation unclear - current URL: {current_url}")
+                print("    [i] User management actions may not be implemented yet")
+
+            # Check for customer membership information
+            membership_info = page.locator('div:has-text("Customer"), div:has-text("Member"), table')
+            if membership_info.count() > 0:
+                print("    ✅ Customer membership information displayed")
+
+            # Check for user activity/login history
+            activity_info = page.locator('table:has-text("Login"), div:has-text("Activity"), .history')
+            if activity_info.count() > 0:
+                print("    ✅ User activity/login history available")
         else:
-            print("  ℹ️ No user detail links found - may need to create test users")
+            # Soft check: user detail links not yet implemented in the list view
+            print("  [i] User detail links not yet implemented in list view")
 
         print("  ✅ Staff user detail view and management test completed")
 
@@ -361,64 +512,60 @@ def test_staff_user_creation_workflow(page: Page) -> None:
         # Verify staff can access user list
         print("  👥 Testing staff user list access")
         user_list_heading = page.locator('h1:has-text("Users")')
-        if user_list_heading.is_visible():
-            print("  ✅ Staff user list accessible")
+        assert user_list_heading.is_visible(), "Staff user list heading should be visible"
+        print("  ✅ Staff user list accessible")
 
-            # Check for user data display
-            user_entries = page.locator('ul li, table tr, .user-item').count()
-            if user_entries > 0:
-                print(f"  ✅ Found {user_entries} user entries in system")
-            else:
-                print("  ℹ️ No users displayed - may be empty or different layout")
-        else:
-            print("  ⚠️ User list heading not found")
+        # Check for user data display
+        # Wait for user list content to render
+        page.locator('ul li, table tbody tr').first.wait_for(state="attached", timeout=5000)
+        user_entries = page.locator('ul li, table tr, .user-item').count()
+        assert user_entries > 0, "User list should display user entries"
+        print(f"  ✅ Found {user_entries} user entries in system")
 
         # Test staff can access registration workflow (since PRAHO uses registration)
         print("  📝 Testing registration workflow access")
         navigate_to_platform_page(page, REGISTER_URL)
         page.wait_for_load_state("networkidle")
 
-        # Verify registration form is accessible
-        if "/register" in page.url:
-            print("  ✅ Registration page accessible to staff")
+        # Hard assertion: registration page is accessible
+        assert "/register" in page.url, "Registration page should be accessible to staff"
+        print("  ✅ Registration page accessible to staff")
 
-            # Check for registration form elements
-            registration_form = page.locator('form')
-            if registration_form.is_visible():
-                print("  ✅ Registration form displayed")
+        # Soft check: registration form may not be visible (e.g. if already logged in)
+        registration_form = page.locator('form')
+        if registration_form.is_visible():
+            print("  ✅ Registration form displayed")
 
-                # Check for expected form fields
-                form_fields = [
-                    ('input[name="email"]', "Email field"),
-                    ('input[name="first_name"]', "First name field"),
-                    ('input[name="last_name"]', "Last name field"),
-                    ('input[name="password1"], input[name="password"]', "Password field"),
-                ]
+            # Soft check: form fields may vary by implementation
+            form_fields = [
+                ('input[name="email"]', "Email field"),
+                ('input[name="first_name"]', "First name field"),
+                ('input[name="last_name"]', "Last name field"),
+                ('input[name="password1"], input[name="password"]', "Password field"),
+            ]
 
-                for selector, field_name in form_fields:
-                    if page.locator(selector).is_visible():
-                        print(f"    ✅ {field_name} available")
-                    else:
-                        print(f"    ℹ️ {field_name} not found")
-
-                # Check submit button
-                submit_button = page.locator('button[type="submit"], input[type="submit"]')
-                if submit_button.is_visible():
-                    print("    ✅ Registration form ready for submission")
+            for selector, field_name in form_fields:
+                if page.locator(selector).is_visible():
+                    print(f"    ✅ {field_name} available")
                 else:
-                    print("    ⚠️ Submit button not found")
+                    print(f"    [i] {field_name} not found on registration form")
+
+            # Soft check: submit button
+            submit_button = page.locator('button[type="submit"], input[type="submit"]')
+            if submit_button.is_visible():
+                print("    ✅ Registration form ready for submission")
             else:
-                print("  ⚠️ Registration form not found")
+                print("    [i] Submit button not found on registration form")
         else:
-            print("  ⚠️ Could not access registration page")
+            print("  [i] Registration form not visible (may redirect when already authenticated)")
 
         # Return to user management
         print("  🔙 Returning to user management")
         navigate_to_platform_page(page, "/auth/users/")
         page.wait_for_load_state("networkidle")
 
-        if "/users/" in page.url:
-            print("  ✅ Successfully returned to user management")
+        assert "/users/" in page.url, "Should successfully return to user management"
+        print("  ✅ Successfully returned to user management")
 
         print("  ✅ Staff user registration and management workflow test completed")
 
@@ -454,119 +601,31 @@ def test_staff_user_search_and_bulk_operations(page: Page) -> None:
 
         # Test advanced search functionality
         print("  🔍 Testing advanced user search")
-
-        search_tests = [
+        search_terms = [
             ('customer', 'customer users'),
             ('admin', 'admin users'),
             ('@', 'users by email pattern'),
-            ('2024', 'users by date pattern')
+            ('2024', 'users by date pattern'),
         ]
-
-        search_field = page.locator('input[type="search"], input[name="search"]')
-        if search_field.is_visible():
-            for search_term, description in search_tests:
-                print(f"    🔍 Searching for {description}")
-
-                search_field.clear()
-                search_field.fill(search_term)
-                search_field.press("Enter")
-                page.wait_for_load_state("networkidle")
-                page.wait_for_timeout(500)
-
-                # Check search results
-                results = page.locator('table tbody tr, .user-item').count()
-                if results > 0:
-                    print(f"      ✅ Found {results} results for '{search_term}'")
-                else:
-                    print(f"      ℹ️ No results for '{search_term}'")
-
-                # Clear search between tests
-                search_field.clear()
-                search_field.press("Enter")
-                page.wait_for_timeout(200)
-        else:
-            print("  ℹ️ Search functionality not available")
+        for search_term, description in search_terms:
+            print(f"    🔍 Searching for {description}")
+            results = _perform_user_search(page, search_term)
+            if results > 0:
+                print(f"      ✅ Found {results} results for '{search_term}'")
+            else:
+                print(f"      [i] No results for '{search_term}'")
 
         # Test filtering options
         print("  📊 Testing user filtering options")
-
-        filter_options = [
-            ('select[name*="role"]', 'role filter'),
-            ('select[name*="staff"]', 'staff filter'),
-            ('select[name*="status"]', 'status filter'),
-            ('select[name*="customer"]', 'customer filter')
-        ]
-
-        for selector, filter_name in filter_options:
-            filter_element = page.locator(selector)
-            if filter_element.is_visible():
-                print(f"    ✅ {filter_name} available")
-
-                # Test filter functionality
-                options = page.locator(f'{selector} option').count()
-                if options > 1:
-                    # Select second option (first is usually "All")
-                    page.select_option(selector, index=1)
-                    page.wait_for_load_state("networkidle")
-                    page.wait_for_timeout(500)
-
-                    filtered_results = page.locator('table tbody tr, .user-item').count()
-                    print(f"      ✅ {filter_name} returned {filtered_results} results")
-
-                    # Reset filter
-                    page.select_option(selector, index=0)
-                    page.wait_for_timeout(200)
+        _verify_role_filter(page)
 
         # Test bulk operations
         print("  📋 Testing bulk user operations")
-
-        # Look for bulk selection checkboxes
-        bulk_checkboxes = page.locator('input[type="checkbox"][name*="select"], .bulk-select')
-        if bulk_checkboxes.count() > 0:
-            print(f"    ✅ Found {bulk_checkboxes.count()} bulk selection options")
-
-            # Select a few users
-            for i in range(min(2, bulk_checkboxes.count())):
-                bulk_checkboxes.nth(i).check()
-
-            print("    ✅ Selected users for bulk operations")
-
-            # Look for bulk action buttons
-            bulk_actions = [
-                ('button:has-text("Export"), a:has-text("Export")', 'export users'),
-                ('button:has-text("Delete"), a:has-text("Delete")', 'bulk delete'),
-                ('select[name*="action"]', 'action dropdown'),
-                ('button:has-text("Apply"), button:has-text("Execute")', 'execute actions')
-            ]
-
-            available_bulk_actions = 0
-            for selector, action_name in bulk_actions:
-                if page.locator(selector).count() > 0:
-                    print(f"    ✅ {action_name} available")
-                    available_bulk_actions += 1
-
-            if available_bulk_actions > 0:
-                print(f"    📊 {available_bulk_actions} bulk actions available")
-            else:
-                print("    ℹ️ Bulk actions may not be implemented yet")
-        else:
-            print("  ℹ️ Bulk selection not available")
+        _verify_bulk_operations(page)
 
         # Test sorting functionality
         print("  📊 Testing user list sorting")
-
-        sortable_headers = page.locator('th a, th[data-sort], .sortable')
-        if sortable_headers.count() > 0:
-            print(f"    ✅ Found {sortable_headers.count()} sortable columns")
-
-            # Test sorting on first sortable column
-            sortable_headers.first.click()
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(500)
-
-            print("    ✅ Column sorting functionality tested")
-        else:
-            print("  ℹ️ Column sorting not available")
+        _verify_sorting(page)
 
         print("  ✅ Staff user search and bulk operations test completed")
 
@@ -600,102 +659,37 @@ def test_staff_customer_user_assignment_and_management(page: Page) -> None:
         navigate_to_platform_page(page, "/auth/users/")
         page.wait_for_load_state("networkidle")
 
-        # Find a user to test customer assignment
-        user_links = page.locator('a[href*="/auth/users/"]:not([href$="/auth/users/"])')
+        # Hard assertion: page loads and is correct
+        assert "/auth/users/" in page.url, "Staff should be on user management page"
+        user_heading = page.locator('h1:has-text("Users")')
+        assert user_heading.is_visible(), "User management heading should be visible"
+        print("  ✅ User management page loaded successfully")
 
+        # Navigate into a user detail page if links exist, then probe customer management
+        user_links = page.locator('a[href*="/auth/users/"]:not([href$="/auth/users/"])')
         if user_links.count() > 0:
-            # Click on first user to test customer management
             user_links.first.click()
             page.wait_for_load_state("networkidle")
+            assert "/auth/users/" in page.url, "Should navigate to user detail page"
+            print("  ✅ Accessing user detail for customer management testing")
+            _verify_customer_assignment_from_detail(page)
 
-            if "/auth/users/" in page.url:
-                print("  ✅ Accessing user detail for customer management testing")
-
-                # Look for customer membership management
-                customer_sections = [
-                    ('div:has-text("Customer"), section:has-text("Customer")', 'customer section'),
-                    ('div:has-text("Member"), div:has-text("Membership")', 'membership section'),
-                    ('table:has-text("Organization"), .customer-list', 'customer organization list'),
-                    ('a:has-text("Assign"), button:has-text("Add Customer")', 'customer assignment actions')
-                ]
-
-                customer_management_features = 0
-                for selector, feature_name in customer_sections:
-                    if page.locator(selector).count() > 0:
-                        print(f"    ✅ {feature_name} available")
-                        customer_management_features += 1
-
-                if customer_management_features > 0:
-                    print(f"    📊 {customer_management_features} customer management features found")
-
-                    # Test customer assignment if available
-                    assign_button = page.locator('a:has-text("Assign"), button:has-text("Add"), a:has-text("Customer")')
-                    if assign_button.count() > 0:
-                        print("    🔗 Testing customer assignment functionality")
-
-                        assign_button.first.click()
-                        page.wait_for_load_state("networkidle")
-
-                        # Look for customer selection form
-                        customer_form = page.locator('form, select[name*="customer"], .customer-select')
-                        if customer_form.count() > 0:
-                            print("      ✅ Customer assignment form available")
-
-                            # Check for customer selection options
-                            customer_select = page.locator('select[name*="customer"]')
-                            if customer_select.is_visible():
-                                options = page.locator('select[name*="customer"] option').count()
-                                if options > 1:
-                                    print(f"      ✅ {options} customer options available")
-                                else:
-                                    print("      ℹ️ Limited customer options (may need test data)")
-                        else:
-                            print("      ℹ️ Customer assignment form not found")
-                else:
-                    print("  ℹ️ Customer management features not found in user detail")
-
-                # Test customer filtering from user list
-                print("  🔍 Testing customer-based user filtering")
-                navigate_to_platform_page(page, "/auth/users/")
-                page.wait_for_load_state("networkidle")
-
-                # Look for customer filter
-                customer_filter = page.locator('select[name*="customer"], .customer-filter')
-                if customer_filter.is_visible():
-                    print("    ✅ Customer-based filtering available")
-
-                    customer_options = page.locator('select[name*="customer"] option').count()
-                    if customer_options > 1:
-                        # Test filtering by customer
-                        page.select_option('select[name*="customer"]', index=1)
-                        page.wait_for_load_state("networkidle")
-
-                        filtered_users = page.locator('table tbody tr, .user-item').count()
-                        print(f"    ✅ Customer filter returned {filtered_users} users")
-                else:
-                    print("    ℹ️ Customer-based filtering not available")
-            else:
-                print("  ⚠️ Could not access user detail page")
+            # Test customer filtering from the user list
+            print("  🔍 Testing customer-based user filtering")
+            _verify_customer_filter_from_list(page)
         else:
-            print("  ℹ️ No user detail links available for testing")
+            print("  [i] User detail links not yet implemented in list view — skipping customer assignment detail tests")
 
         # Test access to customer management section
         print("  🏢 Testing integration with customer management")
-
         navigate_to_platform_page(page, "/customers/")
         page.wait_for_load_state("networkidle")
 
         if "/customers/" in page.url:
             print("    ✅ Staff can access customer management")
-
-            # Look for user management from customer perspective
             customer_user_links = page.locator('a:has-text("User"), a:has-text("Member"), .user-link')
             if customer_user_links.count() > 0:
                 print("    ✅ Customer-to-user management integration available")
-            else:
-                print("    ℹ️ Customer-to-user links not found")
-        else:
-            print("    ℹ️ Customer management not accessible or different URL")
 
         print("  ✅ Staff customer user assignment and management test completed")
 
@@ -734,40 +728,19 @@ def test_staff_user_management_mobile_responsiveness(page: Page) -> None:
         with MobileTestContext(page, 'mobile_medium') as mobile:
             print("    📱 Testing staff user management on mobile viewport")
 
-            # Reload page to ensure mobile layout
-            page.reload()
-            page.wait_for_load_state("networkidle")
-
-            # Test mobile navigation to user management
-            mobile_nav_count = mobile.test_mobile_navigation()
-            print(f"      Mobile navigation elements: {mobile_nav_count}")
-
-            # Check responsive layout issues
-            layout_issues = mobile.check_responsive_layout()
-            critical_issues = [issue for issue in layout_issues
-                             if any(keyword in issue.lower()
-                                  for keyword in ['horizontal scroll', 'small touch'])]
-
-            if critical_issues:
-                print(f"      ⚠️ Critical mobile layout issues: {len(critical_issues)}")
-                for issue in critical_issues[:3]:  # Show first 3 issues
-                    print(f"        - {issue}")
-            else:
-                print("      ✅ No critical mobile layout issues found")
-
-            # Test touch interactions on key elements
-            touch_success = mobile.test_touch_interactions()
-            print(f"      Touch interactions: {'✅ Working' if touch_success else '⚠️ Limited'}")
+            run_standard_mobile_test(page, mobile, context_label="staff user management")
 
             # Verify key mobile elements are accessible
             user_list_heading = page.locator('h1:has-text("User"), h1:has-text("Users")').first
-            if user_list_heading.is_visible():
-                print("      ✅ User management heading visible on mobile")
+            assert user_list_heading.is_visible(), "User management heading should be visible on mobile"
+            print("      ✅ User management heading visible on mobile")
 
-            # Test mobile-friendly user list
-            user_entries = page.locator('table tbody tr, .user-item, .user-card').count()
-            if user_entries > 0:
-                print(f"      ✅ {user_entries} user entries accessible on mobile")
+            # Test mobile-friendly user list (includes ul li for bare-bones list view)
+            # Wait for user list content to render
+            page.locator('ul li, table tbody tr').first.wait_for(state="attached", timeout=5000)
+            user_entries = page.locator('table tbody tr, .user-item, .user-card, ul li').count()
+            assert user_entries > 0, "User entries should be accessible on mobile"
+            print(f"      ✅ {user_entries} user entries accessible on mobile")
 
             # Test mobile search functionality
             search_field = page.locator('input[type="search"], input[name="search"]')
@@ -777,7 +750,7 @@ def test_staff_user_management_mobile_responsiveness(page: Page) -> None:
                 # Test mobile search interaction
                 search_field.fill("test")
                 search_field.press("Enter")
-                page.wait_for_timeout(500)
+                page.wait_for_load_state("domcontentloaded")
                 print("      ✅ Mobile search interaction works")
                 search_field.clear()
 
@@ -792,10 +765,8 @@ def test_staff_user_management_mobile_responsiveness(page: Page) -> None:
 
                 if "/auth/users/" in page.url:
                     user_detail_content = page.locator('h1, .user-detail, form').count()
-                    if user_detail_content > 0:
-                        print("      ✅ User detail page loads correctly on mobile")
-                    else:
-                        print("      ⚠️ User detail page content issues on mobile")
+                    assert user_detail_content > 0, "User detail page should have content on mobile"
+                    print("      ✅ User detail page loads correctly on mobile")
 
         print("  ✅ Staff user management mobile responsiveness testing completed")
 
@@ -829,7 +800,6 @@ def test_staff_complete_user_management_workflow(page: Page) -> None:
         ensure_fresh_platform_session(page)
         assert login_platform_user(page)
 
-        # Verify dashboard access
         assert navigate_to_platform_page(page, "/")
         staff_dashboard = page.locator('h1, h2, .dashboard, .staff').count()
         assert staff_dashboard > 0, "Staff should see dashboard content"
@@ -840,113 +810,40 @@ def test_staff_complete_user_management_workflow(page: Page) -> None:
         navigate_to_platform_page(page, "/auth/users/")
         page.wait_for_load_state("networkidle")
 
-        # Verify user management page
-        if "/auth/users/" in page.url:
-            user_mgmt_elements = page.locator('h1, table, .user-list, form').count()
-            assert user_mgmt_elements > 0, "User management page should have content"
-            print("      ✅ User management system accessible")
+        assert "/auth/users/" in page.url, "Should be on user management page"
+        user_mgmt_elements = page.locator('h1, table, .user-list, form').count()
+        assert user_mgmt_elements > 0, "User management page should have content"
+        print("      ✅ User management system accessible")
 
-            # Step 3: User list analysis
-            print("    Step 3: User list viewing and analysis")
+        # Step 3: User list analysis
+        print("    Step 3: User list viewing and analysis")
+        page.locator('ul li, table tbody tr').first.wait_for(state="attached", timeout=5000)
+        total_users = page.locator('table tbody tr, .user-item, ul li').count()
+        assert total_users > 0, "User list should display users"
+        print(f"      ✅ User list displays {total_users} users")
 
-            # Count total users
-            total_users = page.locator('table tbody tr, .user-item').count()
-            if total_users > 0:
-                print(f"      ✅ User list displays {total_users} users")
+        search_results = _perform_user_search(page, "customer")
+        print(f"      ✅ Search returned {search_results} results")
 
-                # Test search functionality if available
-                search_field = page.locator('input[name="search"], input[type="search"]')
-                if search_field.is_visible():
-                    search_field.fill("customer")
-                    search_field.press("Enter")
-                    page.wait_for_load_state("networkidle")
+        # Step 4: User detail examination
+        print("    Step 4: User detail examination")
+        _examine_user_detail_page(page)
 
-                    search_results = page.locator('table tbody tr, .user-item').count()
-                    print(f"      ✅ Search returned {search_results} results")
-
-                    # Clear search
-                    search_field.clear()
-                    search_field.press("Enter")
-                    page.wait_for_timeout(500)
-            else:
-                print("      ℹ️ No users in system or different layout")
-
-            # Step 4: User detail examination
-            print("    Step 4: User detail examination")
-
-            user_detail_links = page.locator('a[href*="/auth/users/"]:not([href$="/auth/users/"])')
-            if user_detail_links.count() > 0:
-                user_detail_links.first.click()
-                page.wait_for_load_state("networkidle")
-
-                if "/auth/users/" in page.url:
-                    print("      ✅ User detail page accessible")
-
-                    # Examine user information
-                    user_info_elements = [
-                        ('div:has-text("Email"), td:has-text("@")', 'email'),
-                        ('div:has-text("Name"), td', 'name'),
-                        ('div:has-text("Role"), div:has-text("Staff")', 'role'),
-                        ('div:has-text("Customer"), div:has-text("Member")', 'customer info'),
-                        ('div:has-text("Login"), div:has-text("Activity")', 'activity')
-                    ]
-
-                    for selector, info_type in user_info_elements:
-                        if page.locator(selector).count() > 0:
-                            print(f"        ✅ {info_type} information displayed")
-
-                    # Check for management actions
-                    mgmt_actions = page.locator('a:has-text("Edit"), button:has-text("Edit"), a:has-text("Delete")').count()
-                    if mgmt_actions > 0:
-                        print(f"        ✅ {mgmt_actions} management actions available")
-
-                # Navigate back to user list
-                navigate_to_platform_page(page, "/auth/users/")
-                page.wait_for_load_state("networkidle")
-
-            # Step 5: User creation workflow test
-            print("    Step 5: User creation workflow exploration")
-
-            # Test registration page access since PRAHO uses registration not admin creation
-            navigate_to_platform_page(page, REGISTER_URL)
-            page.wait_for_load_state("networkidle")
-
-            if "/register" in page.url:
-                print("      ✅ User registration page accessible to staff")
-
-                # Check form fields
-                registration_form = page.locator('form')
-                if registration_form.is_visible():
-                    form_fields = page.locator('input, select, textarea').count()
-                    if form_fields > 0:
-                        print(f"      ✅ Registration form has {form_fields} fields")
-
-                    # Check required fields
-                    required_fields = ['email', 'first_name', 'last_name', 'password']
-                    for field_name in required_fields:
-                        field = page.locator(f'input[name="{field_name}"], input[name="{field_name}1"]')
-                        if field.is_visible():
-                            print(f"        ✅ {field_name} field available")
-                else:
-                    print("      ℹ️ Registration form not visible")
-            else:
-                print("      ℹ️ Registration page not accessible to staff")
-        else:
-            print("      ⚠️ User management page not accessible")
+        # Step 5: User creation workflow test
+        print("    Step 5: User creation workflow exploration")
+        _verify_registration_form_fields(page)
 
         # Step 6: Cross-system integration
         print("    Step 6: Cross-system integration validation")
-
-        # Test integration with customer management
         navigate_to_platform_page(page, "/customers/")
         page.wait_for_load_state("networkidle")
 
-        if "/customers/" in page.url:
-            print("      ✅ Customer management system accessible")
+        assert "/customers/" in page.url, "Customer management system should be accessible"
+        print("      ✅ Customer management system accessible")
 
-            customer_user_integration = page.locator('a:has-text("User"), a:has-text("Member")').count()
-            if customer_user_integration > 0:
-                print("      ✅ Customer-user integration available")
+        customer_user_integration = page.locator('a:has-text("User"), a:has-text("Member")').count()
+        if customer_user_integration > 0:
+            print("      ✅ Customer-user integration available")
 
         print("  ✅ Complete staff user management workflow successful")
 
@@ -995,7 +892,7 @@ def test_staff_user_management_responsive_breakpoints(page: Page) -> None:
                     print(f"      ❌ Core user management elements missing in {context}")
                     return False
 
-            except Exception as e:
+            except (TimeoutError, PlaywrightError) as e:
                 print(f"      ❌ User management test failed in {context}: {str(e)[:50]}")
                 return False
 
@@ -1003,12 +900,6 @@ def test_staff_user_management_responsive_breakpoints(page: Page) -> None:
         results = run_responsive_breakpoints_test(page, test_staff_user_management_functionality)
 
         # Verify all breakpoints pass
-        desktop_pass = results.get('desktop', False)
-        tablet_pass = results.get('tablet_landscape', False)
-        mobile_pass = results.get('mobile', False)
-
-        assert desktop_pass, "Staff user management should work on desktop viewport"
-        assert tablet_pass, "Staff user management should work on tablet viewport"
-        assert mobile_pass, "Staff user management should work on mobile viewport"
+        assert_responsive_results(results, "Staff user management")
 
         print("  ✅ Staff user management validated across all responsive breakpoints")

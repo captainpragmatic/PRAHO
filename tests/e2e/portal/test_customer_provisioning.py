@@ -25,11 +25,11 @@ Created: 2025-08-29
 Framework: Playwright + pytest
 """
 
-import pytest
 from playwright.sync_api import Page
 
 # Import shared utilities
 from tests.e2e.utils import (
+    BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
     ComprehensivePageMonitor,
@@ -59,7 +59,7 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
 
         # Access services as customer
         print("  👁️ Accessing services as customer")
-        page.goto("http://localhost:8701/services/")
+        page.goto(f"{BASE_URL}/services/")
         page.wait_for_load_state("networkidle")
 
         # Customer should be able to see the services page
@@ -72,12 +72,16 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
         assert services_heading.is_visible(), "Services heading should be visible to customers"
         print("    ✅ Services page displays correctly for customer")
 
-        # Check that management buttons are NOT available to customers
-        new_service_btn = page.locator('a[href*="/create/"], a:has-text("New Service"), a:has-text("➕")')
-        if new_service_btn.count() == 0:
-            print("    ✅ New Service button correctly hidden from customers")
+        # Customers CAN see "Order New Service" button (it's for ordering, not management)
+        new_service_btn = page.locator('a[href*="/create/"], a:has-text("New Service"), a:has-text("➕")')  # noqa: RUF001 — locator matches actual UI emoji
+        if new_service_btn.count() > 0:
+            print("    ✅ Order New Service button available for customers (by design)")
         else:
-            print("    ⚠️ WARNING: New Service button visible to customers")
+            print("    [i] No order button found")
+        # Verify customer CANNOT access management actions (edit, delete, suspend)
+        mgmt_actions = page.locator('a:has-text("Edit"), a:has-text("Delete"), button:has-text("Suspend")')
+        assert mgmt_actions.count() == 0, "Management actions should be hidden from customers"
+        print("    ✅ Management actions correctly hidden from customers")
 
         # Customer should see status filter tabs (these are for viewing only)
         status_tabs = page.locator('a:has-text("✅"), a:has-text("⏸️"), a:has-text("⏳")')
@@ -93,7 +97,7 @@ def test_customer_cannot_create_services(page: Page) -> None:
 
     Expected: Access denied with appropriate messaging.
     """
-    print("➕ Testing customer cannot create services")
+    print("+ Testing customer cannot create services")
 
     with ComprehensivePageMonitor(page, "customer service creation access denial",
                                  check_console=False,  # Expect access denied redirects
@@ -108,7 +112,7 @@ def test_customer_cannot_create_services(page: Page) -> None:
 
         # Attempt to access service creation directly
         print("  🚨 Attempting direct access to /services/create/")
-        page.goto("http://localhost:8701/services/create/")
+        page.goto(f"{BASE_URL}/services/create/")
         page.wait_for_load_state("networkidle")
 
         # Should be blocked: either redirected away OR page shows 404/no creation form
@@ -120,7 +124,7 @@ def test_customer_cannot_create_services(page: Page) -> None:
 
         if has_creation_form:
             print("    ❌ SECURITY ISSUE: Customer can access service creation form")
-            assert False, "Customer should not be able to access service creation"
+            raise AssertionError("Customer should not be able to access service creation")
         else:
             print("    ✅ Customer correctly blocked from service creation (no form available)")
 
@@ -164,7 +168,7 @@ def test_customer_cannot_access_service_management_actions(page: Page) -> None:
         blocked_actions = 0
         for url, action_name in management_actions:
             print(f"  🚨 Testing {action_name} access control")
-            page.goto(f"http://localhost:8701{url}")
+            page.goto(f"{BASE_URL}{url}")
             page.wait_for_load_state("networkidle")
 
             # Check if action is blocked: redirected away, 404, or no management form present
@@ -210,7 +214,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
 
         # Test servers section access (should be blocked)
         print("  🖥️ Testing servers section access control")
-        page.goto("http://localhost:8701/services/")
+        page.goto(f"{BASE_URL}/services/")
         page.wait_for_load_state("networkidle")
 
         servers_url = page.url
@@ -219,7 +223,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
 
         # Test plans section access (should be allowed - customers need to see available plans)
         print("  📦 Testing plans section access (should be allowed)")
-        page.goto("http://localhost:8701/services/plans/")
+        page.goto(f"{BASE_URL}/services/plans/")
         page.wait_for_load_state("networkidle")
 
         plans_url = page.url
@@ -234,7 +238,7 @@ def test_customer_server_access_blocked_but_plans_allowed(page: Page) -> None:
                 print("    ⚠️ WARNING: Plan management buttons visible to customer")
         else:
             print("    ❌ Customer unexpectedly blocked from viewing hosting plans")
-            assert False, "Customers should be able to view available hosting plans"
+            raise AssertionError("Customers should be able to view available hosting plans")
 
 
 def test_customer_provisioning_navigation_not_available(page: Page) -> None:
@@ -257,7 +261,7 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
         # Go to dashboard/main page
-        page.goto("http://localhost:8701/dashboard/")
+        page.goto(f"{BASE_URL}/dashboard/")
         page.wait_for_load_state("networkidle")
 
         # Portal does not have Business dropdown - verify it's absent
@@ -267,10 +271,8 @@ def test_customer_provisioning_navigation_not_available(page: Page) -> None:
 
         # Check for any direct provisioning links on page
         direct_provisioning_links = page.locator('a[href*="/provisioning/"]')
-        if direct_provisioning_links.count() == 0:
-            print("  ✅ No direct provisioning links found in customer interface")
-        else:
-            print("  ⚠️ WARNING: Direct provisioning links found in customer interface")
+        assert direct_provisioning_links.count() == 0, "Provisioning links should not appear in customer interface"
+        print("  ✅ No direct provisioning links found in customer interface")
 
 
 def test_customer_provisioning_comprehensive_security_validation(page: Page) -> None:
@@ -310,7 +312,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
 
         correct_count = 0
         for test_url, should_allow, description in test_urls:
-            page.goto(f"http://localhost:8701{test_url}")
+            page.goto(f"{BASE_URL}{test_url}")
             page.wait_for_load_state("networkidle")
 
             current_url = page.url
@@ -342,12 +344,12 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
             print("    ✅ Provisioning access controls properly configured")
         else:
             print("    ❌ SECURITY CONCERN: Incorrect provisioning access controls")
-            assert False, "Provisioning access controls not properly configured"
+            raise AssertionError("Provisioning access controls not properly configured")
 
         print("  🔍 Phase 2: Error message validation")
 
         # Test that we get proper error messaging
-        page.goto("http://localhost:8701/services/")
+        page.goto(f"{BASE_URL}/services/")
         page.wait_for_load_state("networkidle")
 
         # Look for appropriate security messaging
@@ -361,7 +363,7 @@ def test_customer_provisioning_comprehensive_security_validation(page: Page) -> 
         if security_messages.count() > 0:
             print("    ✅ Appropriate security messaging displayed")
         else:
-            print("    ℹ️ Security redirect occurred without visible messaging")
+            print("    [i] Security redirect occurred without visible messaging")
 
         print("  🔍 Phase 3: Final security boundary validation")
 
@@ -400,37 +402,31 @@ def test_customer_provisioning_security_mobile_compatibility(page: Page) -> None
 
         # Test on mobile viewport
         page.set_viewport_size({"width": 375, "height": 667})
-        page.wait_for_timeout(500)  # Allow layout to adjust
+        page.wait_for_load_state("domcontentloaded")
 
         print("  📱 Testing provisioning access on mobile viewport")
 
         # Test services access on mobile (should follow same rules as desktop)
-        page.goto("http://localhost:8701/services/")
+        page.goto(f"{BASE_URL}/services/")
         page.wait_for_load_state("networkidle")
 
         # Customer should be able to view services (same as desktop)
         current_url = page.url
-        if "/services/" in current_url:
-            print("    ✅ Customer can view services on mobile (correct - same as desktop)")
+        assert "/services/" in current_url, "Customer should be able to view services on mobile"
+        print("    ✅ Customer can view services on mobile (correct - same as desktop)")
 
-            # Test that management actions are still blocked on mobile
-            page.goto("http://localhost:8701/services/create/")
-            page.wait_for_load_state("networkidle")
+        # Test that management actions are still blocked on mobile
+        page.goto(f"{BASE_URL}/services/create/")
+        page.wait_for_load_state("networkidle")
 
-            create_url = page.url
-            page_content = page.content().lower()
-            has_creation_form = page.locator('form:has(input[name="domain"]), form:has(select[name="plan_id"])').count() > 0
-            is_404 = "not found" in page_content or "404" in page_content
-            is_redirected = "/create/" not in create_url
+        create_url = page.url
+        page_content = page.content().lower()
+        has_creation_form = page.locator('form:has(input[name="domain"]), form:has(select[name="plan_id"])').count() > 0
+        is_404 = "not found" in page_content or "404" in page_content
+        is_redirected = "/create/" not in create_url
 
-            if is_redirected or is_404 or not has_creation_form:
-                print("    ✅ Service creation properly blocked on mobile")
-            else:
-                print("    ❌ SECURITY ISSUE: Service creation accessible on mobile")
-                assert False, "Service creation should be blocked on mobile"
-        else:
-            print("    ❌ Customer unexpectedly blocked from viewing services on mobile")
-            assert False, "Customers should be able to view their services on mobile"
+        assert is_redirected or is_404 or not has_creation_form, "Service creation should be blocked on mobile"
+        print("    ✅ Service creation properly blocked on mobile")
 
         # Restore desktop viewport
         page.set_viewport_size({"width": 1280, "height": 720})

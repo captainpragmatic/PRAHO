@@ -18,7 +18,7 @@ import re
 import secrets
 import string
 
-import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect
 
 # Import shared utilities
@@ -28,24 +28,14 @@ from tests.e2e.utils import (
     CUSTOMER_PASSWORD,
     LOGIN_URL,
     REGISTER_URL,
-    SUPERUSER_EMAIL,
-    SUPERUSER_PASSWORD,
     ComprehensivePageMonitor,
     MobileTestContext,
-    count_elements,
+    assert_responsive_results,
     ensure_fresh_session,
     is_login_url,
-    login_user,
     login_user_with_retry,
-    logout_user,
-    navigate_to_dashboard,
-    navigate_to_page,
-    require_authentication,
     run_responsive_breakpoints_test,
-    safe_click_element,
-    wait_for_server_ready,
 )
-
 
 # ===============================================================================
 # TEST DATA GENERATORS
@@ -262,7 +252,7 @@ def test_signup_form_validation_required_fields(page: Page) -> None:
         submit_button.click()
 
         # Wait for validation
-        page.wait_for_timeout(1000)
+        page.wait_for_load_state("networkidle")
 
         # Should still be on signup page
         assert REGISTER_URL in page.url, "Should remain on signup page after validation failure"
@@ -312,23 +302,23 @@ def test_signup_form_email_validation(page: Page) -> None:
         email_field = page.locator('input[name="email"]')
 
         # Test invalid email format
-        invalid_emails = ["notanemail", "missing@domain", "@nodomain.com"]
+        # NOTE: "missing@domain" is valid per RFC 5321 (TLD-only domains accepted by browsers)
+        invalid_emails = ["notanemail", "@nodomain.com"]
 
         for invalid_email in invalid_emails:
             email_field.fill(invalid_email)
-            page.wait_for_timeout(300)
 
             # Check HTML5 validation
             is_invalid = email_field.evaluate("el => !el.validity.valid")
-            if is_invalid:
-                print(f"    Invalid email '{invalid_email}' correctly rejected")
+            assert is_invalid, f"Invalid email '{invalid_email}' should be rejected by validation"
+            print(f"    Invalid email '{invalid_email}' correctly rejected")
 
         # Test valid email format
         valid_email = generate_test_email()
         email_field.fill(valid_email)
         is_valid = email_field.evaluate("el => el.validity.valid")
         assert is_valid, f"Valid email '{valid_email}' should be accepted"
-        print(f"    Valid email format accepted")
+        print("    Valid email format accepted")
 
         print("  Email validation works correctly")
 
@@ -378,17 +368,16 @@ def test_signup_form_password_validation(page: Page) -> None:
         submit_button = page.locator('button:has-text("Create Account")')
         submit_button.click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1000)
 
         # Should show error about password mismatch
         # Check if still on register page (validation failed) or if error message shown
-        if REGISTER_URL in page.url:
-            print("    Password mismatch correctly prevented form submission")
+        assert REGISTER_URL in page.url, "Password mismatch should prevent form submission"
+        print("    Password mismatch correctly prevented form submission")
 
-            # Look for password error message
-            password_errors = page.locator('p:has-text("password"), .error:has-text("password")')
-            if password_errors.count() > 0:
-                print("    Password mismatch error message displayed")
+        # Look for password error message
+        password_errors = page.locator('p:has-text("password"), .error:has-text("password")')
+        if password_errors.count() > 0:
+            print("    Password mismatch error message displayed")
 
         # Test matching passwords
         password2_field.fill(test_password)
@@ -469,37 +458,31 @@ def test_signup_form_successful_submission(page: Page) -> None:
 
         # Wait for form processing
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
 
         # Check for successful submission
         # Should redirect to register/submitted/ or show success message
         current_url = page.url
 
-        if "/register/submitted/" in current_url or "submitted" in current_url:
+        # App may redirect to /register/submitted/ OR stay on /register/ with success message
+        page_content = page.content().lower()
+        confirmation_indicators = ["submitted", "check your email", "registration", "thank you", "success", "account created"]
+        on_submitted_page = "/submitted" in current_url
+        has_success_message = any(indicator in page_content for indicator in confirmation_indicators)
+
+        assert on_submitted_page or has_success_message or current_url != f"{BASE_URL}{REGISTER_URL}", (
+            f"Should show confirmation after signup, got: {current_url}"
+        )
+        if on_submitted_page:
             print("    Successfully redirected to confirmation page")
-
-            # Verify confirmation page content
-            page_content = page.content().lower()
-            confirmation_indicators = ["submitted", "check your email", "registration", "thank you"]
-            found_indicator = any(indicator in page_content for indicator in confirmation_indicators)
-
-            if found_indicator:
-                print("    Confirmation page shows appropriate message")
-            else:
-                print("    Confirmation page loaded (content may vary)")
-
-        elif REGISTER_URL in current_url:
-            # Still on register page - check for errors
-            error_elements = page.locator(".text-red-400, .text-red-500, .text-red-600, .error")
-            if error_elements.count() > 0:
-                error_text = error_elements.first.text_content()
-                print(f"    Form validation error: {error_text}")
-                # This might be expected if email already exists (enumeration-safe)
-                # The system should still redirect to submitted page for security
-            else:
-                print("    Form submitted but still on register page (may be processing)")
         else:
-            print(f"    Redirected to: {current_url}")
+            print("    [i] Signup processed (stayed on registration page with feedback)")
+
+        found_indicator = on_submitted_page or has_success_message
+
+        if found_indicator:
+            print("    Confirmation page shows appropriate message")
+        else:
+            print("    Confirmation page loaded (content may vary)")
 
         print("  Signup form submission test completed")
 
@@ -549,7 +532,6 @@ def test_signup_then_login_flow(page: Page) -> None:
         # Submit
         page.locator('button:has-text("Create Account")').click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
 
         # After signup, navigate to login
         page.goto(f"{BASE_URL}{LOGIN_URL}")
@@ -566,7 +548,6 @@ def test_signup_then_login_flow(page: Page) -> None:
         page.locator('button[type="submit"]').click()
 
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1000)
 
         current_url = page.url
         if "/dashboard/" in current_url:
@@ -619,29 +600,23 @@ def test_customer_can_view_orders_list(page: Page) -> None:
 
         # Verify we're on orders page or allowed to access
         current_url = page.url
+        assert "/order/" in current_url, f"Customer should be able to access orders page, got: {current_url}"
+        print("    Customer can access orders page")
 
-        if "/order/" in current_url:
-            print("    Customer can access orders page")
+        # Check for orders list elements
+        # Look for table or list of orders, or "no orders" message
+        orders_content = page.locator("table, .order-list, .no-orders")
 
-            # Check for orders list elements
-            # Look for table or list of orders, or "no orders" message
-            orders_content = page.locator("table, .order-list, .no-orders")
+        # Check for status filter buttons/tabs
+        status_filters = page.locator('a:has-text("All"), a:has-text("Pending"), a:has-text("Completed")')
+        if status_filters.count() > 0:
+            print(f"    Found {status_filters.count()} status filter options")
 
-            # Check for status filter buttons/tabs
-            status_filters = page.locator('a:has-text("All"), a:has-text("Pending"), a:has-text("Completed")')
-            if status_filters.count() > 0:
-                print(f"    Found {status_filters.count()} status filter options")
-
-            # Check page structure
-            page_heading = page.locator("h1, h2")
-            if page_heading.count() > 0:
-                heading_text = page_heading.first.text_content()
-                print(f"    Page heading: {heading_text}")
-
-        elif is_login_url(current_url):
-            print("    Customer redirected to login (session may have expired)")
-        else:
-            print(f"    Customer redirected to: {current_url}")
+        # Check page structure
+        page_heading = page.locator("h1, h2")
+        if page_heading.count() > 0:
+            heading_text = page_heading.first.text_content()
+            print(f"    Page heading: {heading_text}")
 
         print("  Customer order viewing test completed")
 
@@ -695,7 +670,7 @@ def test_customer_order_list_shows_correct_data(page: Page) -> None:
 
             for pattern in expected_patterns:
                 if re.search(pattern, row_text or ""):
-                    print(f"    Order number pattern found")
+                    print("    Order number pattern found")
                     break
 
             # Check for order detail link
@@ -723,6 +698,54 @@ def test_customer_order_list_shows_correct_data(page: Page) -> None:
 # ===============================================================================
 
 
+def _journey_fill_registration_form(page: Page, test_email: str, test_password: str, test_company: str) -> None:
+    """Step 2: Fill all fields in the customer registration form."""
+    page.locator('input[name="first_name"]').fill("Journey")
+    page.locator('input[name="last_name"]').fill("TestUser")
+    page.locator('input[name="email"]').fill(test_email)
+    page.locator('input[name="phone"]').fill(generate_test_phone())
+    page.locator('select[name="customer_type"]').select_option("srl")
+    page.locator('input[name="company_name"]').fill(test_company)
+    page.locator('input[name="vat_number"]').fill("RO12345678")
+    page.locator('input[name="address_line1"]').fill("Bulevardul Test Nr. 100")
+    page.locator('input[name="city"]').fill("Bucuresti")
+    page.locator('input[name="county"]').fill("Bucuresti")
+    page.locator('input[name="postal_code"]').fill("010001")
+    page.locator('input[name="password1"]').fill(test_password)
+    page.locator('input[name="password2"]').fill(test_password)
+    page.locator('input[name="data_processing_consent"]').check()
+
+    marketing_checkbox = page.locator('input[name="marketing_consent"]')
+    if marketing_checkbox.is_visible():
+        marketing_checkbox.check()
+
+    print("    Step 2: Registration form filled")
+
+
+def _journey_handle_post_login(page: Page, test_email: str, test_password: str, current_url: str) -> None:
+    """Steps 5-6: Handle login result — navigate to orders if successful, report otherwise."""
+    if "/dashboard/" in current_url:
+        print("    Step 5: Successfully logged in to dashboard")
+
+        page.goto(f"{BASE_URL}/order/")
+        page.wait_for_load_state("networkidle")
+
+        if "/order/" in page.url:
+            print("    Step 6: Successfully accessed orders section")
+            if "order" in page.content().lower():
+                print("    Complete journey successful - new customer can view orders")
+        else:
+            print(f"    Step 6: Orders page access result: {page.url}")
+        return
+
+    print(f"    Step 5: Login result: {current_url}")
+    if is_login_url(current_url):
+        error_msg = page.locator(".alert, .error, .text-red-500")
+        if error_msg.count() > 0:
+            print(f"      Login message: {error_msg.first.text_content()}")
+        print("      (Account may require email verification)")
+
+
 def test_complete_new_customer_journey(page: Page) -> None:
     """
     Test the complete new customer journey: signup -> login -> dashboard -> orders.
@@ -747,7 +770,6 @@ def test_complete_new_customer_journey(page: Page) -> None:
         check_html=False,
         check_css=True,
                                  check_accessibility=False):
-        # Generate unique test data
         test_email = generate_test_email()
         test_password = generate_test_password()
         test_company = generate_test_company_name()
@@ -755,89 +777,35 @@ def test_complete_new_customer_journey(page: Page) -> None:
         print(f"    Journey test email: {test_email}")
         print(f"    Journey test company: {test_company}")
 
-        # Step 1: Navigate to signup
         page.goto(f"{BASE_URL}{REGISTER_URL}")
         page.wait_for_load_state("networkidle")
         assert REGISTER_URL in page.url, "Should be on signup page"
         print("    Step 1: Signup page accessed")
 
-        # Step 2: Fill registration form
-        page.locator('input[name="first_name"]').fill("Journey")
-        page.locator('input[name="last_name"]').fill("TestUser")
-        page.locator('input[name="email"]').fill(test_email)
-        page.locator('input[name="phone"]').fill(generate_test_phone())
-        page.locator('select[name="customer_type"]').select_option("srl")
-        page.locator('input[name="company_name"]').fill(test_company)
-        page.locator('input[name="vat_number"]').fill("RO12345678")
-        page.locator('input[name="address_line1"]').fill("Bulevardul Test Nr. 100")
-        page.locator('input[name="city"]').fill("Bucuresti")
-        page.locator('input[name="county"]').fill("Bucuresti")
-        page.locator('input[name="postal_code"]').fill("010001")
-        page.locator('input[name="password1"]').fill(test_password)
-        page.locator('input[name="password2"]').fill(test_password)
-        page.locator('input[name="data_processing_consent"]').check()
+        _journey_fill_registration_form(page, test_email, test_password, test_company)
 
-        # Optional: marketing consent
-        marketing_checkbox = page.locator('input[name="marketing_consent"]')
-        if marketing_checkbox.is_visible():
-            marketing_checkbox.check()
-
-        print("    Step 2: Registration form filled")
-
-        # Step 3: Submit registration
         page.locator('button:has-text("Create Account")').click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(2000)
 
         submitted_url = page.url
-        if "/submitted" in submitted_url or "/register/submitted" in submitted_url:
-            print("    Step 3: Registration submitted successfully")
-        elif REGISTER_URL in submitted_url:
-            print("    Step 3: Still on register page (checking for errors)")
-            errors = page.locator(".text-red-400, .text-red-500, .error")
-            if errors.count() > 0:
-                error_text = errors.first.text_content()
-                print(f"      Form error: {error_text}")
-        else:
-            print(f"    Step 3: Redirected to {submitted_url}")
+        page_content = page.content().lower()
+        on_submitted = "/submitted" in submitted_url
+        has_feedback = any(w in page_content for w in ["success", "submitted", "thank you", "account created", "check your email"])
+        assert on_submitted or has_feedback or submitted_url != f"{BASE_URL}{REGISTER_URL}", (
+            f"Step 3: Registration should show confirmation, got: {submitted_url}"
+        )
+        print("    Step 3: Registration submitted successfully")
 
-        # Step 4: Navigate to login
         page.goto(f"{BASE_URL}{LOGIN_URL}")
         page.wait_for_load_state("networkidle")
         print("    Step 4: Navigated to login page")
 
-        # Step 5: Attempt login
         page.locator('input[name="email"]').fill(test_email)
         page.locator('input[name="password"]').fill(test_password)
         page.locator('button[type="submit"]').click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1000)
 
-        current_url = page.url
-
-        if "/dashboard/" in current_url:
-            print("    Step 5: Successfully logged in to dashboard")
-
-            # Step 6: Navigate to orders
-            page.goto(f"{BASE_URL}/order/")
-            page.wait_for_load_state("networkidle")
-
-            if "/order/" in page.url:
-                print("    Step 6: Successfully accessed orders section")
-
-                # Verify orders page content for new customer
-                page_content = page.content().lower()
-                if "order" in page_content:
-                    print("    Complete journey successful - new customer can view orders")
-            else:
-                print(f"    Step 6: Orders page access result: {page.url}")
-        else:
-            print(f"    Step 5: Login result: {current_url}")
-            if is_login_url(current_url):
-                error_msg = page.locator(".alert, .error, .text-red-500")
-                if error_msg.count() > 0:
-                    print(f"      Login message: {error_msg.first.text_content()}")
-                print("      (Account may require email verification)")
+        _journey_handle_post_login(page, test_email, test_password, page.url)
 
         print("  Complete new customer journey test finished")
 
@@ -886,7 +854,7 @@ def test_signup_page_mobile_responsiveness(page: Page) -> None:
             ]
 
             if horizontal_scroll_issues:
-                print(f"      Horizontal scroll issue detected")
+                print("      Horizontal scroll issue detected")
             else:
                 print("      No horizontal scroll issues")
 
@@ -953,20 +921,14 @@ def test_signup_across_responsive_breakpoints(page: Page) -> None:
                     print(f"      Signup form issues in {context}")
                     return False
 
-            except Exception as e:
+            except (TimeoutError, PlaywrightError) as e:
                 print(f"      Error in {context}: {str(e)[:50]}")
                 return False
 
         # Test across breakpoints
         results = run_responsive_breakpoints_test(page, test_signup_form_visibility)
 
-        desktop_pass = results.get("desktop", False)
-        tablet_pass = results.get("tablet_landscape", False)
-        mobile_pass = results.get("mobile", False)
-
-        assert desktop_pass, "Signup should work on desktop"
-        assert tablet_pass, "Signup should work on tablet"
-        assert mobile_pass, "Signup should work on mobile"
+        assert_responsive_results(results, "Signup form")
 
         print("  Signup responsive breakpoints test completed")
 
@@ -1052,7 +1014,6 @@ def test_signup_enumeration_protection(page: Page) -> None:
 
         page.locator('button:has-text("Create Account")').click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1500)
 
         new_email_url = page.url
 
@@ -1075,7 +1036,6 @@ def test_signup_enumeration_protection(page: Page) -> None:
 
         page.locator('button:has-text("Create Account")').click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1500)
 
         existing_email_url = page.url
 
@@ -1141,7 +1101,6 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
         # Submit and check for success
         page.locator('button:has-text("Create Account")').click()
         page.wait_for_load_state("networkidle")
-        page.wait_for_timeout(1500)
 
         # Should succeed or show only valid errors (not encoding issues)
         current_url = page.url
@@ -1151,10 +1110,8 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
         encoding_errors = ["encoding", "unicode", "invalid character", "codec"]
         has_encoding_error = any(err in page_content.lower() for err in encoding_errors)
 
-        if not has_encoding_error:
-            print("    Special characters handled correctly")
-        else:
-            print("    Encoding issue detected with special characters")
+        assert not has_encoding_error, "Special characters should not cause encoding errors"
+        print("    Special characters handled correctly")
 
         if "/submitted" in current_url:
             print("    Form with special characters submitted successfully")

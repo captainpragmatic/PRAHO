@@ -10,13 +10,9 @@ This is a meta-test - testing the test infrastructure itself.
 """
 
 import os
-import tempfile
-from unittest.mock import patch
 
-import pytest
 import django
-from django.conf import settings
-from django.test import override_settings
+import pytest
 
 # Set up Django before importing TestUserManager
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
@@ -135,7 +131,7 @@ def test_testusermanager_duplicate_prevention():
         # Try to create duplicate - should raise ValueError
         try:
             admin2 = user_mgr.create_admin_user(email="duplicate.test@test.praho.local")
-            assert False, "Should have raised ValueError for duplicate email"
+            raise AssertionError("Should have raised ValueError for duplicate email")
         except ValueError as e:
             assert "already exists" in str(e)
             print("  ✅ Correctly prevented duplicate user creation")

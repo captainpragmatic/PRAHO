@@ -11,6 +11,7 @@ Uses shared utilities from tests.e2e.utils for consistency.
 """
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 # Import shared utilities
@@ -45,7 +46,7 @@ def test_superuser_dashboard_functionality(page: Page) -> None:
         # Ensure fresh session and login
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             # Verify dashboard functionality using semantic validation
@@ -70,7 +71,7 @@ def test_customer_dashboard_functionality(page: Page) -> None:
         # Ensure fresh session and login
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             # Verify dashboard functionality using semantic validation
@@ -110,7 +111,7 @@ def test_dashboard_role_based_content(page: Page) -> None:
             ensure_fresh_session(page)
 
             if not login_user(page, email, password):
-                pytest.skip("Login precondition failed — TODO: check E2E service health")
+                pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
             try:
                 # Verify role-based content is displayed correctly
@@ -142,7 +143,7 @@ def test_dashboard_actions_and_interactions(page: Page) -> None:
         # Login as superuser for maximum dashboard access
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             require_authentication(page)
@@ -190,7 +191,7 @@ def test_dashboard_actions_and_interactions(page: Page) -> None:
 
                             print(f"      ✅ Successfully interacted with {element_type}")
 
-                    except Exception as e:
+                    except (TimeoutError, PlaywrightError) as e:
                         print(f"      ⚠️ Interaction failed: {str(e)[:50]}")
                         continue
 
@@ -228,7 +229,7 @@ def test_dashboard_mobile_responsiveness(page: Page) -> None:
         # Login as superuser for full dashboard access
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             require_authentication(page)
@@ -292,7 +293,7 @@ def test_dashboard_mobile_specific_features(page: Page) -> None:
         # Login as superuser
         ensure_fresh_session(page)
         if not login_user(page, SUPERUSER_EMAIL, SUPERUSER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             require_authentication(page)
@@ -329,10 +330,8 @@ def test_dashboard_mobile_specific_features(page: Page) -> None:
 
                 # Verify dashboard core functionality still works
                 basic_functionality = verify_dashboard_functionality(page, "superuser")
-                if basic_functionality:
-                    print("    ✅ Dashboard works on small mobile viewport")
-                else:
-                    print("    ⚠️  Dashboard has issues on small mobile viewport")
+                assert basic_functionality, "Dashboard should work on small mobile viewport"
+                print("    ✅ Dashboard works on small mobile viewport")
 
                 # Check for critical layout problems on small screens
                 small_layout_issues = mobile_small.check_responsive_layout()

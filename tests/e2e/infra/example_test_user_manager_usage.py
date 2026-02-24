@@ -19,23 +19,21 @@ Created: 2025-08-29
 Framework: Playwright + pytest + TestUserManager
 """
 
-import pytest
 from playwright.sync_api import Page
 
 # Import the new test user management system
 from tests.e2e.utils import (
     BASE_URL,
     LOGOUT_URL,
+    ComprehensivePageMonitor,
     TestUserManager,
-    test_users,
-    login_test_user,
     create_and_login_admin,
     create_and_login_customer,
-    navigate_to_dashboard,
-    ComprehensivePageMonitor,
     ensure_fresh_session,
+    login_test_user,
+    navigate_to_dashboard,
+    test_users,
 )
-
 
 # ===============================================================================
 # BASIC USAGE EXAMPLES
@@ -228,7 +226,7 @@ def test_duplicate_user_handling(page: Page) -> None:
         # Try to create duplicate user (should fail)
         try:
             admin2 = user_mgr.create_admin_user(email="specific.admin@test.praho.local")
-            assert False, "Should not be able to create duplicate user"
+            raise AssertionError("Should not be able to create duplicate user")
         except ValueError as e:
             print(f"✅ Correctly prevented duplicate user: {e}")
 

@@ -18,6 +18,7 @@ Uses shared utilities from tests.e2e.utils for consistency.
 Based on real staff workflows for Romanian billing operations.
 """
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 # Import shared utilities
@@ -25,12 +26,186 @@ from tests.e2e.utils import (
     PLATFORM_BASE_URL,
     ComprehensivePageMonitor,
     MobileTestContext,
+    assert_responsive_results,
     ensure_fresh_platform_session,
     login_platform_user,
     navigate_to_platform_page,
     require_authentication,
     run_responsive_breakpoints_test,
+    run_standard_mobile_test,
 )
+
+# ===============================================================================
+# PRIVATE HELPERS — proforma creation workflow
+# ===============================================================================
+
+def _fill_proforma_form(page: Page, data: dict) -> None:
+    """Fill the proforma creation form fields with the supplied data dict.
+
+    Handles optional field visibility gracefully; prints a warning when a
+    field cannot be located rather than failing hard.
+    """
+    customer_select = page.locator('select[name="customer"]')
+    if customer_select.is_visible():
+        customer_options = page.locator('select[name="customer"] option')
+        if customer_options.count() > 1:
+            page.select_option('select[name="customer"]', index=1)
+            print("  ✅ Selected customer for proforma creation")
+        else:
+            print("  ⚠️ No customers available - may need sample data")
+
+    description_field = page.locator(
+        'input[name="lines-0-description"], textarea[name="lines-0-description"]'
+    ).first
+    if description_field.is_visible():
+        description_field.fill(data['description'])
+        print("  ✅ Filled line item description")
+    else:
+        print("  ⚠️ Line item description field not found")
+
+    amount_field = page.locator(
+        'input[name="lines-0-unit_price"], input[name="lines-0-amount"]'
+    ).first
+    if amount_field.is_visible():
+        amount_field.fill(data['amount'])
+        print("  ✅ Filled line item amount")
+    else:
+        print("  ⚠️ Amount field not found")
+
+    quantity_field = page.locator('input[name="lines-0-quantity"]')
+    if quantity_field.is_visible():
+        quantity_field.fill('1')
+
+
+def _submit_proforma_form(page: Page) -> None:
+    """Click the proforma submit button and wait for network idle."""
+    submit_button = page.locator(
+        'button:has-text("Create Proforma"), button:has-text("Submit"), input[type="submit"]'
+    ).first
+    if not submit_button.is_visible():
+        print("  ❌ Submit button not found")
+        return
+    submit_button.click()
+    page.wait_for_load_state("networkidle")
+
+
+def _verify_proforma_created(page: Page) -> None:
+    """Check the page state after proforma form submission and log the outcome."""
+    if "/billing/proformas/" in page.url and "/billing/proformas/create/" not in page.url:
+        print("  ✅ Proforma creation succeeded - redirected away from create page")
+        success_message = page.get_by_role("alert").locator(
+            'div:has-text("created"), div:has-text("Proforma #")'
+        ).first
+        if success_message.is_visible():
+            print("  ✅ Success message displayed")
+        return
+
+    # Still on create page — surface any validation errors.
+    error_messages = page.locator('div.text-red-600, .text-red-500, [class*="error"]')
+    if error_messages.count() > 0:
+        error_text = error_messages.first.inner_text()
+        print(f"  ❌ Form validation error: {error_text}")
+    else:
+        print("  [i] Form submitted but still on create page")
+
+
+# ===============================================================================
+# PRIVATE HELPERS — complete billing workflow
+# ===============================================================================
+
+def _fill_workflow_proforma_form(page: Page, data: dict) -> None:
+    """Fill the proforma form fields for the comprehensive billing workflow."""
+    customer_select = page.locator('select[name="customer"]')
+    if customer_select.is_visible():
+        customer_options = page.locator('select[name="customer"] option')
+        if customer_options.count() > 1:
+            page.select_option('select[name="customer"]', index=1)
+
+    description_field = page.locator(
+        'input[name="lines-0-description"], textarea[name="lines-0-description"]'
+    ).first
+    if description_field.is_visible():
+        description_field.fill(data['description'])
+
+    amount_field = page.locator(
+        'input[name="lines-0-unit_price"], input[name="lines-0-amount"]'
+    ).first
+    if amount_field.is_visible():
+        amount_field.fill(data['amount'])
+
+    submit_btn = page.locator('button:has-text("Create"), button:has-text("Submit")').first
+    if submit_btn.is_visible():
+        submit_btn.click()
+        page.wait_for_load_state("networkidle")
+
+
+def _locate_or_navigate_to_proforma(page: Page, data: dict) -> bool:
+    """Return True if we are now on a proforma detail page, False otherwise."""
+    if "/billing/proformas/" in page.url and "create" not in page.url:
+        print("      ✅ Proforma created successfully")
+        return True
+
+    print("      [i] Proforma creation may have validation issues - checking list")
+    navigate_to_platform_page(page, "/billing/invoices/")
+    page.wait_for_load_state("networkidle")
+
+    workflow_proforma_link = page.locator(f'text="{data["description"][:20]}"')
+    if workflow_proforma_link.is_visible():
+        workflow_proforma_link.click()
+        page.wait_for_load_state("networkidle")
+        print("      ✅ Found and opened created proforma")
+        return True
+
+    return False
+
+
+def _convert_proforma_to_invoice(page: Page) -> bool:
+    """Click 'Convert to Invoice', wait for navigation, return True on success."""
+    convert_button = page.locator(
+        'a:has-text("Convert to Invoice"), button:has-text("Convert"), a[href*="/convert/"]'
+    ).first
+    if not convert_button.is_visible():
+        print("  ⚠️ Convert button not found")
+        return False
+
+    convert_button.click()
+    page.wait_for_load_state("networkidle")
+
+    if "/billing/invoices/" in page.url:
+        print("      ✅ Proforma converted to invoice successfully")
+        return True
+
+    print("  ⚠️ Proforma conversion failed")
+    return False
+
+
+def _test_pdf_generation(page: Page) -> None:
+    """Verify the PDF generation button is present on the invoice detail page."""
+    pdf_button = page.locator('a:has-text("PDF"), a[href*="/pdf/"]')
+    if pdf_button.is_visible():
+        print("      ✅ PDF generation feature available")
+
+
+def _test_payment_recording(page: Page, amount: str) -> None:
+    """Attempt to record a payment for the current invoice."""
+    payment_button = page.locator('a:has-text("Record Payment"), a[href*="/pay/"]')
+    if not payment_button.is_visible():
+        return
+
+    payment_button.click()
+    page.wait_for_load_state("networkidle")
+
+    amount_field = page.locator('input[name="amount"]')
+    if not amount_field.is_visible():
+        return
+
+    amount_field.fill(amount)
+    submit_payment = page.locator('button:has-text("Record Payment"), button:has-text("Submit")')
+    if submit_payment.is_visible():
+        submit_payment.click()
+        page.wait_for_load_state("networkidle")
+        print("      ✅ Payment processing tested")
+
 
 # ===============================================================================
 # STAFF BILLING SYSTEM ACCESS AND NAVIGATION TESTS
@@ -77,7 +252,7 @@ def test_staff_billing_system_access_via_navigation(page: Page) -> None:
         if new_invoice_button.count() > 0:
             print("  ✅ Invoice/Proforma creation button available")
         else:
-            print("  ℹ️ Invoice/Proforma creation functionality may not be implemented yet")
+            print("  [i] Invoice/Proforma creation functionality may not be implemented yet")
 
         print("  ✅ Staff billing system successfully accessible via Billing navigation")
 
@@ -117,21 +292,21 @@ def test_staff_billing_list_dashboard_display(page: Page) -> None:
             if proforma_text.count() > 0 or invoice_text.count() > 0:
                 print("  ✅ Found billing statistics")
             else:
-                print("  ℹ️ Billing statistics not found - may need alternative implementation")
+                print("  [i] Billing statistics not found - may need alternative implementation")
 
         # Check for creation functionality
         new_invoice_button = page.locator('a:has-text("New Invoice"), button:has-text("New Invoice"), a:has-text("New Proforma"), button:has-text("Create")')
         if new_invoice_button.count() > 0:
             print("  ✅ Invoice/Proforma creation functionality available")
         else:
-            print("  ℹ️ Creation functionality may not be fully implemented yet")
+            print("  [i] Creation functionality may not be fully implemented yet")
 
         # Verify filtering interface is present (if implemented)
         filters_section = page.locator('div.bg-slate-800\\/50').filter(has_text="Search").first
         if filters_section.is_visible():
             print("  ✅ Billing filtering interface is present")
         else:
-            print("  ℹ️ Billing filtering interface may not be implemented yet")
+            print("  [i] Billing filtering interface may not be implemented yet")
 
         # Verify billing page content is present (support both English and Romanian)
         billing_content = page.locator('div:has-text("🧾 Invoices"), div:has-text("🧾 Facturi")').first
@@ -140,10 +315,8 @@ def test_staff_billing_list_dashboard_display(page: Page) -> None:
         # Check if any documents are displayed
         document_items = page.locator('tr:has-text("PRO-"), tr:has-text("INV-"), div:has-text("PRO-"), div:has-text("INV-")')
         document_count = document_items.count()
-        if document_count > 0:
-            print(f"  ✅ Found {document_count} billing documents in the system")
-        else:
-            print("  ℹ️ No billing documents currently in the system")
+        assert document_count > 0, "Billing list should contain at least one document (PRO- or INV-)"
+        print(f"  ✅ Found {document_count} billing documents in the system")
 
         print("  ✅ Staff billing list dashboard displays correctly")
 
@@ -160,7 +333,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
     1. Navigate to proforma creation form
     2. Fill in proforma details for a customer
     3. Add line items with products/services
-    4. Apply Romanian VAT calculations (19%)
+    4. Apply Romanian VAT calculations (21%)
     5. Submit form and verify proforma is created
     6. Verify redirect to proforma detail page
     """
@@ -195,77 +368,19 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
         test_proforma_data = {
             'description': 'Web Hosting Package - Premium Plan',
             'amount': '299.00',
-            'vat_rate': '19'  # Romanian standard VAT rate
         }
 
-        # Fill customer selection (should be available for staff)
-        customer_select = page.locator('select[name="customer"]')
-        if customer_select.is_visible():
-            # Select first available customer
-            customer_options = page.locator('select[name="customer"] option')
-            if customer_options.count() > 1:  # More than just the placeholder option
-                page.select_option('select[name="customer"]', index=1)
-                print("  ✅ Selected customer for proforma creation")
-            else:
-                print("  ⚠️ No customers available - may need sample data")
-        else:
-            print("  ℹ️ Customer selection not found - checking alternative selectors")
-
-        # Fill first line item
-        description_field = page.locator('input[name="lines-0-description"], textarea[name="lines-0-description"]').first
-        if description_field.is_visible():
-            description_field.fill(test_proforma_data['description'])
-            print("  ✅ Filled line item description")
-        else:
-            print("  ⚠️ Line item description field not found")
-
-        # Fill amount/price
-        amount_field = page.locator('input[name="lines-0-unit_price"], input[name="lines-0-amount"]').first
-        if amount_field.is_visible():
-            amount_field.fill(test_proforma_data['amount'])
-            print("  ✅ Filled line item amount")
-        else:
-            print("  ⚠️ Amount field not found")
-
-        # Check quantity field (if separate)
-        quantity_field = page.locator('input[name="lines-0-quantity"]')
-        if quantity_field.is_visible():
-            quantity_field.fill('1')
+        # Fill all form fields via helper
+        _fill_proforma_form(page, test_proforma_data)
 
         # Verify VAT calculation is applied automatically
-        vat_display = page.locator('text="VAT (19%)", text="TVA (19%)"')
+        vat_display = page.locator('text="VAT (21%)", text="TVA (21%)"')
         if vat_display.is_visible():
-            print("  ✅ Romanian VAT rate (19%) displayed")
+            print("  ✅ Romanian VAT rate (21%) displayed")
 
-        # Submit the form
-        submit_button = page.locator('button:has-text("Create Proforma"), button:has-text("Submit"), input[type="submit"]').first
-        if submit_button.is_visible():
-            submit_button.click()
-
-            # Wait for form processing
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(1000)
-
-            # Check if proforma was created successfully
-            if "/billing/proformas/" in page.url and "/billing/proformas/create/" not in page.url:
-                print("  ✅ Proforma creation succeeded - redirected away from create page")
-
-                # Look for success message
-                success_message = page.get_by_role("alert").locator('div:has-text("created"), div:has-text("Proforma #")').first
-                if success_message.is_visible():
-                    print("  ✅ Success message displayed")
-                else:
-                    print("  ℹ️ Success message not immediately visible")
-            else:
-                # Still on create page - check for validation errors
-                error_messages = page.locator('div.text-red-600, .text-red-500, [class*="error"]')
-                if error_messages.count() > 0:
-                    error_text = error_messages.first.inner_text()
-                    print(f"  ❌ Form validation error: {error_text}")
-                else:
-                    print("  ℹ️ Form submitted but still on create page")
-        else:
-            print("  ❌ Submit button not found")
+        # Submit and verify
+        _submit_proforma_form(page)
+        _verify_proforma_created(page)
 
         print("  ✅ Staff proforma creation workflow completed")
 
@@ -328,8 +443,8 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
 
                     # Verify we're now on the invoice detail page
                     invoice_heading = page.locator('h1:has-text("INV-"), h1:has-text("Invoice")')
-                    if invoice_heading.is_visible():
-                        print("  ✅ Invoice detail page displayed")
+                    assert invoice_heading.is_visible(), "Invoice detail page heading should be displayed after conversion"
+                    print("  ✅ Invoice detail page displayed")
 
                     # Check for conversion success message
                     success_message = page.get_by_role("alert").locator('div:has-text("converted"), div:has-text("Invoice created")')
@@ -338,12 +453,11 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
 
                     # Verify invoice has sequential numbering (INV-YYYY-XXXXXX format)
                     invoice_number = page.locator('span:has-text("INV-"), h1:has-text("INV-")')
-                    if invoice_number.is_visible():
-                        number_text = invoice_number.first.inner_text()
-                        if "INV-" in number_text and len(number_text) > 8:  # Basic format check
-                            print("  ✅ Invoice sequential numbering appears correct")
-                        else:
-                            print("  ⚠️ Invoice numbering format may need verification")
+                    assert invoice_number.is_visible(), "Invoice number should be visible after conversion"
+                    number_text = invoice_number.first.inner_text()
+                    assert "INV-" in number_text and len(number_text) > 8, \
+                        f"Invoice numbering format should match INV-YYYY-XXXXXX, got: {number_text}"
+                    print("  ✅ Invoice sequential numbering appears correct")
                 else:
                     # Check for conversion errors
                     error_message = page.get_by_role("alert").locator('div:has-text("error"), div:has-text("failed")')
@@ -351,11 +465,11 @@ def test_staff_proforma_to_invoice_conversion(page: Page) -> None:
                         error_text = error_message.first.inner_text()
                         print(f"  ❌ Conversion error: {error_text}")
                     else:
-                        print("  ℹ️ Conversion completed but still on proforma page")
+                        print("  [i] Conversion completed but still on proforma page")
             else:
-                print("  ℹ️ Convert to Invoice button not found - proforma may already be converted")
+                print("  [i] Convert to Invoice button not found - proforma may already be converted")
         else:
-            print("  ℹ️ No proformas available for conversion testing")
+            print("  [i] No proformas available for conversion testing")
 
         print("  ✅ Staff proforma to invoice conversion testing completed")
 
@@ -408,37 +522,35 @@ def test_staff_invoice_detail_and_management_features(page: Page) -> None:
 
             # Verify invoice detail elements are present
             invoice_info = page.locator('h1:has-text("INV-"), h1:has-text("#")')
-            if invoice_info.is_visible():
-                print("  ✅ Invoice information displayed")
+            assert invoice_info.is_visible(), "Invoice information heading should be displayed on detail page"
+            print("  ✅ Invoice information displayed")
 
             # Check for staff management features
             # PDF generation button
             pdf_button = page.locator('a:has-text("PDF"), button:has-text("Download PDF"), a[href*="/pdf/"]')
-            if pdf_button.is_visible():
-                print("  ✅ PDF generation feature available")
-            else:
-                print("  ℹ️ PDF generation feature not found")
+            assert pdf_button.is_visible(), "PDF generation feature should be available on invoice detail page"
+            print("  ✅ PDF generation feature available")
 
             # Email sending functionality
             email_button = page.locator('a:has-text("Send"), button:has-text("Email"), a[href*="/send/"]')
             if email_button.is_visible():
                 print("  ✅ Email sending feature available")
             else:
-                print("  ℹ️ Email sending feature not found")
+                print("  [i] Email sending feature not found")
 
             # Payment processing options
             payment_button = page.locator('a:has-text("Record Payment"), button:has-text("Pay"), a[href*="/pay/"]')
             if payment_button.is_visible():
                 print("  ✅ Payment processing feature available")
             else:
-                print("  ℹ️ Payment processing feature not found")
+                print("  [i] Payment processing feature not found")
 
             # Romanian e-Factura integration
             efactura_button = page.locator('a:has-text("e-Factura"), button:has-text("Generate XML"), a[href*="/e-factura/"]')
             if efactura_button.is_visible():
                 print("  ✅ Romanian e-Factura integration available")
             else:
-                print("  ℹ️ e-Factura integration not found")
+                print("  [i] e-Factura integration not found")
 
             # Check for VAT information display
             vat_info = page.locator('text="VAT", text="TVA", text="19%"')
@@ -447,11 +559,11 @@ def test_staff_invoice_detail_and_management_features(page: Page) -> None:
 
             # Verify customer information is shown
             customer_info = page.locator('div:has-text("Customer:"), section:has-text("Bill To:")')
-            if customer_info.is_visible():
-                print("  ✅ Customer information section present")
+            assert customer_info.is_visible(), "Customer information section should be present on invoice detail"
+            print("  ✅ Customer information section present")
 
         else:
-            print("  ℹ️ No invoices available for management testing")
+            print("  [i] No invoices available for management testing")
 
         print("  ✅ Staff invoice management features verified")
 
@@ -510,7 +622,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
                     if vat_elements.count() > 0:
                         print("  ✅ Romanian VAT report elements present")
                 else:
-                    print("  ℹ️ VAT report may not be implemented")
+                    print("  [i] VAT report may not be implemented")
 
             # Navigate back to main reports
             navigate_to_platform_page(page, "/billing/reports/")
@@ -527,7 +639,7 @@ def test_staff_billing_reports_and_analytics(page: Page) -> None:
                 print("  ✅ Date range filtering available")
 
         else:
-            print("  ℹ️ Billing reports page may not be implemented yet")
+            print("  [i] Billing reports page may not be implemented yet")
 
         print("  ✅ Staff billing reports and analytics testing completed")
 
@@ -565,30 +677,7 @@ def test_staff_billing_system_mobile_responsiveness(page: Page) -> None:
         with MobileTestContext(page, 'mobile_medium') as mobile:
             print("    📱 Testing staff billing system on mobile viewport")
 
-            # Reload page to ensure mobile layout
-            page.reload()
-            page.wait_for_load_state("networkidle")
-
-            # Test mobile navigation to billing
-            mobile_nav_count = mobile.test_mobile_navigation()
-            print(f"      Mobile navigation elements: {mobile_nav_count}")
-
-            # Check responsive layout issues
-            layout_issues = mobile.check_responsive_layout()
-            critical_issues = [issue for issue in layout_issues
-                             if any(keyword in issue.lower()
-                                  for keyword in ['horizontal scroll', 'small touch'])]
-
-            if critical_issues:
-                print(f"      ⚠️ Critical mobile layout issues: {len(critical_issues)}")
-                for issue in critical_issues[:3]:  # Show first 3 issues
-                    print(f"        - {issue}")
-            else:
-                print("      ✅ No critical mobile layout issues found")
-
-            # Test touch interactions on key elements
-            touch_success = mobile.test_touch_interactions()
-            print(f"      Touch interactions: {'✅ Working' if touch_success else '⚠️ Limited'}")
+            run_standard_mobile_test(page, mobile, context_label="staff billing")
 
             # Verify key mobile elements are accessible
             billing_heading = page.locator('h1:has-text("🧾 Billing Management"), h1:has-text("🧾 Billing")').first
@@ -635,97 +724,34 @@ def test_staff_complete_billing_workflow(page: Page) -> None:
         navigate_to_platform_page(page, "/billing/proformas/create/")
         page.wait_for_load_state("networkidle")
 
-        # Test proforma data for comprehensive workflow
         workflow_proforma = {
             'description': 'Staff E2E Workflow - Complete Billing Management Test',
             'amount': '500.00',
-            'quantity': '1'
         }
 
-        # Fill and submit proforma form with flexible field detection
-        customer_select = page.locator('select[name="customer"]')
-        if customer_select.is_visible():
-            customer_options = page.locator('select[name="customer"] option')
-            if customer_options.count() > 1:
-                page.select_option('select[name="customer"]', index=1)
+        _fill_workflow_proforma_form(page, workflow_proforma)
+        proforma_created = _locate_or_navigate_to_proforma(page, workflow_proforma)
 
-        description_field = page.locator('input[name="lines-0-description"], textarea[name="lines-0-description"]').first
-        if description_field.is_visible():
-            description_field.fill(workflow_proforma['description'])
-
-        amount_field = page.locator('input[name="lines-0-unit_price"], input[name="lines-0-amount"]').first
-        if amount_field.is_visible():
-            amount_field.fill(workflow_proforma['amount'])
-
-        # Submit form
-        submit_btn = page.locator('button:has-text("Create"), button:has-text("Submit")').first
-        if submit_btn.is_visible():
-            submit_btn.click()
-            page.wait_for_load_state("networkidle")
-
-        # Verify proforma creation
-        proforma_created = False
-        if "/billing/proformas/" in page.url and "create" not in page.url:
-            print("      ✅ Proforma created successfully")
-            proforma_created = True
-        else:
-            print("      ℹ️ Proforma creation may have validation issues - checking list")
-            navigate_to_platform_page(page, "/billing/invoices/")
-            page.wait_for_load_state("networkidle")
-
-            # Look for our proforma
-            workflow_proforma_link = page.locator(f'text="{workflow_proforma["description"][:20]}"')
-            if workflow_proforma_link.is_visible():
-                workflow_proforma_link.click()
-                page.wait_for_load_state("networkidle")
-                proforma_created = True
-                print("      ✅ Found and opened created proforma")
-
-        if proforma_created:
-            # Step 2: Convert proforma to invoice
-            print("    Step 2: Converting proforma to invoice...")
-
-            convert_button = page.locator('a:has-text("Convert to Invoice"), button:has-text("Convert"), a[href*="/convert/"]').first
-            if convert_button.is_visible():
-                convert_button.click()
-                page.wait_for_load_state("networkidle")
-
-                if "/billing/invoices/" in page.url:
-                    print("      ✅ Proforma converted to invoice successfully")
-
-                    # Step 3: Test PDF generation
-                    print("    Step 3: Testing PDF generation...")
-                    pdf_button = page.locator('a:has-text("PDF"), a[href*="/pdf/"]')
-                    if pdf_button.is_visible():
-                        # Note: In a real test, we would verify the PDF download
-                        print("      ✅ PDF generation feature available")
-
-                    # Step 4: Test payment processing
-                    print("    Step 4: Testing payment processing...")
-                    payment_button = page.locator('a:has-text("Record Payment"), a[href*="/pay/"]')
-                    if payment_button.is_visible():
-                        payment_button.click()
-                        page.wait_for_load_state("networkidle")
-
-                        # Fill payment details (if form loads)
-                        amount_field = page.locator('input[name="amount"]')
-                        if amount_field.is_visible():
-                            amount_field.fill('500.00')
-
-                            # Submit payment
-                            submit_payment = page.locator('button:has-text("Record Payment"), button:has-text("Submit")')
-                            if submit_payment.is_visible():
-                                submit_payment.click()
-                                page.wait_for_timeout(2000)
-                                print("      ✅ Payment processing tested")
-
-                    print("  ✅ Complete staff billing workflow successful")
-                else:
-                    print("  ⚠️ Proforma conversion failed")
-            else:
-                print("  ⚠️ Convert button not found")
-        else:
+        if not proforma_created:
             print("  ⚠️ Workflow limited due to proforma creation issues")
+            return
+
+        # Step 2: Convert proforma to invoice
+        print("    Step 2: Converting proforma to invoice...")
+        invoice_ready = _convert_proforma_to_invoice(page)
+
+        if not invoice_ready:
+            return
+
+        # Step 3: Test PDF generation
+        print("    Step 3: Testing PDF generation...")
+        _test_pdf_generation(page)
+
+        # Step 4: Test payment processing
+        print("    Step 4: Testing payment processing...")
+        _test_payment_recording(page, '500.00')
+
+        print("  ✅ Complete staff billing workflow successful")
 
 
 def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
@@ -772,7 +798,7 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
                     print(f"      ❌ Core billing elements missing in {context}")
                     return False
 
-            except Exception as e:
+            except (TimeoutError, PlaywrightError) as e:
                 print(f"      ❌ Billing system test failed in {context}: {str(e)[:50]}")
                 return False
 
@@ -780,13 +806,7 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
         results = run_responsive_breakpoints_test(page, test_staff_billing_functionality)
 
         # Verify all breakpoints pass
-        desktop_pass = results.get('desktop', False)
-        tablet_pass = results.get('tablet_landscape', False)
-        mobile_pass = results.get('mobile', False)
-
-        assert desktop_pass, "Staff billing system should work on desktop viewport"
-        assert tablet_pass, "Staff billing system should work on tablet viewport"
-        assert mobile_pass, "Staff billing system should work on mobile viewport"
+        assert_responsive_results(results, "Staff billing system")
 
         print("  ✅ Staff billing system validated across all responsive breakpoints")
 

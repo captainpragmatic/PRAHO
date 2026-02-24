@@ -15,8 +15,8 @@ Uses platform service at :8700.
 import pytest
 from playwright.sync_api import Page
 
-# Import shared utilities
 from tests.e2e.utils import (
+    BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
     PLATFORM_BASE_URL,
@@ -24,6 +24,7 @@ from tests.e2e.utils import (
     ComprehensivePageMonitor,
     MobileTestContext,
     ensure_fresh_platform_session,
+    ensure_fresh_session,
     login_platform_user,
     login_user,
     require_authentication,
@@ -151,29 +152,16 @@ def verify_invoices_functionality(page: Page, user_type: str) -> bool:
         return False
 
 
-def test_staff_invoices_functionality(page: Page) -> None:
+def test_staff_invoices_functionality(monitored_staff_page: Page) -> None:
     """Test staff invoice management displays correct content and functions properly."""
     print("🧪 Testing staff invoice functionality with comprehensive monitoring")
 
-    with ComprehensivePageMonitor(page, "staff invoices test",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 check_performance=False):
-        # Ensure fresh session and login as staff
-        ensure_fresh_platform_session(page)
-        if not login_platform_user(page):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+    try:
+        assert verify_invoices_functionality(monitored_staff_page, "superuser"), \
+            "Staff invoice functionality verification failed"
 
-        try:
-            # Verify staff invoice functionality
-            assert verify_invoices_functionality(page, "superuser"), \
-                "Staff invoice functionality verification failed"
-
-        except AuthenticationError:
-            pytest.fail("Lost authentication during staff invoices test")
+    except AuthenticationError:
+        pytest.fail("Lost authentication during staff invoices test")
 
 
 def test_invoices_role_based_access(page: Page) -> None:
@@ -183,6 +171,8 @@ def test_invoices_role_based_access(page: Page) -> None:
     This test verifies role-based access control is working correctly
     by testing both staff and customer invoice access. The customer login
     portion tests portal login from the platform test context.
+
+    NOTE: Cannot use fixtures here — test logs into both platform and portal.
     """
     print("🧪 Testing invoice role-based access with comprehensive monitoring")
 
@@ -195,40 +185,38 @@ def test_invoices_role_based_access(page: Page) -> None:
                                  check_performance=False):
 
         # Test staff access on platform
-        print(f"\n  👤 Testing invoice access for superuser")
+        print("\n  👤 Testing invoice access for superuser")
         ensure_fresh_platform_session(page)
 
         if not login_platform_user(page):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             assert verify_invoices_functionality(page, "superuser"), \
                 "Invoice access verification failed for superuser"
-            print(f"    ✅ Invoice access correct for superuser")
+            print("    ✅ Invoice access correct for superuser")
         except AuthenticationError:
             pytest.fail("Lost authentication during superuser invoice test")
 
         # Test customer access (uses portal login_user for customer role)
-        print(f"\n  👤 Testing invoice access for customer (portal login)")
-        # NOTE: This tests customer login via portal - uses login_user with BASE_URL
-        from tests.e2e.utils import BASE_URL, ensure_fresh_session
+        print("\n  👤 Testing invoice access for customer (portal login)")
         ensure_fresh_session(page)
 
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
 
         try:
             # Navigate to portal invoices
             page.goto(f"{BASE_URL}/billing/invoices/")
             page.wait_for_load_state("networkidle", timeout=5000)
-            print(f"    ✅ Invoice access correct for customer")
+            print("    ✅ Invoice access correct for customer")
         except AuthenticationError:
             pytest.fail("Lost authentication during customer invoice test")
 
         print("  ✅ Invoice role-based access control verified!")
 
 
-def test_invoices_actions_and_interactions(page: Page) -> None:
+def test_invoices_actions_and_interactions(monitored_staff_page: Page) -> None:
     """
     Test invoice actions and interactive elements work correctly.
 
@@ -237,89 +225,79 @@ def test_invoices_actions_and_interactions(page: Page) -> None:
     """
     print("🧪 Testing invoice actions and interactions with full validation")
 
-    with ComprehensivePageMonitor(page, "invoice interactions test",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 check_performance=False):
-        # Login as staff for maximum invoice access
-        ensure_fresh_platform_session(page)
-        if not login_platform_user(page):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+    page = monitored_staff_page
 
-        try:
-            require_authentication(page)
+    try:
+        require_authentication(page)
 
-            # Navigate to invoices page
-            if not navigate_to_invoices(page):
-                pytest.fail("Cannot navigate to invoices page")
+        # Navigate to invoices page
+        if not navigate_to_invoices(page):
+            pytest.fail("Cannot navigate to invoices page")
 
-            print("  🔘 Testing invoice content interactions...")
+        print("  🔘 Testing invoice content interactions...")
 
-            # Test invoice-specific interactive elements
-            invoice_elements = [
-                ('.invoice-actions button', 'invoice action buttons'),
-                ('a[href*="/invoices/"]', 'invoice detail links'),
-                ('.pagination a, .pagination button', 'pagination controls'),
-                ('.search-form input, .filter-form select', 'search and filter controls'),
-                ('table th a, .sortable', 'sortable table headers'),
-            ]
+        # Test invoice-specific interactive elements
+        invoice_elements = [
+            ('.invoice-actions button', 'invoice action buttons'),
+            ('a[href*="/invoices/"]', 'invoice detail links'),
+            ('.pagination a, .pagination button', 'pagination controls'),
+            ('.search-form input, .filter-form select', 'search and filter controls'),
+            ('table th a, .sortable', 'sortable table headers'),
+        ]
 
-            interactions_tested = 0
+        interactions_tested = 0
 
-            for selector, element_type in invoice_elements:
-                elements = page.locator(selector)
-                count = elements.count()
+        for selector, element_type in invoice_elements:
+            elements = page.locator(selector)
+            count = elements.count()
 
-                if count > 0:
-                    print(f"    📊 Found {count} {element_type}")
+            if count > 0:
+                print(f"    📊 Found {count} {element_type}")
 
-                    # Test first interactive element if it's safe
-                    try:
-                        first_element = elements.first
-                        if first_element.is_visible() and first_element.is_enabled():
-                            # Get element info for safety check
-                            href = first_element.get_attribute("href") or ""
-                            onclick = first_element.get_attribute("onclick") or ""
+                # Test first interactive element if it's safe
+                try:
+                    first_element = elements.first
+                    if first_element.is_visible() and first_element.is_enabled():
+                        # Get element info for safety check
+                        href = first_element.get_attribute("href") or ""
+                        onclick = first_element.get_attribute("onclick") or ""
 
-                            # Skip dangerous elements
-                            if any(danger in (href + onclick).lower()
-                                   for danger in ['delete', 'remove', 'logout']):
-                                print("      ⚠️ Skipping potentially dangerous element")
-                                continue
+                        # Skip dangerous elements
+                        if any(danger in (href + onclick).lower()
+                               for danger in ['delete', 'remove', 'logout']):
+                            print("      ⚠️ Skipping potentially dangerous element")
+                            continue
 
-                            # Safe interaction test
-                            first_element.click(timeout=2000)
-                            page.wait_for_load_state("networkidle", timeout=3000)
-                            interactions_tested += 1
+                        # Safe interaction test
+                        first_element.click(timeout=2000)
+                        page.wait_for_load_state("networkidle", timeout=3000)
+                        interactions_tested += 1
 
-                            # Verify we're still authenticated
-                            require_authentication(page)
+                        # Verify we're still authenticated
+                        require_authentication(page)
 
-                            print(f"      ✅ Successfully interacted with {element_type}")
+                        print(f"      ✅ Successfully interacted with {element_type}")
 
-                            # Return to invoices if we navigated away
-                            if "/billing/invoices/" not in page.url:
-                                navigate_to_invoices(page)
+                        # Return to invoices if we navigated away
+                        if "/billing/invoices/" not in page.url:
+                            navigate_to_invoices(page)
 
-                    except Exception as e:
-                        print(f"      ⚠️ Interaction failed: {str(e)[:50]}")
-                        continue
+                except Exception as e:
+                    print(f"      ⚠️ Interaction failed: {str(e)[:50]}")
+                    continue
 
-            print(f"  📊 Invoice interactions tested: {interactions_tested}")
+        print(f"  📊 Invoice interactions tested: {interactions_tested}")
 
-            # Verify we're still on invoices page after interactions
-            if "/billing/invoices/" not in page.url:
-                print("  🔄 Returning to invoices page after interactions")
-                navigate_to_invoices(page)
+        # Verify we're still on invoices page after interactions
+        if "/billing/invoices/" not in page.url:
+            print("  🔄 Returning to invoices page after interactions")
+            navigate_to_invoices(page)
 
-        except AuthenticationError:
-            pytest.fail("Lost authentication during invoice interactions test")
+    except AuthenticationError:
+        pytest.fail("Lost authentication during invoice interactions test")
 
 
-def test_invoices_mobile_responsiveness(page: Page) -> None:
+def test_invoices_mobile_responsiveness(monitored_staff_page: Page) -> None:
     """
     Test invoice management responsiveness across mobile breakpoints.
 
@@ -331,58 +309,48 @@ def test_invoices_mobile_responsiveness(page: Page) -> None:
     """
     print("🧪 Testing invoice mobile responsiveness with comprehensive validation")
 
-    with ComprehensivePageMonitor(page, "invoices mobile responsiveness test",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 check_performance=False):
-        # Login as staff for full invoice access
-        ensure_fresh_platform_session(page)
-        if not login_platform_user(page):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+    page = monitored_staff_page
 
-        try:
-            require_authentication(page)
+    try:
+        require_authentication(page)
 
-            # Test invoice functionality across responsive breakpoints
-            results = run_responsive_breakpoints_test(page, verify_invoices_functionality, "superuser")
+        # Test invoice functionality across responsive breakpoints
+        results = run_responsive_breakpoints_test(page, verify_invoices_functionality, "superuser")
 
-            # Verify desktop functionality as baseline
-            assert results.get('desktop'), "Invoices should work on desktop viewport"
+        # Verify desktop functionality as baseline
+        assert results.get('desktop'), "Invoices should work on desktop viewport"
 
-            # Verify tablet functionality
-            assert results.get('tablet_landscape'), "Invoices should work on tablet landscape viewport"
+        # Verify tablet functionality
+        assert results.get('tablet_landscape'), "Invoices should work on tablet landscape viewport"
 
-            # Verify mobile functionality
-            assert results.get('mobile'), "Invoices should work on mobile viewport"
+        # Verify mobile functionality
+        assert results.get('mobile'), "Invoices should work on mobile viewport"
 
-            # Check mobile-specific results
-            mobile_extras = results.get('mobile_extras', {})
+        # Check mobile-specific results
+        mobile_extras = results.get('mobile_extras', {})
 
-            # Log mobile-specific findings
-            nav_elements = mobile_extras.get('navigation_elements', 0)
-            layout_issues = mobile_extras.get('layout_issues', [])
-            touch_works = mobile_extras.get('touch_works', False)
+        # Log mobile-specific findings
+        nav_elements = mobile_extras.get('navigation_elements', 0)
+        layout_issues = mobile_extras.get('layout_issues', [])
+        touch_works = mobile_extras.get('touch_works', False)
 
-            print(f"    📱 Mobile navigation elements: {nav_elements}")
-            print(f"    📱 Layout issues found: {len(layout_issues)}")
-            print(f"    📱 Touch interactions: {'WORKING' if touch_works else 'LIMITED'}")
+        print(f"    📱 Mobile navigation elements: {nav_elements}")
+        print(f"    📱 Layout issues found: {len(layout_issues)}")
+        print(f"    📱 Touch interactions: {'WORKING' if touch_works else 'LIMITED'}")
 
-            # Report any layout issues (but don't fail the test)
-            if layout_issues:
-                print("    ⚠️  Mobile layout issues detected:")
-                for issue in layout_issues[:3]:  # Show first 3 issues
-                    print(f"      - {issue}")
+        # Report any layout issues (but don't fail the test)
+        if layout_issues:
+            print("    ⚠️  Mobile layout issues detected:")
+            for issue in layout_issues[:3]:  # Show first 3 issues
+                print(f"      - {issue}")
 
-            print("  ✅ Invoice mobile responsiveness validated across all breakpoints")
+        print("  ✅ Invoice mobile responsiveness validated across all breakpoints")
 
-        except AuthenticationError:
-            pytest.fail("Lost authentication during invoice mobile responsiveness test")
+    except AuthenticationError:
+        pytest.fail("Lost authentication during invoice mobile responsiveness test")
 
 
-def test_invoices_mobile_specific_features(page: Page) -> None:
+def test_invoices_mobile_specific_features(monitored_staff_page: Page) -> None:
     """
     Test invoice features specific to mobile viewport.
 
@@ -394,69 +362,59 @@ def test_invoices_mobile_specific_features(page: Page) -> None:
     """
     print("🧪 Testing invoice mobile-specific features")
 
-    with ComprehensivePageMonitor(page, "invoices mobile features test",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 check_performance=False):
-        # Login as staff
-        ensure_fresh_platform_session(page)
-        if not login_platform_user(page):
-            pytest.skip("Login precondition failed — TODO: check E2E service health")
+    page = monitored_staff_page
 
-        try:
-            require_authentication(page)
+    try:
+        require_authentication(page)
 
-            # Test mobile medium viewport (standard smartphone)
-            with MobileTestContext(page, 'mobile_medium') as mobile:
-                print("  📱 Testing standard mobile invoice viewport (375x667)")
+        # Test mobile medium viewport (standard smartphone)
+        with MobileTestContext(page, 'mobile_medium') as mobile:
+            print("  📱 Testing standard mobile invoice viewport (375x667)")
 
-                # Verify invoice functionality still works
-                assert verify_invoices_functionality(page, "superuser"), \
-                    "Invoice functionality should work on mobile"
+            # Verify invoice functionality still works
+            assert verify_invoices_functionality(page, "superuser"), \
+                "Invoice functionality should work on mobile"
 
-                # Test mobile navigation
-                nav_count = mobile.test_mobile_navigation()
-                print(f"    ✅ Mobile navigation test completed ({nav_count} elements)")
+            # Test mobile navigation
+            nav_count = mobile.test_mobile_navigation()
+            print(f"    ✅ Mobile navigation test completed ({nav_count} elements)")
 
-                # Check responsive layout for invoice tables/lists
-                layout_issues = mobile.check_responsive_layout()
-                if layout_issues:
-                    print(f"    ⚠️  Found {len(layout_issues)} responsive layout issues")
-                    for issue in layout_issues[:2]:  # Show first 2
-                        print(f"      - {issue}")
-                else:
-                    print("    ✅ No responsive layout issues detected")
+            # Check responsive layout for invoice tables/lists
+            layout_issues = mobile.check_responsive_layout()
+            if layout_issues:
+                print(f"    ⚠️  Found {len(layout_issues)} responsive layout issues")
+                for issue in layout_issues[:2]:  # Show first 2
+                    print(f"      - {issue}")
+            else:
+                print("    ✅ No responsive layout issues detected")
 
-                # Test touch interactions on invoice elements
-                touch_success = mobile.test_touch_interactions()
-                if not touch_success:
-                    print("    Info: Limited touch interactivity (may be normal for this page)")
+            # Test touch interactions on invoice elements
+            touch_success = mobile.test_touch_interactions()
+            if not touch_success:
+                print("    Info: Limited touch interactivity (may be normal for this page)")
 
-            # Test mobile small viewport (older/smaller devices)
-            with MobileTestContext(page, 'mobile_small') as mobile_small:
-                print("  📱 Testing small mobile invoice viewport (320x568)")
+        # Test mobile small viewport (older/smaller devices)
+        with MobileTestContext(page, 'mobile_small') as mobile_small:
+            print("  📱 Testing small mobile invoice viewport (320x568)")
 
-                # Verify invoice core functionality still works
-                basic_functionality = verify_invoices_functionality(page, "superuser")
-                if basic_functionality:
-                    print("    ✅ Invoices work on small mobile viewport")
-                else:
-                    print("    ⚠️  Invoices have issues on small mobile viewport")
+            # Verify invoice core functionality still works
+            basic_functionality = verify_invoices_functionality(page, "superuser")
+            if basic_functionality:
+                print("    ✅ Invoices work on small mobile viewport")
+            else:
+                print("    ⚠️  Invoices have issues on small mobile viewport")
 
-                # Check for critical layout problems on small screens
-                small_layout_issues = mobile_small.check_responsive_layout()
-                critical_issues = [issue for issue in small_layout_issues
-                                 if 'horizontal scroll' in issue.lower()]
+            # Check for critical layout problems on small screens
+            small_layout_issues = mobile_small.check_responsive_layout()
+            critical_issues = [issue for issue in small_layout_issues
+                             if 'horizontal scroll' in issue.lower()]
 
-                if critical_issues:
-                    print(f"    ⚠️  Critical small-screen issues: {len(critical_issues)}")
-                else:
-                    print("    ✅ No critical small-screen layout issues")
+            if critical_issues:
+                print(f"    ⚠️  Critical small-screen issues: {len(critical_issues)}")
+            else:
+                print("    ✅ No critical small-screen layout issues")
 
-            print("  ✅ Mobile-specific invoice features tested successfully")
+        print("  ✅ Mobile-specific invoice features tested successfully")
 
-        except AuthenticationError:
-            pytest.fail("Lost authentication during invoice mobile features test")
+    except AuthenticationError:
+        pytest.fail("Lost authentication during invoice mobile features test")
