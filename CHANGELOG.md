@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Security Scanner**: `scripts/security_scanner.py` — AST-based static security scanner covering OWASP Top 10 categories; detects hardcoded secrets, dangerous function calls (eval/exec with dynamic args, pickle.loads), SQL injection patterns, and insecure subprocess usage; integrates pip-audit/safety for dependency vulnerability scanning; supports JSON and console output modes with configurable severity thresholds; invokable standalone or via `make lint-security`
+- **Architecture Diagrams**: New `docs/architecture/` directory with seven Mermaid diagram files — system overview, entity relationships, data flow, deployment topology, and app dependencies; accompanied by `README.md` (diagram index and render instructions) and `CHANGELOG.md` (diagram history)
+- **Documentation Updates**: `README.md` and `docs/ARCHITECTURE.md` updated to reflect current two-service architecture (Platform :8700 + Portal :8701), session-scoped E2E fixtures, and `make dev-e2e` target
 - **ORM E2E Tests (billing)**: `test_billing_workflow.py` — order-to-invoice, invoice-to-payment, proforma conversion, full/partial refund flows using Django TestCase with direct DB access; Romanian VAT rate sourced from `TaxService.get_vat_rate("RO")` (no hardcoded percentage)
 - **ORM E2E Tests (signup)**: `test_signup_workflow.py` — complete company and individual customer signup, GDPR consent tracking, multi-address support, user registration and onboarding steps; both files bootstrap via `django.setup()` with E402 noqa on post-setup imports and are marked `@pytest.mark.e2e`
 

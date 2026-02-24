@@ -1,8 +1,13 @@
 # PRAHO Platform Architecture
 
-**Version:** 1.0.0
-**Last Updated:** September 5, 2025
+**Version:** 1.1.0
+**Last Updated:** February 21, 2026
 **Status:** ✅ Services Architecture Complete
+
+> **Note**: Architecture diagrams available in `docs/architecture/` (Mermaid format):
+> - `system-overview.mmd` - High-level service boundaries and data flow
+> - `data-flow.mmd` - Sequence diagram showing Portal ↔ Platform communication
+> - `deployment.mmd` - Docker network topology and security isolation
 
 ## 🏗️ Architecture Overview
 
@@ -24,19 +29,26 @@ PRAHO Platform uses **Services-based Django architecture** for secure separation
 PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 ├─ services/                    # 🏗️ Services Architecture
 │  ├─ platform/                # 🏢 Main Django application (full database access)
-│  │  ├─ apps/users/           # Authentication & user management
-│  │  ├─ apps/customers/       # Customer organization management
-│  │  ├─ apps/billing/         # Invoice & payment processing
-│  │  ├─ apps/tickets/         # Support ticket system
-│  │  ├─ apps/provisioning/    # Service provisioning
-│  │  ├─ apps/audit/           # Compliance & audit logging
-│  │  ├─ apps/common/          # Shared utilities
-│  │  ├─ apps/ui/              # Templates & UI components
+│  │  ├─ apps/                 # 17 Django apps (business domains)
+│  │  │  ├─ users/             # Authentication & user management
+│  │  │  ├─ customers/         # Customer organization management
+│  │  │  ├─ billing/           # Invoice & payment processing
+│  │  │  ├─ tickets/           # Support ticket system
+│  │  │  ├─ provisioning/      # Service provisioning
+│  │  │  ├─ audit/             # Compliance & audit logging
+│  │  │  ├─ common/            # Shared utilities
+│  │  │  ├─ ui/                # Templates & UI components
+│  │  │  └─ ... (17 total)     # See ls services/platform/apps/
 │  │  ├─ config/               # Django configuration
 │  │  ├─ manage.py             # Django management
 │  │  └─ requirements.txt      # Platform dependencies
-│  └─ portal/                  # 🌐 Customer API service (NO database access)
-│     ├─ apps/portal/          # Customer API endpoints
+│  └─ portal/                  # 🌐 Customer API service (stateless, session-only DB)
+│     ├─ apps/                 # 9 Django apps (API proxies, no business models)
+│     │  ├─ api_client/        # HMAC authentication client
+│     │  ├─ users/             # User API proxy
+│     │  ├─ billing/           # Billing API proxy
+│     │  ├─ tickets/           # Support API proxy
+│     │  └─ ... (9 total)      # See ls services/portal/apps/
 │     ├─ config/               # Minimal Django configuration
 ├─ deploy/                      # 🐳 Docker deployment configuration
 │  ├─ platform/                # Platform service Dockerfile
@@ -94,7 +106,17 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 ## 🌐 Portal Service Architecture
 
 **Location**: `services/portal/`
-**Purpose**: Customer-facing API service with **NO database access**
+**Purpose**: Customer-facing API service — **NO business data access**
+
+### Database Isolation
+
+Portal uses a **minimal SQLite database for Django session storage only**. It has:
+- ✅ Session storage (required by Django's session framework)
+- ❌ NO business models (no User, Customer, Invoice, etc.)
+- ❌ NO PostgreSQL access (no connection to platform database)
+- ❌ NO direct data queries (all business data fetched via Platform API)
+
+This maintains stateless architecture while leveraging Django's built-in session management.
 
 ### API Endpoints
 
@@ -122,10 +144,12 @@ POST /api/v1/tickets/{id}/comments/ # Add comment
 ```
 
 ### Security Constraints
-- ❌ **NO database drivers** (psycopg2, mysql, sqlite)
-- ❌ **NO direct model imports** from platform
-- ✅ **Cookie-based sessions** (no database storage)
-- ✅ **HTTP API communication** with platform only
+- ❌ **NO PostgreSQL access** (no psycopg2, no connection to business database)
+- ❌ **NO direct model imports** from platform (enforced by pre-commit hooks)
+- ❌ **NO business data models** (apps have no models.py with domain entities)
+- ✅ **SQLite for sessions only** (minimal local storage, no business data)
+- ✅ **HMAC-signed API communication** with platform for all business operations
+- ✅ **Stateless design** - can be destroyed/recreated without data loss
 
 ---
 

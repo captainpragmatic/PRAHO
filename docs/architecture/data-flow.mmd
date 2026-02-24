@@ -1,0 +1,46 @@
+%% PRAHO Platform - Data Flow & Service Communication
+%% Generated: 2026-02-21
+%% Shows how Portal and Platform services communicate
+
+sequenceDiagram
+    participant Customer as Customer Browser
+    participant Portal as Portal Service<br/>(Stateless API)
+    participant Platform as Platform Service<br/>(Business Logic)
+    participant DB as PostgreSQL<br/>(Business Data)
+    participant Cache as DB Cache Table
+
+    Note over Customer,Cache: Customer Authentication Flow
+    Customer->>Portal: POST /api/v1/auth/login
+    Portal->>Portal: Validate credentials locally
+    Portal->>Platform: HMAC-signed request<br/>X-HMAC-Signature: sha256...
+    Platform->>Platform: Verify HMAC signature
+    Platform->>DB: SELECT * FROM users WHERE email=?
+    DB-->>Platform: User record
+    Platform->>Cache: Store session data
+    Cache-->>Platform: OK
+    Platform-->>Portal: {user_id, token}
+    Portal->>Portal: Store session in SQLite
+    Portal-->>Customer: Set-Cookie: sessionid=...
+
+    Note over Customer,Cache: Fetching Customer Data
+    Customer->>Portal: GET /api/v1/account/profile
+    Portal->>Portal: Read session from SQLite
+    Portal->>Platform: HMAC-signed request<br/>X-User-Context: {user_id: 123}
+    Platform->>Platform: Verify HMAC + user context
+    Platform->>DB: SELECT * FROM customers WHERE user_id=123
+    DB-->>Platform: Customer data
+    Platform->>Cache: Cache customer profile
+    Cache-->>Platform: Cached
+    Platform-->>Portal: {customer_data}
+    Portal-->>Customer: JSON response
+
+    Note over Customer,Cache: Security Isolation
+    rect rgb(255, 200, 200)
+        Portal-XDB: ❌ Direct access blocked<br/>No psycopg2 driver
+        Portal-XCache: ❌ No Redis/cache access
+    end
+
+    rect rgb(200, 255, 200)
+        Platform->>DB: ✅ Full CRUD access
+        Platform->>Cache: ✅ Cache operations
+    end

@@ -1,0 +1,59 @@
+%% PRAHO Platform Architecture - System Overview
+%% Generated: 2026-02-21
+%% Maintainer: Architecture Team
+
+graph TB
+    subgraph "Client Layer"
+        WebBrowser[Web Browser]
+        MobileApp[Mobile App]
+    end
+
+    subgraph "Reverse Proxy Layer"
+        Nginx[Nginx Reverse Proxy<br/>:80/:443]
+    end
+
+    subgraph "Portal Service (Customer-Facing)"
+        PortalApp[Portal Django App<br/>:8701]
+        PortalSession[(SQLite<br/>Session Storage Only)]
+        PortalApp -.->|Sessions Only| PortalSession
+    end
+
+    subgraph "Platform Service (Business Logic)"
+        PlatformApp[Platform Django App<br/>:8700]
+        PlatformDB[(PostgreSQL<br/>Business Data)]
+        CacheTable[(DB Cache Table<br/>No Redis)]
+        PlatformApp -->|Read/Write| PlatformDB
+        PlatformApp -->|Cache Ops| CacheTable
+        CacheTable -.->|Stored In| PlatformDB
+    end
+
+    subgraph "External Integrations"
+        Virtualmin[Virtualmin API<br/>Provisioning]
+        ROTLD[ROTLD API<br/>.ro Domains]
+        Stripe[Stripe API<br/>Payments]
+        ANAF[ANAF e-Factura<br/>Romanian Tax]
+    end
+
+    WebBrowser --> Nginx
+    MobileApp --> Nginx
+    Nginx -->|/portal/*| PortalApp
+    Nginx -->|/platform/*| PlatformApp
+
+    PortalApp -->|HMAC-Signed<br/>HTTP Requests| PlatformApp
+
+    PlatformApp -.->|Provision| Virtualmin
+    PlatformApp -.->|Register| ROTLD
+    PlatformApp -.->|Charge| Stripe
+    PlatformApp -.->|Submit Invoice| ANAF
+
+    classDef portal fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef platform fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef client fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+
+    class PortalApp,PortalSession portal
+    class PlatformApp,CacheTable platform
+    class PlatformDB db
+    class Virtualmin,ROTLD,Stripe,ANAF external
+    class WebBrowser,MobileApp,Nginx client

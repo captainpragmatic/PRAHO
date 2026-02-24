@@ -28,18 +28,21 @@ PRAHO uses a **two-service architecture** for security isolation:
 ```
 services/
 ├── platform/   # Staff/admin service (:8700) - full database access
-│   ├── apps/   # 21 Django apps with models, services, views
+│   ├── apps/   # 17 Django apps with models, services, views
 │   ├── config/ # Django settings (base, dev, prod, staging, test)
 │   └── tests/  # Mirrors apps/ structure
 │
-└── portal/     # Customer-facing service (:8701) - NO database access
-    ├── apps/   # 13 Django apps (API proxies, no models)
-    └── tests/  # Enforces no DB access
+└── portal/     # Customer-facing service (:8701) - SQLite sessions only
+    ├── apps/   # 9 Django apps (API proxies, no business models)
+    └── tests/  # Enforces no business DB access
 ```
 
 - **Platform** owns all data (PostgreSQL) and business logic
-- **Portal** is fully stateless - communicates with Platform via HMAC-signed requests
+- **Portal** uses SQLite for session storage only - NO business data access
+- **Portal** is stateless - communicates with Platform via HMAC-signed requests
 - **No Redis required** - uses Django's database cache
+
+> **Architecture Diagrams**: See [`docs/architecture/`](docs/architecture/) for Mermaid diagrams showing system overview, data flow, and deployment topology.
 
 ## Quick Start
 
@@ -192,6 +195,7 @@ PRAHO is built for Romanian hosting providers with **full EU VAT support**:
 ## Documentation
 
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - System design and patterns
+- **[Architecture Diagrams](docs/architecture/)** - Mermaid diagrams (system, data flow, deployment)
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment scenarios
 - **[Linting Guide](docs/LINTING_GUIDE.md)** - Code quality framework
 - **[Changelog](CHANGELOG.md)** - Version history (SemVer)

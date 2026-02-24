@@ -1,0 +1,296 @@
+%% PRAHO Platform - Database Entity Relationship Diagram
+%% Generated: 2026-02-21
+%% Shows core entities and their relationships
+%% Monetary values stored as BigInteger in cents (subtotal_cents, tax_cents, total_cents)
+%% PKs: UUID for Order, OrderItem, Product, ProductPrice, Domain, Subscription; auto-increment for others
+
+erDiagram
+    %% =========================================================================
+    %% AUTHENTICATION & IDENTITY
+    %% =========================================================================
+
+    User {
+        int id PK
+        string email UK "Email-based auth (no username)"
+        string staff_role "admin|support|billing|manager"
+        bool two_factor_enabled
+        datetime created_at
+    }
+
+    UserProfile {
+        int id PK
+        int user_id FK
+        string preferred_language "ro|en"
+        string timezone "Europe/Bucharest"
+    }
+
+    CustomerMembership {
+        int id PK
+        int user_id FK
+        int customer_id FK
+        string role "owner|billing|tech|viewer"
+        bool is_primary
+    }
+
+    %% =========================================================================
+    %% BUSINESS ENTITIES
+    %% =========================================================================
+
+    Customer {
+        int id PK
+        string name
+        string customer_type "individual|company|pfa|ngo"
+        string status "active|inactive|suspended|prospect"
+        string company_name
+        string primary_email
+        datetime deleted_at "Soft delete"
+    }
+
+    CustomerTaxProfile {
+        int id PK
+        int customer_id FK
+        string vat_number
+        bool is_vat_payer
+        bool reverse_charge_eligible
+    }
+
+    CustomerBillingProfile {
+        int id PK
+        int customer_id FK
+        string default_currency
+        string payment_terms
+    }
+
+    %% =========================================================================
+    %% PRODUCT CATALOG
+    %% =========================================================================
+
+    Product {
+        uuid id PK
+        string slug UK
+        string name
+        string product_type "shared_hosting|vps|domain|ssl|..."
+        bool is_active
+        uuid default_service_plan_id FK
+    }
+
+    ProductPrice {
+        uuid id PK
+        uuid product_id FK
+        int currency_id FK
+        bigint monthly_price_cents
+        bigint setup_cents
+        decimal semiannual_discount_percent
+        decimal annual_discount_percent
+    }
+
+    %% =========================================================================
+    %% ORDERS
+    %% =========================================================================
+
+    Order {
+        uuid id PK
+        string order_number UK
+        int customer_id FK
+        string status "draft|pending|confirmed|processing|completed|..."
+        int currency_id FK
+        bigint subtotal_cents
+        bigint tax_cents
+        bigint total_cents
+        datetime created_at
+    }
+
+    OrderItem {
+        uuid id PK
+        uuid order_id FK
+        uuid product_id FK
+        int quantity
+        bigint unit_price_cents
+        bigint tax_cents
+        bigint line_total_cents
+        string provisioning_status
+        int service_id FK "Optional - after provisioning"
+    }
+
+    %% =========================================================================
+    %% BILLING & INVOICING
+    %% =========================================================================
+
+    Invoice {
+        int id PK
+        int customer_id FK
+        string number UK "INV-000001 sequential"
+        string status "draft|issued|paid|overdue|void|refunded"
+        bigint subtotal_cents
+        bigint tax_cents
+        bigint total_cents
+        int converted_from_proforma_id FK "Optional"
+        datetime locked_at "Immutable once issued"
+    }
+
+    InvoiceLine {
+        int id PK
+        int invoice_id FK
+        string description
+        bigint amount_cents
+        bigint tax_cents
+    }
+
+    ProformaInvoice {
+        int id PK
+        int customer_id FK
+        string number UK "PRO-000001"
+        string status
+        bigint total_cents
+    }
+
+    Subscription {
+        uuid id PK
+        int customer_id FK
+        uuid product_id FK
+        string subscription_number UK
+        string status "trialing|active|past_due|cancelled|..."
+        string billing_cycle "monthly|quarterly|yearly"
+        bigint amount_cents
+    }
+
+    %% =========================================================================
+    %% HOSTING & PROVISIONING
+    %% =========================================================================
+
+    ServicePlan {
+        int id PK
+        string name
+        string plan_type "shared_hosting|vps|dedicated|..."
+        decimal price_monthly
+        int disk_space_gb
+        int bandwidth_gb
+    }
+
+    Server {
+        int id PK
+        string hostname UK
+        string server_type "shared|vps_host|dedicated|cloud"
+        string status "active|maintenance|offline"
+        string primary_ip
+    }
+
+    Service {
+        int id PK
+        int customer_id FK
+        int service_plan_id FK
+        int server_id FK
+        string service_name
+        string username UK
+        string status "pending|provisioning|active|suspended|terminated"
+        string billing_cycle
+    }
+
+    %% =========================================================================
+    %% DOMAINS
+    %% =========================================================================
+
+    Domain {
+        uuid id PK
+        string name UK "example.com"
+        int customer_id FK
+        int tld_id FK
+        int registrar_id FK
+        string status "pending|active|expired|transfer_in|..."
+        datetime expires_at
+        bool auto_renew
+    }
+
+    TLD {
+        int id PK
+        string extension UK "com|ro|eu|..."
+        bigint registration_price_cents
+        bigint renewal_price_cents
+    }
+
+    Registrar {
+        int id PK
+        string name UK
+        string status "active|suspended|disabled"
+        string api_endpoint
+    }
+
+    %% =========================================================================
+    %% SUPPORT
+    %% =========================================================================
+
+    Ticket {
+        int id PK
+        string ticket_number UK "TK2026-XXXXXXXX"
+        int customer_id FK
+        string status "open|in_progress|waiting_on_customer|closed"
+        string priority "low|normal|high|urgent|critical"
+        int assigned_to_id FK
+    }
+
+    TicketComment {
+        int id PK
+        int ticket_id FK
+        int author_id FK
+        string comment_type "customer|support|internal|system"
+        text content
+    }
+
+    TicketAttachment {
+        int id PK
+        int ticket_id FK
+        int comment_id FK
+        string filename
+        int file_size
+    }
+
+    %% =========================================================================
+    %% AUDIT (cross-cutting)
+    %% =========================================================================
+
+    AuditEvent {
+        uuid id PK
+        string category "authentication|security_event|..."
+        string severity "low|medium|high|critical"
+        int content_type_id FK "GenericFK to any model"
+        string object_id
+        datetime created_at "Append-only immutable"
+    }
+
+    %% =========================================================================
+    %% RELATIONSHIPS
+    %% =========================================================================
+
+    User ||--o| UserProfile : "has"
+    User ||--o{ CustomerMembership : "holds"
+    Customer ||--o{ CustomerMembership : "grants"
+    Customer ||--|| CustomerTaxProfile : "has"
+    Customer ||--|| CustomerBillingProfile : "has"
+
+    Customer ||--o{ Order : "places"
+    Customer ||--o{ Invoice : "receives"
+    Customer ||--o{ ProformaInvoice : "receives"
+    Customer ||--o{ Subscription : "subscribes"
+    Customer ||--o{ Service : "owns"
+    Customer ||--o{ Domain : "registers"
+    Customer ||--o{ Ticket : "opens"
+
+    Order ||--o{ OrderItem : "contains"
+    OrderItem }o--|| Product : "references"
+    OrderItem }o--o| Service : "provisions"
+
+    Product ||--o{ ProductPrice : "priced as"
+    Product }o--o| ServicePlan : "maps to"
+    Subscription }o--|| Product : "subscribes to"
+
+    Invoice ||--o{ InvoiceLine : "itemized as"
+    ProformaInvoice ||--o{ Invoice : "converts to"
+
+    Domain }o--|| TLD : "under"
+    Domain }o--|| Registrar : "managed by"
+
+    Service }o--|| ServicePlan : "based on"
+    Service }o--o| Server : "hosted on"
+
+    Ticket ||--o{ TicketComment : "has"
+    TicketComment ||--o{ TicketAttachment : "attaches"

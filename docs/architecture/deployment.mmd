@@ -1,0 +1,42 @@
+%% PRAHO Platform - Docker Deployment Architecture
+%% Generated: 2026-02-21
+%% Shows network isolation and container layout
+
+graph TB
+    subgraph "Docker Host"
+        subgraph "platform-network<br/>(Internal Only)"
+            Platform[Platform Service<br/>:8700]
+            PostgreSQL[(PostgreSQL<br/>:5432)]
+            Platform <-->|Full Access| PostgreSQL
+        end
+
+        subgraph "api-network<br/>(Public Facing)"
+            Portal[Portal Service<br/>:8701]
+            Nginx[Nginx<br/>:80/:443]
+            Nginx -->|Proxy /portal/*| Portal
+            Nginx -->|Proxy /platform/*| Platform
+        end
+
+        Portal -.->|HTTP API<br/>HMAC Auth| Platform
+    end
+
+    Internet([Internet]) -->|HTTPS| Nginx
+
+    subgraph "External Services"
+        Virtualmin[Virtualmin]
+        Stripe[Stripe]
+        ANAF[ANAF]
+    end
+
+    Platform -.->|API Calls| Virtualmin
+    Platform -.->|API Calls| Stripe
+    Platform -.->|API Calls| ANAF
+
+    classDef network fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef service fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef external fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+
+    class Platform,Portal,Nginx service
+    class PostgreSQL db
+    class Virtualmin,Stripe,ANAF external
