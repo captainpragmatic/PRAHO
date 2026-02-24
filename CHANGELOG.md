@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **E2E Cache Prevention**: Added `PYTHONDONTWRITEBYTECODE=1` to `conftest.py` and `__pycache__` cleanup to all `make test-e2e*` Makefile targets to prevent stale bytecode issues in Docker bind mounts
 
 ### Changed
+- **OS-Scoped Dev Database**: Platform dev database is now `db-{darwin,linux}.sqlite3` to prevent SQLite corruption when macOS host and Docker container share the same bind-mounted directory (VirtioFS cannot coordinate file locks cross-platform)
 - **E2E Rate Limit Guard**: `make test-e2e` now detects active rate limiting and fails fast with actionable error instead of running 179 tests that will all fail
 - **CSS Build Portability**: `make build-css` gracefully skips when npm is not available (Docker container support)
 - **CLAUDE.md**: Strengthened Makefile-only directive — agents must always use `make` targets, never run `pytest` directly
-- **Makefile**: All E2E targets reference `make dev-e2e` as prerequisite in error messages
+- **Makefile**: All E2E targets reference `make dev-e2e` as prerequisite in error messages; `check-css-tooling` now gracefully skips when npm is absent instead of erroring
+- **pre-commit hook patching**: `scripts/patch_precommit_hook.py` now patches all pre-commit-generated hooks (not just `pre-commit`), uses a versioned `PATCHED_MARKER` sentinel for true idempotency, switches from `uname -s | tr` to a POSIX `case` statement for OS detection, and resolves repo root via `git rev-parse --show-toplevel`
 
 ---
 

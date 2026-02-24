@@ -278,19 +278,30 @@ test-security:
 test-e2e:
 	@echo "🎭 [E2E] Running all end-to-end tests..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires both services running (make dev)"
+	@echo "⚠️  Requires services running with rate limiting disabled (make dev-e2e)"
 	@echo "🧪 Checking if services are available..."
-	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev' first." && exit 1)
-	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev' first." && exit 1)
+	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev-e2e' first." && exit 1)
+	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e' first." && exit 1)
 	@echo "✅ Both services are running"
+	@echo "🔍 Checking rate limiting is disabled..."
+	@RATE_LIMITED=false; \
+	for i in 1 2 3 4 5; do \
+		STATUS=$$(curl -so /dev/null -w "%{http_code}" http://localhost:8700/auth/login/ 2>/dev/null); \
+		if [ "$$STATUS" = "429" ]; then \
+			RATE_LIMITED=true; \
+			break; \
+		fi; \
+	done; \
+	if [ "$$RATE_LIMITED" = "true" ]; then \
+		echo "❌ Rate limiting is ACTIVE on platform service."; \
+		echo "   E2E tests make ~180 login requests and WILL fail with rate limiting enabled."; \
+		echo "   Restart services: make dev-e2e"; \
+		exit 1; \
+	fi
+	@echo "✅ Rate limiting check passed"
 	@echo "🧹 Clearing stale bytecode cache..."
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@echo "🎭 Running Playwright E2E tests..."
-	@if [ "$$RATELIMIT_ENABLE" != "false" ]; then \
-		echo "⚠️  WARNING: Rate limiting (django-ratelimit + DRF throttling) may be active."; \
-		echo "   Start services with: RATELIMIT_ENABLE=false make dev"; \
-		echo "   Or use: make dev-e2e (starts services with rate limiting disabled)"; \
-	fi
 	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/ -v
 	@echo "✅ E2E tests completed!"
 
@@ -299,8 +310,8 @@ test-with-e2e: test-e2e
 test-e2e-platform:
 	@echo "🎭 [E2E Platform] Running platform staff E2E tests..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires platform service running (make dev-platform)"
-	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700." && exit 1)
+	@echo "⚠️  Requires platform service running with rate limiting disabled (make dev-e2e)"
+	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev-e2e' first." && exit 1)
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/platform/ -v
 	@echo "✅ Platform E2E tests completed!"
@@ -308,8 +319,8 @@ test-e2e-platform:
 test-e2e-portal:
 	@echo "🎭 [E2E Portal] Running portal customer E2E tests..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires portal service running (make dev-portal)"
-	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701." && exit 1)
+	@echo "⚠️  Requires portal service running with rate limiting disabled (make dev-e2e)"
+	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e' first." && exit 1)
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/ -v
 	@echo "✅ Portal E2E tests completed!"
@@ -487,20 +498,25 @@ install-css:
 install-frontend: install-css
 
 check-css-tooling:
-	@npm ls --depth=0 @tailwindcss/cli >/dev/null 2>&1 || ( \
-		echo "❌ Missing Tailwind CLI package: @tailwindcss/cli"; \
-		echo "   Run: npm install --save-dev @tailwindcss/cli"; \
-		exit 1; \
-	)
+	@if ! command -v npm >/dev/null 2>&1; then \
+		echo "⚠️  npm not found — skipping CSS build (using pre-built assets)"; \
+	else \
+		npm ls --depth=0 @tailwindcss/cli >/dev/null 2>&1 || ( \
+			echo "❌ Missing Tailwind CLI package: @tailwindcss/cli"; \
+			echo "   Run: npm install --save-dev @tailwindcss/cli"; \
+			exit 1; \
+		); \
+	fi
 
 build-css: check-css-tooling
-	@echo "🎨 Building Tailwind CSS assets for all services..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🏗️  Building Portal CSS..."
-	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify
-	@echo "🏗️  Building Platform CSS..."
-	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify
-	@echo "✅ CSS build complete!"
+	@command -v npm >/dev/null 2>&1 || exit 0; \
+	echo "🎨 Building Tailwind CSS assets for all services..."; \
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+	echo "🏗️  Building Portal CSS..."; \
+	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify && \
+	echo "🏗️  Building Platform CSS..." && \
+	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify && \
+	echo "✅ CSS build complete!"
 
 watch-css: check-css-tooling
 	@echo "👀 Watching CSS changes for development..."
