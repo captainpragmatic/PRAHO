@@ -142,19 +142,19 @@ class RegistrarAdminAuthorizationTests(TestCase):
     def setUp(self) -> None:
         self.client = Client()
         self.admin = User.objects.create_user(
-            email="admin@example.com", password="x", is_superuser=True, is_staff=True
+            email="admin@example.com", password="testpass123", is_superuser=True, is_staff=True
         )
         self.staff = User.objects.create_user(
-            email="staff@example.com", password="x", is_staff=True
+            email="staff@example.com", password="testpass123", is_staff=True
         )
 
     def test_staff_cannot_access_registrar_create(self) -> None:
-        self.client.login(email="staff@example.com", password="x")
+        self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.get(reverse("domains:registrar_create"))
         # Expect 403 due to admin_required
         self.assertEqual(resp.status_code, 403)
 
     def test_admin_can_access_registrar_create(self) -> None:
-        self.client.login(email="admin@example.com", password="x")
+        self.client.login(email="admin@example.com", password="testpass123")
         resp = self.client.get(reverse("domains:registrar_create"))
         self.assertEqual(resp.status_code, 200)

@@ -22,7 +22,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Create staff user (admin)
         self.staff_user = User.objects.create_user(
             email='admin@example.com',
-            password='admin123'
+            password='testpass123'
         )
         self.staff_user.first_name = 'Admin'
         self.staff_user.last_name = 'User'
@@ -33,7 +33,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Create support staff user
         self.support_user = User.objects.create_user(
             email='support@example.com',
-            password='support123'
+            password='testpass123'
         )
         self.support_user.first_name = 'Support'
         self.support_user.last_name = 'Agent'
@@ -44,7 +44,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Create customer user (non-staff)
         self.customer_user = User.objects.create_user(
             email='customer@example.com',
-            password='customer123'
+            password='testpass123'
         )
         self.customer_user.first_name = 'Customer'
         self.customer_user.last_name = 'User'
@@ -121,7 +121,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
     def test_staff_can_see_all_comments(self):
         """Test that staff users can see all comments including internal notes"""
         # Test admin user
-        self.client.login(email='admin@example.com', password='admin123')
+        self.client.login(email='admin@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
 
@@ -132,7 +132,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertContains(response, 'STAFF INTERNAL NOTE')
 
         # Test support user
-        self.client.login(email='support@example.com', password='support123')
+        self.client.login(email='support@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
 
@@ -144,7 +144,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
     def test_customer_cannot_see_internal_comments(self):
         """Test that customer users cannot see internal staff notes"""
-        self.client.login(email='customer@example.com', password='customer123')
+        self.client.login(email='customer@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
 
@@ -159,7 +159,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
     def test_htmx_comments_endpoint_security(self):
         """Test that HTMX comments endpoint respects internal comment security"""
         # Test staff user via HTMX
-        self.client.login(email='admin@example.com', password='admin123')
+        self.client.login(email='admin@example.com', password='testpass123')
         response = self.client.get(
             reverse('tickets:comments_htmx', kwargs={'pk': self.ticket.pk}),
             HTTP_HX_REQUEST='true'
@@ -171,7 +171,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertContains(response, 'STAFF INTERNAL NOTE')
 
         # Test customer user via HTMX
-        self.client.login(email='customer@example.com', password='customer123')
+        self.client.login(email='customer@example.com', password='testpass123')
         response = self.client.get(
             reverse('tickets:comments_htmx', kwargs={'pk': self.ticket.pk}),
             HTTP_HX_REQUEST='true'
@@ -185,7 +185,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
     def test_comment_filtering_in_views(self):
         """Test that view-level comment filtering works correctly"""
         # Test with staff user - should see all comments
-        self.client.login(email='admin@example.com', password='admin123')
+        self.client.login(email='admin@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
 
@@ -194,7 +194,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertEqual(comments_in_context.count(), 3)
 
         # Test with customer user - should see only public comments
-        self.client.login(email='customer@example.com', password='customer123')
+        self.client.login(email='customer@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
         self.assertEqual(response.status_code, 200)
 
@@ -204,7 +204,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
     def test_internal_comment_styling(self):
         """Test that internal comments have proper styling when visible to staff"""
-        self.client.login(email='admin@example.com', password='admin123')
+        self.client.login(email='admin@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
 
         # Check for internal comment styling
@@ -242,7 +242,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
         other_user = User.objects.create_user(
             email='other@example.com',
-            password='other123'
+            password='testpass123'
         )
         other_user.first_name = 'Other'
         other_user.last_name = 'User'
@@ -256,7 +256,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
         )
 
         # Try to access ticket from different customer
-        self.client.login(email='other@example.com', password='other123')
+        self.client.login(email='other@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
 
         # Should redirect with error message
@@ -275,7 +275,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
     def test_comment_author_information(self):
         """Test that comment author information is properly displayed"""
-        self.client.login(email='admin@example.com', password='admin123')
+        self.client.login(email='admin@example.com', password='testpass123')
         response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
 
         # Check that author names are displayed

@@ -21,7 +21,7 @@ class RefundServiceTestCase(TestCase):
         # Create test user
         self.user = User.objects.create_user(
             email='admin@example.com',
-            password='admin123'
+            password='testpass123'
         )
 
         # Create test customer
@@ -307,7 +307,7 @@ class RefundEdgeCasesTestCase(TestCase):
         # Create test data similar to main test case
         self.user = User.objects.create_user(
             email='admin@example.com',
-            password='admin123'
+            password='testpass123'
         )
 
         from apps.customers.models import Customer, CustomerTaxProfile
@@ -343,7 +343,7 @@ class TestRefundServiceWithFixtures:
         """Fixture to set up comprehensive test data"""
         user = User.objects.create_user(
             email='admin@example.com',
-            password='admin123'
+            password='testpass123'
         )
 
         from apps.customers.models import Customer

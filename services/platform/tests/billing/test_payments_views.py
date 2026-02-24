@@ -45,7 +45,7 @@ class PaymentProcessingViewsTestCase(TestCase):
 
         self.user = User.objects.create_user(
             email='payment@test.ro',
-            password='testpass'
+            password='testpass123'
         )
         self.user.staff_role = 'billing'  # Give billing staff privileges
         self.user.save()
@@ -104,7 +104,7 @@ class PaymentProcessingViewsTestCase(TestCase):
         """Test payment processing with unauthorized user"""
         unauthorized_user = User.objects.create_user(
             email='unauth_payment@test.ro',
-            password='testpass'
+            password='testpass123'
         )
 
         post_data = {
@@ -175,7 +175,7 @@ class PaymentListViewsTestCase(TestCase):
 
         self.user = User.objects.create_user(
             email='payment_list@test.ro',
-            password='testpass'
+            password='testpass123'
         )
         self.user.staff_role = 'billing'  # Give billing staff privileges
         self.user.save()
@@ -275,7 +275,7 @@ class PaymentListViewsTestCase(TestCase):
         """Test payment list with unauthorized user"""
         unauthorized_user = User.objects.create_user(
             email='unauth_list@test.ro',
-            password='testpass'
+            password='testpass123'
         )
 
         self.client.force_login(unauthorized_user)
