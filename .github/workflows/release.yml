@@ -1,0 +1,103 @@
+# ===============================================================================
+# AUTOMATED RELEASE — Creates GitHub Releases from annotated tags
+# ===============================================================================
+# Triggered when an annotated tag matching v* is pushed.
+# Extracts release notes from CHANGELOG.md and the tag message.
+#
+# Pre-release logic:
+#   - v0.x.y          → pre-release (alpha phase)
+#   - v1.0.0-beta     → pre-release (suffix detected)
+#   - v1.0.0          → full release
+#   - v1.2.3          → full release
+
+name: Create Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for tag metadata
+
+      - name: Extract version and tag metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Get the annotated tag subject line for the release title
+          TAG_SUBJECT=$(git tag -l --format='%(contents:subject)' "${TAG}")
+          if [ -z "${TAG_SUBJECT}" ]; then
+            TAG_SUBJECT="${TAG}"
+          fi
+          echo "title=${TAG_SUBJECT}" >> "$GITHUB_OUTPUT"
+
+          # Determine pre-release status:
+          #   - Major version 0 → always pre-release (alpha)
+          #   - Contains -alpha/-beta/-rc suffix → pre-release
+          #   - Otherwise → full release
+          MAJOR=$(echo "${VERSION}" | cut -d. -f1)
+          if [ "${MAJOR}" = "0" ] || echo "${VERSION}" | grep -qE '\-(alpha|beta|rc)'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          NOTES_FILE=$(mktemp)
+
+          # Extract the section for this version from CHANGELOG.md
+          # Matches from "## [VERSION]" to the next "## [" or "---"
+          awk -v ver="${VERSION}" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found && /^---$/ { exit }
+            found { print }
+          ' CHANGELOG.md > "${NOTES_FILE}"
+
+          # Fallback to annotated tag body if CHANGELOG section not found
+          if [ ! -s "${NOTES_FILE}" ]; then
+            echo "⚠️ No CHANGELOG section found for ${VERSION}, using tag message"
+            git tag -l --format='%(contents:body)' "${{ steps.meta.outputs.tag }}" > "${NOTES_FILE}"
+          fi
+
+          # Append footer
+          printf '\n---\n\n' >> "${NOTES_FILE}"
+          printf '**Full Changelog**: See [CHANGELOG.md](https://github.com/%s/blob/master/CHANGELOG.md#%s)\n' \
+            "${GITHUB_REPOSITORY}" \
+            "$(echo "${VERSION}" | tr '.' '')" \
+            >> "${NOTES_FILE}"
+
+          echo "file=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS=(
+            "${{ steps.meta.outputs.tag }}"
+            --title "${{ steps.meta.outputs.title }}"
+            --notes-file "${{ steps.notes.outputs.file }}"
+          )
+
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+            ARGS+=(--prerelease)
+          else
+            ARGS+=(--latest)
+          fi
+
+          gh release create "${ARGS[@]}"
