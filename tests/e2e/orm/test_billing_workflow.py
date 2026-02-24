@@ -19,17 +19,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../services/platf
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
 
 import django
+
 django.setup()
 
-from django.test import Client, TestCase
-from django.utils import timezone
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model  # noqa: E402
+from django.test import Client, TestCase  # noqa: E402
+from django.utils import timezone  # noqa: E402
 
-from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
-from apps.orders.models import Order, OrderItem
-from apps.billing.models import Currency, Invoice, InvoiceLine, Payment
-from apps.billing.proforma_models import ProformaInvoice
-from apps.products.models import Product
+from apps.billing.models import Currency, Invoice, InvoiceLine, Payment  # noqa: E402
+from apps.billing.proforma_models import ProformaInvoice  # noqa: E402
+from apps.common.tax_service import TaxService  # noqa: E402
+from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
+from apps.orders.models import Order, OrderItem  # noqa: E402
+from apps.products.models import Product  # noqa: E402
 
 User = get_user_model()
 
@@ -71,7 +73,7 @@ class TestOrderToBillingWorkflow(TestCase):
             vat_number='RO12345678',
             registration_number='J40/1234/2024',
             is_vat_payer=True,
-            vat_rate=Decimal('19.00'),
+            vat_rate=TaxService.get_vat_rate("RO"),
         )
 
         CustomerBillingProfile.objects.create(
@@ -199,11 +201,13 @@ class TestOrderToBillingWorkflow(TestCase):
         assert payment.invoice == invoice
         assert payment.amount_cents == invoice.total_cents
 
-    def test_romanian_vat_19_percent_applied(self):
-        """Verify 19% Romanian VAT is applied correctly"""
+    def test_romanian_vat_applied(self):
+        """Verify Romanian VAT rate from TaxService is applied correctly"""
+        ro_vat_rate = TaxService.get_vat_rate("RO")
+        ro_vat_decimal = ro_vat_rate / Decimal("100")
         subtotal_cents = 10000  # 100.00 RON
-        tax_cents = int(subtotal_cents * Decimal('0.19'))  # 19.00 RON
-        total_cents = subtotal_cents + tax_cents  # 119.00 RON
+        tax_cents = int(subtotal_cents * ro_vat_decimal)
+        total_cents = subtotal_cents + tax_cents
 
         invoice = Invoice.objects.create(
             customer=self.customer,
@@ -216,9 +220,10 @@ class TestOrderToBillingWorkflow(TestCase):
             due_at=timezone.now() + timedelta(days=30),
         )
 
-        # Verify VAT calculation
+        # Verify VAT calculation matches TaxService rate
         actual_vat_rate = (invoice.tax_cents / invoice.subtotal_cents) * 100
-        assert 18.9 < actual_vat_rate < 19.1
+        expected_rate = float(ro_vat_rate)
+        assert expected_rate - 0.1 < actual_vat_rate < expected_rate + 0.1
         assert invoice.total_cents == invoice.subtotal_cents + invoice.tax_cents
 
 

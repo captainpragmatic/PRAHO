@@ -17,13 +17,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../services/platf
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
 
 import django
+
 django.setup()
 
-from django.test import Client, TestCase, override_settings
-from django.contrib.auth import get_user_model
-from django.urls import reverse
+from django.contrib.auth import get_user_model  # noqa: E402
+from django.test import Client, TestCase  # noqa: E402
 
-from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
+from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
 
 User = get_user_model()
 

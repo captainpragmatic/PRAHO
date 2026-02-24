@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **ORM E2E Tests (billing)**: `test_billing_workflow.py` — order-to-invoice, invoice-to-payment, proforma conversion, full/partial refund flows using Django TestCase with direct DB access; Romanian VAT rate sourced from `TaxService.get_vat_rate("RO")` (no hardcoded percentage)
+- **ORM E2E Tests (signup)**: `test_signup_workflow.py` — complete company and individual customer signup, GDPR consent tracking, multi-address support, user registration and onboarding steps; both files bootstrap via `django.setup()` with E402 noqa on post-setup imports and are marked `@pytest.mark.e2e`
+
+### Fixed
+- **E2E Test Suite**: Fixed 37 test issues (19 assertion failures + 18 teardown errors) caused by stale `.pyc` cache and incorrect test selectors/assumptions — zero app code changes, all test bugs
+- **E2E Cache Prevention**: Added `PYTHONDONTWRITEBYTECODE=1` to `conftest.py` and `__pycache__` cleanup to all `make test-e2e*` Makefile targets to prevent stale bytecode issues in Docker bind mounts
+
+### Changed
+- **E2E Rate Limit Guard**: `make test-e2e` now detects active rate limiting and fails fast with actionable error instead of running 179 tests that will all fail
+- **CSS Build Portability**: `make build-css` gracefully skips when npm is not available (Docker container support)
+- **CLAUDE.md**: Strengthened Makefile-only directive — agents must always use `make` targets, never run `pytest` directly
+- **Makefile**: All E2E targets reference `make dev-e2e` as prerequisite in error messages
 
 ---
 
