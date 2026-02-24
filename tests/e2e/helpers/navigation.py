@@ -235,14 +235,10 @@ def verify_role_based_content(page: Page, user_type: str) -> bool:
     """
     print(f"👤 Verifying role-based content for {user_type}")
 
-    if user_type == "superuser":
-        expected_features = [
-            ('a[href*="/app/"]', "staff interface access"),
-            ('a[href*="/customers/"]', "customer management"),
-        ]
-        forbidden_features = []
-
-    elif user_type == "customer":
+    # Portal treats all users identically — no superuser-specific navigation.
+    # Both superuser and customer see the same portal navigation links.
+    # Platform-specific features (/app/, /customers/) live at :8700 only.
+    if user_type in ("superuser", "customer"):
         expected_features = [
             ('a[href*="/tickets/"]', "support tickets"),
             ('a[href*="/billing/"]', "billing access"),
