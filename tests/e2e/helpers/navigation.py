@@ -5,6 +5,7 @@ Navigation helpers and semantic validation for admin access, role content, and d
 """
 
 from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e.helpers.constants import BASE_URL, is_logged_in_url
 from tests.e2e.helpers.interactions import count_elements
@@ -141,24 +142,22 @@ def _check_no_staff_navigation(page: Page) -> bool:
 def _test_admin_access_blocked(page: Page) -> bool:
     """Test that admin URLs return 404 (admin completely removed)."""
     try:
-        current_url = page.url
         page.goto(f"{BASE_URL}/admin/")
         page.wait_for_load_state("networkidle", timeout=5000)
-
-        # Admin is completely removed - should get 404
-        # Check for 404 page or Django's "Page not found" text
-        page_text = page.locator('body').text_content()
-        if "404" in page_text or "not found" in page_text.lower() or "page not found" in page_text.lower():
-            print("✅ Admin URLs properly return 404 (admin removed)")
-            return True
-        else:
-            print(f"❌ Admin URL should return 404, but got: {page.url}")
-            print(f"Page content: {page_text[:200]}...")
-            return False
-
+    except PlaywrightTimeoutError:
+        # Timeout is acceptable — 404 pages can stall networkidle; check content anyway
+        pass
     except Exception as e:
-        print(f"✅ Admin access blocked with exception (expected): {str(e)[:50]}")
+        print(f"❌ Unexpected error navigating to /admin/: {str(e)[:80]}")
+        return False
+
+    page_text = page.locator("body").text_content() or ""
+    if "404" in page_text or "not found" in page_text.lower():
+        print("✅ Admin URLs properly return 404 (admin removed)")
         return True
+    print(f"❌ Admin URL should return 404, got: {page.url}")
+    print(f"   Content snippet: {page_text[:200]}...")
+    return False
 
 
 def _debug_navigation_links(page: Page) -> None:
@@ -238,7 +237,7 @@ def verify_role_based_content(page: Page, user_type: str) -> bool:
 
     if user_type == "superuser":
         expected_features = [
-            ('a[href*="/admin/"]', "admin panel access"),
+            ('a[href*="/app/"]', "staff interface access"),
             ('a[href*="/customers/"]', "customer management"),
         ]
         forbidden_features = []
@@ -323,11 +322,11 @@ def verify_dashboard_functionality(page: Page, user_type: str) -> bool:
 
     print(f"📊 Total dashboard content elements: {total_content}")
 
-    # Verify role-based content with relaxed expectations
+    # Verify role-based content
     role_content_valid = verify_role_based_content(page, user_type)
     if not role_content_valid:
-        print("⚠️ Role-based content validation failed, but continuing...")
-        # Don't fail on role content alone for now
+        print("❌ Role-based content validation failed")
+        return False
 
     print(f"✅ Dashboard functionality verified for {user_type} (basic content present)")
     return True

@@ -44,6 +44,15 @@ class Severity(Enum):
     INFO = "INFO"
 
 
+_SEVERITY_RANK: dict[Severity, int] = {
+    Severity.CRITICAL: 4,
+    Severity.HIGH: 3,
+    Severity.MEDIUM: 2,
+    Severity.LOW: 1,
+    Severity.INFO: 0,
+}
+
+
 class OWASPCategory(Enum):
     A01_BROKEN_ACCESS_CONTROL = "A01:2021-Broken Access Control"
     A02_CRYPTO_FAILURES = "A02:2021-Cryptographic Failures"
@@ -815,7 +824,7 @@ def main():
 
     # Filter by severity
     min_severity = Severity[args.min_severity]
-    result.findings = [f for f in result.findings if f.severity.value >= min_severity.value]
+    result.findings = [f for f in result.findings if _SEVERITY_RANK[f.severity] >= _SEVERITY_RANK[min_severity]]
 
     # Output results
     if args.output == "json":

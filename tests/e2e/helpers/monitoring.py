@@ -178,8 +178,10 @@ def check_html_validation(page: Page) -> list[str]:
                 // Check for HTMX elements with invalid targets
                 document.querySelectorAll('[hx-target]').forEach(el => {
                     const target = el.getAttribute('hx-target');
-                    if (target && !target.startsWith('#') && !target.startsWith('.') &&
-                        target !== 'this' && target !== 'closest' && !document.querySelector(target)) {
+                    if (target &&
+                        !target.startsWith('#') && !target.startsWith('.') &&
+                        target !== 'this' && !target.includes(' ') &&
+                        !document.querySelector(target)) {
                         issues.push('Invalid HTMX target: ' + target);
                     }
                 });

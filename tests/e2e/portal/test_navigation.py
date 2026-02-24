@@ -88,7 +88,11 @@ def test_navigation_cross_page_flow(page: Page) -> None:
                     print(f"    ⚠️ {description} navigation redirected to {current_url}")
 
             print(f"📊 Navigation success: {success_count}/{len(navigation_tests)} sections")
-            assert success_count > 0, "At least one navigation section should be accessible"
+            min_required = max(1, int(len(navigation_tests) * 0.75))
+            assert success_count >= min_required, (
+                f"Navigation broken: only {success_count}/{len(navigation_tests)} sections accessible "
+                f"(required {min_required})"
+            )
 
             # Verify we can return to dashboard
             navigate_to_dashboard(page)
