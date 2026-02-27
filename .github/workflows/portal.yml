@@ -79,6 +79,14 @@ jobs:
         echo "Running portal unit tests with coverage..."
         PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/pytest tests/ -v --tb=short --maxfail=10 --cov=apps --cov-report=xml:coverage-portal.xml --cov-report=term-missing
 
+    - name: Upload coverage to Codecov
+      if: always()
+      uses: codecov/codecov-action@v5
+      with:
+        files: services/portal/coverage-portal.xml
+        flags: portal
+        fail_ci_if_error: false
+
     - name: Ruff no-new-debt gate (portal)
       run: |
         BASE_REF="${{ github.event.before }}"
