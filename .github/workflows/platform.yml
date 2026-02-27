@@ -67,15 +67,22 @@ jobs:
         echo "Running platform unit tests with coverage..."
         PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/coverage run manage.py test tests --verbosity=2
         ${{ github.workspace }}/.venv/bin/coverage xml -o coverage-platform.xml
+        COVERAGE_PCT=$(${{ github.workspace }}/.venv/bin/coverage report --format=total)
+        echo "COVERAGE_PCT=${COVERAGE_PCT}" >> "$GITHUB_ENV"
         ${{ github.workspace }}/.venv/bin/coverage report --show-missing
 
-    - name: Upload coverage to Codecov
-      if: always()
-      uses: codecov/codecov-action@v5
+    - name: Update coverage badge
+      if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+      uses: schneegans/dynamic-badges-action@v1.7.0
       with:
-        files: services/platform/coverage-platform.xml
-        flags: platform
-        fail_ci_if_error: false
+        auth: ${{ secrets.GIST_TOKEN }}
+        gistID: ${{ secrets.COVERAGE_GIST_ID }}
+        filename: praho-coverage.json
+        label: coverage
+        message: "${{ env.COVERAGE_PCT }}%"
+        valColorRange: ${{ env.COVERAGE_PCT }}
+        minColorRange: 50
+        maxColorRange: 90
 
     - name: Ruff no-new-debt gate (platform)
       run: |
