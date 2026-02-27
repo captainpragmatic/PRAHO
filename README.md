@@ -6,6 +6,8 @@
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE.md)
+[![mypy: strict](https://img.shields.io/badge/mypy-strict_%E2%9C%93-brightgreen.svg)](https://mypy-lang.org/)
+[![Ruff](https://img.shields.io/badge/Ruff-lint_%E2%9C%93-brightgreen.svg)](https://docs.astral.sh/ruff/)
 
 ## Overview
 
