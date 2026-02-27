@@ -24,9 +24,9 @@
 
     <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 lg:flex-shrink-0">
       {% url 'products:product_detail' slug=product.slug as detail_url %}
-      {% button "← Back to Product" variant="secondary" href=detail_url %}
+      {% trans "← Back to Product" as bt1 %}{% button bt1 variant="secondary" href=detail_url %}
       {% url 'products:product_price_create' slug=product.slug as create_price_url %}
-      {% button "💰 Add Price" variant="primary" href=create_price_url %}
+      {% trans "💰 Add Price" as bt2 %}{% button bt2 variant="primary" href=create_price_url %}
     </div>
   </div>
 
@@ -53,7 +53,7 @@
           </div>
 
           <div class="flex items-center space-x-2 flex-shrink-0">
-            {% badge "Active Currency" variant="success" %}
+            {% trans "Active Currency" as bt3 %}{% badge bt3 variant="success" %}
           </div>
         </div>
       </div>
@@ -67,9 +67,9 @@
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
               <h3 class="text-lg font-semibold text-white">💰 {% trans 'Base Monthly Price' %}</h3>
               {% if price.is_active %}
-                {% badge "Active" variant="success" size="sm" %}
+                {% trans "Active" as bt4 %}{% badge bt4 variant="success" size="sm" %}
               {% else %}
-                {% badge "Inactive" variant="danger" size="sm" %}
+                {% trans "Inactive" as bt5 %}{% badge bt5 variant="danger" size="sm" %}
               {% endif %}
             </div>
             <div class="text-2xl sm:text-3xl font-bold text-white break-all">
@@ -197,7 +197,7 @@
         {% trans 'Start by adding pricing options for this product. Multiple currencies and billing periods are supported.' %}
       </p>
       {% url 'products:product_price_create' slug=product.slug as create_price_url %}
-      {% button "💰 Add First Price" variant="primary" href=create_price_url %}
+      {% trans "💰 Add First Price" as bt6 %}{% button bt6 variant="primary" href=create_price_url %}
     </div>
   </div>
   {% endif %}

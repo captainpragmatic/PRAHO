@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
+{% load i18n %}
 
 {% block title %}{% trans "Order Confirmed" %}{% endblock %}
 
@@ -291,8 +292,8 @@
   <div class="text-center space-y-4">
     <div class="flex flex-col sm:flex-row gap-4 justify-center">
       {% url 'orders:catalog' as catalog_url %}
-      {% button "📦 Order other products" variant="secondary" size="lg" href=catalog_url %}
-      {% button "🏠 Back to dashboard" variant="primary" size="lg" href="/" %}
+      {% trans "📦 Order other products" as bt1 %}{% button bt1 variant="secondary" size="lg" href=catalog_url %}
+      {% trans "🏠 Back to dashboard" as bt2 %}{% button bt2 variant="primary" size="lg" href="/" %}
     </div>
 
     <div class="pt-4">

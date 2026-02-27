@@ -155,6 +155,21 @@ repos:
         verbose: true
 
   # ===============================================================================
+  # i18n COVERAGE CHECK 🌍
+  # ===============================================================================
+
+  - repo: local
+    hooks:
+      - id: i18n-coverage-check
+        name: "i18n: Check for Unwrapped Strings"
+        entry: uv run python
+        args: [scripts/lint_i18n_coverage.py, --fail-on, high, --allowlist, scripts/i18n_coverage_allowlist.txt]
+        language: system
+        files: \.(py|html)$
+        exclude: ^(migrations/|tests/|scripts/)
+        pass_filenames: true
+
+  # ===============================================================================
   # PERFORMANCE ANALYSIS ⚡
   # ===============================================================================
 

@@ -22,7 +22,7 @@
         </div>
         <div>
             {% url 'customers:edit' customer.pk as edit_url %}
-            {% button "Edit Customer" variant="primary" href=edit_url icon="edit" %}
+            {% trans "Edit Customer" as bt1 %}{% button bt1 variant="primary" href=edit_url icon="edit" %}
         </div>
     </div>
 
@@ -136,7 +136,7 @@
                 {% if customer.memberships.exists %}
                 <div class="flex space-x-2">
                     {% url 'customers:add_user' customer.pk as add_user_url %}
-                    {% button "➕ Add User" variant="primary" size="sm" href=add_user_url %}
+                    {% trans "➕ Add User" as bt2 %}{% button bt2 variant="primary" size="sm" href=add_user_url %}
                 </div>
                 {% endif %}
             </div>
@@ -373,10 +373,10 @@
 
                 <div class="flex flex-col sm:flex-row gap-3 justify-center items-center">
                     {% url 'customers:add_user' customer.pk as add_user_url %}
-                    {% button "➕ Add Existing User" variant="primary" href=add_user_url %}
+                    {% trans "➕ Add Existing User" as bt3 %}{% button bt3 variant="primary" href=add_user_url %}
 
                     {% url 'customers:create_user' customer.pk as create_user_url %}
-                    {% button "👤 Create New User" variant="outline" href=create_user_url %}
+                    {% trans "👤 Create New User" as bt4 %}{% button bt4 variant="outline" href=create_user_url %}
                 </div>
 
                 <p class="text-xs text-slate-500 mt-4">
@@ -445,7 +445,7 @@
                         <h3 class="font-medium text-white">{{ address.get_address_type_display }}</h3>
                         <div class="flex space-x-1">
                             {% if address.is_current %}
-                            {% badge "Current" variant="success" icon="📍" %}
+                            {% trans "Current" as bt5 %}{% badge bt5 variant="success" icon="📍" %}
                             {% endif %}
                         </div>
                     </div>

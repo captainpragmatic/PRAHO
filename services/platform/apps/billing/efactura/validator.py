@@ -175,7 +175,9 @@ class CIUSROValidator:
     def _find(self, doc: etree._Element, xpath: str) -> etree._Element | None:
         """Find element using XPath with namespaces."""
         result = doc.xpath(xpath, namespaces=NAMESPACES)
-        return result[0] if result else None
+        if isinstance(result, list) and result:
+            return cast(etree._Element, result[0])
+        return None
 
     def _find_all(self, doc: etree._Element, xpath: str) -> list[etree._Element]:
         """Find all elements using XPath with namespaces."""

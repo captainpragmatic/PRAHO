@@ -180,14 +180,14 @@
                   </div>
                 </div>
                 <div class="col-span-1">
-                  {% button "🗑️" variant="danger" css_class="remove-line opacity-50 cursor-not-allowed" %}
+                  {% trans "🗑️" as bt1 %}{% button bt1 variant="danger" css_class="remove-line opacity-50 cursor-not-allowed" %}
                 </div>
               </div>
             </div>
 
             <!-- Add Line Button -->
             <div class="pt-4">
-              {% button "➕ Add Line Item" variant="secondary" css_class="add-line-btn" %}
+              {% trans "➕ Add Line Item" as bt2 %}{% button bt2 variant="secondary" css_class="add-line-btn" %}
             </div>
           </div>
         </div>
@@ -287,9 +287,9 @@
           </h3>
 
           <div class="space-y-3">
-            {% button "💾 Save as Draft" variant="secondary" type="submit" css_class="w-full" %}
-            {% button "📧 Create & Send" variant="primary" type="submit" css_class="w-full" %}
-            {% button "🧾 Create & Download PDF" variant="success" type="submit" css_class="w-full" %}
+            {% trans "💾 Save as Draft" as bt3 %}{% button bt3 variant="secondary" type="submit" css_class="w-full" %}
+            {% trans "📧 Create & Send" as bt4 %}{% button bt4 variant="primary" type="submit" css_class="w-full" %}
+            {% trans "🧾 Create & Download PDF" as bt5 %}{% button bt5 variant="success" type="submit" css_class="w-full" %}
 
             <hr class="border-slate-600">
 

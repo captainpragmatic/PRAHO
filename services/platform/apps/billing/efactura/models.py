@@ -11,6 +11,7 @@ This model tracks the complete lifecycle of e-Factura submissions:
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import uuid
 from datetime import timedelta
@@ -21,6 +22,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
     pass
@@ -90,7 +92,7 @@ class EFacturaDocument(models.Model):
         "billing.Invoice",
         on_delete=models.CASCADE,
         related_name="efactura_document",
-        help_text="The invoice this e-Factura document represents",
+        help_text=_("The invoice this e-Factura document represents"),
     )
 
     # Document metadata
@@ -98,7 +100,7 @@ class EFacturaDocument(models.Model):
         max_length=20,
         choices=EFacturaDocumentType.choices(),
         default=EFacturaDocumentType.INVOICE.value,
-        help_text="Type of e-Factura document",
+        help_text=_("Type of e-Factura document"),
     )
 
     status = models.CharField(
@@ -106,7 +108,7 @@ class EFacturaDocument(models.Model):
         choices=EFacturaStatus.choices(),
         default=EFacturaStatus.DRAFT.value,
         db_index=True,
-        help_text="Current status in the submission lifecycle",
+        help_text=_("Current status in the submission lifecycle"),
     )
 
     # ANAF identifiers
@@ -114,94 +116,94 @@ class EFacturaDocument(models.Model):
         max_length=100,
         blank=True,
         db_index=True,
-        help_text="ANAF index_incarcare - returned after upload",
+        help_text=_("ANAF index_incarcare - returned after upload"),
     )
 
     anaf_download_id = models.CharField(
         max_length=100,
         blank=True,
-        help_text="ANAF id_descarcare - available after acceptance",
+        help_text=_("ANAF id_descarcare - available after acceptance"),
     )
 
     anaf_response_id = models.CharField(
         max_length=100,
         blank=True,
-        help_text="ANAF response message ID",
+        help_text=_("ANAF response message ID"),
     )
 
     # XML storage
     xml_content = models.TextField(
         blank=True,
-        help_text="Generated UBL 2.1 XML content",
+        help_text=_("Generated UBL 2.1 XML content"),
     )
 
     xml_file = models.FileField(
         upload_to="efactura/xml/%Y/%m/",
         blank=True,
         null=True,
-        help_text="Stored XML file path",
+        help_text=_("Stored XML file path"),
     )
 
     xml_hash = models.CharField(
         max_length=64,
         blank=True,
-        help_text="SHA-256 hash of XML content for integrity verification",
+        help_text=_("SHA-256 hash of XML content for integrity verification"),
     )
 
     # Response storage
     anaf_response = models.JSONField(
         default=dict,
         blank=True,
-        help_text="Complete ANAF API response data",
+        help_text=_("Complete ANAF API response data"),
     )
 
     validation_errors = models.JSONField(
         default=list,
         blank=True,
-        help_text="List of validation errors from ANAF",
+        help_text=_("List of validation errors from ANAF"),
     )
 
     signed_pdf = models.FileField(
         upload_to="efactura/pdf/%Y/%m/",
         blank=True,
         null=True,
-        help_text="ANAF-signed PDF visualization",
+        help_text=_("ANAF-signed PDF visualization"),
     )
 
     # Timestamps
     xml_generated_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When the XML was generated",
+        help_text=_("When the XML was generated"),
     )
 
     submitted_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When the document was submitted to ANAF",
+        help_text=_("When the document was submitted to ANAF"),
     )
 
     response_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When ANAF responded (accepted/rejected)",
+        help_text=_("When ANAF responded (accepted/rejected)"),
     )
 
     # Retry tracking
     retry_count = models.PositiveIntegerField(
         default=0,
-        help_text="Number of submission attempts",
+        help_text=_("Number of submission attempts"),
     )
 
     next_retry_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When the next retry should be attempted",
+        help_text=_("When the next retry should be attempted"),
     )
 
     last_error = models.TextField(
         blank=True,
-        help_text="Last error message for debugging",
+        help_text=_("Last error message for debugging"),
     )
 
     # Environment tracking
@@ -209,7 +211,7 @@ class EFacturaDocument(models.Model):
         max_length=20,
         default="test",
         choices=[("test", "Test/Sandbox"), ("production", "Production")],
-        help_text="ANAF environment used for submission",
+        help_text=_("ANAF environment used for submission"),
     )
 
     # Audit fields
@@ -218,8 +220,8 @@ class EFacturaDocument(models.Model):
 
     class Meta:
         db_table = "billing_efactura_document"
-        verbose_name = "e-Factura Document"
-        verbose_name_plural = "e-Factura Documents"
+        verbose_name = _("e-Factura Document")
+        verbose_name_plural = _("e-Factura Documents")
         ordering = ["-created_at"]
 
         indexes = [
@@ -287,7 +289,7 @@ class EFacturaDocument(models.Model):
         if save:
             self.save(update_fields=["status", "updated_at"])
 
-    def mark_accepted(self, download_id: str, response: dict | None = None, save: bool = True) -> None:
+    def mark_accepted(self, download_id: str, response: dict[str, Any] | None = None, save: bool = True) -> None:
         """Mark document as accepted by ANAF."""
         self.status = EFacturaStatus.ACCEPTED.value
         self.anaf_download_id = download_id
@@ -300,7 +302,9 @@ class EFacturaDocument(models.Model):
         # Update invoice fields
         self._update_invoice_on_acceptance()
 
-    def mark_rejected(self, errors: list[dict], response: dict | None = None, save: bool = True) -> None:
+    def mark_rejected(
+        self, errors: list[dict[str, Any]], response: dict[str, Any] | None = None, save: bool = True
+    ) -> None:
         """Mark document as rejected by ANAF."""
         self.status = EFacturaStatus.REJECTED.value
         self.validation_errors = errors
@@ -378,7 +382,7 @@ class EFacturaDocument(models.Model):
         return self.status in EFacturaStatus.retryable_statuses() and self.retry_count < self.MAX_RETRIES
 
     @property
-    def submission_deadline(self) -> timezone.datetime | None:
+    def submission_deadline(self) -> datetime.datetime | None:
         """Calculate the submission deadline from invoice issue date."""
         if self.invoice.issued_at:
             from apps.settings.services import SettingsService  # noqa: PLC0415
@@ -395,7 +399,7 @@ class EFacturaDocument(models.Model):
             from apps.settings.services import SettingsService  # noqa: PLC0415
 
             warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
-            return timezone.now() >= deadline - timedelta(hours=warning_hours)
+            return bool(timezone.now() >= deadline - timedelta(hours=warning_hours))
         return False
 
     @property
@@ -403,7 +407,7 @@ class EFacturaDocument(models.Model):
         """Check if deadline has passed."""
         deadline = self.submission_deadline
         if deadline:
-            return timezone.now() > deadline
+            return bool(timezone.now() > deadline)
         return False
 
     def get_environment_base_url(self) -> str:

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
+{% load i18n %}
 
 {% block title %}{{ product.name }}{% endblock %}
 
@@ -49,7 +50,7 @@
               {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="🌐" %}
             </div>
             {% endif %}
-            {% button "🛒 Add to Cart" variant="primary" size="md" type="submit" class="w-full" %}
+            {% trans "🛒 Add to Cart" as bt1 %}{% button bt1 variant="primary" size="md" type="submit" class="w-full" %}
           </form>
         </div>
       </div>

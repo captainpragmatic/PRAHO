@@ -23,8 +23,8 @@
         <div class="mt-4 sm:mt-0 flex gap-3">
             {% url 'domains:tld_list' as tld_list_url %}
             {% url 'domains:registrar_list' as registrar_list_url %}
-            {% button "🌐 TLDs" variant="secondary" href=tld_list_url %}
-            {% button "🏢 Registrars" variant="secondary" href=registrar_list_url %}
+            {% trans "🌐 TLDs" as bt1 %}{% button bt1 variant="secondary" href=tld_list_url %}
+            {% trans "🏢 Registrars" as bt2 %}{% button bt2 variant="secondary" href=registrar_list_url %}
         </div>
     </div>
 

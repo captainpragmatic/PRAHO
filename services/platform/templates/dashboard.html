@@ -176,13 +176,13 @@
                 </div>
                 <div class="ml-2 flex-shrink-0">
                   {% if document.status == 'paid' %}
-                    {% badge "Paid" variant="success" icon="✅" css_class="w-20 justify-center" %}
+                    {% trans "Paid" as bt1 %}{% badge bt1 variant="success" icon="✅" css_class="w-20 justify-center" %}
                   {% elif document.status == 'overdue' %}
-                    {% badge "Overdue" variant="danger" icon="❌" css_class="w-20 justify-center" %}
+                    {% trans "Overdue" as bt2 %}{% badge bt2 variant="danger" icon="❌" css_class="w-20 justify-center" %}
                   {% elif document.document_type == 'proforma' %}
-                    {% badge "Draft" variant="info" icon="📝" css_class="w-20 justify-center" %}
+                    {% trans "Draft" as bt3 %}{% badge bt3 variant="info" icon="📝" css_class="w-20 justify-center" %}
                   {% else %}
-                    {% badge "Pending" variant="warning" icon="⏳" css_class="w-20 justify-center" %}
+                    {% trans "Pending" as bt4 %}{% badge bt4 variant="warning" icon="⏳" css_class="w-20 justify-center" %}
                   {% endif %}
                 </div>
               </div>
@@ -248,13 +248,13 @@
                 </div>
                 <div class="ml-2 flex-shrink-0">
                   {% if ticket.status == 'open' %}
-                    {% badge "Open" variant="info" icon="📂" css_class="w-32 justify-center" %}
+                    {% trans "Open" as bt5 %}{% badge bt5 variant="info" icon="📂" css_class="w-32 justify-center" %}
                   {% elif ticket.status == 'in_progress' %}
-                    {% badge "In Progress" variant="primary" icon="⚡" css_class="w-32 justify-center" %}
+                    {% trans "In Progress" as bt6 %}{% badge bt6 variant="primary" icon="⚡" css_class="w-32 justify-center" %}
                   {% elif ticket.status == 'waiting_on_customer' %}
-                    {% badge "Waiting on Customer" variant="warning" icon="⏳" css_class="w-44 justify-center text-xs whitespace-nowrap" %}
+                    {% trans "Waiting on Customer" as bt7 %}{% badge bt7 variant="warning" icon="⏳" css_class="w-44 justify-center text-xs whitespace-nowrap" %}
                   {% elif ticket.status == 'closed' %}
-                    {% badge "Closed" variant="secondary" icon="📁" css_class="w-32 justify-center" %}
+                    {% trans "Closed" as bt8 %}{% badge bt8 variant="secondary" icon="📁" css_class="w-32 justify-center" %}
                   {% else %}
                     {% badge ticket.status|capfirst variant="default" css_class="w-32 justify-center" %}
                   {% endif %}

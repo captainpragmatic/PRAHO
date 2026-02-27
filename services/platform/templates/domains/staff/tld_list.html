@@ -17,8 +17,8 @@
         </div>
         <div class="flex gap-3">
             {% url 'domains:tld_create' as tld_create_url %}
-            {% button "➕ Add TLD" variant="primary" href=tld_create_url %}
-            {% button "⭐ Featured" variant="secondary" href="?status=featured" %}
+            {% trans "➕ Add TLD" as bt1 %}{% button bt1 variant="primary" href=tld_create_url %}
+            {% trans "⭐ Featured" as bt2 %}{% button bt2 variant="secondary" href="?status=featured" %}
         </div>
     </div>
 
@@ -111,9 +111,9 @@
                         <div>
                             <div class="flex items-center gap-2">
                                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white">.{{ tld.extension }}</h3>
-                                {% if tld.is_active %}{% badge "🟢" %}{% else %}{% badge "🔴" %}{% endif %}
-                                {% if tld.is_featured %}{% badge "⭐" variant="secondary" %}{% endif %}
-                                {% if tld.whois_privacy_available %}{% badge "🔒 WHOIS" size="sm" %}{% endif %}
+                                {% if tld.is_active %}{% trans "🟢" as bt3 %}{% badge bt3 %}{% else %}{% trans "🔴" as bt4 %}{% badge bt4 %}{% endif %}
+                                {% if tld.is_featured %}{% trans "⭐" as bt5 %}{% badge bt5 variant="secondary" %}{% endif %}
+                                {% if tld.whois_privacy_available %}{% trans "🔒 WHOIS" as bt6 %}{% badge bt6 size="sm" %}{% endif %}
                             </div>
                             <p class="text-sm text-slate-600 dark:text-slate-400">{{ tld.description }}</p>
                             <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
@@ -168,8 +168,8 @@
                     <!-- Actions -->
                     <div class="flex items-center gap-2">
                         {% url 'domains:tld_edit' pk=tld.id as tld_edit_url %}
-                        {% button "✏️ Edit" variant="secondary" size="sm" href=tld_edit_url %}
-                        {% button "📊 Pricing" variant="secondary" size="sm" href=tld_edit_url|add:'#pricing' %}
+                        {% trans "✏️ Edit" as bt7 %}{% button bt7 variant="secondary" size="sm" href=tld_edit_url %}
+                        {% trans "📊 Pricing" as bt8 %}{% button bt8 variant="secondary" size="sm" href=tld_edit_url|add:'#pricing' %}
                     </div>
                 </div>
             </div>
@@ -242,7 +242,7 @@
             <p class="text-slate-500 dark:text-slate-400 mb-6">
                 {% trans "Get started by adding your first TLD and pricing." %}
             </p>
-            {% button "➕ Add First TLD" variant="primary" href="#" %}
+            {% trans "➕ Add First TLD" as bt9 %}{% button bt9 variant="primary" href="#" %}
         </div>
         {% endif %}
     </div>

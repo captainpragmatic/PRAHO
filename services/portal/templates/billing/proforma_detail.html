@@ -265,13 +265,13 @@
         <div class="mt-4 pt-4 border-t border-slate-700">
           <div class="text-center">
             {% if proforma.status == 'draft' %}
-              {% badge "📝 Draft" variant="secondary" %}
+              {% trans "📝 Draft" as bt1 %}{% badge bt1 variant="secondary" %}
             {% elif proforma.status == 'sent' %}
-              {% badge "📧 Sent" variant="primary" %}
+              {% trans "📧 Sent" as bt2 %}{% badge bt2 variant="primary" %}
             {% elif proforma.status == 'accepted' %}
-              {% badge "✅ Accepted" variant="success" %}
+              {% trans "✅ Accepted" as bt3 %}{% badge bt3 variant="success" %}
             {% elif proforma.status == 'expired' %}
-              {% badge "❌ Expired" variant="danger" %}
+              {% trans "❌ Expired" as bt4 %}{% badge bt4 variant="danger" %}
             {% else %}
               {% badge proforma.status|title variant="secondary" %}
             {% endif %}

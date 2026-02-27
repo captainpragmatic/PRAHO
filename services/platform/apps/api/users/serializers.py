@@ -87,7 +87,7 @@ class MFAVerifySerializer(serializers.Serializer):
     def validate_token(self, value: str) -> str:
         """Validate token format"""
         if not value.isdigit():
-            raise serializers.ValidationError("Token must contain only digits.")
+            raise serializers.ValidationError(_("Token must contain only digits."))
         return value
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
@@ -98,7 +98,7 @@ class MFAVerifySerializer(serializers.Serializer):
         token = validated_data["token"]
 
         if not user.two_factor_secret:
-            raise serializers.ValidationError("2FA setup not initialized. Please start setup first.")
+            raise serializers.ValidationError(_("2FA setup not initialized. Please start setup first."))
 
         # Verify token
         totp = pyotp.TOTP(user.two_factor_secret)
@@ -117,7 +117,7 @@ class MFAVerifySerializer(serializers.Serializer):
 
                 return {"success": True, "message": "2FA enabled successfully", "backup_codes": backup_codes}
             else:
-                raise serializers.ValidationError("Invalid verification code. Please try again.")
+                raise serializers.ValidationError(_("Invalid verification code. Please try again."))
 
         # Check if it's an 8-digit backup code
         elif len(token) == BACKUP_CODE_LENGTH:
@@ -129,10 +129,10 @@ class MFAVerifySerializer(serializers.Serializer):
                     "backup_codes_remaining": len(user.backup_tokens),
                 }
             else:
-                raise serializers.ValidationError("Invalid backup code.")
+                raise serializers.ValidationError(_("Invalid backup code."))
 
         else:
-            raise serializers.ValidationError("Invalid token length.")
+            raise serializers.ValidationError(_("Invalid token length."))
 
 
 class MFADisableSerializer(serializers.Serializer):
@@ -149,12 +149,12 @@ class MFADisableSerializer(serializers.Serializer):
 
         # Verify password
         if not user.check_password(data["password"]):
-            raise serializers.ValidationError("Invalid password.")
+            raise serializers.ValidationError(_("Invalid password."))
 
         # Verify 2FA token
         token = data["token"]
         if not user.two_factor_enabled:
-            raise serializers.ValidationError("2FA is not enabled for this account.")
+            raise serializers.ValidationError(_("2FA is not enabled for this account."))
 
         # Verify current token
         totp = pyotp.TOTP(user.two_factor_secret)
@@ -162,7 +162,7 @@ class MFADisableSerializer(serializers.Serializer):
             (len(token) == BACKUP_CODE_LENGTH and not user.verify_backup_code(token))
             or len(token) != BACKUP_CODE_LENGTH
         ):
-            raise serializers.ValidationError("Invalid verification code.")
+            raise serializers.ValidationError(_("Invalid verification code."))
 
         return data
 
@@ -245,7 +245,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
         except Exception as e:
             logger.error(f"🔥 [Password Reset] Failed to send email to {user.email}: {e}")
-            raise serializers.ValidationError("Failed to send reset email. Please try again later.") from e
+            raise serializers.ValidationError(_("Failed to send reset email. Please try again later.")) from e
 
         return {"success": True, "message": "If the email exists, a reset link has been sent."}
 
@@ -263,7 +263,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate passwords match"""
         if data["new_password"] != data["new_password_confirm"]:
-            raise serializers.ValidationError("Passwords do not match.")
+            raise serializers.ValidationError(_("Passwords do not match."))
         return data
 
     def validate_uid(self, value: str) -> str:
@@ -273,7 +273,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             user = User.objects.get(pk=uid, is_active=True)
             return user
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            raise serializers.ValidationError("Invalid reset link.") from None
+            raise serializers.ValidationError(_("Invalid reset link.")) from None
 
     def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -285,7 +285,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
         # Verify token
         if not default_token_generator.check_token(user, token):
-            raise serializers.ValidationError("Invalid or expired reset link.")
+            raise serializers.ValidationError(_("Invalid or expired reset link."))
 
         # Reset password
         user.set_password(new_password)

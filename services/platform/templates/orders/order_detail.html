@@ -27,17 +27,17 @@
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Back Button -->
       {% url 'orders:order_list' as order_list_url %}
-      {% button "← Back to Orders" variant="outline" href=order_list_url %}
+      {% trans "← Back to Orders" as bt1 %}{% button bt1 variant="outline" href=order_list_url %}
 
       <!-- Action Buttons for Staff -->
       {% if is_staff %}
         {% if can_edit %}
           {% url 'orders:order_edit' pk=order.id as order_edit_url %}
-          {% button "✏️ Edit" variant="primary" href=order_edit_url %}
+          {% trans "✏️ Edit" as bt2 %}{% button bt2 variant="primary" href=order_edit_url %}
         {% endif %}
 
         {% if order.status == "completed" or order.status == "partially_refunded" %}
-          {% button "💰 Refund Order" onclick="showRefundModal()" variant="success" %}
+          {% trans "💰 Refund Order" as bt3 %}{% button bt3 onclick="showRefundModal()" variant="success" %}
         {% endif %}
 
         {% if order.status not in "cancelled,refunded,completed" %}
@@ -59,7 +59,7 @@
         {% endif %}
       {% elif not is_staff and order.status in "completed,partially_refunded" %}
         <!-- Refund Request Button for Customers -->
-        {% button "🎫 Request Refund" onclick="showOrderRefundRequestModal()" variant="primary" %}
+        {% trans "🎫 Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
 
         {% if order.status not in "cancelled,refunded,completed" %}
           <button
@@ -94,21 +94,21 @@
               <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
               <dd class="mt-1">
                 {% if order.status == "draft" %}
-                  {% badge "📝 Draft" variant="secondary" %}
+                  {% trans "📝 Draft" as bt5 %}{% badge bt5 variant="secondary" %}
                 {% elif order.status == "pending" %}
-                  {% badge "⏳ Pending" variant="warning" %}
+                  {% trans "⏳ Pending" as bt6 %}{% badge bt6 variant="warning" %}
                 {% elif order.status == "processing" %}
-                  {% badge "⚙️ Processing" variant="primary" %}
+                  {% trans "⚙️ Processing" as bt7 %}{% badge bt7 variant="primary" %}
                 {% elif order.status == "completed" %}
-                  {% badge "✅ Completed" variant="success" %}
+                  {% trans "✅ Completed" as bt8 %}{% badge bt8 variant="success" %}
                 {% elif order.status == "cancelled" %}
-                  {% badge "❌ Cancelled" variant="danger" %}
+                  {% trans "❌ Cancelled" as bt9 %}{% badge bt9 variant="danger" %}
                 {% elif order.status == "failed" %}
-                  {% badge "🔥 Failed" variant="danger" %}
+                  {% trans "🔥 Failed" as bt10 %}{% badge bt10 variant="danger" %}
                 {% elif order.status == "refunded" %}
-                  {% badge "💰 Refunded" variant="info" %}
+                  {% trans "💰 Refunded" as bt11 %}{% badge bt11 variant="info" %}
                 {% elif order.status == "partially_refunded" %}
-                  {% badge "💸 Partially Refunded" variant="warning" %}
+                  {% trans "💸 Partially Refunded" as bt12 %}{% badge bt12 variant="warning" %}
                 {% endif %}
               </dd>
             </div>
@@ -468,7 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Error:', error);
-                alert('An error occurred while updating the status.');
+                alert('{% trans "An error occurred while updating the status." %}');
             });
         });
     }
@@ -643,7 +643,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('An error occurred while processing the refund.');
+        alert('{% trans "An error occurred while processing the refund." %}');
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';

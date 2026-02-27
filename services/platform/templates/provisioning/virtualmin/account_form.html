@@ -22,7 +22,7 @@
         </div>
         <div class="mt-4 sm:mt-0">
             {% url 'provisioning:virtualmin_accounts' as back_url %}
-            {% button "← Back to Accounts" href=back_url variant="secondary" %}
+            {% trans "← Back to Accounts" as bt1 %}{% button bt1 href=back_url variant="secondary" %}
         </div>
     </div>
 
@@ -147,8 +147,8 @@
                     <!-- Form Actions -->
                     <div class="flex justify-end space-x-3 pt-6 border-t border-slate-700">
                         {% url 'provisioning:virtualmin_accounts' as cancel_url %}
-                        {% button "Cancel" href=cancel_url variant="secondary" %}
-                        {% button "Create Account" type="submit" variant="primary" %}
+                        {% trans "Cancel" as bt2 %}{% button bt2 href=cancel_url variant="secondary" %}
+                        {% trans "Create Account" as bt3 %}{% button bt3 type="submit" variant="primary" %}
                     </div>
                 </form>
             </div>

@@ -20,10 +20,10 @@
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Refund Button for Staff -->
       {% if is_staff and invoice.status == "paid" %}
-        {% button "💰 Refund Invoice" onclick="showInvoiceRefundModal()" variant="success" %}
+        {% trans "💰 Refund Invoice" as bt1 %}{% button bt1 onclick="showInvoiceRefundModal()" variant="success" %}
       {% elif not is_staff and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
-        {% button "🎫 Request Refund" onclick="showInvoiceRefundRequestModal()" variant="primary" %}
+        {% trans "🎫 Request Refund" as bt2 %}{% button bt2 onclick="showInvoiceRefundRequestModal()" variant="primary" %}
       {% endif %}
 
       <a href="{% url 'billing:invoice_list' %}"
@@ -391,7 +391,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('An error occurred while processing the refund.');
+        alert('{% trans "An error occurred while processing the refund." %}');
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';

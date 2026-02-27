@@ -223,11 +223,11 @@ class ProformaInvoice(models.Model):
 
         # Validate total calculation integrity
         if self.subtotal_cents + self.tax_cents != self.total_cents and self.total_cents != 0:
-            raise ValidationError("Financial calculation error: subtotal + tax must equal total")
+            raise ValidationError(_("Financial calculation error: subtotal + tax must equal total"))
 
         # Validate expiration date
         if self.valid_until and self.valid_until <= timezone.now():
-            raise ValidationError("Proforma valid until date must be in the future")
+            raise ValidationError(_("Proforma valid until date must be in the future"))
 
         # Log security validation
         log_security_event(

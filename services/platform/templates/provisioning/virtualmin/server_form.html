@@ -34,7 +34,7 @@
             {% endif %}
         </div>
         <div class="mt-4 sm:mt-0">
-            {% button "Cancel" href=cancel_url variant="secondary" %}
+            {% trans "Cancel" as bt1 %}{% button bt1 href=cancel_url variant="secondary" %}
         </div>
     </div>
 
@@ -212,13 +212,13 @@
 
                             <!-- Form Actions -->
                             <div class="mt-8 flex items-center justify-end space-x-3">
-                                {% button "Cancel" href=cancel_url variant="secondary" %}
+                                {% trans "Cancel" as bt2 %}{% button bt2 href=cancel_url variant="secondary" %}
                                 {% if server %}
-                                    {% button "Test Connection" type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
-                                    {% button "Update Server" type="submit" variant="primary" %}
+                                    {% trans "Test Connection" as bt3 %}{% button bt3 type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
+                                    {% trans "Update Server" as bt4 %}{% button bt4 type="submit" variant="primary" %}
                                 {% else %}
-                                    {% button "Test Connection" type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
-                                    {% button "Add Server" type="submit" variant="primary" %}
+                                    {% trans "Test Connection" as bt5 %}{% button bt5 type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
+                                    {% trans "Add Server" as bt6 %}{% button bt6 type="submit" variant="primary" %}
                                 {% endif %}
                             </div>
 

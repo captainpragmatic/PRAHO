@@ -95,17 +95,17 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
               {% if item.provisioning_status == "pending" %}
-                {% badge "⏳ Pending" variant="warning" size="sm" %}
+                {% trans "⏳ Pending" as bt1 %}{% badge bt1 variant="warning" size="sm" %}
               {% elif item.provisioning_status == "in_progress" %}
-                {% badge "⚙️ Provisioning" variant="primary" size="sm" %}
+                {% trans "⚙️ Provisioning" as bt2 %}{% badge bt2 variant="primary" size="sm" %}
               {% elif item.provisioning_status == "completed" %}
-                {% badge "✅ Active" variant="success" size="sm" %}
+                {% trans "✅ Active" as bt3 %}{% badge bt3 variant="success" size="sm" %}
               {% elif item.provisioning_status == "failed" %}
-                {% badge "🔥 Failed" variant="danger" size="sm" %}
+                {% trans "🔥 Failed" as bt4 %}{% badge bt4 variant="danger" size="sm" %}
               {% elif item.provisioning_status == "cancelled" %}
-                {% badge "❌ Cancelled" variant="secondary" size="sm" %}
+                {% trans "❌ Cancelled" as bt5 %}{% badge bt5 variant="secondary" size="sm" %}
               {% else %}
-                {% badge "📋 Not Started" variant="secondary" size="sm" %}
+                {% trans "📋 Not Started" as bt6 %}{% badge bt6 variant="secondary" size="sm" %}
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm sticky right-0 bg-slate-800 border-l border-slate-700">

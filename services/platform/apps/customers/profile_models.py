@@ -34,23 +34,26 @@ class CustomerTaxProfile(SoftDeleteModel):
     cnp = models.CharField(
         max_length=13,
         blank=True,
-        verbose_name="CNP",
-        help_text="Cod Numeric Personal (13 cifre)",
-        validators=[RegexValidator(r"^\d{13}$", "CNP invalid (trebuie 13 cifre)")],
+        verbose_name=_("CNP"),
+        help_text=_("Cod Numeric Personal (13 cifre)"),
+        validators=[RegexValidator(r"^\d{13}$", _("CNP invalid (trebuie 13 cifre)"))],
     )
     cui = models.CharField(
-        max_length=20, blank=True, verbose_name="CUI/CIF", validators=[RegexValidator(r"^RO\d{2,10}$", "CUI invalid")]
+        max_length=20,
+        blank=True,
+        verbose_name=_("CUI/CIF"),
+        validators=[RegexValidator(r"^RO\d{2,10}$", _("CUI invalid"))],
     )
-    registration_number = models.CharField(max_length=50, blank=True, verbose_name="Nr. registrul comerțului")
+    registration_number = models.CharField(max_length=50, blank=True, verbose_name=_("Nr. registrul comerțului"))
 
     # VAT Information
-    is_vat_payer = models.BooleanField(default=True, verbose_name="Plătitor TVA")
-    vat_number = models.CharField(max_length=20, blank=True, verbose_name="Nr. TVA")
+    is_vat_payer = models.BooleanField(default=True, verbose_name=_("Plătitor TVA"))
+    vat_number = models.CharField(max_length=20, blank=True, verbose_name=_("Nr. TVA"))
     vat_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=Decimal("21.00"),  # Romanian VAT rate (updated Aug 2025)
-        verbose_name="Cota TVA (%)",
+        verbose_name=_("Cota TVA (%)"),
     )
 
     # Tax Reverse Charge (for B2B EU)
@@ -92,16 +95,16 @@ class CustomerBillingProfile(SoftDeleteModel):
     )
 
     # Payment Terms
-    payment_terms = models.PositiveIntegerField(default=30, verbose_name="Termen plată (zile)")
+    payment_terms = models.PositiveIntegerField(default=30, verbose_name=_("Termen plată (zile)"))
 
     # Credit Management
     credit_limit = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name="Limită credit (RON)"
+        max_digits=10, decimal_places=2, default=Decimal("0.00"), verbose_name=_("Limită credit (RON)")
     )
 
     # Currency Preferences
     preferred_currency = models.CharField(
-        max_length=3, choices=[("RON", "RON"), ("EUR", "EUR")], default="RON", verbose_name="Monedă preferată"
+        max_length=3, choices=[("RON", "RON"), ("EUR", "EUR")], default="RON", verbose_name=_("Monedă preferată")
     )
 
     # Billing Preferences
@@ -113,7 +116,7 @@ class CustomerBillingProfile(SoftDeleteModel):
             ("both", "Email și poștă"),
         ],
         default="email",
-        verbose_name="Mod livrare facturi",
+        verbose_name=_("Mod livrare facturi"),
     )
 
     # Automatic Payment

@@ -21,9 +21,9 @@
         </div>
         <div class="mt-4 sm:mt-0">
             {% if is_complete %}
-                {% button "Back to Account" href=account_url variant="primary" %}
+                {% trans "Back to Account" as bt1 %}{% button bt1 href=account_url variant="primary" %}
             {% else %}
-                {% button "Refresh" href=refresh_url variant="secondary" hx_get=refresh_url hx_swap="innerHTML" hx_target="#job-status-container" %}
+                {% trans "Refresh" as bt2 %}{% button bt2 href=refresh_url variant="secondary" hx_get=refresh_url hx_swap="innerHTML" hx_target="#job-status-container" %}
             {% endif %}
         </div>
     </div>

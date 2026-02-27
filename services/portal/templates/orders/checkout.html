@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n ui_components formatting %}
+{% load i18n %}
 
 {% block title %}{% trans "Checkout" %}{% endblock %}
 
@@ -378,7 +379,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('🏦 Creating bank transfer order to:', actionUrl);
                 } else {
                     console.error('❌ No payment method selected!');
-                    alert('Please select a payment method');
+                    alert('{% trans "Please select a payment method" %}');
 
                     // Reset button state
                     if (submitButton) submitButton.disabled = false;
@@ -401,7 +402,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } catch (error) {
                 console.error('🔥 Error during form submission:', error);
-                alert('An error occurred. Please try again.');
+                alert('{% trans "An error occurred. Please try again." %}');
 
                 // Reset button state
                 if (submitButton) submitButton.disabled = false;

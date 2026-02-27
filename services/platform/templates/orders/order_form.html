@@ -36,7 +36,7 @@
       {% else %}
         {% url 'orders:order_list' as back_url %}
       {% endif %}
-      {% button "← Back" variant="outline" href=back_url %}
+      {% trans "← Back" as bt1 %}{% button bt1 variant="outline" href=back_url %}
     </div>
   </div>
 
@@ -150,12 +150,12 @@
           {% else %}
             {% url 'orders:order_list' as cancel_url %}
           {% endif %}
-          {% button "Cancel" variant="outline" href=cancel_url %}
+          {% trans "Cancel" as bt2 %}{% button bt2 variant="outline" href=cancel_url %}
 
           {% if order %}
-            {% button "💾 Update Order" type="submit" variant="primary" %}
+            {% trans "💾 Update Order" as bt3 %}{% button bt3 type="submit" variant="primary" %}
           {% else %}
-            {% button "📦 Create Order" type="submit" variant="outline" %}
+            {% trans "📦 Create Order" as bt4 %}{% button bt4 type="submit" variant="outline" %}
             {% url 'orders:order_create_with_item' as create_with_item_url %}
             <button type="submit" formaction="{{ create_with_item_url }}"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 bg-green-700 text-white hover:bg-green-600 focus:ring-2 focus:ring-green-500">

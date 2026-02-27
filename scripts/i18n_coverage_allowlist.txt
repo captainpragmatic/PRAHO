@@ -1,0 +1,37 @@
+# i18n Coverage Allowlist
+#
+# Suppress specific i18n lint findings. One entry per line.
+# Format: filepath:CODE
+#
+# Example:
+#   services/platform/apps/common/validators.py:I18N001
+#   services/platform/apps/billing/forms.py:I18N006
+#
+# Codes:
+#   I18N001 - ValidationError("str") without _()
+#   I18N002 - messages.success/error/warning/info() without _()
+#   I18N003 - help_text="str" without _()
+#   I18N004 - verbose_name="str" without _()
+#   I18N005 - Choices tuple label without _()
+#   I18N006 - Form field label="str" without _()
+#   I18N007 - short_description = "str" without _()
+#   I18N008 - Template button text without {% trans %}
+#   I18N009 - JS alert() without {% trans %}
+#   I18N010 - Template heading/th text without {% trans %}
+
+# Programmatic error category strings (not user-facing)
+services/platform/apps/integrations/signals.py:I18N005
+# Test data tuples (not choices)
+services/platform/apps/integrations/webhooks/base.py:I18N005
+
+# Audit services: programmatic filter mapping tuples, not user-facing choices
+services/platform/apps/audit/services.py:I18N005
+
+# Sample data generation command: test/seed data, not user-facing
+services/platform/apps/common/management/commands/generate_sample_data.py:I18N005
+
+# unique_together tuples falsely detected as choices
+services/platform/apps/billing/currency_models.py:I18N005
+services/platform/apps/billing/payment_models.py:I18N005
+services/platform/apps/billing/subscription_models.py:I18N005
+services/platform/apps/billing/tax_models.py:I18N005

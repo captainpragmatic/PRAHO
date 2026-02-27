@@ -165,3 +165,4 @@ services/platform/logs/*
 !services/platform/logs/.gitkeep
 services/portal/logs/*
 !services/portal/logs/.gitkeep
+i18n-review-*.yaml

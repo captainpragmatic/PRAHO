@@ -70,13 +70,13 @@
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="flex items-center space-x-2">
               {% if ticket.status == 'open' %}
-                {% badge "Open" variant="info" icon="📂" %}
+                {% trans "Open" as bt1 %}{% badge bt1 variant="info" icon="📂" %}
               {% elif ticket.status == 'in_progress' %}
-                {% badge "In Progress" variant="primary" icon="⚡" %}
+                {% trans "In Progress" as bt2 %}{% badge bt2 variant="primary" icon="⚡" %}
               {% elif ticket.status == 'waiting_on_customer' %}
-                {% badge "Waiting on Customer" variant="warning" icon="⏳" %}
+                {% trans "Waiting on Customer" as bt3 %}{% badge bt3 variant="warning" icon="⏳" %}
               {% elif ticket.status == 'closed' %}
-                {% badge "Closed" variant="secondary" icon="📁" %}
+                {% trans "Closed" as bt4 %}{% badge bt4 variant="secondary" icon="📁" %}
                 {% if ticket.resolution_code %}
                   {% badge ticket.resolution_code|title variant="outline" size="xs" %}
                 {% endif %}
@@ -118,13 +118,13 @@
       </div>
       <div class="text-right">
         {% if ticket.status == 'open' %}
-          {% badge "Open" variant="info" icon="📂" %}
+          {% trans "Open" as bt5 %}{% badge bt5 variant="info" icon="📂" %}
         {% elif ticket.status == 'in_progress' %}
-          {% badge "In Progress" variant="primary" icon="⚡" %}
+          {% trans "In Progress" as bt6 %}{% badge bt6 variant="primary" icon="⚡" %}
         {% elif ticket.status == 'waiting_on_customer' %}
-          {% badge "Waiting on Customer" variant="warning" icon="⏳" %}
+          {% trans "Waiting on Customer" as bt7 %}{% badge bt7 variant="warning" icon="⏳" %}
         {% elif ticket.status == 'closed' %}
-          {% badge "Closed" variant="secondary" icon="📁" %}
+          {% trans "Closed" as bt8 %}{% badge bt8 variant="secondary" icon="📁" %}
           {% if ticket.resolution_code %}
             {% badge ticket.resolution_code|title variant="outline" size="xs" %}
           {% endif %}

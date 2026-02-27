@@ -33,20 +33,20 @@
                     {% badge domain.get_status_display variant="success" %}
                     {% badge domain.tld.extension variant="secondary" %}
                     {% if domain.whois_privacy %}
-                        {% badge "🔒 WHOIS Privacy" variant="info" size="sm" %}
+                        {% trans "🔒 WHOIS Privacy" as bt1 %}{% badge bt1 variant="info" size="sm" %}
                     {% endif %}
                     {% if domain.auto_renew %}
-                        {% badge "🔄 Auto-Renew" variant="success" size="sm" %}
+                        {% trans "🔄 Auto-Renew" as bt2 %}{% badge bt2 variant="success" size="sm" %}
                     {% endif %}
                 </div>
             </div>
             <div class="mt-4 sm:mt-0 flex gap-2">
                 {% if can_renew %}
                     {% url 'domains:renew' domain.id as renew_url %}
-                    {% button "🔄 Renew" variant="primary" href=renew_url %}
+                    {% trans "🔄 Renew" as bt3 %}{% button bt3 variant="primary" href=renew_url %}
                 {% endif %}
                 {% if can_modify_dns %}
-                    {% button "⚙️ DNS" variant="secondary" href="#" %}
+                    {% trans "⚙️ DNS" as bt4 %}{% button bt4 variant="secondary" href="#" %}
                 {% endif %}
             </div>
         </div>
@@ -241,15 +241,15 @@
                 <div class="px-6 py-4 space-y-3">
                     {% if can_renew %}
                         {% url 'domains:renew' domain.id as renew_url_2 %}
-                        {% button "🔄 Renew Domain" variant="primary" size="sm" href=renew_url_2 class="w-full" %}
+                        {% trans "🔄 Renew Domain" as bt5 %}{% button bt5 variant="primary" size="sm" href=renew_url_2 class="w-full" %}
                     {% endif %}
                     {% if can_transfer %}
-                        {% button "📥 Transfer Out" variant="secondary" size="sm" href="#" class="w-full" %}
+                        {% trans "📥 Transfer Out" as bt6 %}{% button bt6 variant="secondary" size="sm" href="#" class="w-full" %}
                     {% endif %}
                     {% if can_modify_dns %}
-                        {% button "⚙️ Manage DNS" variant="secondary" size="sm" href="#" class="w-full" %}
+                        {% trans "⚙️ Manage DNS" as bt7 %}{% button bt7 variant="secondary" size="sm" href="#" class="w-full" %}
                     {% endif %}
-                    {% button "📊 View Analytics" variant="secondary" size="sm" href="#" class="w-full" %}
+                    {% trans "📊 View Analytics" as bt8 %}{% button bt8 variant="secondary" size="sm" href="#" class="w-full" %}
                 </div>
             </div>
         </div>

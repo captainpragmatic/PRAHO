@@ -69,11 +69,11 @@
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
                         {% if account.is_active %}
-                            {% badge "Active" variant="success" size="sm" %}
+                            {% trans "Active" as bt1 %}{% badge bt1 variant="success" size="sm" %}
                         {% elif account.is_suspended %}
-                            {% badge "Suspended" variant="warning" size="sm" %}
+                            {% trans "Suspended" as bt2 %}{% badge bt2 variant="warning" size="sm" %}
                         {% else %}
-                            {% badge "Disabled" variant="secondary" size="sm" %}
+                            {% trans "Disabled" as bt3 %}{% badge bt3 variant="secondary" size="sm" %}
                         {% endif %}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
@@ -99,7 +99,7 @@
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
                         <div class="flex items-center justify-end space-x-2">
-                            {% button "View" href=account.get_absolute_url variant="secondary" size="sm" %}
+                            {% trans "View" as bt4 %}{% button bt4 href=account.get_absolute_url variant="secondary" size="sm" %}
                         </div>
                     </td>
                 </tr>
@@ -114,10 +114,10 @@
         <div class="flex items-center justify-between">
             <div class="flex-1 flex justify-between sm:hidden">
                 {% if page_obj.has_previous %}
-                    {% button "Previous" href="?page={{ page_obj.previous_page_number }}" variant="secondary" size="sm" %}
+                    {% trans "Previous" as bt5 %}{% button bt5 href="?page={{ page_obj.previous_page_number }}" variant="secondary" size="sm" %}
                 {% endif %}
                 {% if page_obj.has_next %}
-                    {% button "Next" href="?page={{ page_obj.next_page_number }}" variant="secondary" size="sm" %}
+                    {% trans "Next" as bt6 %}{% button bt6 href="?page={{ page_obj.next_page_number }}" variant="secondary" size="sm" %}
                 {% endif %}
             </div>
             <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
@@ -182,9 +182,9 @@
     </p>
     <div class="mt-6">
         {% if request.GET.search or request.GET.status or request.GET.plan %}
-            {% button "Clear Filters" href="." variant="secondary" %}
+            {% trans "Clear Filters" as bt7 %}{% button bt7 href="." variant="secondary" %}
         {% endif %}
-        {% button "Create Account" href=new_account_url variant="primary" %}
+        {% trans "Create Account" as bt8 %}{% button bt8 href=new_account_url variant="primary" %}
     </div>
 </div>
 {% endif %}

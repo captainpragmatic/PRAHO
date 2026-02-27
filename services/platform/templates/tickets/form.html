@@ -10,7 +10,7 @@
   <div class="mb-6">
     <div class="flex items-center space-x-4">
       {% url 'tickets:list' as tickets_url %}
-      {% button "← Back to Tickets" variant="secondary" href=tickets_url size="sm" %}
+      {% trans "← Back to Tickets" as bt1 %}{% button bt1 variant="secondary" href=tickets_url size="sm" %}
     </div>
     <h1 class="text-2xl font-bold text-white mt-4 romanian-flag">
       {% trans 'Create New Ticket' %}
@@ -102,8 +102,8 @@
         <!-- Form Actions -->
         <div class="flex justify-end space-x-4 pt-4 border-t border-slate-600">
           {% url 'tickets:list' as tickets_url %}
-          {% button "Cancel" variant="secondary" href=tickets_url %}
-          {% button "Create Ticket" variant="primary" type="submit" icon="ticket" %}
+          {% trans "Cancel" as bt2 %}{% button bt2 variant="secondary" href=tickets_url %}
+          {% trans "Create Ticket" as bt3 %}{% button bt3 variant="primary" type="submit" icon="ticket" %}
         </div>
       </form>
     </div>

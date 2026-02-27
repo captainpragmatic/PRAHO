@@ -29,21 +29,21 @@ This template is dynamically loaded and contains only the results section.
 
                   <!-- Order Status Badge -->
                   {% if order.status == "draft" %}
-                    {% badge "📝 Draft" variant="secondary" %}
+                    {% trans "📝 Draft" as bt1 %}{% badge bt1 variant="secondary" %}
                   {% elif order.status == "pending" %}
-                    {% badge "⏳ Pending" variant="warning" %}
+                    {% trans "⏳ Pending" as bt2 %}{% badge bt2 variant="warning" %}
                   {% elif order.status == "processing" %}
-                    {% badge "⚙️ Processing" variant="primary" %}
+                    {% trans "⚙️ Processing" as bt3 %}{% badge bt3 variant="primary" %}
                   {% elif order.status == "completed" %}
-                    {% badge "✅ Completed" variant="success" %}
+                    {% trans "✅ Completed" as bt4 %}{% badge bt4 variant="success" %}
                   {% elif order.status == "cancelled" %}
-                    {% badge "❌ Cancelled" variant="danger" %}
+                    {% trans "❌ Cancelled" as bt5 %}{% badge bt5 variant="danger" %}
                   {% elif order.status == "failed" %}
-                    {% badge "🔥 Failed" variant="danger" %}
+                    {% trans "🔥 Failed" as bt6 %}{% badge bt6 variant="danger" %}
                   {% elif order.status == "refunded" %}
-                    {% badge "💰 Refunded" variant="info" %}
+                    {% trans "💰 Refunded" as bt7 %}{% badge bt7 variant="info" %}
                   {% elif order.status == "partially_refunded" %}
-                    {% badge "💸 Partially Refunded" variant="warning" %}
+                    {% trans "💸 Partially Refunded" as bt8 %}{% badge bt8 variant="warning" %}
                   {% endif %}
                 </div>
 
@@ -73,11 +73,11 @@ This template is dynamically loaded and contains only the results section.
               {% if is_staff %}
               <div class="flex items-center space-x-2">
                 {% url 'orders:order_detail' pk=order.id as detail_url %}
-                {% button "View" variant="secondary" size="sm" href=detail_url %}
+                {% trans "View" as bt9 %}{% button bt9 variant="secondary" size="sm" href=detail_url %}
 
                 {% if order.status == 'draft' %}
                   {% url 'orders:order_edit' pk=order.id as edit_url %}
-                  {% button "Edit" variant="primary" size="sm" href=edit_url %}
+                  {% trans "Edit" as bt10 %}{% button bt10 variant="primary" size="sm" href=edit_url %}
                 {% endif %}
               </div>
               {% endif %}
@@ -111,7 +111,7 @@ This template is dynamically loaded and contains only the results section.
 
       {% if is_staff and not search_query and not current_status %}
         {% url 'orders:order_create' as create_url %}
-        {% button "📦 Create First Order" variant="primary" href=create_url %}
+        {% trans "📦 Create First Order" as bt11 %}{% button bt11 variant="primary" href=create_url %}
       {% endif %}
     </div>
   {% endif %}

@@ -24,7 +24,7 @@
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
       {% if is_staff %}
         {% url 'orders:order_create' as create_order_url %}
-        {% button "📦 New Order" variant="primary" href=create_order_url %}
+        {% trans "📦 New Order" as bt1 %}{% button bt1 variant="primary" href=create_order_url %}
       {% endif %}
     </div>
   </div>
@@ -142,7 +142,7 @@
 
         <!-- Action Buttons -->
         <div class="flex gap-2 sm:flex-shrink-0">
-          {% button "🔍 Search" type="submit" variant="primary" size="sm" %}
+          {% trans "🔍 Search" as bt2 %}{% button bt2 type="submit" variant="primary" size="sm" %}
 
           {% if search_query or current_status %}
           <a href="{% url 'orders:order_list' %}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
@@ -173,21 +173,21 @@
 
                   <!-- Order Status Badge -->
                   {% if order.status == "draft" %}
-                    {% badge "📝 Draft" variant="secondary" %}
+                    {% trans "📝 Draft" as bt3 %}{% badge bt3 variant="secondary" %}
                   {% elif order.status == "pending" %}
-                    {% badge "⏳ Pending" variant="warning" %}
+                    {% trans "⏳ Pending" as bt4 %}{% badge bt4 variant="warning" %}
                   {% elif order.status == "processing" %}
-                    {% badge "⚙️ Processing" variant="primary" %}
+                    {% trans "⚙️ Processing" as bt5 %}{% badge bt5 variant="primary" %}
                   {% elif order.status == "completed" %}
-                    {% badge "✅ Completed" variant="success" %}
+                    {% trans "✅ Completed" as bt6 %}{% badge bt6 variant="success" %}
                   {% elif order.status == "cancelled" %}
-                    {% badge "❌ Cancelled" variant="danger" %}
+                    {% trans "❌ Cancelled" as bt7 %}{% badge bt7 variant="danger" %}
                   {% elif order.status == "failed" %}
-                    {% badge "🔥 Failed" variant="danger" %}
+                    {% trans "🔥 Failed" as bt8 %}{% badge bt8 variant="danger" %}
                   {% elif order.status == "refunded" %}
-                    {% badge "💰 Refunded" variant="info" %}
+                    {% trans "💰 Refunded" as bt9 %}{% badge bt9 variant="info" %}
                   {% elif order.status == "partially_refunded" %}
-                    {% badge "💸 Partially Refunded" variant="warning" %}
+                    {% trans "💸 Partially Refunded" as bt10 %}{% badge bt10 variant="warning" %}
                   {% endif %}
                 </div>
 
@@ -231,11 +231,11 @@
               <!-- Action Buttons -->
               <div class="flex space-x-2 ml-4">
                 {% url 'orders:order_detail' pk=order.id as order_detail_url %}
-                {% button "👁️ View" variant="outline" size="sm" href=order_detail_url %}
+                {% trans "👁️ View" as bt11 %}{% button bt11 variant="outline" size="sm" href=order_detail_url %}
 
                 {% if is_staff and order.status not in "cancelled,refunded" %}
                   {% url 'orders:order_edit' pk=order.id as order_edit_url %}
-                  {% button "✏️ Edit" variant="outline" size="sm" href=order_edit_url %}
+                  {% trans "✏️ Edit" as bt12 %}{% button bt12 variant="outline" size="sm" href=order_edit_url %}
                 {% endif %}
               </div>
             </div>
@@ -272,21 +272,21 @@
               <!-- Order Status Badge -->
               <div class="flex-shrink-0">
                 {% if order.status == "draft" %}
-                  {% badge "📝 Draft" variant="secondary" size="sm" %}
+                  {% trans "📝 Draft" as bt13 %}{% badge bt13 variant="secondary" size="sm" %}
                 {% elif order.status == "pending" %}
-                  {% badge "⏳ Pending" variant="warning" size="sm" %}
+                  {% trans "⏳ Pending" as bt14 %}{% badge bt14 variant="warning" size="sm" %}
                 {% elif order.status == "processing" %}
-                  {% badge "⚙️ Processing" variant="primary" size="sm" %}
+                  {% trans "⚙️ Processing" as bt15 %}{% badge bt15 variant="primary" size="sm" %}
                 {% elif order.status == "completed" %}
-                  {% badge "✅ Completed" variant="success" size="sm" %}
+                  {% trans "✅ Completed" as bt16 %}{% badge bt16 variant="success" size="sm" %}
                 {% elif order.status == "cancelled" %}
-                  {% badge "❌ Cancelled" variant="danger" size="sm" %}
+                  {% trans "❌ Cancelled" as bt17 %}{% badge bt17 variant="danger" size="sm" %}
                 {% elif order.status == "failed" %}
-                  {% badge "🔥 Failed" variant="danger" size="sm" %}
+                  {% trans "🔥 Failed" as bt18 %}{% badge bt18 variant="danger" size="sm" %}
                 {% elif order.status == "refunded" %}
-                  {% badge "💰 Refunded" variant="info" size="sm" %}
+                  {% trans "💰 Refunded" as bt19 %}{% badge bt19 variant="info" size="sm" %}
                 {% elif order.status == "partially_refunded" %}
-                  {% badge "💸 Partially Refunded" variant="warning" size="sm" %}
+                  {% trans "💸 Partially Refunded" as bt20 %}{% badge bt20 variant="warning" size="sm" %}
                 {% endif %}
               </div>
             </div>
@@ -348,11 +348,11 @@
             <!-- Action Buttons -->
             <div class="flex gap-2 pt-2 border-t border-slate-700">
               {% url 'orders:order_detail' pk=order.id as order_detail_url %}
-              {% button "👁️ View Details" variant="outline" size="sm" href=order_detail_url %}
+              {% trans "👁️ View Details" as bt21 %}{% button bt21 variant="outline" size="sm" href=order_detail_url %}
 
               {% if is_staff and order.status not in "cancelled,refunded" %}
                 {% url 'orders:order_edit' pk=order.id as order_edit_url %}
-                {% button "✏️ Edit Order" variant="outline" size="sm" href=order_edit_url %}
+                {% trans "✏️ Edit Order" as bt22 %}{% button bt22 variant="outline" size="sm" href=order_edit_url %}
               {% endif %}
             </div>
           </div>
@@ -428,7 +428,7 @@
       <div class="flex flex-col sm:flex-row gap-3 justify-center items-center">
         {% if is_staff and not search_query and not current_status %}
           {% url 'orders:order_create' as create_order_url %}
-          {% button "📦 Create First Order" variant="primary" href=create_order_url %}
+          {% trans "📦 Create First Order" as bt23 %}{% button bt23 variant="primary" href=create_order_url %}
         {% endif %}
 
         {% if search_query or current_status %}

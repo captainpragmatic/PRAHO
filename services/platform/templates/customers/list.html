@@ -15,7 +15,7 @@
 
     {% url 'customers:create' as create_url %}
     <div class="sm:flex-shrink-0">
-      {% button "New Customer" variant="primary" href=create_url icon="plus" %}
+      {% trans "New Customer" as bt1 %}{% button bt1 variant="primary" href=create_url icon="plus" %}
     </div>
   </div>
 
@@ -30,11 +30,11 @@
       </div>
 
       <div class="flex gap-2 sm:gap-4">
-        {% button "Search" variant="primary" type="submit" %}
+        {% trans "Search" as bt2 %}{% button bt2 variant="primary" type="submit" %}
 
         {% if search_query %}
         {% url 'customers:list' as list_url %}
-        {% button "Reset" variant="secondary" href=list_url %}
+        {% trans "Reset" as bt3 %}{% button bt3 variant="secondary" href=list_url %}
         {% endif %}
       </div>
     </form>
@@ -160,8 +160,8 @@
               <div class="flex items-center space-x-2">
                 {% url 'customers:detail' customer.pk as detail_url %}
                 {% url 'customers:edit' customer.pk as edit_url %}
-                {% button "View" variant="info" href=detail_url size="sm" %}
-                {% button "Edit" variant="success" href=edit_url size="sm" %}
+                {% trans "View" as bt4 %}{% button bt4 variant="info" href=detail_url size="sm" %}
+                {% trans "Edit" as bt5 %}{% button bt5 variant="success" href=edit_url size="sm" %}
               </div>
             </td>
           </tr>
@@ -287,8 +287,8 @@
         {% url 'customers:detail' customer.pk as detail_url %}
         {% url 'customers:edit' customer.pk as edit_url %}
         <div class="flex gap-2">
-          {% button "View Details" variant="info" href=detail_url size="sm" %}
-          {% button "Edit" variant="success" href=edit_url size="sm" %}
+          {% trans "View Details" as bt6 %}{% button bt6 variant="info" href=detail_url size="sm" %}
+          {% trans "Edit" as bt7 %}{% button bt7 variant="success" href=edit_url size="sm" %}
         </div>
       </div>
     </div>
@@ -326,17 +326,17 @@
       <div class="flex justify-center sm:justify-end space-x-2">
         {% if customers.has_previous %}
         {% if search_query %}
-        {% button "← Previous" variant="secondary" href="?page={{ customers.previous_page_number }}&search={{ search_query }}" size="sm" %}
+        {% trans "← Previous" as bt8 %}{% button bt8 variant="secondary" href="?page={{ customers.previous_page_number }}&search={{ search_query }}" size="sm" %}
         {% else %}
-        {% button "← Previous" variant="secondary" href="?page={{ customers.previous_page_number }}" size="sm" %}
+        {% trans "← Previous" as bt9 %}{% button bt9 variant="secondary" href="?page={{ customers.previous_page_number }}" size="sm" %}
         {% endif %}
         {% endif %}
 
         {% if customers.has_next %}
         {% if search_query %}
-        {% button "Next →" variant="secondary" href="?page={{ customers.next_page_number }}&search={{ search_query }}" size="sm" %}
+        {% trans "Next →" as bt10 %}{% button bt10 variant="secondary" href="?page={{ customers.next_page_number }}&search={{ search_query }}" size="sm" %}
         {% else %}
-        {% button "Next →" variant="secondary" href="?page={{ customers.next_page_number }}" size="sm" %}
+        {% trans "Next →" as bt11 %}{% button bt11 variant="secondary" href="?page={{ customers.next_page_number }}" size="sm" %}
         {% endif %}
         {% endif %}
       </div>

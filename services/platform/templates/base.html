@@ -151,7 +151,7 @@
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
             </a>
             {% url 'users:logout' as logout_url %}
-            {% button "Logout" variant="danger" href=logout_url size="sm" %}
+            {% trans "Logout" as bt1 %}{% button bt1 variant="danger" href=logout_url size="sm" %}
           </div>
         </div>
       </div>

@@ -43,13 +43,13 @@
 
         <div class="text-right">
             {% if live_status.status == "completed" %}
-                {% badge "Complete" variant="success" %}
+                {% trans "Complete" as bt1 %}{% badge bt1 variant="success" %}
             {% elif live_status.status == "failed" %}
-                {% badge "Failed" variant="danger" %}
+                {% trans "Failed" as bt2 %}{% badge bt2 variant="danger" %}
             {% elif live_status.status == "running" %}
-                {% badge "Running" variant="warning" %}
+                {% trans "Running" as bt3 %}{% badge bt3 variant="warning" %}
             {% else %}
-                {% badge "Queued" variant="secondary" %}
+                {% trans "Queued" as bt4 %}{% badge bt4 variant="secondary" %}
             {% endif %}
         </div>
     </div>

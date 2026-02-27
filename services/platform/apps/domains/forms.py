@@ -3,6 +3,7 @@ import re
 from typing import Any, ClassVar
 
 from django import forms
+from django.utils.translation import gettext_lazy as _
 
 from apps.settings.encryption import settings_encryption
 
@@ -54,10 +55,10 @@ class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
             try:
                 value = json.loads(value)
             except Exception as e:
-                raise forms.ValidationError("Invalid JSON for nameservers") from e
+                raise forms.ValidationError(_("Invalid JSON for nameservers")) from e
 
         if not isinstance(value, list):
-            raise forms.ValidationError("Nameservers must be a list of hostnames")
+            raise forms.ValidationError(_("Nameservers must be a list of hostnames"))
 
         hostname_re = re.compile(
             r"^(?=.{1,253}\.?)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[A-Za-z]{2,63}\.?$"
@@ -65,7 +66,7 @@ class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
         cleaned: list[str] = []
         for ns in value:
             if not isinstance(ns, str) or not hostname_re.match(ns):
-                raise forms.ValidationError("Invalid nameserver hostname")
+                raise forms.ValidationError(_("Invalid nameserver hostname"))
             cleaned.append(ns.rstrip("."))
         return cleaned
 

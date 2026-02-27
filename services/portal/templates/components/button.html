@@ -3,7 +3,7 @@
 🎯 HTMX-POWERED BUTTON COMPONENT
 ===============================================================================
 Button component with full HTMX support and loading states
-Usage: {% button "Label" variant="primary" href="/url" hx_get="/endpoint" size="sm" %}
+Usage: {% trans "Label" as bt1 %}{% button bt1 variant="primary" href="/url" hx_get="/endpoint" size="sm" %}
 {% endcomment %}
 
 {% if href %}

@@ -17,17 +17,17 @@
                         {{ service.service_name|default:service.domain }}
                     </h1>
                     {% if service.status == 'active' %}
-                      {% badge "Active" variant="success" icon="✅" %}
+                      {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="✅" %}
                     {% elif service.status == 'suspended' %}
-                      {% badge "Suspended" variant="danger" icon="⏸️" %}
+                      {% trans "Suspended" as bt2 %}{% badge bt2 variant="danger" icon="⏸️" %}
                     {% elif service.status == 'cancelled' %}
-                      {% badge "Cancelled" variant="secondary" icon="❌" %}
+                      {% trans "Cancelled" as bt3 %}{% badge bt3 variant="secondary" icon="❌" %}
                     {% elif service.status == 'pending' %}
-                      {% badge "Pending" variant="warning" icon="⏳" %}
+                      {% trans "Pending" as bt4 %}{% badge bt4 variant="warning" icon="⏳" %}
                     {% elif service.status == 'provisioning' %}
-                      {% badge "Provisioning" variant="info" icon="🔄" %}
+                      {% trans "Provisioning" as bt5 %}{% badge bt5 variant="info" icon="🔄" %}
                     {% elif service.status == 'failed' %}
-                      {% badge "Provisioning Failed" variant="danger" icon="💥" %}
+                      {% trans "Provisioning Failed" as bt6 %}{% badge bt6 variant="danger" icon="💥" %}
                     {% else %}
                       {% badge service.status|title variant="default" %}
                     {% endif %}
@@ -66,16 +66,16 @@
                 {% if can_manage %}
                     {% if service.status == 'active' %}
                         {% url 'provisioning:service_suspend' service.pk as suspend_url %}
-                        {% button "⏸️ Suspend" variant="danger" hx_post=suspend_url hx_confirm="Suspend this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                        {% trans "⏸️ Suspend" as bt7 %}{% button bt7 variant="danger" hx_post=suspend_url hx_confirm="Suspend this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
                     {% elif service.status == 'suspended' %}
                         {% url 'provisioning:service_activate' service.pk as activate_url %}
-                        {% button "▶️ Activate" variant="success" hx_post=activate_url hx_confirm="Reactivate this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                        {% trans "▶️ Activate" as bt8 %}{% button bt8 variant="success" hx_post=activate_url hx_confirm="Reactivate this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
                     {% endif %}
                     {% url 'provisioning:service_edit' service.pk as edit_url %}
-                    {% button "✏️ Edit" variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
+                    {% trans "✏️ Edit" as bt9 %}{% button bt9 variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
                 {% endif %}
                 {% url 'provisioning:services' as services_url %}
-                {% button "← Back to Services" variant="secondary" href=services_url class="sm:text-sm mobile-full-width" %}
+                {% trans "← Back to Services" as bt10 %}{% button bt10 variant="secondary" href=services_url class="sm:text-sm mobile-full-width" %}
             </div>
         </div>
     </div>

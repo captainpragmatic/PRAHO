@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.security_decorators import (
     atomic_with_retry,
@@ -773,12 +774,12 @@ def _safe_json_loads(json_string: str) -> Any:
 
     # Check size limit
     if len(json_string.encode("utf-8")) > MAX_JSON_SIZE:
-        raise ValidationError("JSON too large - exceeds 1MB limit")
+        raise ValidationError(_("JSON too large - exceeds 1MB limit"))
 
     # Parse with depth checking
     def parse_with_depth_check(obj: Any, current_depth: int = 0) -> Any:
         if current_depth > MAX_JSON_DEPTH:
-            raise ValidationError("JSON too deeply nested")
+            raise ValidationError(_("JSON too deeply nested"))
 
         if isinstance(obj, dict):
             return {k: parse_with_depth_check(v, current_depth + 1) for k, v in obj.items()}
@@ -795,6 +796,6 @@ def _safe_json_loads(json_string: str) -> Any:
         return parse_with_depth_check(parsed_data)
 
     except json.JSONDecodeError as e:
-        raise ValidationError(f"Invalid JSON format: {e!s}") from e
+        raise ValidationError(_("Invalid JSON format: %(error)s") % {"error": str(e)}) from e
     except RecursionError as e:
-        raise ValidationError(f"JSON nesting too deep - exceeds {MAX_JSON_DEPTH} levels") from e
+        raise ValidationError(_("JSON nesting too deep - exceeds %(depth)s levels") % {"depth": MAX_JSON_DEPTH}) from e

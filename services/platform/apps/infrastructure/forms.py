@@ -8,6 +8,7 @@ from typing import Any
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
 
 from apps.infrastructure.models import (
     CloudProvider,
@@ -94,11 +95,11 @@ class NodeDeploymentForm(forms.ModelForm):
 
         # Validate region belongs to selected provider
         if provider and region and region.provider != provider:
-            raise ValidationError({"region": "Selected region does not belong to the selected provider"})
+            raise ValidationError({"region": _("Selected region does not belong to the selected provider")})
 
         # Validate size belongs to selected provider
         if provider and node_size and node_size.provider != provider:
-            raise ValidationError({"node_size": "Selected size does not belong to the selected provider"})
+            raise ValidationError({"node_size": _("Selected size does not belong to the selected provider")})
 
         return cleaned_data
 
@@ -114,7 +115,7 @@ class CloudProviderForm(forms.ModelForm):
             }
         ),
         required=False,
-        help_text="Leave blank to keep existing token",
+        help_text=_("Leave blank to keep existing token"),
     )
 
     class Meta:
@@ -264,7 +265,7 @@ class DeploymentDestroyForm(forms.Form):
                 "placeholder": "Type the hostname to confirm",
             }
         ),
-        help_text="Type the hostname exactly to confirm destruction",
+        help_text=_("Type the hostname exactly to confirm destruction"),
     )
 
     def __init__(self, *args: Any, hostname: str = "", **kwargs: Any) -> None:
@@ -274,5 +275,5 @@ class DeploymentDestroyForm(forms.Form):
     def clean_confirm_hostname(self) -> str:
         confirm = self.cleaned_data["confirm_hostname"]
         if confirm != self.expected_hostname:
-            raise ValidationError(f"Hostname must match exactly: {self.expected_hostname}")
+            raise ValidationError(_("Hostname must match exactly: %(hostname)s") % {"hostname": self.expected_hostname})
         return confirm

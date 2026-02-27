@@ -151,8 +151,8 @@
 
                 <!-- Form Actions -->
                 <div class="px-6 py-4 bg-slate-750 border-t border-slate-700 flex justify-end space-x-3">
-                    {% button "Cancel" href=cancel_url variant="secondary" %}
-                    {% button "💾 Create Backup" type="submit" variant="primary" %}
+                    {% trans "Cancel" as bt1 %}{% button bt1 href=cancel_url variant="secondary" %}
+                    {% trans "💾 Create Backup" as bt2 %}{% button bt2 type="submit" variant="primary" %}
                 </div>
             </form>
         </div>

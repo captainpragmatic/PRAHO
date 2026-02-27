@@ -40,7 +40,7 @@
                 </span>
             </div>
             {% url 'provisioning:virtualmin_account_new' as new_account_url %}
-            {% button "New Account" href=new_account_url variant="primary" %}
+            {% trans "New Account" as bt1 %}{% button bt1 href=new_account_url variant="primary" %}
         </div>
     </div>
 

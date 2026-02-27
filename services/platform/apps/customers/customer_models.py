@@ -35,7 +35,7 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
     logger = models_module.security_logger
 
     if not isinstance(bank_details, dict):
-        raise ValidationError("Bank details must be a dictionary")
+        raise ValidationError(_("Bank details must be a dictionary"))
 
     # Security: Validate bank details structure and content
     allowed_fields = {
@@ -56,7 +56,7 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
             f"🔒 [Security] Invalid bank detail fields detected: {invalid_fields}",
             extra={"invalid_fields": list(invalid_fields), "operation": "bank_details_validation"},
         )
-        raise ValidationError(f"Invalid bank details field: {', '.join(invalid_fields)}")
+        raise ValidationError(_("Invalid bank details field: %(fields)s") % {"fields": ", ".join(invalid_fields)})
 
     # Validate field lengths for security
     field_limits = {
@@ -74,7 +74,9 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
         if isinstance(value, str) and field in field_limits:
             max_length = field_limits[field]
             if len(value) > max_length:
-                raise ValidationError(f"{field} exceeds maximum length of {max_length} characters")
+                raise ValidationError(
+                    _("%(field)s exceeds maximum length of %(max)s characters") % {"field": field, "max": max_length}
+                )
 
     # IBAN validation can be added here if needed in the future
     # Currently no additional required fields for IBAN payments
@@ -105,14 +107,14 @@ class SoftDeleteManager(models.Manager["Customer"]):
 class SoftDeleteModel(models.Model):
     """Abstract model with soft delete capabilities"""
 
-    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name="Șters la")
+    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Șters la"))
     deleted_by = models.ForeignKey(
         "users.User",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="deleted_%(class)ss",
-        verbose_name="Șters de",
+        verbose_name=_("Șters de"),
     )
 
     all_objects = models.Manager()  # Manager - All records including soft-deleted
@@ -217,30 +219,30 @@ class Customer(SoftDeleteModel):
     )
 
     # Core Identity Fields
-    name = models.CharField(max_length=255, verbose_name="Nume")
+    name = models.CharField(max_length=255, verbose_name=_("Nume"))
     customer_type = models.CharField(
-        max_length=20, choices=CUSTOMER_TYPE_CHOICES, default="individual", verbose_name="Tip client"
+        max_length=20, choices=CUSTOMER_TYPE_CHOICES, default="individual", verbose_name=_("Tip client")
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="prospect", verbose_name="Status")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="prospect", verbose_name=_("Status"))
 
     # Company Fields (when customer_type = 'company')
-    company_name = models.CharField(max_length=255, blank=True, verbose_name="Nume companie")
+    company_name = models.CharField(max_length=255, blank=True, verbose_name=_("Nume companie"))
 
     # Primary Contact (from users via CustomerMembership)
     primary_email = models.EmailField(
-        verbose_name="Email principal",
+        verbose_name=_("Email principal"),
         default="contact@example.com",  # Temporary default for migration
     )
     primary_phone = models.CharField(
         max_length=20,
         validators=[RegexValidator(r"^(\+40|0)[0-9]{9,10}$", "Număr telefon invalid")],
-        verbose_name="Telefon principal",
+        verbose_name=_("Telefon principal"),
         default="+40712345678",  # Temporary default for migration
     )
 
     # Business Context
-    industry = models.CharField(max_length=100, blank=True, verbose_name="Domeniu")
-    website = models.URLField(blank=True, verbose_name="Website")
+    industry = models.CharField(max_length=100, blank=True, verbose_name=_("Domeniu"))
+    website = models.URLField(blank=True, verbose_name=_("Website"))
 
     # Account Management
     assigned_account_manager = models.ForeignKey(
@@ -250,7 +252,7 @@ class Customer(SoftDeleteModel):
         blank=True,
         limit_choices_to={"staff_role__in": ["manager", "support", "admin"]},
         related_name="managed_customers",
-        verbose_name="Manager cont",
+        verbose_name=_("Manager cont"),
     )
 
     # GDPR Compliance (simplified)

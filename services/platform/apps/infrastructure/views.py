@@ -15,6 +15,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.common.credential_vault import get_credential_vault
@@ -246,7 +247,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
 
     # Check if deployment is enabled
     if not SettingsService.get_setting("node_deployment.enabled", True):
-        messages.error(request, "Node deployment is disabled in settings.")
+        messages.error(request, _("Node deployment is disabled in settings."))
         return redirect("infrastructure:deployment_list")
 
     if request.method == "POST":
@@ -444,7 +445,7 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
     if deployment.status != "failed":
-        messages.error(request, "Can only retry failed deployments.")
+        messages.error(request, _("Can only retry failed deployments."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API tokens
@@ -545,7 +546,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
     if deployment.status != "completed":
-        messages.error(request, "Can only upgrade running nodes.")
+        messages.error(request, _("Can only upgrade running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get available sizes for this provider (larger than current)
@@ -561,7 +562,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         new_size_id = request.POST.get("new_size")
         if not new_size_id:
-            messages.error(request, "Please select a new size.")
+            messages.error(request, _("Please select a new size."))
         else:
             try:
                 new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
@@ -593,7 +594,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             except NodeSize.DoesNotExist:
-                messages.error(request, "Invalid size selected.")
+                messages.error(request, _("Invalid size selected."))
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -625,7 +626,7 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
     if deployment.status != "completed":
-        messages.error(request, "Can only stop running nodes.")
+        messages.error(request, _("Can only stop running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
@@ -657,7 +658,7 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
     if deployment.status != "stopped":
-        messages.error(request, "Can only start stopped nodes.")
+        messages.error(request, _("Can only start stopped nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
@@ -689,7 +690,7 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
     if deployment.status != "completed":
-        messages.error(request, "Can only reboot running nodes.")
+        messages.error(request, _("Can only reboot running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
@@ -721,7 +722,7 @@ def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
     deployment = get_object_or_404(NodeDeployment, id=pk)
 
     if deployment.status != "completed":
-        messages.error(request, "Can only run maintenance on running nodes.")
+        messages.error(request, _("Can only run maintenance on running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Available maintenance playbooks
@@ -740,7 +741,7 @@ def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         selected_playbooks = request.POST.getlist("playbooks")
         if not selected_playbooks:
-            messages.error(request, "Please select at least one maintenance task.")
+            messages.error(request, _("Please select at least one maintenance task."))
         else:
             # Queue maintenance task
             task_id = queue_maintenance(

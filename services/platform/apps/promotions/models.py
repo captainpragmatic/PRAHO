@@ -471,33 +471,35 @@ class Coupon(models.Model):
         """Validate discount type and value consistency."""
         if self.discount_type == "percent":
             if self.discount_percent is None:
-                raise ValidationError("Percentage discount requires discount_percent value")
+                raise ValidationError(_("Percentage discount requires discount_percent value"))
             max_pct = get_max_discount_percent()
             if self.discount_percent < 0 or self.discount_percent > max_pct:
-                raise ValidationError(f"Percentage must be between 0 and {max_pct}")
+                raise ValidationError(_("Percentage must be between 0 and %(max_pct)s") % {"max_pct": max_pct})
         elif self.discount_type == "fixed":
             if self.discount_amount_cents is None:
-                raise ValidationError("Fixed discount requires discount_amount_cents value")
+                raise ValidationError(_("Fixed discount requires discount_amount_cents value"))
             if self.discount_amount_cents < 0:
-                raise ValidationError("Fixed discount amount cannot be negative")
+                raise ValidationError(_("Fixed discount amount cannot be negative"))
             max_amount = get_max_discount_amount_cents()
             if self.discount_amount_cents > max_amount:
-                raise ValidationError(f"Fixed discount amount cannot exceed {max_amount} cents")
+                raise ValidationError(
+                    _("Fixed discount amount cannot exceed %(max_amount)s cents") % {"max_amount": max_amount}
+                )
         elif self.discount_type == "free_months":
             if self.free_months is None:
-                raise ValidationError("Free months discount requires free_months value")
+                raise ValidationError(_("Free months discount requires free_months value"))
 
     def _validate_usage_limits(self) -> None:
         """Validate usage limit configuration."""
         if self.usage_limit_type == "limited" and self.max_total_uses is None:
-            raise ValidationError("Limited usage requires max_total_uses value")
+            raise ValidationError(_("Limited usage requires max_total_uses value"))
         if self.usage_limit_type == "per_customer" and self.max_uses_per_customer is None:
-            raise ValidationError("Per-customer limit requires max_uses_per_customer value")
+            raise ValidationError(_("Per-customer limit requires max_uses_per_customer value"))
 
     def _validate_dates(self) -> None:
         """Validate date range."""
         if self.valid_until and self.valid_from and self.valid_until < self.valid_from:
-            raise ValidationError("valid_until must be after valid_from")
+            raise ValidationError(_("valid_until must be after valid_from"))
 
     @property
     def is_expired(self) -> bool:

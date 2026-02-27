@@ -59,8 +59,8 @@
 
     <!-- Action Buttons -->
     <div class="flex flex-col sm:flex-row gap-4 justify-center">
-      {% button "🏠 Go to Dashboard" variant="info" href="/dashboard/" size="lg" %}
-      {% button "← Go Back" variant="secondary" onclick="history.back()" size="lg" attrs="onclick=\"history.back()\"" %}
+      {% trans "🏠 Go to Dashboard" as bt1 %}{% button bt1 variant="info" href="/dashboard/" size="lg" %}
+      {% trans "← Go Back" as bt2 %}{% button bt2 variant="secondary" onclick="history.back()" size="lg" attrs="onclick=\"history.back()\"" %}
     </div>
 
     <!-- Help Text -->

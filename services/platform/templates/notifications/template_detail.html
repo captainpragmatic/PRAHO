@@ -29,9 +29,9 @@
                 <h1 class="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
                     {{ object.key }}
                     {% if object.is_active %}
-                        {% badge "Active" variant="success" size="sm" %}
+                        {% trans "Active" as bt1 %}{% badge bt1 variant="success" size="sm" %}
                     {% else %}
-                        {% badge "Inactive" variant="secondary" size="sm" %}
+                        {% trans "Inactive" as bt2 %}{% badge bt2 variant="secondary" size="sm" %}
                     {% endif %}
                 </h1>
                 <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
@@ -135,9 +135,9 @@
                         <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Status" %}</dt>
                         <dd class="mt-1">
                             {% if object.is_active %}
-                                {% badge "Active" variant="success" %}
+                                {% trans "Active" as bt3 %}{% badge bt3 variant="success" %}
                             {% else %}
-                                {% badge "Inactive" variant="secondary" %}
+                                {% trans "Inactive" as bt4 %}{% badge bt4 variant="secondary" %}
                             {% endif %}
                         </dd>
                     </div>

@@ -212,18 +212,18 @@ class Invoice(models.Model):
             and self.tax_cents != 0
             and (self.subtotal_cents + self.tax_cents != self.total_cents)
         ):
-            raise ValidationError("Financial calculation error: subtotal + tax must equal total")
+            raise ValidationError(_("Financial calculation error: subtotal + tax must equal total"))
 
         # Validate invoice immutability rules
         # Keep strict validation when explicitly validating an invoice
         # that is locked and not in draft. Views creating invoices that
         # must be locked immediately should lock post-save.
         if self.locked_at and self.status not in ["draft"]:
-            raise ValidationError("Cannot modify locked invoice")
+            raise ValidationError(_("Cannot modify locked invoice"))
 
         # Validate date consistency
         if self.issued_at and self.due_at and self.due_at <= self.issued_at:
-            raise ValidationError("Due date must be after issue date")
+            raise ValidationError(_("Due date must be after issue date"))
 
         # Log security validation
         log_security_event(

@@ -309,20 +309,20 @@ class WebhookDelivery(models.Model):
                 # Special check for malformed IPv6 URLs like http://::1/path
                 # (should be http://[::1]/path)
                 if not hostname and "::" in self.endpoint_url:
-                    raise ValidationError("Webhook URLs cannot target localhost")
+                    raise ValidationError(_("Webhook URLs cannot target localhost"))
 
                 if not hostname:
-                    raise ValidationError("Invalid webhook URL format")
+                    raise ValidationError(_("Invalid webhook URL format"))
 
                 # Block localhost and loopback
                 if hostname in ["localhost", "127.0.0.1", "::1"]:
-                    raise ValidationError("Webhook URLs cannot target localhost")
+                    raise ValidationError(_("Webhook URLs cannot target localhost"))
 
                 # Check for private IP ranges
                 try:
                     ip = ipaddress.ip_address(hostname)
                     if ip.is_private or ip.is_loopback or ip.is_link_local:
-                        raise ValidationError("Webhook URLs cannot target private networks")
+                        raise ValidationError(_("Webhook URLs cannot target private networks"))
                 except (ipaddress.AddressValueError, ValueError):
                     # Not an IP address, continue with other checks
                     pass
@@ -331,11 +331,11 @@ class WebhookDelivery(models.Model):
                 dangerous_ports = [22, 23, 25, 53, 135, 139, 445, 993, 995, 1433, 1521, 3306, 3389, 5432, 6379]
                 if parsed.port in dangerous_ports:
                     # Lowercase message fragment to satisfy tests expecting 'port {n}'
-                    raise ValidationError(f"port {parsed.port} is not allowed for webhooks")
+                    raise ValidationError(_("port %(port)s is not allowed for webhooks") % {"port": parsed.port})
 
             except ValidationError:
                 # Re-raise ValidationError as-is
                 raise
             except Exception as e:
                 # Only catch non-ValidationError exceptions
-                raise ValidationError("Invalid webhook URL format") from e
+                raise ValidationError(_("Invalid webhook URL format")) from e

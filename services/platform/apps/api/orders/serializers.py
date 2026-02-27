@@ -5,6 +5,7 @@ DRF serializers for order and product catalog endpoints with Romanian compliance
 
 import logging
 
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.orders.models import Order, OrderItem
@@ -221,7 +222,7 @@ class CartItemInputSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1, max_value=50)
     billing_period = serializers.ChoiceField(
         choices=[("monthly", "Monthly"), ("semiannual", "Semi-Annual"), ("annual", "Annual")],
-        help_text="Simplified billing periods: monthly, semiannual, annual",
+        help_text=_("Simplified billing periods: monthly, semiannual, annual"),
     )
     config = serializers.JSONField(default=dict, required=False)
     domain_name = serializers.CharField(max_length=255, required=False, allow_blank=True)

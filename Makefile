@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-e2e dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod
+.PHONY: help install dev dev-e2e dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -379,20 +379,23 @@ fixtures-light:
 lint-platform:
 	@echo "🏗️ [Platform] Comprehensive code quality check..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/5: Performance & Security Analysis (Ruff)..."
+	@echo "🔍 1/6: Performance & Security Analysis (Ruff)..."
 	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
-	@echo "🏷️  2/5: Type Safety Check (MyPy)..."
+	@echo "🏷️  2/6: Type Safety Check (MyPy)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml 2>/dev/null || echo "⚠️ MyPy check skipped"
 	@echo ""
-	@echo "📊 3/5: Django Check..."
+	@echo "📊 3/6: Django Check..."
 	@$(PYTHON_PLATFORM_MANAGE) check --settings=config.settings.dev
 	@echo ""
-	@echo "🔒 4/5: Audit Coverage Check..."
+	@echo "🔒 4/6: Audit Coverage Check..."
 	@$(PYTHON_SHARED) scripts/audit_coverage_scan.py --min-severity=medium --exclude-tests services/platform/apps
 	@echo ""
-	@echo "⚙️ 5/5: Settings Coverage Check..."
+	@echo "⚙️ 5/6: Settings Coverage Check..."
 	@$(PYTHON_SHARED) scripts/lint_settings_coverage.py --fail-on medium
+	@echo ""
+	@echo "🌐 6/6: i18n Coverage Check..."
+	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/platform/templates
 	@echo "✅ Platform linting complete!"
 
 lint-audit:
@@ -423,6 +426,8 @@ lint:
 	@$(MAKE) lint-portal
 	@echo "📋 Phase 3: Test suppression scan (ADR-0014)"
 	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
+	@echo "📋 Phase 4: i18n coverage scan"
+	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
 	@echo "🎉 All services linting complete!"
 
 lint-security:
@@ -486,6 +491,88 @@ pre-commit:
 	fi
 	@$(VENV_DIR)/bin/pre-commit run --all-files || echo "⚠️ Pre-commit hooks skipped"
 	@echo "✅ Pre-commit completed!"
+
+# ===============================================================================
+# INTERNATIONALIZATION 🌍
+# ===============================================================================
+
+PLATFORM_PO = services/platform/locale/ro/LC_MESSAGES/django.po
+PORTAL_PO   = services/portal/locale/ro/LC_MESSAGES/django.po
+PYTHON_I18N = uv run python
+
+i18n-extract:
+	@echo "🌍 Extracting translatable strings..."
+	@cd services/platform && PORTAL_IMPORT_ISOLATION_BYPASS=true $(PWD)/$(VENV_DIR)/bin/python manage.py makemessages -l ro --no-wrap --settings=config.settings.dev
+	@cd services/portal && PORTAL_IMPORT_ISOLATION_BYPASS=true $(PWD)/$(VENV_DIR)/bin/python manage.py makemessages -l ro --no-wrap --settings=config.settings.dev
+	@echo "✅ Strings extracted for both services."
+
+i18n-compile:
+	@echo "🌍 Compiling translation files..."
+	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
+	@echo "✅ Translations compiled."
+
+translate-stats:
+	@echo "📊 Translation coverage stats (both services)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "🏗️  Platform:"
+	@$(PYTHON_I18N) scripts/translate_po.py stats $(PLATFORM_PO)
+	@echo ""
+	@echo "🌐 Portal:"
+	@$(PYTHON_I18N) scripts/translate_po.py stats $(PORTAL_PO)
+
+translate-stats-platform:
+	@$(PYTHON_I18N) scripts/translate_po.py stats $(PLATFORM_PO)
+
+translate-stats-portal:
+	@$(PYTHON_I18N) scripts/translate_po.py stats $(PORTAL_PO)
+
+translate:
+	@echo "📖 Generating review YAML (dictionary mode)..."
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml
+	@echo "✅ Review files: i18n-review-platform.yaml, i18n-review-portal.yaml"
+
+translate-platform:
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml
+
+translate-portal:
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml
+
+translate-ai:
+	@echo "🤖 Generating review YAML (Claude AI mode)..."
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) --claude --model haiku -o i18n-review-platform.yaml
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) --claude --model haiku -o i18n-review-portal.yaml
+	@echo "✅ AI review files: i18n-review-platform.yaml, i18n-review-portal.yaml"
+
+translate-ai-platform:
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) --claude --model haiku -o i18n-review-platform.yaml
+
+translate-ai-portal:
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) --claude --model haiku -o i18n-review-portal.yaml
+
+translate-review:
+	@echo "📝 Review YAML files to edit:"
+	@ls -la i18n-review-*.yaml 2>/dev/null || echo "No review files found. Run 'make translate' or 'make translate-ai' first."
+
+translate-apply:
+	@echo "📥 Applying approved translations..."
+	@for f in i18n-review-*.yaml; do \
+		if [ -f "$$f" ]; then \
+			echo "Applying $$f..."; \
+			$(PYTHON_SHARED) scripts/translate_po.py apply "$$f" --compile; \
+		fi; \
+	done
+	@echo "✅ Translations applied and compiled."
+
+translate-diff:
+	@echo "🔍 Preview of changes (dry-run)..."
+	@for f in i18n-review-*.yaml; do \
+		if [ -f "$$f" ]; then \
+			echo "--- $$f ---"; \
+			$(PYTHON_SHARED) scripts/translate_po.py apply "$$f" --dry-run; \
+		fi; \
+	done
 
 # ===============================================================================
 # BUILD & ASSETS 🎨

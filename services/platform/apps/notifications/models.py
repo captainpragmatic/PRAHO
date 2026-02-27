@@ -73,7 +73,7 @@ def validate_template_content(content: str) -> None:
 
     # Size limit check - templates over 100KB are rejected
     if len(content) > MAX_TEMPLATE_SIZE:
-        raise ValidationError("Template content too large")
+        raise ValidationError(_("Template content too large"))
 
     # Disallowed tags that should be explicitly blocked
     disallowed_tags = [
@@ -83,7 +83,7 @@ def validate_template_content(content: str) -> None:
     ]
     for pattern in disallowed_tags:
         if re.search(pattern, content, flags=re.IGNORECASE):
-            raise ValidationError("Template contains disallowed tags")
+            raise ValidationError(_("Template contains disallowed tags"))
 
     dangerous_patterns = [
         r"\{\%\s*debug\s*\%\}",  # {% debug %}
@@ -95,7 +95,7 @@ def validate_template_content(content: str) -> None:
     ]
     for pattern in dangerous_patterns:
         if re.search(pattern, content, flags=re.IGNORECASE):
-            raise ValidationError("Template contains disallowed constructs")
+            raise ValidationError(_("Template contains disallowed constructs"))
 
 
 def validate_json_field(data: Any) -> None:
@@ -105,12 +105,12 @@ def validate_json_field(data: Any) -> None:
 
     # Check size limit
     if len(str(data)) > MAX_JSON_SIZE:
-        raise ValidationError("JSON content too large")
+        raise ValidationError(_("JSON content too large"))
 
     # Check depth limit to prevent stack overflow
     def check_depth(obj: Any, depth: int = 0) -> None:
         if depth > MAX_JSON_DEPTH:
-            raise ValidationError("JSON nesting too deep")
+            raise ValidationError(_("JSON nesting too deep"))
 
         if isinstance(obj, dict):
             for value in obj.values():
@@ -128,15 +128,15 @@ def validate_email_subject(subject: str) -> None:
         return
 
     if len(subject) > MAX_SUBJECT_LENGTH:
-        raise ValidationError("Subject too long")
+        raise ValidationError(_("Subject too long"))
 
     # Check for email header injection attempts (newlines, carriage returns, null bytes)
     if re.search(r"[\r\n\x00]", subject):
-        raise ValidationError("Subject contains invalid characters")
+        raise ValidationError(_("Subject contains invalid characters"))
 
     # Check for dangerous patterns
     if re.search(r"<script", subject, flags=re.IGNORECASE):
-        raise ValidationError("Subject contains dangerous content")
+        raise ValidationError(_("Subject contains dangerous content"))
 
 
 def encrypt_sensitive_content(content: str, key: str | None = None) -> str:
@@ -256,15 +256,15 @@ class EmailTemplate(models.Model):
         dangerous_patterns = [r"\{\%\s*debug\s*\%\}", r"<script[\s>]"]
         for pattern in dangerous_patterns:
             if re.search(pattern, self.body_html or "", flags=re.IGNORECASE):
-                raise ValidationError("Template contains disallowed constructs")
+                raise ValidationError(_("Template contains disallowed constructs"))
 
         # Basic JSON size guard for variables
         try:
             # Very lightweight estimate without serialization
             if self.variables and len(str(self.variables)) > MAX_JSON_SIZE:
-                raise ValidationError("Template variables too large")
+                raise ValidationError(_("Template variables too large"))
         except Exception as e:  # pragma: no cover - defensive
-            raise ValidationError(f"Invalid variables JSON: {e}") from e
+            raise ValidationError(_("Invalid variables JSON: %(error)s") % {"error": e}) from e
 
         # Log template modification for security audit
         try:
@@ -431,11 +431,11 @@ class EmailLog(models.Model):
         """Validate log content and emit basic security logging."""
         # Prevent header injection via subject
         if self.subject and ("\n" in self.subject or "\r" in self.subject):
-            raise ValidationError("Invalid subject header")
+            raise ValidationError(_("Invalid subject header"))
 
         # Basic JSON/meta size limit
         if self.meta and len(str(self.meta)) > MAX_JSON_SIZE:
-            raise ValidationError("Metadata too large")
+            raise ValidationError(_("Metadata too large"))
 
         # Log sending activity with masked email (only on send-like statuses)
         if self.status in {"sent", "delivered"}:
@@ -591,11 +591,11 @@ class EmailCampaign(models.Model):
         """Validate campaign configuration and GDPR compliance hints."""
         # Size limit for audience filter
         if self.audience_filter and len(str(self.audience_filter)) > MAX_JSON_SIZE:
-            raise ValidationError("Audience filter JSON too large")
+            raise ValidationError(_("Audience filter JSON too large"))
 
         # Name length constraint
         if self.name and len(self.name) > MAX_NAME_LENGTH:
-            raise ValidationError("Campaign name too long")
+            raise ValidationError(_("Campaign name too long"))
 
         # GDPR compliance warning for marketing without consent
         if not self.is_transactional and not self.requires_consent:
