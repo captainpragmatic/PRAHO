@@ -23,7 +23,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
-    pass
+    from django.utils.functional import _StrPromise
 
 
 # Hostname format validator: prd-sha-het-de-fsn1-001
@@ -41,7 +41,7 @@ def validate_hostname_format(value: str) -> None:
 class CloudProvider(models.Model):
     """Supported cloud providers (Hetzner, DigitalOcean, etc.)"""
 
-    PROVIDER_CHOICES: ClassVar[list[tuple[str, str]]] = [
+    PROVIDER_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("hetzner", "Hetzner Cloud"),
         ("digitalocean", "DigitalOcean"),  # TODO: future
         ("vultr", "Vultr"),  # TODO: future
@@ -226,7 +226,7 @@ class NodeSize(models.Model):
 class PanelType(models.Model):
     """Supported control panels (Virtualmin, Blesta, etc.)"""
 
-    PANEL_CHOICES: ClassVar[list[tuple[str, str]]] = [
+    PANEL_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("virtualmin", "Virtualmin GPL"),
         ("blesta", "Blesta"),  # TODO: future
     ]
@@ -268,7 +268,7 @@ class PanelType(models.Model):
 class NodeDeployment(models.Model):
     """Tracks hosting node deployment lifecycle"""
 
-    STATUS_CHOICES: ClassVar[list[tuple[str, str]]] = [
+    STATUS_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("pending", _("Pending")),
         ("provisioning_node", _("Provisioning Node")),
         ("configuring_dns", _("Configuring DNS")),
@@ -283,13 +283,13 @@ class NodeDeployment(models.Model):
         ("destroyed", _("Destroyed")),
     ]
 
-    ENVIRONMENT_CHOICES: ClassVar[list[tuple[str, str]]] = [
+    ENVIRONMENT_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("prd", _("Production")),
         ("stg", _("Staging")),
         ("dev", _("Development")),
     ]
 
-    NODE_TYPE_CHOICES: ClassVar[list[tuple[str, str]]] = [
+    NODE_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("sha", _("Shared Hosting")),  # Virtualmin - implemented
         ("vps", _("VPS Hosting")),  # TODO: future
         ("ctr", _("Container")),  # TODO: future (Docker)
@@ -675,7 +675,7 @@ class NodeDeployment(models.Model):
 class NodeDeploymentLog(models.Model):
     """Detailed logs for deployment steps"""
 
-    LEVEL_CHOICES: ClassVar[list[tuple[str, str]]] = [
+    LEVEL_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("debug", _("Debug")),
         ("info", _("Info")),
         ("warning", _("Warning")),
