@@ -20,6 +20,7 @@ from typing import Any, ClassVar
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
 
@@ -86,16 +87,16 @@ class SecureTaskParameters:
             # Verify hash integrity
             computed_hash = hashlib.sha256(decrypted_payload.encode("utf-8")).hexdigest()
             if not secrets.compare_digest(computed_hash, self.parameter_hash):
-                raise ValidationError("Parameter integrity check failed")
+                raise ValidationError(_("Parameter integrity check failed"))
 
             result = json.loads(decrypted_payload)
             if not isinstance(result, dict):
-                raise ValidationError("Invalid parameter format")
+                raise ValidationError(_("Invalid parameter format"))
             return result
 
         except Exception as e:
             logger.error(f"🔥 [Security] Failed to decrypt task parameters: {e}")
-            raise ValidationError(f"Parameter decryption failed: {e}") from e
+            raise ValidationError(_("Parameter decryption failed: %(error)s") % {"error": e}) from e
 
 
 class ProvisioningParametersValidator:
@@ -116,21 +117,21 @@ class ProvisioningParametersValidator:
             ValidationError: If domain is invalid or potentially malicious
         """
         if not domain:
-            raise ValidationError("Domain cannot be empty")
+            raise ValidationError(_("Domain cannot be empty"))
 
         # Strip and normalize
         domain = str(domain).strip().lower()
 
         # Length validation
         if len(domain) > MAX_DOMAIN_LENGTH:
-            raise ValidationError(f"Domain too long (max {MAX_DOMAIN_LENGTH} characters)")
+            raise ValidationError(_("Domain too long (max %(max)s characters)") % {"max": MAX_DOMAIN_LENGTH})
 
         if len(domain) < MIN_DOMAIN_LENGTH:
-            raise ValidationError(f"Domain too short (minimum {MIN_DOMAIN_LENGTH} characters)")
+            raise ValidationError(_("Domain too short (minimum %(min)s characters)") % {"min": MIN_DOMAIN_LENGTH})
 
         # Format validation
         if not DOMAIN_VALIDATION_PATTERN.match(domain):
-            raise ValidationError("Invalid domain format")
+            raise ValidationError(_("Invalid domain format"))
 
         # Security checks
         dangerous_patterns = [
@@ -143,7 +144,7 @@ class ProvisioningParametersValidator:
 
         for pattern in dangerous_patterns:
             if re.search(pattern, domain):
-                raise ValidationError(f"Domain contains dangerous pattern: {pattern}")
+                raise ValidationError(_("Domain contains dangerous pattern: %(pattern)s") % {"pattern": pattern})
 
         # Check for localhost, private domains, and other dangerous domains
         dangerous_domains = [
@@ -162,7 +163,7 @@ class ProvisioningParametersValidator:
         domain_parts = domain.split(".")
         for part in domain_parts:
             if part in dangerous_domains:
-                raise ValidationError(f"Domain contains restricted component: {part}")
+                raise ValidationError(_("Domain contains restricted component: %(part)s") % {"part": part})
 
         return domain
 
@@ -187,15 +188,17 @@ class ProvisioningParametersValidator:
 
         # Length validation
         if len(username) > MAX_USERNAME_LENGTH:
-            raise ValidationError(f"Username too long (max {MAX_USERNAME_LENGTH} characters)")
+            raise ValidationError(_("Username too long (max %(max)s characters)") % {"max": MAX_USERNAME_LENGTH})
 
         if len(username) < MIN_USERNAME_LENGTH:
-            raise ValidationError(f"Username too short (minimum {MIN_USERNAME_LENGTH} characters)")
+            raise ValidationError(_("Username too short (minimum %(min)s characters)") % {"min": MIN_USERNAME_LENGTH})
 
         # Format validation
         if not USERNAME_VALIDATION_PATTERN.match(username):
             raise ValidationError(
-                "Invalid username format (must start with letter, contain only lowercase letters, numbers, underscore, hyphen)"
+                _(
+                    "Invalid username format (must start with letter, contain only lowercase letters, numbers, underscore, hyphen)"
+                )
             )
 
         # Security checks - reserved usernames
@@ -233,7 +236,7 @@ class ProvisioningParametersValidator:
         ]
 
         if username in reserved_usernames:
-            raise ValidationError(f"Username '{username}' is reserved")
+            raise ValidationError(_("Username '%(username)s' is reserved") % {"username": username})
 
         return username
 
@@ -252,7 +255,7 @@ class ProvisioningParametersValidator:
             ValidationError: If service ID is invalid
         """
         if not service_id:
-            raise ValidationError("Service ID cannot be empty")
+            raise ValidationError(_("Service ID cannot be empty"))
 
         service_id = str(service_id).strip()
 
@@ -261,9 +264,9 @@ class ProvisioningParametersValidator:
             uuid_obj = uuid.UUID(service_id)
             # Ensure it's a valid UUID4
             if uuid_obj.version != UUID_VERSION_4:
-                raise ValidationError("Service ID must be a valid UUID4")
+                raise ValidationError(_("Service ID must be a valid UUID4"))
         except ValueError as e:
-            raise ValidationError(f"Invalid service ID format: {e}") from e
+            raise ValidationError(_("Invalid service ID format: %(error)s") % {"error": e}) from e
 
         return str(uuid_obj)
 
@@ -288,17 +291,19 @@ class ProvisioningParametersValidator:
 
         # Length validation
         if len(template) > MAX_TEMPLATE_NAME_LENGTH:
-            raise ValidationError(f"Template name too long (max {MAX_TEMPLATE_NAME_LENGTH} characters)")
+            raise ValidationError(
+                _("Template name too long (max %(max)s characters)") % {"max": MAX_TEMPLATE_NAME_LENGTH}
+            )
 
         # Security validation - only alphanumeric, spaces, hyphens, underscores
         if not re.match(r"^[a-zA-Z0-9\s\-_]+$", template):
-            raise ValidationError("Template name contains invalid characters")
+            raise ValidationError(_("Template name contains invalid characters"))
 
         # Check for path traversal and other dangerous patterns
         dangerous_patterns = ["..", "/", "\\", "<", ">", '"', "'", "`"]
         for pattern in dangerous_patterns:
             if pattern in template:
-                raise ValidationError(f"Template name contains dangerous pattern: {pattern}")
+                raise ValidationError(_("Template name contains dangerous pattern: %(pattern)s") % {"pattern": pattern})
 
         return template
 

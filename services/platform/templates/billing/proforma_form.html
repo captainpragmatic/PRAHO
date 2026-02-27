@@ -256,7 +256,7 @@
 
             <!-- Add Line Button -->
             <div class="pt-4">
-              {% button "➕ Add Line Item" variant="secondary" class_="add-line-btn" %}
+              {% trans "➕ Add Line Item" as bt1 %}{% button bt1 variant="secondary" class_="add-line-btn" %}
             </div>
           </div>
         </div>
@@ -357,9 +357,9 @@
 
           <div class="space-y-3">
             {% if proforma %}
-            {% button "💾 Update Proforma" variant="primary" type="submit" css_class="w-full" %}
+            {% trans "💾 Update Proforma" as bt2 %}{% button bt2 variant="primary" type="submit" css_class="w-full" %}
             {% else %}
-            {% button "💾 Create Proforma" variant="primary" type="submit" css_class="w-full" %}
+            {% trans "💾 Create Proforma" as bt3 %}{% button bt3 variant="primary" type="submit" css_class="w-full" %}
             {% endif %}
 
             <hr class="border-slate-600">

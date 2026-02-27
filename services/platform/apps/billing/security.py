@@ -62,20 +62,23 @@ def validate_efactura_url(url: str) -> str:
     try:
         parsed = urllib.parse.urlparse(url)
     except Exception as e:
-        raise ValidationError(f"Invalid URL format: {e}") from e
+        raise ValidationError(_("Invalid URL format: %(error)s") % {"error": e}) from e
 
     # Check protocol
     if parsed.scheme.lower() not in ["http", "https"]:
-        raise ValidationError(f"Protocol '{parsed.scheme}' not allowed. Only HTTP/HTTPS permitted.")
+        raise ValidationError(
+            _("Protocol '%(scheme)s' not allowed. Only HTTP/HTTPS permitted.") % {"scheme": parsed.scheme}
+        )
 
     if parsed.scheme.lower() in BLOCKED_PROTOCOLS:
-        raise ValidationError(f"Protocol '{parsed.scheme}' is blocked for security reasons")
+        raise ValidationError(_("Protocol '%(scheme)s' is blocked for security reasons") % {"scheme": parsed.scheme})
 
     # Check domain whitelist for e-Factura using secure suffix matching
     domain = parsed.netloc.lower()
     if not _is_valid_domain_suffix(domain, ALLOWED_EFACTURA_DOMAINS):
         raise ValidationError(
-            f"Domain '{domain}' not in allowed e-Factura endpoints: {', '.join(ALLOWED_EFACTURA_DOMAINS)}"
+            _("Domain '%(domain)s' not in allowed e-Factura endpoints: %(allowed)s")
+            % {"domain": domain, "allowed": ", ".join(ALLOWED_EFACTURA_DOMAINS)}
         )
 
     # Check for blocked IP patterns
@@ -83,11 +86,13 @@ def validate_efactura_url(url: str) -> str:
     if hostname:
         for pattern in BLOCKED_IP_PATTERNS:
             if re.match(pattern, hostname):
-                raise ValidationError(f"Access to IP range '{hostname}' is blocked for security")
+                raise ValidationError(
+                    _("Access to IP range '%(hostname)s' is blocked for security") % {"hostname": hostname}
+                )
 
     # Check for suspicious URL patterns
     if any(suspicious in url.lower() for suspicious in ["localhost", "0.0.0.0", "metadata"]):
-        raise ValidationError("URL contains suspicious patterns")
+        raise ValidationError(_("URL contains suspicious patterns"))
 
     return url
 
@@ -102,23 +107,23 @@ def validate_external_api_url(url: str, allowed_domains: list[str]) -> str:
     try:
         parsed = urllib.parse.urlparse(url)
     except Exception as e:
-        raise ValidationError(f"Invalid URL format: {e}") from e
+        raise ValidationError(_("Invalid URL format: %(error)s") % {"error": e}) from e
 
     # Check protocol
     if parsed.scheme.lower() not in ["http", "https"]:
-        raise ValidationError(f"Protocol '{parsed.scheme}' not allowed")
+        raise ValidationError(_("Protocol '%(scheme)s' not allowed") % {"scheme": parsed.scheme})
 
     # Check domain whitelist using secure suffix matching
     domain = parsed.netloc.lower()
     if not _is_valid_domain_suffix(domain, allowed_domains):
-        raise ValidationError(f"Domain '{domain}' not in allowed list")
+        raise ValidationError(_("Domain '%(domain)s' not in allowed list") % {"domain": domain})
 
     # Check for blocked IPs
     hostname = parsed.hostname
     if hostname:
         for pattern in BLOCKED_IP_PATTERNS:
             if re.match(pattern, hostname):
-                raise ValidationError(f"Access to IP range '{hostname}' is blocked")
+                raise ValidationError(_("Access to IP range '%(hostname)s' is blocked") % {"hostname": hostname})
 
     return url
 

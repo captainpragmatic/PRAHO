@@ -22,7 +22,8 @@
                     {% trans "You can update your cookie preferences at any time." %}
                 </p>
             </div>
-            <button onclick="window.showCookiePreferences ? window.showCookiePreferences() : alert('Cookie preferences panel will appear on next page load.')"
+            {% trans "Cookie preferences panel will appear on next page load." as cookie_msg %}
+            <button onclick="window.showCookiePreferences ? window.showCookiePreferences() : alert('{{ cookie_msg|escapejs }}')"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium transition-colors">
                 {% trans "Cookie Settings" %}
             </button>

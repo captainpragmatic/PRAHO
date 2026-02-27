@@ -16,13 +16,13 @@
             <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
             <div class="flex items-center space-x-2">
               {% if ticket.status == 'open' %}
-                {% badge "Open" variant="info" icon="📂" %}
+                {% trans "Open" as bt1 %}{% badge bt1 variant="info" icon="📂" %}
               {% elif ticket.status == 'in_progress' %}
-                {% badge "In Progress" variant="primary" icon="⚡" %}
+                {% trans "In Progress" as bt2 %}{% badge bt2 variant="primary" icon="⚡" %}
               {% elif ticket.status == 'waiting_on_customer' %}
-                {% badge "Waiting on Customer" variant="warning" icon="⏳" %}
+                {% trans "Waiting on Customer" as bt3 %}{% badge bt3 variant="warning" icon="⏳" %}
               {% elif ticket.status == 'closed' %}
-                {% badge "Closed" variant="secondary" icon="📁" %}
+                {% trans "Closed" as bt4 %}{% badge bt4 variant="secondary" icon="📁" %}
                 {% if ticket.resolution_code %}
                   {% badge ticket.get_resolution_code_display variant="outline" size="xs" %}
                 {% endif %}
@@ -41,15 +41,15 @@
         <div>
             <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
             {% if ticket.priority == 'critical' %}
-              {% badge "Critical" variant="danger" icon="🚨" %}
+              {% trans "Critical" as bt5 %}{% badge bt5 variant="danger" icon="🚨" %}
             {% elif ticket.priority == 'urgent' %}
-              {% badge "Urgent" variant="danger" icon="🔴" %}
+              {% trans "Urgent" as bt6 %}{% badge bt6 variant="danger" icon="🔴" %}
             {% elif ticket.priority == 'high' %}
-              {% badge "High" variant="warning" icon="🟡" %}
+              {% trans "High" as bt7 %}{% badge bt7 variant="warning" icon="🟡" %}
             {% elif ticket.priority == 'normal' %}
-              {% badge "Normal" variant="info" icon="🔵" %}
+              {% trans "Normal" as bt8 %}{% badge bt8 variant="info" icon="🔵" %}
             {% elif ticket.priority == 'low' %}
-              {% badge "Low" variant="success" icon="🟢" %}
+              {% trans "Low" as bt9 %}{% badge bt9 variant="success" icon="🟢" %}
             {% else %}
               {% badge ticket.get_priority_display variant="default" %}
             {% endif %}

@@ -18,6 +18,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.common.security_decorators import (
@@ -542,7 +543,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
     available_backups = backups_result.unwrap() if backups_result.is_ok() else []
 
     if not available_backups:
-        messages.error(request, "No backups available for this account.")
+        messages.error(request, _("No backups available for this account."))
         return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
 
     if request.method == "POST":
@@ -905,7 +906,7 @@ def virtualmin_backups_list(request: HttpRequest) -> HttpResponse:
     server = VirtualminServer.objects.filter(status="active").first()
 
     if not server:
-        messages.error(request, "No active Virtualmin servers found")
+        messages.error(request, _("No active Virtualmin servers found"))
         return redirect("provisioning:virtualmin_servers")
 
     backup_service = VirtualminBackupService(server)
@@ -1014,7 +1015,7 @@ def virtualmin_bulk_actions(request: HttpRequest) -> HttpResponse:
                 accounts = VirtualminAccount.objects.filter(id__in=account_ids).select_related("server")
 
                 if not accounts:
-                    messages.error(request, "No valid accounts found for bulk action")
+                    messages.error(request, _("No valid accounts found for bulk action"))
                     return redirect("provisioning:virtualmin_accounts")
 
                 # Execute bulk action and handle result
@@ -1703,7 +1704,7 @@ def virtualmin_accounts_sync(request: HttpRequest) -> HttpResponse:  # noqa: C90
     active_servers = VirtualminServer.objects.filter(status="active")
 
     if not active_servers.exists():
-        messages.error(request, "No active Virtualmin servers found to sync from")
+        messages.error(request, _("No active Virtualmin servers found to sync from"))
         return redirect("provisioning:virtualmin_accounts")
 
     sync_results: SyncResults = {

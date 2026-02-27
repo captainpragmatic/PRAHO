@@ -710,7 +710,7 @@ class VirtualminProvisioningJob(models.Model):
     def schedule_retry(self) -> None:
         """Schedule job for retry"""
         if not self.can_retry:
-            raise ValidationError("Job cannot be retried")
+            raise ValidationError(_("Job cannot be retried"))
 
         self.retry_count += 1
         self.status = "pending"

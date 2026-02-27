@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.common.types import Err, Ok
@@ -68,13 +69,13 @@ class UserRegistrationDataSerializer(serializers.Serializer):
     def validate_email(self, value: str) -> str:
         """Ensure email is not already taken"""
         if User.objects.filter(email=value.lower()).exists():
-            raise serializers.ValidationError("A user with this email already exists.")
+            raise serializers.ValidationError(_("A user with this email already exists."))
         return value.lower()
 
     def validate_phone(self, value: str) -> str:
         """Validate Romanian phone format"""
         if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
-            raise serializers.ValidationError("Invalid Romanian phone number format.")
+            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
         return value
 
 
@@ -99,7 +100,7 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     def validate_company_name(self, value: str) -> str:
         """Ensure company name is unique"""
         if Customer.objects.filter(company_name__iexact=value.strip()).exists():
-            raise serializers.ValidationError("A company with this name already exists.")
+            raise serializers.ValidationError(_("A company with this name already exists."))
         return value.strip()
 
     def validate_vat_number(self, value: str) -> str:
@@ -110,17 +111,17 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
                 if value.isdigit() and len(value) >= MIN_VAT_DIGITS:
                     value = f"RO{value}"
                 else:
-                    raise serializers.ValidationError("VAT number must start with RO followed by digits.")
+                    raise serializers.ValidationError(_("VAT number must start with RO followed by digits."))
             else:
                 vat_digits = value[2:]
                 if not vat_digits.isdigit() or len(vat_digits) < MIN_VAT_DIGITS:
-                    raise serializers.ValidationError("VAT number must start with RO followed by digits.")
+                    raise serializers.ValidationError(_("VAT number must start with RO followed by digits."))
         return value
 
     def validate_data_processing_consent(self, value: bool) -> bool:
         """GDPR consent is required"""
         if not value:
-            raise serializers.ValidationError("Data processing consent is required.")
+            raise serializers.ValidationError(_("Data processing consent is required."))
         return value
 
 
@@ -220,7 +221,7 @@ class CustomerCreationSerializer(serializers.Serializer):
 
             # Basic format validation
             if len(vat_clean) < MIN_VAT_DIGITS + 2:  # RO + minimum digits
-                raise serializers.ValidationError("Invalid VAT number format")
+                raise serializers.ValidationError(_("Invalid VAT number format"))
 
             return vat_clean
         return value
@@ -409,13 +410,13 @@ class CustomerBillingAddressUpdateSerializer(serializers.Serializer):
     def validate_postal_code(self, value: str) -> str:
         """Validate Romanian postal code format"""
         if value and not re.match(r"^\d{6}$", value):
-            raise serializers.ValidationError("Postal code must be 6 digits for Romanian addresses")
+            raise serializers.ValidationError(_("Postal code must be 6 digits for Romanian addresses"))
         return value
 
     def validate_fiscal_code(self, value: str) -> str:
         """Basic CUI validation for Romanian fiscal codes"""
         if value and not re.match(r"^(RO)?\d{6,10}$", value.upper()):
-            raise serializers.ValidationError("Invalid Romanian CUI format")
+            raise serializers.ValidationError(_("Invalid Romanian CUI format"))
         return value.upper() if value else value
 
 
@@ -443,7 +444,7 @@ class CustomerProfileSerializer(serializers.Serializer):
     def validate_phone(self, value: str) -> str:
         """Validate Romanian phone format"""
         if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
-            raise serializers.ValidationError("Invalid Romanian phone number format.")
+            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
         return value
 
     def update(self, instance: User, validated_data: dict[str, Any]) -> User:

@@ -296,7 +296,7 @@ class VirtualminValidator:
         try:
             VirtualminValidator.validate_domain_name(domain)
         except ValidationError as e:
-            raise ValidationError(f"Invalid email domain: {e}") from e
+            raise ValidationError(_("Invalid email domain: %(error)s") % {"error": e}) from e
 
         return email
 
@@ -504,7 +504,7 @@ class VirtualminValidator:
         }
 
         if program not in allowed_programs:
-            raise ValidationError(f"Program '{program}' is not allowed")
+            raise ValidationError(_("Program '%(program)s' is not allowed") % {"program": program})
 
         return program
 
@@ -529,7 +529,10 @@ class VirtualminValidator:
 
         allowed_formats = {"json", "xml", "text"}
         if format_type not in allowed_formats:
-            raise ValidationError(f"Format '{format_type}' not supported. Use: {', '.join(allowed_formats)}")
+            raise ValidationError(
+                _("Format '%(format)s' not supported. Use: %(allowed)s")
+                % {"format": format_type, "allowed": ", ".join(allowed_formats)}
+            )
 
         return format_type
 
@@ -567,7 +570,7 @@ class VirtualminValidator:
 
             # Length limits for all string parameters
             if isinstance(value, str) and len(value) > MAX_PARAMETER_VALUE_LENGTH:
-                raise ValidationError(f"Parameter '{key}' value too long")
+                raise ValidationError(_("Parameter '%(key)s' value too long") % {"key": key})
 
             validated_params[key] = value
 

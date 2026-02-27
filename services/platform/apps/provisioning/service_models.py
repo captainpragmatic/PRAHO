@@ -276,7 +276,7 @@ class Service(models.Model):
     )
     service_plan = models.ForeignKey(ServicePlan, on_delete=models.PROTECT, verbose_name=_("Service Plan"))
     server = models.ForeignKey(
-        Server, on_delete=models.SET_NULL, null=True, blank=True, related_name="services", verbose_name="Server"
+        Server, on_delete=models.SET_NULL, null=True, blank=True, related_name="services", verbose_name=_("Server")
     )
 
     # Service identification

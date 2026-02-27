@@ -20,11 +20,11 @@ class CustomerAddress(SoftDeleteModel):
     🚨 CASCADE: ON DELETE CASCADE from Customer
     """
 
-    ADDRESS_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("primary", "Adresa principală"),
-        ("billing", "Adresa facturare"),
-        ("delivery", "Adresa livrare"),
-        ("legal", "Sediul social"),
+    ADDRESS_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("primary", _("Adresa principală")),
+        ("billing", _("Adresa facturare")),
+        ("delivery", _("Adresa livrare")),
+        ("legal", _("Sediul social")),
     )
 
     customer = models.ForeignKey(
@@ -33,22 +33,22 @@ class CustomerAddress(SoftDeleteModel):
         related_name="addresses",
     )
 
-    address_type = models.CharField(max_length=20, choices=ADDRESS_TYPE_CHOICES, verbose_name="Tip adresă")
+    address_type = models.CharField(max_length=20, choices=ADDRESS_TYPE_CHOICES, verbose_name=_("Tip adresă"))
 
     # Address Fields
-    address_line1 = models.CharField(max_length=200, verbose_name="Adresa 1")
-    address_line2 = models.CharField(max_length=200, blank=True, verbose_name="Adresa 2")
-    city = models.CharField(max_length=100, verbose_name="Oraș")
-    county = models.CharField(max_length=100, verbose_name="Județ")
-    postal_code = models.CharField(max_length=10, verbose_name="Cod poștal")
-    country = models.CharField(max_length=100, default="România", verbose_name="Țara")
+    address_line1 = models.CharField(max_length=200, verbose_name=_("Adresa 1"))
+    address_line2 = models.CharField(max_length=200, blank=True, verbose_name=_("Adresa 2"))
+    city = models.CharField(max_length=100, verbose_name=_("Oraș"))
+    county = models.CharField(max_length=100, verbose_name=_("Județ"))
+    postal_code = models.CharField(max_length=10, verbose_name=_("Cod poștal"))
+    country = models.CharField(max_length=100, default="România", verbose_name=_("Țara"))
 
     # Versioning
-    is_current = models.BooleanField(default=True, verbose_name="Adresa curentă")
-    version = models.PositiveIntegerField(default=1, verbose_name="Versiune")
+    is_current = models.BooleanField(default=True, verbose_name=_("Adresa curentă"))
+    version = models.PositiveIntegerField(default=1, verbose_name=_("Versiune"))
 
     # Validation
-    is_validated = models.BooleanField(default=False, verbose_name="Validată")
+    is_validated = models.BooleanField(default=False, verbose_name=_("Validată"))
     validated_at = models.DateTimeField(null=True, blank=True)
 
     # Audit
@@ -82,11 +82,11 @@ class CustomerPaymentMethod(SoftDeleteModel):
     🚨 CASCADE: ON DELETE CASCADE from Customer
     """
 
-    METHOD_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("stripe_card", "Card Stripe"),
-        ("bank_transfer", "Transfer bancar"),
-        ("cash", "Numerar"),
-        ("other", "Altele"),
+    METHOD_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("stripe_card", _("Card Stripe")),
+        ("bank_transfer", _("Transfer bancar")),
+        ("cash", _("Numerar")),
+        ("other", _("Altele")),
     )
 
     customer = models.ForeignKey(
@@ -95,22 +95,22 @@ class CustomerPaymentMethod(SoftDeleteModel):
         related_name="payment_methods",
     )
 
-    method_type = models.CharField(max_length=20, choices=METHOD_TYPE_CHOICES, verbose_name="Tip metodă")
+    method_type = models.CharField(max_length=20, choices=METHOD_TYPE_CHOICES, verbose_name=_("Tip metodă"))
 
     # Stripe Integration
     stripe_customer_id = models.CharField(max_length=100, blank=True)
     stripe_payment_method_id = models.CharField(max_length=100, blank=True)
 
     # Display Information
-    display_name = models.CharField(max_length=100, verbose_name="Nume afișaj")
-    last_four = models.CharField(max_length=4, blank=True, verbose_name="Ultimele 4 cifre")
+    display_name = models.CharField(max_length=100, verbose_name=_("Nume afișaj"))
+    last_four = models.CharField(max_length=4, blank=True, verbose_name=_("Ultimele 4 cifre"))
 
     # Status
-    is_default = models.BooleanField(default=False, verbose_name="Implicit")
-    is_active = models.BooleanField(default=True, verbose_name="Activ")
+    is_default = models.BooleanField(default=False, verbose_name=_("Implicit"))
+    is_active = models.BooleanField(default=True, verbose_name=_("Activ"))
 
     # Bank Transfer Details (encrypted)
-    bank_details = models.JSONField(blank=True, null=True, verbose_name="Detalii bancare")
+    bank_details = models.JSONField(blank=True, null=True, verbose_name=_("Detalii bancare"))
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
@@ -157,13 +157,13 @@ class CustomerPaymentMethod(SoftDeleteModel):
 class CustomerNote(SoftDeleteModel):
     """Customer interaction notes with soft delete"""
 
-    NOTE_TYPE_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("general", "Generală"),
-        ("call", "Apel telefonic"),
-        ("email", "Email"),
-        ("meeting", "Întâlnire"),
-        ("complaint", "Reclamație"),
-        ("compliment", "Compliment"),
+    NOTE_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("general", _("Generală")),
+        ("call", _("Apel telefonic")),
+        ("email", _("Email")),
+        ("meeting", _("Întâlnire")),
+        ("complaint", _("Reclamație")),
+        ("compliment", _("Compliment")),
     )
 
     customer = models.ForeignKey(
@@ -172,20 +172,22 @@ class CustomerNote(SoftDeleteModel):
         related_name="notes",
     )
 
-    note_type = models.CharField(max_length=20, choices=NOTE_TYPE_CHOICES, default="general", verbose_name="Tip notă")
+    note_type = models.CharField(
+        max_length=20, choices=NOTE_TYPE_CHOICES, default="general", verbose_name=_("Tip notă")
+    )
 
-    title = models.CharField(max_length=200, verbose_name="Titlu")
-    content = models.TextField(verbose_name="Conținut")
+    title = models.CharField(max_length=200, verbose_name=_("Titlu"))
+    content = models.TextField(verbose_name=_("Conținut"))
 
-    is_important = models.BooleanField(default=False, verbose_name="Important")
-    is_private = models.BooleanField(default=False, verbose_name="Privat")
+    is_important = models.BooleanField(default=False, verbose_name=_("Important"))
+    is_private = models.BooleanField(default=False, verbose_name=_("Privat"))
 
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         "users.User",
         on_delete=models.SET_NULL,  # Keep note when user deleted
         null=True,
-        verbose_name="Creat de",
+        verbose_name=_("Creat de"),
     )
 
     class Meta:

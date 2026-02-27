@@ -124,6 +124,25 @@ class Command(BaseCommand):
             )
         )
 
+        # Print available login credentials
+        self.stdout.write("")
+        self.stdout.write("━" * 60)
+        self.stdout.write(self.style.SUCCESS("  Available login credentials"))
+        self.stdout.write("━" * 60)
+        self.stdout.write(f"  {'Role':<12} {'Email':<32} {'Password'}")
+        self.stdout.write(f"  {'─' * 12} {'─' * 32} {'─' * 12}")
+        self.stdout.write(f"  {'Admin':<12} {'admin@pragmatichost.com':<32} admin123")
+        self.stdout.write(f"  {'Support':<12} {'john@pragmatichost.com':<32} support123")
+        self.stdout.write(f"  {'Support':<12} {'jane@pragmatichost.com':<32} support123")
+        self.stdout.write(f"  {'Support':<12} {'mike@pragmatichost.com':<32} support123")
+        self.stdout.write(f"  {'Customer':<12} {'customer@pragmatichost.com':<32} testpass123")
+        self.stdout.write(f"  {'E2E Admin':<12} {'e2e-admin@test.local':<32} test123")
+        self.stdout.write(f"  {'E2E Customer':<12} {'e2e-customer@test.local':<32} test123")
+        self.stdout.write("━" * 60)
+        self.stdout.write("  Platform: http://localhost:8700")
+        self.stdout.write("  Portal:   http://localhost:8701")
+        self.stdout.write("━" * 60)
+
     def create_admin_users(self, fake: Faker) -> None:
         self.stdout.write("Creating admin users...")
 

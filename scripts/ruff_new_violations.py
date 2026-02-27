@@ -27,7 +27,7 @@ PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 import os as _os
 
 _uv_env = _os.environ.get("UV_PROJECT_ENVIRONMENT")
-DEFAULT_RUFF = Path(_uv_env) / "bin" / "ruff" if _uv_env else REPO_ROOT / ".venv" / "bin" / "ruff"
+DEFAULT_RUFF = (REPO_ROOT / _uv_env / "bin" / "ruff") if _uv_env else REPO_ROOT / ".venv" / "bin" / "ruff"
 del _os, _uv_env
 
 

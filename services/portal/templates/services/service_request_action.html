@@ -396,7 +396,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedAction = document.querySelector('input[name="action"]:checked');
     if (!selectedAction) {
       e.preventDefault();
-      alert('{% trans "Please select an action type." %}');
+      {% trans "Please select an action type." as select_action_msg %}
+      alert('{{ select_action_msg|escapejs }}');
       return;
     }
 
@@ -412,7 +413,8 @@ document.addEventListener('DOMContentLoaded', function() {
         reasonField.classList.remove('border-red-500');
       }, 3000);
 
-      alert('{% trans "Please provide a reason for this request." %}');
+      {% trans "Please provide a reason for this request." as provide_reason_msg %}
+      alert('{{ provide_reason_msg|escapejs }}');
     }
   });
 });

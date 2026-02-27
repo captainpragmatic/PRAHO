@@ -47,7 +47,7 @@ This demonstrates how to use our reusable table component across the platform.
         {% if user.is_staff %}
           <div class="mt-4">
             {% url 'billing:proforma_create' as create_proforma_url %}
-            {% button "📄 Create First Proforma" variant="primary" href=create_proforma_url %}
+            {% trans "📄 Create First Proforma" as bt1 %}{% button bt1 variant="primary" href=create_proforma_url %}
           </div>
         {% endif %}
       </div>

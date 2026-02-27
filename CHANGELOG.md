@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **Full i18n Coverage**: 100% Romanian translations for Platform (4,470 entries) and Portal (1,285 entries) — wrapped all hardcoded Python strings (`ValidationError`, `help_text`, `verbose_name`, `short_description`, `choices`) and template strings (`alert()`, `{% button %}`) with `_()` / `{% trans %}`
+- **i18n Linter** (`scripts/lint_i18n_coverage.py`): AST-based linter detecting unwrapped i18n strings (7 Python checks + 3 template checks), integrated into `make lint` Phase 4 and pre-commit
+- **Translation Tooling** (`scripts/translate_po.py`): Dictionary engine (500+ Romanian terms), Claude AI mode (`--claude`), YAML review workflow (generate → review → approve → apply), per-app coverage stats
+- **Makefile i18n Targets**: `make translate`, `make translate-ai`, `make translate-apply`, `make translate-stats`, `make i18n-extract`, `make i18n-compile`
+- **i18n Allowlist** (`scripts/i18n_coverage_allowlist.txt`): Suppression file for programmatic strings that are not user-facing (filter tuples, seed data, `unique_together` constraints); `--allowlist` flag wired into all `lint_i18n_coverage.py` invocations in Makefile and pre-commit hook
 
 ---
 

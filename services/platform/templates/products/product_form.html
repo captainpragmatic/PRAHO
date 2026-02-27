@@ -229,9 +229,9 @@
         ❌ {% trans 'Cancel' %}
       </a>
       {% if action == 'create' %}
-        {% button "✨ Create Product" variant="primary" type="submit" %}
+        {% trans "✨ Create Product" as bt1 %}{% button bt1 variant="primary" type="submit" %}
       {% else %}
-        {% button "💾 Save Changes" variant="primary" type="submit" %}
+        {% trans "💾 Save Changes" as bt2 %}{% button bt2 variant="primary" type="submit" %}
       {% endif %}
     </div>
   </form>

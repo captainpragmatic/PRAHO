@@ -23,7 +23,7 @@
         <div class="mt-4 sm:mt-0">
             {% if can_register_domains %}
                 {% url 'domains:register' as register_url %}
-                {% button "🆕 Register Domain" variant="primary" href=register_url icon="plus" %}
+                {% trans "🆕 Register Domain" as bt1 %}{% button bt1 variant="primary" href=register_url icon="plus" %}
             {% endif %}
         </div>
     </div>
@@ -95,7 +95,7 @@
             {% if can_register_domains %}
                 <div class="mt-6">
                     {% url 'domains:register' as register_url %}
-                    {% button "🆕 Register First Domain" variant="primary" href=register_url %}
+                    {% trans "🆕 Register First Domain" as bt2 %}{% button bt2 variant="primary" href=register_url %}
                 </div>
             {% endif %}
         </div>

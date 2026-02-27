@@ -670,7 +670,7 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):  # type: ignore[type
         result = registration_service.register_new_customer_owner(user_data=user_data, customer_data=customer_data)
 
         if result.is_err():
-            raise ValidationError(f"Registration failed: {result.unwrap_err()}")
+            raise ValidationError(_("Registration failed: %(error)s") % {"error": result.unwrap_err()})
 
         user, _customer = result.unwrap()
         return user

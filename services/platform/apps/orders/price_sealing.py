@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
+from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
     from apps.products.models import ProductPrice
@@ -111,7 +112,7 @@ class PriceSealingService:
 
         # Validate secret key length for security
         if len(price_sealing_secret) < MIN_SECRET_LENGTH:
-            raise ValidationError("PRICE_SEALING_SECRET must be at least 32 characters long for security")
+            raise ValidationError(_("PRICE_SEALING_SECRET must be at least 32 characters long for security"))
 
         return price_sealing_secret
 
@@ -178,7 +179,7 @@ class PriceSealingService:
         try:
             # Split token into payload and signature
             if "." not in sealed_token:
-                raise ValidationError("Invalid price token format")
+                raise ValidationError(_("Invalid price token format"))
 
             payload_json, provided_signature = sealed_token.rsplit(".", 1)
 
@@ -189,7 +190,7 @@ class PriceSealingService:
             ).hexdigest()
 
             if not hmac.compare_digest(expected_signature, provided_signature):
-                raise ValidationError("Price token signature invalid - possible tampering detected")
+                raise ValidationError(_("Price token signature invalid - possible tampering detected"))
 
             # Parse price data
             price_data = json.loads(payload_json)
@@ -199,7 +200,7 @@ class PriceSealingService:
             current_timestamp = time.time()
 
             if current_timestamp - token_timestamp > PRICE_SEAL_TTL_SECONDS:
-                raise ValidationError("Price token has expired - prices must be refreshed")
+                raise ValidationError(_("Price token has expired - prices must be refreshed"))
 
             # Validate required fields
             required_fields = [
@@ -214,17 +215,17 @@ class PriceSealingService:
 
             for field in required_fields:
                 if field not in price_data:
-                    raise ValidationError(f"Missing required field in price token: {field}")
+                    raise ValidationError(_("Missing required field in price token: %(field)s") % {"field": field})
 
             # 🔒 SECURITY: Validate IP address binding
             token_ip = price_data.get("client_ip", "")
             if token_ip != client_ip:
-                raise ValidationError("Price token IP address mismatch - token not valid for this client")
+                raise ValidationError(_("Price token IP address mismatch - token not valid for this client"))
 
             return price_data
 
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid price token format: {e}") from e
+            raise ValidationError(_("Invalid price token format: %(error)s") % {"error": e}) from e
 
     @staticmethod
     def validate_price_against_database(
@@ -255,15 +256,15 @@ class PriceSealingService:
                     id=product_price_id, is_active=True
                 )
             except ProductPrice.DoesNotExist as e:
-                raise ValidationError("Price no longer available - please refresh your cart") from e
+                raise ValidationError(_("Price no longer available - please refresh your cart")) from e
 
             # Optional: Validate expected ProductPrice ID matches
             if expected_product_price_id and product_price_id != expected_product_price_id:
-                raise ValidationError("Price ID mismatch - possible tampering")
+                raise ValidationError(_("Price ID mismatch - possible tampering"))
 
             # Validate product is still active and public
             if not product_price.product.is_active or not product_price.product.is_public:
-                raise ValidationError("Product no longer available")
+                raise ValidationError(_("Product no longer available"))
 
             # Get billing period from sealed token to calculate correct price
             billing_period = unsealed_data.get("billing_period", "monthly")
@@ -284,12 +285,12 @@ class PriceSealingService:
 
             # Validate other attributes match
             if unsealed_data["currency_code"] != product_price.currency.code:
-                raise ValidationError("Currency mismatch - please refresh your cart")
+                raise ValidationError(_("Currency mismatch - please refresh your cart"))
 
             # Note: billing_period validation removed - in simplified model, billing periods are calculated, not stored
 
             if unsealed_data["product_slug"] != product_price.product.slug:
-                raise ValidationError("Product mismatch - please refresh your cart")
+                raise ValidationError(_("Product mismatch - please refresh your cart"))
 
             return {
                 "is_valid": True,
@@ -305,7 +306,7 @@ class PriceSealingService:
         except Exception as e:
             if isinstance(e, ValidationError):
                 raise
-            raise ValidationError(f"Price validation failed: {e}") from e
+            raise ValidationError(_("Price validation failed: %(error)s") % {"error": e}) from e
 
 
 def create_sealed_price_for_product_price(

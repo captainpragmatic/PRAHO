@@ -19,9 +19,9 @@
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
             {% if can_retry %}
-                {% button "🔄 Retry Job" variant="warning" href="#" %}
+                {% trans "🔄 Retry Job" as bt1 %}{% button bt1 variant="warning" href="#" %}
             {% endif %}
-            {% button "← Back to Jobs" variant="secondary" href="/provisioning/virtualmin/servers/" %}
+            {% trans "← Back to Jobs" as bt2 %}{% button bt2 variant="secondary" href="/provisioning/virtualmin/servers/" %}
         </div>
     </div>
 
@@ -46,11 +46,11 @@
                             <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
                             <dd class="mt-1">
                                 {% if job.status == 'completed' %}
-                                    {% badge "✅ Completed" variant="success" %}
+                                    {% trans "✅ Completed" as bt3 %}{% badge bt3 variant="success" %}
                                 {% elif job.status == 'failed' %}
-                                    {% badge "❌ Failed" variant="danger" %}
+                                    {% trans "❌ Failed" as bt4 %}{% badge bt4 variant="danger" %}
                                 {% elif job.status == 'running' %}
-                                    {% badge "🔄 Running" variant="warning" %}
+                                    {% trans "🔄 Running" as bt5 %}{% badge bt5 variant="warning" %}
                                 {% else %}
                                     {% badge job.get_status_display variant="secondary" %}
                                 {% endif %}

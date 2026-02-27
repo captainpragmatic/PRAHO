@@ -141,9 +141,9 @@
       ❌ {% trans "Cancel" %}
     </button>
     {% if action == 'create' %}
-      {% button "➕ Add Item" variant="primary" type="submit" %}
+      {% trans "➕ Add Item" as bt1 %}{% button bt1 variant="primary" type="submit" %}
     {% else %}
-      {% button "💾 Save Changes" variant="primary" type="submit" %}
+      {% trans "💾 Save Changes" as bt2 %}{% button bt2 variant="primary" type="submit" %}
     {% endif %}
   </div>
 </form>
@@ -330,7 +330,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }).catch(error => {
                 console.error('Form submission error:', error);
-                alert('Error submitting form. Please try again.');
+                {% trans "Error submitting form. Please try again." as form_error_msg %}
+                alert('{{ form_error_msg|escapejs }}');
             });
         });
     }

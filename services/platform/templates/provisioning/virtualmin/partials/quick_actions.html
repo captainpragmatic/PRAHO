@@ -4,14 +4,14 @@
 <div id="quick-actions-section">
     <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
     <div class="space-y-3">
-        {% button "Access Control Panel" href="#" variant="primary" icon="external-link" %}
-        {% button "Reset Password" href="#" variant="secondary" icon="key" %}
-        {% button "Change Plan" href="#" variant="secondary" icon="upgrade" %}
-        {% button "Transfer Account" href="#" variant="secondary" icon="transfer" %}
+        {% trans "Access Control Panel" as bt1 %}{% button bt1 href="#" variant="primary" icon="external-link" %}
+        {% trans "Reset Password" as bt2 %}{% button bt2 href="#" variant="secondary" icon="key" %}
+        {% trans "Change Plan" as bt3 %}{% button bt3 href="#" variant="secondary" icon="upgrade" %}
+        {% trans "Transfer Account" as bt4 %}{% button bt4 href="#" variant="secondary" icon="transfer" %}
         {% if account.is_active %}
-            {% button "Disable Account" href="#" variant="danger" icon="pause" %}
+            {% trans "Disable Account" as bt5 %}{% button bt5 href="#" variant="danger" icon="pause" %}
         {% else %}
-            {% button "Enable Account" href="#" variant="success" icon="play" %}
+            {% trans "Enable Account" as bt6 %}{% button bt6 href="#" variant="success" icon="play" %}
         {% endif %}
 
         <!-- Protection Toggle -->

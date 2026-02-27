@@ -20,10 +20,10 @@
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Refund Button for Staff -->
       {% if is_staff and invoice.status == "paid" %}
-        {% button "💰 Refund Invoice" onclick="showInvoiceRefundModal()" variant="success" %}
+        {% trans "💰 Refund Invoice" as bt1 %}{% button bt1 onclick="showInvoiceRefundModal()" variant="success" %}
       {% elif not is_staff and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
-        {% button "🎫 Request Refund" onclick="showInvoiceRefundRequestModal()" variant="primary" %}
+        {% trans "🎫 Request Refund" as bt2 %}{% button bt2 onclick="showInvoiceRefundRequestModal()" variant="primary" %}
       {% endif %}
 
       <a href="{% url 'billing:invoice_list' %}"
@@ -391,7 +391,8 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('An error occurred while processing the refund.');
+        {% trans "An error occurred while processing the refund." as refund_error_msg %}
+        alert('{{ refund_error_msg|escapejs }}');
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
@@ -496,7 +497,8 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
 
     // Basic validation
     if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
-        alert('{% trans "Please fill in all required fields." %}');
+        {% trans "Please fill in all required fields." as fill_fields_msg %}
+        alert('{{ fill_fields_msg|escapejs }}');
         return;
     }
 
@@ -521,7 +523,8 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     .then(data => {
         if (data.success) {
             hideInvoiceRefundRequestModal();
-            alert('{% trans "Refund request submitted successfully! You will receive a confirmation email with your ticket number." %}');
+            {% trans "Refund request submitted successfully! You will receive a confirmation email with your ticket number." as refund_success_msg %}
+            alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
         } else {
             alert('Error: ' + data.error);
@@ -532,7 +535,8 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('{% trans "An error occurred. Please try again." %}');
+        {% trans "An error occurred. Please try again." as generic_error_msg %}
+        alert('{{ generic_error_msg|escapejs }}');
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';

@@ -12,6 +12,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
 
@@ -980,14 +981,14 @@ class CookieConsent(models.Model):
     # User identification (one of these should be set)
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="cookie_consents")
     cookie_id = models.CharField(
-        max_length=64, blank=True, db_index=True, help_text="Anonymous visitor identifier from cookie"
+        max_length=64, blank=True, db_index=True, help_text=_("Anonymous visitor identifier from cookie")
     )
 
     # Consent status
     status = models.CharField(max_length=20, choices=CONSENT_STATUS_CHOICES, default="pending")
 
     # Individual category consents
-    essential_cookies = models.BooleanField(default=True, help_text="Always required")
+    essential_cookies = models.BooleanField(default=True, help_text=_("Always required"))
     functional_cookies = models.BooleanField(default=False)
     analytics_cookies = models.BooleanField(default=False)
     marketing_cookies = models.BooleanField(default=False)

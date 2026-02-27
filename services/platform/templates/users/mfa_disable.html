@@ -192,7 +192,8 @@
 function confirmDisable() {
   const checkbox = document.getElementById('checkbox-confirm_disable');
   if (!checkbox.checked) {
-    alert('{% trans "Please confirm that you understand the security implications" %}');
+    {% trans "Please confirm that you understand the security implications" as security_confirm_msg %}
+    alert('{{ security_confirm_msg|escapejs }}');
     return false;
   }
 

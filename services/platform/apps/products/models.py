@@ -59,11 +59,11 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
     if isinstance(data, dict) and len(data) == 1:
         only_value = next(iter(data.values()))
         if isinstance(only_value, str) and len(only_value) > MAX_JSON_CONTENT_SIZE:
-            raise ValidationError("JSON content too large")
+            raise ValidationError(_("JSON content too large"))
     # Apply tighter limit for known model-bound fields to prevent bloat
     model_bound_fields = {"tags", "meta", "module_config"}
     if field_name in model_bound_fields and len(data_str) > MAX_JSON_CONTENT_SIZE:
-        raise ValidationError(f"{field_name} too large")
+        raise ValidationError(_("%(field_name)s too large") % {"field_name": field_name})
 
     # Depth check
     _get_json_depth(data)
@@ -74,7 +74,7 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
         dangerous_keys = ["eval", "import", "subprocess", "exec", "__import__"]
         for key in data:
             if key in dangerous_keys:
-                raise ValidationError(f"Dangerous key '{key}' in JSON data")
+                raise ValidationError(_("Dangerous key '%(key)s' in JSON data") % {"key": key})
 
         # Check for dangerous patterns in values
         for key, value in data.items():
@@ -82,7 +82,7 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
                 pattern in value.lower()
                 for pattern in ["<script", "javascript:", "eval('", "alert(", "__import__", "subprocess."]
             ):
-                raise ValidationError(f"Dangerous pattern in JSON value for key '{key}'")
+                raise ValidationError(_("Dangerous pattern in JSON value for key '%(key)s'") % {"key": key})
 
     # Also run recursive security checks to cover nested structures
     _check_json_security(data, field_name)
@@ -91,7 +91,7 @@ def validate_json_field(data: Any, field_name: str = "JSON field") -> None:
 def _get_json_depth(obj: Any, depth: int = 0) -> int:
     """Helper function to calculate JSON depth"""
     if depth > MAX_JSON_DEPTH:
-        raise ValidationError("JSON data too deep")
+        raise ValidationError(_("JSON data too deep"))
 
     max_depth = depth
     if isinstance(obj, dict):
@@ -110,13 +110,18 @@ def _check_json_security(data: Any, field_name: str = "JSON field") -> None:
         dangerous_keys = ["eval", "import", "subprocess", "exec", "__import__"]
         for key in data:
             if key in dangerous_keys:
-                raise ValidationError(f"Dangerous key '{key}' in {field_name}")
+                raise ValidationError(
+                    _("Dangerous key '%(key)s' in %(field_name)s") % {"key": key, "field_name": field_name}
+                )
         for key, value in data.items():
             if isinstance(value, str):
                 lowered = value.lower()
                 patterns = ["<script", "javascript:", "eval(", "alert(", "__import__", "subprocess."]
                 if any(p in lowered for p in patterns):
-                    raise ValidationError(f"Dangerous pattern in {field_name} for key '{key}'")
+                    raise ValidationError(
+                        _("Dangerous pattern in %(field_name)s for key '%(key)s'")
+                        % {"field_name": field_name, "key": key}
+                    )
             else:
                 _check_json_security(value, field_name)
     elif isinstance(data, list):
@@ -148,11 +153,11 @@ def validate_product_config(config: Any) -> None:
         for key in config:
             # Check exact dangerous keys
             if key in dangerous_keys:
-                raise ValidationError(f"Dangerous key '{key}' in product config")
+                raise ValidationError(_("Dangerous key '%(key)s' in product config") % {"key": key})
 
             # Check sensitive key patterns
             if any(pattern in key.lower() for pattern in sensitive_key_patterns):
-                raise ValidationError(f"Sensitive key '{key}' in product config")
+                raise ValidationError(_("Sensitive key '%(key)s' in product config") % {"key": key})
 
         # Check for dangerous patterns in values
         for key, value in config.items():
@@ -174,7 +179,7 @@ def validate_product_config(config: Any) -> None:
                     "DELETE FROM",
                 ]
                 if any(pattern in value.lower() for pattern in dangerous_patterns):
-                    raise ValidationError(f"Dangerous pattern in config value for key '{key}'")
+                    raise ValidationError(_("Dangerous pattern in config value for key '%(key)s'") % {"key": key})
 
 
 def validate_text_field_length(text: str | None, field_name: str, max_length: int = 1000) -> None:
@@ -182,7 +187,10 @@ def validate_text_field_length(text: str | None, field_name: str, max_length: in
     if not text:
         return
     if len(text) > int(max_length):
-        raise ValidationError(f"{field_name} too long (max {max_length} characters)")
+        raise ValidationError(
+            _("%(field_name)s too long (max %(max_length)s characters)")
+            % {"field_name": field_name, "max_length": max_length}
+        )
 
 
 # ===============================================================================
@@ -262,7 +270,7 @@ class Product(models.Model):
     tags = models.JSONField(
         default=list,
         blank=True,
-        help_text="Tags for filtering and search (as JSON array)",
+        help_text=_("Tags for filtering and search (as JSON array)"),
         validators=[validate_json_field],
     )
 
@@ -496,45 +504,45 @@ class ProductPrice(models.Model):
 
         # Monthly price constraints
         if self.monthly_price_cents is None or int(self.monthly_price_cents) < 0:
-            raise ValidationError("Monthly price cannot be negative")
+            raise ValidationError(_("Monthly price cannot be negative"))
 
         # Reject unrealistic prices (> 1,000,000.00 in major units)
         if int(self.monthly_price_cents) > MAX_PRICE_CENTS:
-            raise ValidationError("Monthly price too large")
+            raise ValidationError(_("Monthly price too large"))
 
         # Discount range validation
         if self.semiannual_discount_percent is not None:
             try:
                 sdp = Decimal(self.semiannual_discount_percent)
             except Exception as e:
-                raise ValidationError("Invalid semiannual discount percent") from e
+                raise ValidationError(_("Invalid semiannual discount percent")) from e
             if sdp < Decimal("0") or sdp > Decimal("100"):
-                raise ValidationError("Semiannual discount percent must be between 0 and 100")
+                raise ValidationError(_("Semiannual discount percent must be between 0 and 100"))
 
         if self.annual_discount_percent is not None:
             try:
                 adp = Decimal(self.annual_discount_percent)
             except Exception as e:
-                raise ValidationError("Invalid annual discount percent") from e
+                raise ValidationError(_("Invalid annual discount percent")) from e
             if adp < Decimal("0") or adp > Decimal("100"):
-                raise ValidationError("Annual discount percent must be between 0 and 100")
+                raise ValidationError(_("Annual discount percent must be between 0 and 100"))
 
         # Quantity limits
         if self.minimum_quantity is not None and int(self.minimum_quantity) < 1:
-            raise ValidationError("Minimum quantity must be at least 1")
+            raise ValidationError(_("Minimum quantity must be at least 1"))
         if (
             self.maximum_quantity is not None
             and self.minimum_quantity is not None
             and int(self.maximum_quantity) < int(self.minimum_quantity)
         ):
-            raise ValidationError("Maximum quantity cannot be less than minimum quantity")
+            raise ValidationError(_("Maximum quantity cannot be less than minimum quantity"))
 
         # Promo pricing requirements
         if self.promo_price_cents is not None:
             if not self.promo_valid_until:
-                raise ValidationError("Promo valid until is required when promo price is set")
+                raise ValidationError(_("Promo valid until is required when promo price is set"))
             if timezone.now() > self.promo_valid_until:
-                raise ValidationError("Promo valid until must be in the future")
+                raise ValidationError(_("Promo valid until must be in the future"))
 
         # Security validation logging for tests (avoid touching relations before set)
         logger.info(

@@ -171,9 +171,9 @@
             <tr class="hover:bg-slate-700 cursor-pointer transition-colors" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
               <td class="px-6 py-4 whitespace-nowrap text-center">
                 {% if invoice.document_type == 'proforma' %}
-                  {% badge "📄 Proforma" variant="primary" %}
+                  {% trans "📄 Proforma" as bt1 %}{% badge bt1 variant="primary" %}
                 {% else %}
-                  {% badge "🧾 Invoice" variant="success" %}
+                  {% trans "🧾 Invoice" as bt2 %}{% badge bt2 variant="success" %}
                 {% endif %}
               </td>
 
@@ -190,31 +190,31 @@
               <td class="px-6 py-4 whitespace-nowrap text-center">
                 {% if invoice.document_type == 'proforma' %}
                   {% if invoice.status == 'draft' %}
-                    {% badge "📝 Draft" variant="secondary" %}
+                    {% trans "📝 Draft" as bt3 %}{% badge bt3 variant="secondary" %}
                   {% elif invoice.status == 'sent' %}
-                    {% badge "📧 Sent" variant="primary" %}
+                    {% trans "📧 Sent" as bt4 %}{% badge bt4 variant="primary" %}
                   {% elif invoice.status == 'accepted' %}
-                    {% badge "✅ Accepted" variant="success" %}
+                    {% trans "✅ Accepted" as bt5 %}{% badge bt5 variant="success" %}
                   {% elif invoice.status == 'expired' %}
-                    {% badge "❌ Expired" variant="danger" %}
+                    {% trans "❌ Expired" as bt6 %}{% badge bt6 variant="danger" %}
                   {% else %}
                     {% badge invoice.status_display variant="secondary" %}
                   {% endif %}
                 {% else %}
                   {% if invoice.status == 'paid' %}
-                    {% badge "✅ Paid" variant="success" %}
+                    {% trans "✅ Paid" as bt7 %}{% badge bt7 variant="success" %}
                   {% elif invoice.status == 'overdue' %}
-                    {% badge "❌ Overdue" variant="danger" %}
+                    {% trans "❌ Overdue" as bt8 %}{% badge bt8 variant="danger" %}
                   {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
-                    {% badge "📧 Sent" variant="primary" %}
+                    {% trans "📧 Sent" as bt9 %}{% badge bt9 variant="primary" %}
                   {% elif invoice.status == 'pending' %}
-                    {% badge "⏳ Pending" variant="warning" %}
+                    {% trans "⏳ Pending" as bt10 %}{% badge bt10 variant="warning" %}
                   {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
-                    {% badge "❌ Cancelled" variant="danger" %}
+                    {% trans "❌ Cancelled" as bt11 %}{% badge bt11 variant="danger" %}
                   {% elif invoice.status == 'refunded' %}
-                    {% badge "↩️ Refunded" variant="warning" %}
+                    {% trans "↩️ Refunded" as bt12 %}{% badge bt12 variant="warning" %}
                   {% else %}
-                    {% badge "📝 Draft" variant="secondary" %}
+                    {% trans "📝 Draft" as bt13 %}{% badge bt13 variant="secondary" %}
                   {% endif %}
                 {% endif %}
               </td>
@@ -248,31 +248,31 @@
             <div class="text-right">
               {% if invoice.document_type == 'proforma' %}
                 {% if invoice.status == 'draft' %}
-                  {% badge "Draft" variant="secondary" icon="📝" %}
+                  {% trans "Draft" as bt14 %}{% badge bt14 variant="secondary" icon="📝" %}
                 {% elif invoice.status == 'sent' %}
-                  {% badge "Sent" variant="primary" icon="📧" %}
+                  {% trans "Sent" as bt15 %}{% badge bt15 variant="primary" icon="📧" %}
                 {% elif invoice.status == 'accepted' %}
-                  {% badge "Accepted" variant="success" icon="✅" %}
+                  {% trans "Accepted" as bt16 %}{% badge bt16 variant="success" icon="✅" %}
                 {% elif invoice.status == 'expired' %}
-                  {% badge "Expired" variant="danger" icon="❌" %}
+                  {% trans "Expired" as bt17 %}{% badge bt17 variant="danger" icon="❌" %}
                 {% else %}
                   {% badge invoice.status_display variant="secondary" %}
                 {% endif %}
               {% else %}
                 {% if invoice.status == 'paid' %}
-                  {% badge "Paid" variant="success" icon="✅" %}
+                  {% trans "Paid" as bt18 %}{% badge bt18 variant="success" icon="✅" %}
                 {% elif invoice.status == 'overdue' %}
-                  {% badge "Overdue" variant="danger" icon="❌" %}
+                  {% trans "Overdue" as bt19 %}{% badge bt19 variant="danger" icon="❌" %}
                 {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
-                  {% badge "Sent" variant="primary" icon="📧" %}
+                  {% trans "Sent" as bt20 %}{% badge bt20 variant="primary" icon="📧" %}
                 {% elif invoice.status == 'pending' %}
-                  {% badge "Pending" variant="warning" icon="⏳" %}
+                  {% trans "Pending" as bt21 %}{% badge bt21 variant="warning" icon="⏳" %}
                 {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
-                  {% badge "Cancelled" variant="danger" icon="❌" %}
+                  {% trans "Cancelled" as bt22 %}{% badge bt22 variant="danger" icon="❌" %}
                 {% elif invoice.status == 'refunded' %}
-                  {% badge "Refunded" variant="warning" icon="↩️" %}
+                  {% trans "Refunded" as bt23 %}{% badge bt23 variant="warning" icon="↩️" %}
                 {% else %}
-                  {% badge "Draft" variant="secondary" icon="📝" %}
+                  {% trans "Draft" as bt24 %}{% badge bt24 variant="secondary" icon="📝" %}
                 {% endif %}
               {% endif %}
             </div>

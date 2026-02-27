@@ -19,11 +19,11 @@
                 <h1 class="text-2xl font-bold text-slate-100">{{ account.domain }}</h1>
                 <div class="ml-3">
                     {% if account.is_active %}
-                        {% badge "Active" variant="success" %}
+                        {% trans "Active" as bt1 %}{% badge bt1 variant="success" %}
                     {% elif account.is_suspended %}
-                        {% badge "Suspended" variant="warning" %}
+                        {% trans "Suspended" as bt2 %}{% badge bt2 variant="warning" %}
                     {% else %}
-                        {% badge "Disabled" variant="secondary" %}
+                        {% trans "Disabled" as bt3 %}{% badge bt3 variant="secondary" %}
                     {% endif %}
                 </div>
             </div>
@@ -36,7 +36,7 @@
                 <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
                         hx-post="{{ suspend_url }}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="Are you sure you want to suspend this account?"
+                        hx-confirm="{% trans 'Are you sure you want to suspend this account?' %}"
                         hx-swap="outerHTML"
                         hx-target="body">
                     {% trans "Suspend" %}
@@ -45,13 +45,13 @@
                 <button class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors"
                         hx-post="{{ activate_url }}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="Are you sure you want to activate this account?"
+                        hx-confirm="{% trans 'Are you sure you want to activate this account?' %}"
                         hx-swap="outerHTML"
                         hx-target="body">
                     {% trans "Activate" %}
                 </button>
             {% endif %}
-            {% button "Backup Now" href=backup_url variant="primary" %}
+            {% trans "Backup Now" as bt4 %}{% button bt4 href=backup_url variant="primary" %}
         </div>
     </div>
 
@@ -196,14 +196,14 @@
                     <div id="quick-actions-section">
                         <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Quick Actions" %}</h3>
                         <div class="space-y-3">
-                            {% button "Access Control Panel" href="#" variant="primary" icon="external-link" %}
-                            {% button "Reset Password" href="#" variant="secondary" icon="key" %}
-                            {% button "Change Plan" href="#" variant="secondary" icon="upgrade" %}
-                            {% button "Transfer Account" href="#" variant="secondary" icon="transfer" %}
+                            {% trans "Access Control Panel" as bt5 %}{% button bt5 href="#" variant="primary" icon="external-link" %}
+                            {% trans "Reset Password" as bt6 %}{% button bt6 href="#" variant="secondary" icon="key" %}
+                            {% trans "Change Plan" as bt7 %}{% button bt7 href="#" variant="secondary" icon="upgrade" %}
+                            {% trans "Transfer Account" as bt8 %}{% button bt8 href="#" variant="secondary" icon="transfer" %}
                             {% if account.is_active %}
-                                {% button "Disable Account" href="#" variant="danger" icon="pause" %}
+                                {% trans "Disable Account" as bt9 %}{% button bt9 href="#" variant="danger" icon="pause" %}
                             {% else %}
-                                {% button "Enable Account" href="#" variant="success" icon="play" %}
+                                {% trans "Enable Account" as bt10 %}{% button bt10 href="#" variant="success" icon="play" %}
                             {% endif %}
 
                             <!-- Protection Toggle -->
@@ -244,7 +244,7 @@
                 <div class="space-y-4">
                     <div class="flex items-center justify-between">
                         <h3 class="text-lg font-semibold text-slate-100">{% trans "Backup History" %}</h3>
-                        {% button "Create Backup" href=backup_url variant="primary" %}
+                        {% trans "Create Backup" as bt11 %}{% button bt11 href=backup_url variant="primary" %}
                     </div>
 
                     {% if backups %}
@@ -264,13 +264,13 @@
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     {% if backup.is_completed %}
-                                        {% badge "Completed" variant="success" size="sm" %}
-                                        {% button "Restore" href=backup.restore_url variant="secondary" size="sm" %}
-                                        {% button "Download" href=backup.download_url variant="secondary" size="sm" %}
+                                        {% trans "Completed" as bt12 %}{% badge bt12 variant="success" size="sm" %}
+                                        {% trans "Restore" as bt13 %}{% button bt13 href=backup.restore_url variant="secondary" size="sm" %}
+                                        {% trans "Download" as bt14 %}{% button bt14 href=backup.download_url variant="secondary" size="sm" %}
                                     {% elif backup.is_failed %}
-                                        {% badge "Failed" variant="danger" size="sm" %}
+                                        {% trans "Failed" as bt15 %}{% badge bt15 variant="danger" size="sm" %}
                                     {% else %}
-                                        {% badge "In Progress" variant="warning" size="sm" %}
+                                        {% trans "In Progress" as bt16 %}{% badge bt16 variant="warning" size="sm" %}
                                     {% endif %}
                                 </div>
                             </div>
@@ -283,7 +283,7 @@
                         <p class="mt-2 text-sm text-slate-400">
                             {% trans "No backups found for this account" %}
                         </p>
-                        {% button "Create First Backup" href=backup_url variant="primary" class="mt-4" %}
+                        {% trans "Create First Backup" as bt17 %}{% button bt17 href=backup_url variant="primary" class="mt-4" %}
                     </div>
                     {% endif %}
                 </div>
@@ -341,13 +341,13 @@
                                 <div class="flex items-center space-x-3">
                                     <div>
                                         {% if job.status == 'completed' %}
-                                            {% badge "✅ Completed" variant="success" size="sm" %}
+                                            {% trans "✅ Completed" as bt18 %}{% badge bt18 variant="success" size="sm" %}
                                         {% elif job.status == 'failed' %}
-                                            {% badge "❌ Failed" variant="danger" size="sm" %}
+                                            {% trans "❌ Failed" as bt19 %}{% badge bt19 variant="danger" size="sm" %}
                                         {% elif job.status == 'running' %}
-                                            {% badge "🔄 Running" variant="warning" size="sm" %}
+                                            {% trans "🔄 Running" as bt20 %}{% badge bt20 variant="warning" size="sm" %}
                                         {% elif job.status == 'pending' %}
-                                            {% badge "⏳ Pending" variant="secondary" size="sm" %}
+                                            {% trans "⏳ Pending" as bt21 %}{% badge bt21 variant="secondary" size="sm" %}
                                         {% else %}
                                             {% badge job.get_status_display variant="secondary" size="sm" %}
                                         {% endif %}
@@ -453,8 +453,8 @@
                     </div>
 
                     <div class="pt-6 border-t border-slate-700">
-                        {% button "Save Changes" variant="primary" %}
-                        {% button "Cancel" variant="secondary" %}
+                        {% trans "Save Changes" as bt22 %}{% button bt22 variant="primary" %}
+                        {% trans "Cancel" as bt23 %}{% button bt23 variant="secondary" %}
                     </div>
                 </div>
             </div>

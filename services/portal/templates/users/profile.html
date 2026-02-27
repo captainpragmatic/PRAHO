@@ -142,9 +142,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if profile.is_active|default:True %}
-                {% badge "Active" variant="success" icon="✅" %}
+                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="✅" %}
               {% else %}
-                {% badge "Inactive" variant="danger" icon="❌" %}
+                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="❌" %}
               {% endif %}
             </dd>
           </div>
@@ -171,7 +171,7 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
               {% if profile.mfa_enabled %}
-                {% badge "Enabled" variant="success" icon="🔒" %}
+                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="🔒" %}
                 <div class="mt-2">
                   <a href="{% url 'users:mfa_management' %}"
                      class="text-blue-400 hover:text-blue-300 text-xs">
@@ -179,7 +179,7 @@
                   </a>
                 </div>
               {% else %}
-                {% badge "Disabled" variant="warning" icon="⚠️" %}
+                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="⚠️" %}
                 <div class="mt-2">
                   <a href="{% url 'users:mfa_management' %}"
                      class="text-yellow-400 hover:text-yellow-300 text-xs">
@@ -456,9 +456,9 @@
                 </div>
               </div>
               {% if profile.gdpr_consent_date %}
-                {% badge "Given" variant="success" icon="✅" %}
+                {% trans "Given" as bt5 %}{% badge bt5 variant="success" icon="✅" %}
               {% else %}
-                {% badge "Not Given" variant="danger" icon="❌" %}
+                {% trans "Not Given" as bt6 %}{% badge bt6 variant="danger" icon="❌" %}
               {% endif %}
             </div>
 
@@ -472,9 +472,9 @@
                 </div>
               </div>
               {% if profile.accepts_marketing %}
-                {% badge "Enabled" variant="success" icon="✅" %}
+                {% trans "Enabled" as bt7 %}{% badge bt7 variant="success" icon="✅" %}
               {% else %}
-                {% badge "Disabled" variant="secondary" icon="📛" %}
+                {% trans "Disabled" as bt8 %}{% badge bt8 variant="secondary" icon="📛" %}
               {% endif %}
             </div>
           </div>

@@ -16,13 +16,13 @@
       <!-- Order Service Button -->
       <div class="hidden sm:block">
         {% load ui_components %}
-        {% button "🛒 Order New Service" variant="success" size="lg" href="/order/" icon="plus" class="shadow-lg hover:shadow-xl transition-shadow" %}
+        {% trans "🛒 Order New Service" as bt1 %}{% button bt1 variant="success" size="lg" href="/order/" icon="plus" class="shadow-lg hover:shadow-xl transition-shadow" %}
       </div>
     </div>
 
     <!-- Mobile Order Button -->
     <div class="sm:hidden mt-4">
-      {% button "🛒 Order Service" variant="success" size="md" href="/order/" icon="plus" class="w-full" %}
+      {% trans "🛒 Order Service" as bt2 %}{% button bt2 variant="success" size="md" href="/order/" icon="plus" class="w-full" %}
     </div>
   </div>
 

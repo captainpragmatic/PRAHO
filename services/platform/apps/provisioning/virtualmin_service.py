@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.types import Err, Ok, Result
 
@@ -82,7 +83,7 @@ class VirtualminProvisioningService:
         target_server = server or self.server
 
         if not target_server:
-            raise ValidationError("No server specified for gateway")
+            raise ValidationError(_("No server specified for gateway"))
 
         if not self._gateway or (server and server != self.server):
             # Get configuration from SystemSettings + environment

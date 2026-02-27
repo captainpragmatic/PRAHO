@@ -185,9 +185,9 @@ Professional interface for staff to manage all user GDPR requests
 
                 <!-- Action Buttons -->
                 <div class="mt-6 flex justify-center gap-3">
-                    {% button "Apply Filters" variant="primary" hx_get="/app/audit/gdpr_management/requests/" hx_target="#gdpr-results" hx_include="#gdpr-filters" %}
-                    {% button "Reset Filters" variant="secondary" icon="🔄" attrs="onclick=\"resetFilters()\"" %}
-                    {% button "Refresh Dashboard" variant="info" icon="↻" attrs="onclick=\"window.location.reload()\"" %}
+                    {% trans "Apply Filters" as bt1 %}{% button bt1 variant="primary" hx_get="/app/audit/gdpr_management/requests/" hx_target="#gdpr-results" hx_include="#gdpr-filters" %}
+                    {% trans "Reset Filters" as bt2 %}{% button bt2 variant="secondary" icon="🔄" attrs="onclick=\"resetFilters()\"" %}
+                    {% trans "Refresh Dashboard" as bt3 %}{% button bt3 variant="info" icon="↻" attrs="onclick=\"window.location.reload()\"" %}
                 </div>
             </form>
         </div>

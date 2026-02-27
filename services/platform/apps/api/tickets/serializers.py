@@ -4,6 +4,7 @@
 
 from typing import Any, ClassVar
 
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
@@ -363,7 +364,7 @@ class CommentCreateSerializer(serializers.ModelSerializer):
     def validate_content(self, value: str) -> str:
         """Validate comment content"""
         if not value or len(value.strip()) < MIN_COMMENT_LENGTH:
-            raise serializers.ValidationError("Comment must be at least 2 characters long")
+            raise serializers.ValidationError(_("Comment must be at least 2 characters long"))
         return value.strip()
 
 

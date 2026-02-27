@@ -181,7 +181,7 @@ PRAHO is built for Romanian hosting providers with **full EU VAT support**:
 - **CUI/VAT validation** - Romanian company identifier validation
 - **Sequential invoice numbering** - Required by Romanian tax law
 - **GDPR compliance** - Romanian Law 190/2018, data export/erasure, consent tracking
-- **Bilingual templates** - Romanian and English for all customer communications
+- **Full i18n coverage** - 100% Romanian + English translations across Platform (4,470 entries) and Portal (1,285 entries), with automated translation tooling (`make translate-*`), i18n linter, and YAML review workflow
 
 ## Security
 

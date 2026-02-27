@@ -26,7 +26,7 @@
             <h3 class="text-lg font-medium text-white">
               🔒 {% trans 'Privacy Consent Status' %}
             </h3>
-            {% button "✏️ Edit" variant="primary" size="xs" attrs="data-modal=consent-settings-modal" %}
+            {% trans "✏️ Edit" as bt1 %}{% button bt1 variant="primary" size="xs" attrs="data-modal=consent-settings-modal" %}
           </div>
         </div>
         <div class="p-6">
@@ -39,9 +39,9 @@
               </div>
               <div class="flex items-center">
                 {% if consent_status.data_processing %}
-                  {% badge "Given" variant="success" icon="✅" %}
+                  {% trans "Given" as bt2 %}{% badge bt2 variant="success" icon="✅" %}
                 {% else %}
-                  {% badge "Not Given" variant="danger" icon="❌" %}
+                  {% trans "Not Given" as bt3 %}{% badge bt3 variant="danger" icon="❌" %}
                 {% endif %}
               </div>
             </div>
@@ -54,9 +54,9 @@
               </div>
               <div class="flex items-center">
                 {% if consent_status.marketing %}
-                  {% badge "Enabled" variant="success" icon="✅" %}
+                  {% trans "Enabled" as bt4 %}{% badge bt4 variant="success" icon="✅" %}
                 {% else %}
-                  {% badge "Disabled" variant="secondary" icon="📛" %}
+                  {% trans "Disabled" as bt5 %}{% badge bt5 variant="secondary" icon="📛" %}
                 {% endif %}
               </div>
             </div>
@@ -79,9 +79,9 @@
         </div>
         <div class="p-6">
           <div class="space-y-3">
-            {% button "📄 Export My Data" variant="primary" size="sm" attrs="data-modal=export-modal" class_="w-full" %}
+            {% trans "📄 Export My Data" as bt6 %}{% button bt6 variant="primary" size="sm" attrs="data-modal=export-modal" class_="w-full" %}
 
-            {% button "🗑️ Delete Account" variant="danger" size="sm" attrs="data-modal=deletion-modal" class_="w-full" %}
+            {% trans "🗑️ Delete Account" as bt7 %}{% button bt7 variant="danger" size="sm" attrs="data-modal=deletion-modal" class_="w-full" %}
           </div>
         </div>
       </div>
@@ -154,15 +154,15 @@
             <div class="flex items-center space-x-2">
               <!-- Status Badge -->
               {% if export.status == 'completed' %}
-                {% badge "Ready" variant="success" icon="✅" %}
+                {% trans "Ready" as bt8 %}{% badge bt8 variant="success" icon="✅" %}
                 {% url 'audit:download_data_export' export_id=export.id as download_url %}
-                {% button "📥 Download" variant="success" size="xs" href=download_url %}
+                {% trans "📥 Download" as bt9 %}{% button bt9 variant="success" size="xs" href=download_url %}
               {% elif export.status == 'processing' %}
-                {% badge "Processing" variant="warning" icon="⏳" %}
+                {% trans "Processing" as bt10 %}{% badge bt10 variant="warning" icon="⏳" %}
               {% elif export.status == 'failed' %}
-                {% badge "Failed" variant="danger" icon="❌" %}
+                {% trans "Failed" as bt11 %}{% badge bt11 variant="danger" icon="❌" %}
               {% else %}
-                {% badge "Pending" variant="warning" icon="⏳" %}
+                {% trans "Pending" as bt12 %}{% badge bt12 variant="warning" icon="⏳" %}
               {% endif %}
             </div>
           </div>
@@ -180,7 +180,7 @@
         <div class="p-6">
           <div class="text-center py-8">
             <p class="text-slate-400 mb-4">{% trans 'No data exports yet' %}</p>
-            {% button "📄 Export My Data" variant="primary" size="md" attrs="onclick=\"showModal('export-modal')\"" %}
+            {% trans "📄 Export My Data" as bt13 %}{% button bt13 variant="primary" size="md" attrs="onclick=\"showModal('export-modal')\"" %}
           </div>
         </div>
       </div>
@@ -286,8 +286,8 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% button "📄 Request Export" variant="primary" type="submit" %}
-          {% button "Cancel" variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "📄 Request Export" as bt14 %}{% button bt14 variant="primary" type="submit" %}
+          {% trans "Cancel" as bt15 %}{% button bt15 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
     </div>
@@ -315,8 +315,8 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% button "⚠️ Withdraw Consent" variant="warning" type="submit" %}
-          {% button "Cancel" variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "⚠️ Withdraw Consent" as bt16 %}{% button bt16 variant="warning" type="submit" %}
+          {% trans "Cancel" as bt17 %}{% button bt17 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
     </div>
@@ -352,8 +352,8 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% button "🗑️ Request Deletion" variant="danger" type="submit" %}
-          {% button "Cancel" variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "🗑️ Request Deletion" as bt18 %}{% button bt18 variant="danger" type="submit" %}
+          {% trans "Cancel" as bt19 %}{% button bt19 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
     </div>
@@ -403,8 +403,8 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% button "💾 Save Changes" variant="primary" type="submit" %}
-          {% button "Cancel" variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "💾 Save Changes" as bt20 %}{% button bt20 variant="primary" type="submit" %}
+          {% trans "Cancel" as bt21 %}{% button bt21 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
     </div>

@@ -17,11 +17,11 @@
         </div>
         <div class="flex gap-3">
             {% url 'domains:registrar_create' as registrar_create_url %}
-            {% button "➕ Add Registrar" variant="primary" href=registrar_create_url %}
+            {% trans "➕ Add Registrar" as bt1 %}{% button bt1 variant="primary" href=registrar_create_url %}
 
             <form method="post" action="{% url 'domains:registrar_sync_all' %}" class="inline">
                 {% csrf_token %}
-                {% button "🔄 Sync All" variant="secondary" type="submit" attrs="onclick=\"return confirm('Sync all registrars now?')\"" %}
+                {% trans "🔄 Sync All" as bt2 %}{% button bt2 variant="secondary" type="submit" attrs="onclick=\"return confirm('Sync all registrars now?')\"" %}
             </form>
         </div>
     </div>
@@ -98,7 +98,7 @@
                 </select>
             </div>
             <div class="flex items-end">
-                {% button "🔍 Filter" variant="primary" type="submit" size="sm" %}
+                {% trans "🔍 Filter" as bt3 %}{% button bt3 variant="primary" type="submit" size="sm" %}
                 <a href="{% url 'domains:registrar_list' %}" class="ml-2 text-sm text-slate-500 hover:text-slate-700">{% trans "Clear" %}</a>
             </div>
         </form>
@@ -173,7 +173,7 @@
                     <!-- Action: Configure only -->
                     <div class="flex items-center flex-shrink-0">
                         {% url 'domains:registrar_edit' pk=registrar.id as registrar_edit_url %}
-                        {% button "⚙️ Configure" variant="secondary" size="sm" href=registrar_edit_url %}
+                        {% trans "⚙️ Configure" as bt4 %}{% button bt4 variant="secondary" size="sm" href=registrar_edit_url %}
                     </div>
                 </div>
             </div>
@@ -247,7 +247,7 @@
             <p class="text-slate-500 dark:text-slate-400 mb-6">
                 {% trans "Get started by adding your first domain registrar." %}
             </p>
-            {% button "➕ Add First Registrar" variant="primary" href="#" %}
+            {% trans "➕ Add First Registrar" as bt5 %}{% button bt5 variant="primary" href="#" %}
         </div>
         {% endif %}
     </div>

@@ -21,10 +21,10 @@
             </p>
         </div>
         <div class="mt-4 sm:mt-0 flex space-x-3">
-            {% button "✏️ Edit" href="edit/" variant="secondary" %}
+            {% trans "✏️ Edit" as bt1 %}{% button bt1 href="edit/" variant="secondary" %}
             <form method="post" action="health/" class="inline">
                 {% csrf_token %}
-                {% button "🏥 Health Check" type="submit" variant="primary" hx_post="health/" hx_target="#health-status" hx_indicator="#health-loading" hx_include="[name='csrfmiddlewaretoken']" %}
+                {% trans "🏥 Health Check" as bt2 %}{% button bt2 type="submit" variant="primary" hx_post="health/" hx_target="#health-status" hx_indicator="#health-loading" hx_include="[name='csrfmiddlewaretoken']" %}
             </form>
         </div>
     </div>
@@ -412,7 +412,7 @@
                                 {{ job.started_at|date:"M d, Y H:i" }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                {% button "View" href=job.get_absolute_url variant="primary" size="sm" %}
+                                {% trans "View" as bt3 %}{% button bt3 href=job.get_absolute_url variant="primary" size="sm" %}
                             </td>
                         </tr>
                         {% endfor %}

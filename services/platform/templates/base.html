@@ -151,7 +151,7 @@
               <span class="mr-1">⚙️</span> {% trans 'Profile' %}
             </a>
             {% url 'users:logout' as logout_url %}
-            {% button "Logout" variant="danger" href=logout_url size="sm" %}
+            {% trans "Logout" as bt1 %}{% button bt1 variant="danger" href=logout_url size="sm" %}
           </div>
         </div>
       </div>
@@ -314,7 +314,8 @@
     // HTMX Error Handling
     document.body.addEventListener('htmx:responseError', function (event) {
       console.error('🚨 HTMX Error:', event.detail);
-      alert('{% trans "An error occurred. Please try again." %}');
+      {% trans "An error occurred. Please try again." as htmx_error_msg %}
+      alert('{{ htmx_error_msg|escapejs }}');
     });
 
     // Auto-hide flash messages (more specific selector to avoid removing pricing cards)

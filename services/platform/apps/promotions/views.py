@@ -16,6 +16,7 @@ from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
+from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import (
     CreateView,
@@ -912,12 +913,12 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
         try:
             count = int(request.POST.get("count", 10))
         except (ValueError, TypeError):
-            messages.error(request, "Invalid count value. Please enter a number.")
+            messages.error(request, _("Invalid count value. Please enter a number."))
             return redirect("promotions:coupon_batch_create")
 
         # Enforce limits
         if count < 1:
-            messages.error(request, "Count must be at least 1.")
+            messages.error(request, _("Count must be at least 1."))
             return redirect("promotions:coupon_batch_create")
         if count > max_batch_size:
             messages.error(

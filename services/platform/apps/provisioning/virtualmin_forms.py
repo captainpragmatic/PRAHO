@@ -70,7 +70,7 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
         try:
             validator.validate_server_hostname(hostname)
         except ValidationError as e:
-            raise ValidationError(f"Invalid hostname format: {e.message}") from e
+            raise ValidationError(_("Invalid hostname format: %(error)s") % {"error": e.message}) from e
 
         return hostname
 
@@ -82,7 +82,7 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
         try:
             validator.validate_api_username(username)
         except ValidationError as e:
-            raise ValidationError(f"Invalid username format: {e.message}") from e
+            raise ValidationError(_("Invalid username format: %(error)s") % {"error": e.message}) from e
 
         return username
 
@@ -92,14 +92,14 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
 
         if not password and not self.instance.pk:
             # New server requires password
-            raise ValidationError("API password is required for new servers")
+            raise ValidationError(_("API password is required for new servers"))
 
         if password:
             validator = VirtualminValidator()
             try:
                 validator.validate_password(password)
             except ValidationError as e:
-                raise ValidationError(f"Password validation failed: {e.message}") from e
+                raise ValidationError(_("Password validation failed: %(error)s") % {"error": e.message}) from e
 
         return password
 
@@ -178,7 +178,7 @@ class VirtualminBackupForm(forms.Form):
         include_ssl = cast(bool, cleaned_data.get("include_ssl", False))
 
         if not any([include_email, include_databases, include_files, include_ssl]):
-            raise ValidationError("At least one feature must be included in the backup")
+            raise ValidationError(_("At least one feature must be included in the backup"))
 
         return cleaned_data
 
@@ -248,7 +248,7 @@ class VirtualminRestoreForm(forms.Form):
         backup_id = cast(str, self.cleaned_data.get("backup_id", ""))
 
         if not backup_id:
-            raise ValidationError("Please select a backup to restore from")
+            raise ValidationError(_("Please select a backup to restore from"))
 
         # Additional validation could check backup accessibility
         return backup_id
@@ -265,7 +265,7 @@ class VirtualminRestoreForm(forms.Form):
         restore_ssl = cast(bool, cleaned_data.get("restore_ssl", False))
 
         if not any([restore_email, restore_databases, restore_files, restore_ssl]):
-            raise ValidationError("At least one feature must be selected for restore")
+            raise ValidationError(_("At least one feature must be selected for restore"))
 
         return cleaned_data
 
@@ -349,18 +349,18 @@ class VirtualminBulkActionForm(forms.Form):
         accounts_str = self.cleaned_data.get("selected_accounts", "")
 
         if not accounts_str.strip():
-            raise ValidationError("No accounts selected for bulk action")
+            raise ValidationError(_("No accounts selected for bulk action"))
 
         try:
             account_ids = [aid.strip() for aid in accounts_str.split(",") if aid.strip()]
 
             if not account_ids:
-                raise ValidationError("No valid account IDs provided")
+                raise ValidationError(_("No valid account IDs provided"))
 
             return account_ids
 
         except Exception as e:
-            raise ValidationError("Invalid account ID format") from e
+            raise ValidationError(_("Invalid account ID format")) from e
 
     def clean(self) -> dict[str, Any]:
         """Validate form based on selected action."""
@@ -370,7 +370,7 @@ class VirtualminBulkActionForm(forms.Form):
         action = cleaned_data.get("action")
 
         if action == "backup" and not cleaned_data.get("backup_type"):
-            raise ValidationError("Backup type is required for backup action")
+            raise ValidationError(_("Backup type is required for backup action"))
 
         return cleaned_data
 

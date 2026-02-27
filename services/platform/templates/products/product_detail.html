@@ -25,9 +25,9 @@
 
     <div class="flex space-x-3">
       {% url 'products:product_edit' slug=product.slug as edit_url %}
-      {% button "✏️ Edit" variant="secondary" href=edit_url %}
+      {% trans "✏️ Edit" as bt1 %}{% button bt1 variant="secondary" href=edit_url %}
       {% url 'products:product_prices' slug=product.slug as prices_url %}
-      {% button "💰 Pricing" variant="primary" href=prices_url %}
+      {% trans "💰 Pricing" as bt2 %}{% button bt2 variant="primary" href=prices_url %}
     </div>
   </div>
 
@@ -63,9 +63,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Domain Requirements' %}</dt>
             <dd class="mt-1">
               {% if product.domain_required_at_signup %}
-                {% badge "Required at Signup" variant="warning" %}
+                {% trans "Required at Signup" as bt3 %}{% badge bt3 variant="warning" %}
               {% else %}
-                {% badge "Optional Domain" variant="info" %}
+                {% trans "Optional Domain" as bt4 %}{% badge bt4 variant="info" %}
               {% endif %}
             </dd>
           </div>
@@ -75,9 +75,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'VAT Inclusion' %}</dt>
             <dd class="mt-1">
               {% if product.includes_vat %}
-                {% badge "Prices Include VAT" variant="success" %}
+                {% trans "Prices Include VAT" as bt5 %}{% badge bt5 variant="success" %}
               {% else %}
-                {% badge "Prices Exclude VAT" variant="info" %}
+                {% trans "Prices Exclude VAT" as bt6 %}{% badge bt6 variant="info" %}
               {% endif %}
             </dd>
           </div>
@@ -134,9 +134,9 @@
               <div class="flex justify-between items-start mb-2">
                 <span class="text-sm text-slate-400">{{ price.get_billing_period_display }}</span>
                 {% if price.is_active %}
-                  {% badge "Active" variant="success" size="sm" %}
+                  {% trans "Active" as bt7 %}{% badge bt7 variant="success" size="sm" %}
                 {% else %}
-                  {% badge "Inactive" variant="danger" size="sm" %}
+                  {% trans "Inactive" as bt8 %}{% badge bt8 variant="danger" size="sm" %}
                 {% endif %}
               </div>
 
@@ -261,9 +261,9 @@
                     hx-target="this"
                     hx-swap="outerHTML">
               {% if product.is_active %}
-                {% badge "Active" variant="success" %}
+                {% trans "Active" as bt9 %}{% badge bt9 variant="success" %}
               {% else %}
-                {% badge "Inactive" variant="danger" %}
+                {% trans "Inactive" as bt10 %}{% badge bt10 variant="danger" %}
               {% endif %}
             </button>
           </div>
@@ -276,9 +276,9 @@
                     hx-target="this"
                     hx-swap="outerHTML">
               {% if product.is_public %}
-                {% badge "Public" variant="info" %}
+                {% trans "Public" as bt11 %}{% badge bt11 variant="info" %}
               {% else %}
-                {% badge "Private" variant="warning" %}
+                {% trans "Private" as bt12 %}{% badge bt12 variant="warning" %}
               {% endif %}
             </button>
           </div>
@@ -291,9 +291,9 @@
                     hx-target="this"
                     hx-swap="outerHTML">
               {% if product.is_featured %}
-                {% badge "Featured" variant="success" %}
+                {% trans "Featured" as bt13 %}{% badge bt13 variant="success" %}
               {% else %}
-                {% badge "Not Featured" variant="secondary" %}
+                {% trans "Not Featured" as bt14 %}{% badge bt14 variant="secondary" %}
               {% endif %}
             </button>
           </div>
@@ -306,13 +306,13 @@
 
         <div class="space-y-3">
           {% url 'products:product_edit' slug=product.slug as edit_url %}
-          {% button "✏️ Edit Product" variant="primary" href=edit_url class="w-full" %}
+          {% trans "✏️ Edit Product" as bt15 %}{% button bt15 variant="primary" href=edit_url class="w-full" %}
 
           {% url 'products:product_prices' slug=product.slug as prices_url %}
-          {% button "💰 Manage Pricing" variant="secondary" href=prices_url class="w-full" %}
+          {% trans "💰 Manage Pricing" as bt16 %}{% button bt16 variant="secondary" href=prices_url class="w-full" %}
 
           {% url 'products:product_list' as list_url %}
-          {% button "← Back to Products" variant="outline" href=list_url class="w-full" %}
+          {% trans "← Back to Products" as bt17 %}{% button bt17 variant="outline" href=list_url class="w-full" %}
         </div>
       </div>
 

@@ -30,12 +30,12 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
               {% if mfa_enabled %}
-                {% badge "Enabled" variant="success" icon="🔒" %}
+                {% trans "Enabled" as bt1 %}{% badge bt1 variant="success" icon="🔒" %}
                 <p class="mt-2 text-xs text-green-400">
                   {% trans 'Your account is protected with MFA' %}
                 </p>
               {% else %}
-                {% badge "Disabled" variant="warning" icon="⚠️" %}
+                {% trans "Disabled" as bt2 %}{% badge bt2 variant="warning" icon="⚠️" %}
                 <p class="mt-2 text-xs text-yellow-400">
                   {% trans 'Your account is not protected with MFA' %}
                 </p>
@@ -89,7 +89,7 @@
                   {% trans 'codes remaining' %}
                 </p>
               {% else %}
-                {% badge "None" variant="warning" icon="⚠️" %}
+                {% trans "None" as bt3 %}{% badge bt3 variant="warning" icon="⚠️" %}
                 <p class="mt-1 text-xs text-yellow-400">
                   {% trans 'Generate backup codes for account recovery' %}
                 </p>

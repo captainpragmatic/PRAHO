@@ -14,17 +14,17 @@
                         <div class="flex items-center space-x-2 mb-2 flex-wrap">
                             <!-- Status Badge -->
                             {% if request.status == 'pending' %}
-                                {% badge "⏳ Pending" variant="warning" size="sm" %}
+                                {% trans "⏳ Pending" as bt1 %}{% badge bt1 variant="warning" size="sm" %}
                             {% elif request.status == 'processing' %}
-                                {% badge "⚙️ Processing" variant="info" size="sm" %}
+                                {% trans "⚙️ Processing" as bt2 %}{% badge bt2 variant="info" size="sm" %}
                             {% elif request.status == 'completed' %}
                                 {% if current_time > request.expires_at %}
-                                    {% badge "⏰ Expired" variant="danger" size="sm" %}
+                                    {% trans "⏰ Expired" as bt3 %}{% badge bt3 variant="danger" size="sm" %}
                                 {% else %}
-                                    {% badge "✅ Completed" variant="success" size="sm" %}
+                                    {% trans "✅ Completed" as bt4 %}{% badge bt4 variant="success" size="sm" %}
                                 {% endif %}
                             {% elif request.status == 'failed' %}
-                                {% badge "❌ Failed" variant="danger" size="sm" %}
+                                {% trans "❌ Failed" as bt5 %}{% badge bt5 variant="danger" size="sm" %}
                             {% endif %}
 
                             <!-- Export Type -->
@@ -109,15 +109,16 @@
                                 <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="process_now">
-                                    {% button "⚡" variant="success" size="xs" type="submit" title="Process Now" %}
+                                    {% trans "⚡" as bt6 %}{% button bt6 variant="success" size="xs" type="submit" title="Process Now" %}
                                 </form>
                             {% elif request.status == 'completed' and current_time <= request.expires_at %}
-                                {% button "📥" variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:request.id|add:"/" title="Download Export" %}
+                                {% trans "📥" as bt7 %}{% button bt7 variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:request.id|add:"/" title="Download Export" %}
                             {% elif request.status == 'completed' and current_time > request.expires_at %}
                                 <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="delete_expired">
-                                    {% button "🗑️" variant="danger" size="xs" type="submit" hx_confirm="Delete this expired export?" title="Delete Expired" %}
+                                    {% trans "Delete this expired export?" as confirm_delete %}
+                                    {% trans "🗑️" as bt8 %}{% button bt8 variant="danger" size="xs" type="submit" hx_confirm=confirm_delete title="Delete Expired" %}
                                 </form>
                             {% elif request.status == 'processing' %}
                                 <span class="text-blue-400 text-xs animate-pulse">⚙️</span>

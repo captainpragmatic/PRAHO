@@ -29,6 +29,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models, transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.types import Err, Ok, Result
 
@@ -136,13 +137,15 @@ class EncryptedCredential(models.Model):
     # Primary identification
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES)
-    service_identifier = models.CharField(max_length=255, help_text="Server hostname, account ID, or unique identifier")
+    service_identifier = models.CharField(
+        max_length=255, help_text=_("Server hostname, account ID, or unique identifier")
+    )
 
     # Encrypted credential data
     encrypted_username = models.BinaryField()
     encrypted_password = models.BinaryField()
     encrypted_metadata = models.BinaryField(
-        null=True, blank=True, help_text="Additional encrypted data (API keys, certificates, etc.)"
+        null=True, blank=True, help_text=_("Additional encrypted data (API keys, certificates, etc.)")
     )
 
     # Lifecycle management
@@ -199,10 +202,10 @@ class CredentialAccessLog(models.Model):
 
     # Access details
     user = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, blank=True)
-    username = models.CharField(max_length=255, help_text="Username at time of access (for audit trail)")
+    username = models.CharField(max_length=255, help_text=_("Username at time of access (for audit trail)"))
 
     # Context information
-    access_reason = models.CharField(max_length=255, help_text="Reason for credential access")
+    access_reason = models.CharField(max_length=255, help_text=_("Reason for credential access"))
     source_ip = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
 
@@ -676,8 +679,12 @@ class CredentialVault:
 
 
 # Global vault instance using module-level caching
+_vault_instance: CredentialVault | None = None
+
+
 def get_credential_vault() -> CredentialVault:
     """Get global credential vault instance with lazy initialization"""
-    if not hasattr(get_credential_vault, "_instance"):
-        get_credential_vault._instance = CredentialVault()  # type: ignore[attr-defined]
-    return get_credential_vault._instance  # type: ignore[attr-defined,no-any-return]
+    global _vault_instance  # noqa: PLW0603
+    if _vault_instance is None:
+        _vault_instance = CredentialVault()
+    return _vault_instance

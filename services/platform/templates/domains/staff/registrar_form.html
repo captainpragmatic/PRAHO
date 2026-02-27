@@ -56,12 +56,12 @@
 
       <div class="pt-2 flex items-center gap-3">
         {% if is_edit %}
-          {% button "💾 Save Changes" variant="primary" type="submit" %}
+          {% trans "💾 Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
         {% else %}
-          {% button "💾 Save Registrar" variant="primary" type="submit" %}
+          {% trans "💾 Save Registrar" as bt2 %}{% button bt2 variant="primary" type="submit" %}
         {% endif %}
         {% url 'domains:registrar_list' as registrar_list_url %}
-        {% button "Cancel" variant="secondary" href=registrar_list_url %}
+        {% trans "Cancel" as bt3 %}{% button bt3 variant="secondary" href=registrar_list_url %}
       </div>
     </form>
   </div>

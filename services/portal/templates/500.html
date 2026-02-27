@@ -78,8 +78,8 @@
 
     <!-- Action Buttons -->
     <div class="flex flex-col sm:flex-row gap-4 justify-center">
-      {% button "🔄 Try Again" variant="info" attrs="onclick=\"window.location.reload()\"" size="lg" %}
-      {% button "🏠 Go to Dashboard" variant="secondary" href="/dashboard/" size="lg" %}
+      {% trans "🔄 Try Again" as bt1 %}{% button bt1 variant="info" attrs="onclick=\"window.location.reload()\"" size="lg" %}
+      {% trans "🏠 Go to Dashboard" as bt2 %}{% button bt2 variant="secondary" href="/dashboard/" size="lg" %}
     </div>
 
     <!-- Help Text -->

@@ -378,7 +378,7 @@ class Subscription(models.Model):
 
         # Validate custom cycle
         if self.billing_cycle == "custom" and not self.custom_cycle_days:
-            raise ValidationError("Custom billing cycle requires custom_cycle_days to be set")
+            raise ValidationError(_("Custom billing cycle requires custom_cycle_days to be set"))
 
         # Validate price
         validate_financial_amount(self.unit_price_cents, "Unit price")
@@ -391,7 +391,7 @@ class Subscription(models.Model):
             and self.current_period_start
             and self.current_period_end <= self.current_period_start
         ):
-            raise ValidationError("Period end must be after period start")
+            raise ValidationError(_("Period end must be after period start"))
 
     def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
         """Generate subscription number if not set."""
@@ -546,7 +546,7 @@ class Subscription(models.Model):
     def convert_trial(self, user: Any = None) -> None:
         """Convert trial to paid subscription."""
         if self.status != "trialing":
-            raise ValidationError("Can only convert subscriptions in trial status")
+            raise ValidationError(_("Can only convert subscriptions in trial status"))
 
         with transaction.atomic():
             self.trial_converted = True
@@ -614,7 +614,7 @@ class Subscription(models.Model):
     def resume(self, user: Any = None) -> None:
         """Resume a paused subscription."""
         if self.status != "paused":
-            raise ValidationError("Can only resume paused subscriptions")
+            raise ValidationError(_("Can only resume paused subscriptions"))
 
         with transaction.atomic():
             self.status = "active"
@@ -892,7 +892,7 @@ class SubscriptionChange(models.Model):
     def apply(self, user: Any = None) -> None:
         """Apply the subscription change."""
         if self.status != "pending":
-            raise ValidationError(f"Cannot apply change with status: {self.status}")
+            raise ValidationError(_("Cannot apply change with status: %(status)s") % {"status": self.status})
 
         with transaction.atomic():
             sub = self.subscription

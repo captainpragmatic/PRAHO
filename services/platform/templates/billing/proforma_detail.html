@@ -338,11 +338,13 @@ function sendProforma(proformaId) {
             if (data.success) {
                 location.reload();
             } else {
-                alert('{% trans "Failed to send proforma. Please try again." %}');
+                {% trans "Failed to send proforma. Please try again." as proforma_fail_msg %}
+                alert('{{ proforma_fail_msg|escapejs }}');
             }
         })
         .catch(error => {
-            alert('{% trans "An error occurred. Please try again." %}');
+            {% trans "An error occurred. Please try again." as proforma_error_msg %}
+            alert('{{ proforma_error_msg|escapejs }}');
         });
     }
 }

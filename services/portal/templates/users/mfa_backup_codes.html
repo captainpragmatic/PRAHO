@@ -169,7 +169,8 @@ function copyAllCodes() {
   const allCodes = codes.join('\n');
 
   navigator.clipboard.writeText(allCodes).then(function() {
-    alert('{% trans "All backup codes copied to clipboard!" %}');
+    {% trans "All backup codes copied to clipboard!" as codes_copied_msg %}
+    alert('{{ codes_copied_msg|escapejs }}');
   }).catch(function(err) {
     console.error('Could not copy codes: ', err);
   });

@@ -27,7 +27,7 @@
             </p>
         </div>
         <div class="mt-4 sm:mt-0">
-            {% button "Cancel" href=cancel_url variant="secondary" %}
+            {% trans "Cancel" as bt1 %}{% button bt1 href=cancel_url variant="secondary" %}
         </div>
     </div>
 
@@ -183,8 +183,9 @@
 
                             <!-- Form Actions -->
                             <div class="mt-8 flex items-center justify-end space-x-3">
-                                {% button "Cancel" href=cancel_url variant="secondary" %}
-                                {% button "Start Restore" type="submit" variant="danger" hx_confirm="Are you sure you want to restore this backup? This will overwrite existing data." %}
+                                {% trans "Cancel" as bt2 %}{% button bt2 href=cancel_url variant="secondary" %}
+                                {% trans "Are you sure you want to restore this backup? This will overwrite existing data." as confirm_restore %}
+                                {% trans "Start Restore" as bt3 %}{% button bt3 type="submit" variant="danger" hx_confirm=confirm_restore %}
                             </div>
                         </div>
                     </form>
@@ -212,9 +213,9 @@
                         <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
                         <dd class="mt-1">
                             {% if account.is_active %}
-                                {% badge "Active" variant="success" %}
+                                {% trans "Active" as bt4 %}{% badge bt4 variant="success" %}
                             {% else %}
-                                {% badge "Inactive" variant="secondary" %}
+                                {% trans "Inactive" as bt5 %}{% badge bt5 variant="secondary" %}
                             {% endif %}
                         </dd>
                     </div>
@@ -240,9 +241,9 @@
                                 </p>
                             </div>
                             {% if backup.is_completed %}
-                                {% badge "Ready" variant="success" size="sm" %}
+                                {% trans "Ready" as bt6 %}{% badge bt6 variant="success" size="sm" %}
                             {% else %}
-                                {% badge "In Progress" variant="warning" size="sm" %}
+                                {% trans "In Progress" as bt7 %}{% badge bt7 variant="warning" size="sm" %}
                             {% endif %}
                         </div>
                         {% if backup.size_bytes %}

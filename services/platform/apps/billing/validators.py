@@ -12,6 +12,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.validators import log_security_event
 
@@ -83,15 +84,23 @@ def validate_financial_json(data: Any, field_name: str = "Financial JSON field")
     try:
         json_str = json.dumps(data)
     except (TypeError, ValueError) as e:
-        raise ValidationError(f"{field_name} contains invalid JSON: {e}") from e
+        raise ValidationError(
+            _("%(field_name)s contains invalid JSON: %(error)s") % {"field_name": field_name, "error": e}
+        ) from e
 
     # Check size limit (smaller for financial data)
     if len(json_str.encode("utf-8")) > MAX_JSON_SIZE_BYTES:
-        raise ValidationError(f"{field_name} too large. Maximum size: {MAX_JSON_SIZE_BYTES} bytes for financial data")
+        raise ValidationError(
+            _("%(field_name)s too large. Maximum size: %(max_size)s bytes for financial data")
+            % {"field_name": field_name, "max_size": MAX_JSON_SIZE_BYTES}
+        )
 
     # Check depth
     if _get_financial_json_depth(data) > MAX_JSON_DEPTH:
-        raise ValidationError(f"{field_name} too deep. Maximum nesting depth: {MAX_JSON_DEPTH} for financial data")
+        raise ValidationError(
+            _("%(field_name)s too deep. Maximum nesting depth: %(max_depth)s for financial data")
+            % {"field_name": field_name, "max_depth": MAX_JSON_DEPTH}
+        )
 
     # Check for dangerous patterns and sensitive data
     _check_financial_json_security(data, field_name)
@@ -104,12 +113,14 @@ def validate_financial_amount(amount_cents: int | None, field_name: str = "Amoun
 
     if amount_cents > MAX_FINANCIAL_AMOUNT_CENTS:
         raise ValidationError(
-            f"{field_name} too large. Maximum: {MAX_FINANCIAL_AMOUNT_CENTS / 100:,.2f} in major currency units"
+            _("%(field_name)s too large. Maximum: %(max_amount)s in major currency units")
+            % {"field_name": field_name, "max_amount": f"{MAX_FINANCIAL_AMOUNT_CENTS / 100:,.2f}"}
         )
 
     if amount_cents < MIN_FINANCIAL_AMOUNT_CENTS:
         raise ValidationError(
-            f"{field_name} too small. Minimum: {MIN_FINANCIAL_AMOUNT_CENTS / 100:,.2f} in major currency units"
+            _("%(field_name)s too small. Minimum: %(min_amount)s in major currency units")
+            % {"field_name": field_name, "min_amount": f"{MIN_FINANCIAL_AMOUNT_CENTS / 100:,.2f}"}
         )
 
 
@@ -120,12 +131,17 @@ def validate_financial_text_field(text: str, field_name: str, max_length: int | 
 
     max_len = max_length or MAX_DESCRIPTION_LENGTH
     if len(text) > max_len:
-        raise ValidationError(f"{field_name} too long. Maximum length: {max_len} characters")
+        raise ValidationError(
+            _("%(field_name)s too long. Maximum length: %(max_len)s characters")
+            % {"field_name": field_name, "max_len": max_len}
+        )
 
     # Check for dangerous patterns in financial descriptions
     for pattern in DANGEROUS_FINANCIAL_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
-            raise ValidationError(f"{field_name} contains potentially dangerous pattern")
+            raise ValidationError(
+                _("%(field_name)s contains potentially dangerous pattern") % {"field_name": field_name}
+            )
 
 
 def validate_invoice_sequence_increment() -> None:
@@ -164,14 +180,20 @@ def _check_financial_json_security(data: Any, field_name: str) -> None:
         # Check for sensitive keys
         for key in data:
             if any(sensitive in key.lower() for sensitive in SENSITIVE_FINANCIAL_KEYS):
-                raise ValidationError(f"{field_name} contains sensitive financial information in key '{key}'")
+                raise ValidationError(
+                    _("%(field_name)s contains sensitive financial information in key '%(key)s'")
+                    % {"field_name": field_name, "key": key}
+                )
 
         # Check for dangerous patterns in values
         for key, value in data.items():
             if isinstance(value, str):
                 for pattern in DANGEROUS_FINANCIAL_PATTERNS:
                     if re.search(pattern, value, re.IGNORECASE):
-                        raise ValidationError(f"{field_name} contains potentially dangerous pattern in '{key}'")
+                        raise ValidationError(
+                            _("%(field_name)s contains potentially dangerous pattern in '%(key)s'")
+                            % {"field_name": field_name, "key": key}
+                        )
             _check_financial_json_security(value, field_name)
     elif isinstance(data, list):
         for item in data:

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import models
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
     pass
@@ -68,41 +69,41 @@ class OAuthToken(models.Model):
     cui = models.CharField(
         max_length=20,
         db_index=True,
-        help_text="Company CUI this token belongs to",
+        help_text=_("Company CUI this token belongs to"),
     )
 
     # Encrypted token fields
     access_token = models.TextField(
-        help_text="Encrypted access token",
+        help_text=_("Encrypted access token"),
     )
 
     refresh_token = models.TextField(
         blank=True,
         default="",
-        help_text="Encrypted refresh token",
+        help_text=_("Encrypted refresh token"),
     )
 
     token_type = models.CharField(
         max_length=50,
         default=DEFAULT_TOKEN_TYPE,
-        help_text="Token type (usually Bearer)",
+        help_text=_("Token type (usually Bearer)"),
     )
 
     scope = models.TextField(
         blank=True,
         default="",
-        help_text="OAuth scopes granted",
+        help_text=_("OAuth scopes granted"),
     )
 
     # Expiration
     expires_at = models.DateTimeField(
-        help_text="When the access token expires",
+        help_text=_("When the access token expires"),
     )
 
     refresh_expires_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When the refresh token expires (if known)",
+        help_text=_("When the refresh token expires (if known)"),
     )
 
     # Environment
@@ -110,14 +111,14 @@ class OAuthToken(models.Model):
         max_length=20,
         default="test",
         choices=[("test", "Test"), ("production", "Production")],
-        help_text="ANAF environment this token is for",
+        help_text=_("ANAF environment this token is for"),
     )
 
     # Status
     is_active = models.BooleanField(
         default=True,
         db_index=True,
-        help_text="Whether this token is currently active",
+        help_text=_("Whether this token is currently active"),
     )
 
     # Metadata
@@ -128,20 +129,20 @@ class OAuthToken(models.Model):
     last_used_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When this token was last used",
+        help_text=_("When this token was last used"),
     )
 
     use_count = models.PositiveIntegerField(
         default=0,
-        help_text="Number of times this token was used",
+        help_text=_("Number of times this token was used"),
     )
 
     objects = OAuthTokenManager()
 
     class Meta:
         db_table = "billing_efactura_oauth_token"
-        verbose_name = "e-Factura OAuth Token"
-        verbose_name_plural = "e-Factura OAuth Tokens"
+        verbose_name = _("e-Factura OAuth Token")
+        verbose_name_plural = _("e-Factura OAuth Tokens")
         ordering = ["-created_at"]  # noqa: RUF012
         indexes = [  # noqa: RUF012
             models.Index(fields=["cui", "is_active"]),
@@ -169,7 +170,8 @@ class OAuthToken(models.Model):
             from apps.settings.encryption import SettingsEncryption  # noqa: PLC0415
 
             encryption = SettingsEncryption()
-            return encryption.encrypt_value(value)
+            encrypted = encryption.encrypt_value(value)
+            return encrypted if encrypted is not None else value
         except ImportError:
             logger.warning("Encryption service not available, storing token unencrypted")
             return value
@@ -375,7 +377,7 @@ class TokenStorageService:
 
         # Check cache first
         cache_key = self._get_cache_key(cui)
-        cached_token = cache.get(cache_key)
+        cached_token: str | None = cache.get(cache_key)
         if cached_token:
             return cached_token
 
