@@ -61,11 +61,21 @@ jobs:
         uv python install
         uv sync --group platform --group dev
 
-    - name: Run platform unit tests
+    - name: Run platform unit tests with coverage
       run: |
         cd services/platform
-        echo "Running platform unit tests..."
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py test tests --verbosity=2
+        echo "Running platform unit tests with coverage..."
+        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/coverage run manage.py test tests --verbosity=2
+        ${{ github.workspace }}/.venv/bin/coverage xml -o coverage-platform.xml
+        ${{ github.workspace }}/.venv/bin/coverage report --show-missing
+
+    - name: Upload coverage to Codecov
+      if: always()
+      uses: codecov/codecov-action@v5
+      with:
+        files: services/platform/coverage-platform.xml
+        flags: platform
+        fail_ci_if_error: false
 
     - name: Ruff no-new-debt gate (platform)
       run: |
