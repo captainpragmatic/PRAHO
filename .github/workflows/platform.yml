@@ -69,14 +69,6 @@ jobs:
         ${{ github.workspace }}/.venv/bin/coverage xml -o coverage-platform.xml
         ${{ github.workspace }}/.venv/bin/coverage report --show-missing
 
-    - name: Upload coverage to Codecov
-      if: always()
-      uses: codecov/codecov-action@v5
-      with:
-        files: services/platform/coverage-platform.xml
-        flags: platform
-        fail_ci_if_error: false
-
     - name: Ruff no-new-debt gate (platform)
       run: |
         BASE_REF="${{ github.event.before }}"
