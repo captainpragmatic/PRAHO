@@ -198,7 +198,8 @@
 
     if (!title || !description) {
       e.preventDefault();
-      alert('{% trans "Please fill in both title and description fields." %}');
+      {% trans "Please fill in both title and description fields." as fill_both_msg %}
+      alert('{{ fill_both_msg|escapejs }}');
       return false;
     }
   });

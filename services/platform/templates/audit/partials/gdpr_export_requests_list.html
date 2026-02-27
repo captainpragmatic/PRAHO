@@ -117,7 +117,8 @@
                                 <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="delete_expired">
-                                    {% trans "🗑️" as bt8 %}{% button bt8 variant="danger" size="xs" type="submit" hx_confirm="Delete this expired export?" title="Delete Expired" %}
+                                    {% trans "Delete this expired export?" as confirm_delete %}
+                                    {% trans "🗑️" as bt8 %}{% button bt8 variant="danger" size="xs" type="submit" hx_confirm=confirm_delete title="Delete Expired" %}
                                 </form>
                             {% elif request.status == 'processing' %}
                                 <span class="text-blue-400 text-xs animate-pulse">⚙️</span>

@@ -343,7 +343,8 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
 
     // Basic validation
     if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
-        alert('{% trans "Please fill in all required fields." %}');
+        {% trans "Please fill in all required fields." as fill_fields_msg %}
+        alert('{{ fill_fields_msg|escapejs }}');
         return;
     }
 
@@ -358,7 +359,8 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
 
     // For now, just show success message
-    alert('{% trans "Refund request feature coming soon! Please contact support directly." %}');
+    {% trans "Refund request feature coming soon! Please contact support directly." as refund_coming_msg %}
+    alert('{{ refund_coming_msg|escapejs }}');
 
     // Re-enable button
     submitBtn.disabled = false;

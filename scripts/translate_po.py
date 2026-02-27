@@ -814,6 +814,9 @@ def get_untranslated_entries(
         is_fuzzy = "fuzzy" in entry.flags
         if is_fuzzy and not include_fuzzy:
             continue
+        if is_fuzzy and include_fuzzy:
+            entries.append(entry)
+            continue
         if not entry.msgstr or not entry.msgstr.strip():
             entries.append(entry)
     return entries

@@ -27,7 +27,7 @@
                     hx-swap="innerHTML"
                     hx-target="#accounts-container"
                     hx-indicator="#sync-indicator"
-                    hx-confirm="Sync accounts from all active Virtualmin servers? This may take a few moments.">
+                    hx-confirm="{% trans 'Sync accounts from all active Virtualmin servers? This may take a few moments.' %}">
                 🔄 Refresh Accounts
             </button>
             <div id="sync-indicator" class="htmx-indicator">

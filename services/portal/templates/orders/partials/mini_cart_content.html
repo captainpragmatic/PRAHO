@@ -41,7 +41,7 @@
               hx-target="#cart-widget"
               hx-swap="outerHTML"
               hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));"
-              hx-confirm="Are you sure you want to remove this product from cart?"
+              hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}"
               class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1"
               aria-label="{% trans 'Remove from cart' %}">
         <span class="text-xs">🗑️</span>

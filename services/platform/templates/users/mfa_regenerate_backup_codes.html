@@ -183,7 +183,8 @@
 function confirmRegenerate() {
   const checkbox = document.getElementById('checkbox-confirm_regenerate');
   if (!checkbox.checked) {
-    alert('{% trans "Please confirm that you understand the implications of regenerating backup codes" %}');
+    {% trans "Please confirm that you understand the implications of regenerating backup codes" as regen_confirm_msg %}
+    alert('{{ regen_confirm_msg|escapejs }}');
     return false;
   }
 

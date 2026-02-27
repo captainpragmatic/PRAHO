@@ -176,7 +176,8 @@
                 <form method="post" action="{% url 'audit:process_export_request' export_request.id %}" class="inline">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="delete_expired">
-                    {% trans "🗑️ Delete Expired" as bt8 %}{% button bt8 variant="danger" size="sm" type="submit" hx_confirm="Are you sure you want to delete this expired export? This action cannot be undone." %}
+                    {% trans "Are you sure you want to delete this expired export? This action cannot be undone." as confirm_delete %}
+                    {% trans "🗑️ Delete Expired" as bt8 %}{% button bt8 variant="danger" size="sm" type="submit" hx_confirm=confirm_delete %}
                 </form>
             {% endif %}
         </div>

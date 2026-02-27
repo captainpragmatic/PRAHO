@@ -463,7 +463,8 @@ function deleteOrderItem(itemId) {
 
     if (!csrfToken) {
         console.error('CSRF token not found');
-        alert('{% trans "Security token not found. Please refresh the page and try again." %}');
+        {% trans "Security token not found. Please refresh the page and try again." as csrf_error_msg %}
+        alert('{{ csrf_error_msg|escapejs }}');
         return;
     }
 
@@ -495,11 +496,13 @@ function deleteOrderItem(itemId) {
             // Show success message
             showNotification('success', `{% trans "Item deleted successfully" %}`);
         } else {
-            alert('{% trans "Error:" %} ' + (data.error || '{% trans "Unknown error occurred" %}'));
+            {% trans "Error:" as error_prefix %}{% trans "Unknown error occurred" as unknown_error %}
+            alert('{{ error_prefix|escapejs }} ' + (data.error || '{{ unknown_error|escapejs }}'));
         }
     }).catch(error => {
         console.error('Error deleting item:', error);
-        alert('{% trans "Error deleting item. Please try again." %}');
+        {% trans "Error deleting item. Please try again." as delete_error_msg %}
+        alert('{{ delete_error_msg|escapejs }}');
     });
 }
 
@@ -694,7 +697,8 @@ document.addEventListener('submit', function(e) {
             }
         }).catch(error => {
             console.error('Form submission error:', error);
-            alert('{% trans "Error submitting form. Please try again." %}');
+            {% trans "Error submitting form. Please try again." as form_submit_error_msg %}
+            alert('{{ form_submit_error_msg|escapejs }}');
         });
     }
 });

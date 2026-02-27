@@ -19,6 +19,7 @@ import ast
 import json
 import os
 import re
+import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -402,6 +403,10 @@ def iter_files(root_paths: list[Path], extension: str, exclude_dir_names: set[st
     for root in root_paths:
         if not root.exists():
             continue
+        if root.is_file():
+            if root.name.endswith(extension):
+                files.append(root)
+            continue
         for current_root, dirs, filenames in os.walk(root):
             dirs[:] = [d for d in dirs if d not in exclude_dir_names and not d.startswith(".")]
             for filename in filenames:
@@ -497,8 +502,18 @@ def main() -> int:
 
     # Determine roots
     if args.roots:
-        python_roots = [Path(r) for r in args.roots]
-        template_roots = [Path(r) for r in args.roots]
+        python_roots: list[Path] = []
+        template_roots: list[Path] = []
+        for r in args.roots:
+            p = Path(r)
+            if p.is_file():
+                if r.endswith(".py"):
+                    python_roots.append(p)
+                elif r.endswith(".html"):
+                    template_roots.append(p)
+            else:
+                python_roots.append(p)
+                template_roots.append(p)
     else:
         python_roots = [Path("services/platform/apps"), Path("services/portal/apps")]
         template_roots = [Path("services/platform/templates"), Path("services/portal/templates")]
@@ -514,6 +529,9 @@ def main() -> int:
 
     # Scan template files
     template_files = iter_files(template_roots, ".html", exclude_dir_names)
+
+    if args.roots and not python_files and not template_files:
+        print(f"⚠️  Warning: no matching .py or .html files found in: {args.roots}", file=sys.stderr)
 
     all_issues: list[Issue] = []
     scan_errors: list[str] = []

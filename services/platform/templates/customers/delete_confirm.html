@@ -174,7 +174,8 @@ document.addEventListener('DOMContentLoaded', function() {
     form.addEventListener('submit', function(e) {
         if (confirmInput.value.trim() !== customerName) {
             e.preventDefault();
-            alert('{% trans "Please type the exact customer name to confirm deletion." %}');
+            {% trans "Please type the exact customer name to confirm deletion." as confirm_delete_msg %}
+            alert('{{ confirm_delete_msg|escapejs }}');
             return false;
         }
 

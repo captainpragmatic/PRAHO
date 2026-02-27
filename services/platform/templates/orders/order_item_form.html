@@ -330,7 +330,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }).catch(error => {
                 console.error('Form submission error:', error);
-                alert('{% trans "Error submitting form. Please try again." %}');
+                {% trans "Error submitting form. Please try again." as form_error_msg %}
+                alert('{{ form_error_msg|escapejs }}');
             });
         });
     }

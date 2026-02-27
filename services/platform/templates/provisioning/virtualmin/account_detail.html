@@ -36,7 +36,7 @@
                 <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
                         hx-post="{{ suspend_url }}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="Are you sure you want to suspend this account?"
+                        hx-confirm="{% trans 'Are you sure you want to suspend this account?' %}"
                         hx-swap="outerHTML"
                         hx-target="body">
                     {% trans "Suspend" %}
@@ -45,7 +45,7 @@
                 <button class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors"
                         hx-post="{{ activate_url }}"
                         hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="Are you sure you want to activate this account?"
+                        hx-confirm="{% trans 'Are you sure you want to activate this account?' %}"
                         hx-swap="outerHTML"
                         hx-target="body">
                     {% trans "Activate" %}

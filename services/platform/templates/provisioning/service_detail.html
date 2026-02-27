@@ -66,10 +66,12 @@
                 {% if can_manage %}
                     {% if service.status == 'active' %}
                         {% url 'provisioning:service_suspend' service.pk as suspend_url %}
-                        {% trans "⏸️ Suspend" as bt7 %}{% button bt7 variant="danger" hx_post=suspend_url hx_confirm="Suspend this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                        {% trans "Suspend this service?" as confirm_suspend %}
+                        {% trans "⏸️ Suspend" as bt7 %}{% button bt7 variant="danger" hx_post=suspend_url hx_confirm=confirm_suspend hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
                     {% elif service.status == 'suspended' %}
                         {% url 'provisioning:service_activate' service.pk as activate_url %}
-                        {% trans "▶️ Activate" as bt8 %}{% button bt8 variant="success" hx_post=activate_url hx_confirm="Reactivate this service?" hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                        {% trans "Reactivate this service?" as confirm_activate %}
+                        {% trans "▶️ Activate" as bt8 %}{% button bt8 variant="success" hx_post=activate_url hx_confirm=confirm_activate hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
                     {% endif %}
                     {% url 'provisioning:service_edit' service.pk as edit_url %}
                     {% trans "✏️ Edit" as bt9 %}{% button bt9 variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}

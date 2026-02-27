@@ -314,7 +314,8 @@
     // HTMX Error Handling
     document.body.addEventListener('htmx:responseError', function (event) {
       console.error('🚨 HTMX Error:', event.detail);
-      alert('{% trans "An error occurred. Please try again." %}');
+      {% trans "An error occurred. Please try again." as htmx_error_msg %}
+      alert('{{ htmx_error_msg|escapejs }}');
     });
 
     // Auto-hide flash messages (more specific selector to avoid removing pricing cards)
