@@ -8,7 +8,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -35,6 +35,9 @@ from .validators import (
 )
 
 logger = logging.getLogger(__name__)
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 # ===============================================================================
@@ -181,14 +184,14 @@ def secure_invitation_system() -> Callable[[Callable[..., Any]], Callable[..., A
 # ===============================================================================
 
 
-def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def atomic_with_retry(max_retries: int = 3, delay: float = 0.1) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Atomic transaction with retry logic for race condition handling
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             last_exception = None
 
             for attempt in range(max_retries):
@@ -461,14 +464,14 @@ def _normalize_response_time(start_time: float, min_time: float = 0.1) -> None:
 
 def audit_service_call(
     event_type: str, extract_details: Callable[..., Any] | None = None
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Comprehensive audit logging for service method calls
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             start_time = timezone.now()
             user = kwargs.get("user") or (args[0] if len(args) > 0 and hasattr(args[0], "id") else None)
             request_ip = kwargs.get("request_ip")
@@ -490,10 +493,10 @@ def audit_service_call(
                     {
                         "method": func.__name__,
                         "duration_ms": (timezone.now() - start_time).total_seconds() * 1000,
-                        "user_id": user.id if user else None,
+                        "user_id": getattr(user, "id", None) if user else None,
                         **details,
                     },
-                    request_ip,
+                    request_ip,  # type: ignore[arg-type]
                 )
 
                 return result
@@ -506,10 +509,10 @@ def audit_service_call(
                         "method": func.__name__,
                         "duration_ms": (timezone.now() - start_time).total_seconds() * 1000,
                         "error": str(e)[:200],  # Truncate long errors
-                        "user_id": user.id if user else None,
+                        "user_id": getattr(user, "id", None) if user else None,
                         **details,
                     },
-                    request_ip,
+                    request_ip,  # type: ignore[arg-type]
                 )
 
                 raise
@@ -526,14 +529,14 @@ def audit_service_call(
 
 def monitor_performance(
     max_duration_seconds: float = 5.0, alert_threshold: float = 2.0
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Monitor method performance and alert on slow operations
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             start_time = time.time()
 
             try:

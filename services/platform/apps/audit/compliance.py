@@ -324,7 +324,7 @@ class GDPRConsentRule(ComplianceRule):
     def check(
         self, events: list[Any], period_start: datetime, period_end: datetime
     ) -> tuple[bool, list[ComplianceViolation]]:
-        violations = []
+        violations: list[ComplianceViolation] = []
 
         # Check for consent withdrawal without proper handling
         [e for e in events if e.action == "gdpr_consent_withdrawn"]
@@ -572,7 +572,7 @@ class ComplianceReportService:
         auth_events = [e for e in events if e.category == "authentication"]
 
         # Group by action type
-        action_counts = {}
+        action_counts: dict[str, int] = {}
         for event in auth_events:
             action_counts[event.action] = action_counts.get(event.action, 0) + 1
 
@@ -732,7 +732,7 @@ class ComplianceReportService:
     def _generate_generic_report(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate a generic report for unhandled report types"""
         # Group by category
-        category_counts = {}
+        category_counts: dict[str, int] = {}
         for event in events:
             category_counts[event.category] = category_counts.get(event.category, 0) + 1
 
@@ -982,7 +982,7 @@ class LogRetentionService:
 
         logger.info("🗄️ [Retention] Applying retention policies...")
 
-        summary = {
+        summary: dict[str, Any] = {
             "processed_categories": [],
             "archived": 0,
             "deleted": 0,
@@ -1059,7 +1059,7 @@ class LogRetentionService:
             Q(severity="critical") | Q(category__in=["security_event", "compliance", "data_protection"])
         )
 
-        count = safe_to_delete.count()
+        count: int = safe_to_delete.count()
         safe_to_delete.delete()
 
         return count

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.db.models import Avg, Sum
 from django.utils import timezone
@@ -133,7 +133,7 @@ class CustomerAnalyticsService:
                 "customer_id": str(customer.id),
                 "customer_name": customer.get_display_name(),
                 "account_age_days": (timezone.now() - customer.created_at).days if customer.created_at else 0,
-                "customer_type": "business" if customer.is_business else "individual",
+                "customer_type": "business" if getattr(customer, "is_business", False) else "individual",
             }
 
             # Order metrics
@@ -150,7 +150,7 @@ class CustomerAnalyticsService:
 
             # Credit metrics
             metrics["credit_score"] = CustomerCreditService.calculate_credit_score(customer)
-            metrics["credit_rating"] = CustomerCreditService.get_credit_rating(metrics["credit_score"])
+            metrics["credit_rating"] = CustomerCreditService.get_credit_rating(cast(int, metrics["credit_score"]))
 
             # Calculate LTV (Lifetime Value)
             metrics["lifetime_value"] = billing_metrics.get("total_revenue", Decimal("0"))
@@ -404,7 +404,7 @@ class CustomerStatsService:
             # Update oldest first
             customers = Customer.objects.order_by("updated_at")[:limit]
 
-            results = {"total": customers.count(), "updated": 0, "errors": []}
+            results: dict[str, Any] = {"total": customers.count(), "updated": 0, "errors": []}
 
             for customer in customers:
                 try:

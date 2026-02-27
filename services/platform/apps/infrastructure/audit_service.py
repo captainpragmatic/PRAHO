@@ -61,7 +61,7 @@ class InfrastructureAuditService:
     CATEGORY = "system_admin"
 
     # Severity mapping for different event types
-    SEVERITY_MAP: ClassVar[dict] = {
+    SEVERITY_MAP: ClassVar[dict[str, str]] = {
         "node_deployment_created": "medium",
         "node_deployment_started": "low",
         "node_deployment_completed": "medium",
@@ -466,7 +466,7 @@ class InfrastructureAuditService:
         metadata: dict[str, Any] | None = None,
         severity: str | None = None,
         is_sensitive: bool = False,
-    ) -> Any:
+    ) -> AuditEvent:
         """Create and save an audit event via the central audit service"""
         if severity is None:
             severity = cls.SEVERITY_MAP.get(action, "low")

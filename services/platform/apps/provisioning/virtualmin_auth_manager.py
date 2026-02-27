@@ -15,7 +15,7 @@ from enum import Enum
 from types import TracebackType
 from typing import Any
 
-import paramiko  # type: ignore[import-untyped]
+import paramiko
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
@@ -144,8 +144,7 @@ class VirtualminAuthenticationManager:
 
     def __init__(self, server: VirtualminServer):
         self.server = server
-        # TODO: Type hint will be fixed when paramiko is added to requirements
-        self._ssh_client: Any = None
+        self._ssh_client: paramiko.SSHClient | None = None
 
     def execute_virtualmin_command(
         self, program: str, parameters: dict[str, Any], force_method: AuthMethod | None = None
@@ -210,8 +209,6 @@ class VirtualminAuthenticationManager:
             return self._execute_master_proxy(program, parameters)
         elif method == AuthMethod.SSH_SUDO:
             return self._execute_ssh_sudo(program, parameters)
-        else:
-            return create_error_result(f"Unknown authentication method: {method}")  # type: ignore[unreachable]
 
     def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
         """Execute using current ACL user authentication"""
@@ -462,7 +459,7 @@ def test_acl_authentication_health() -> dict[str, Any]:
     Returns summary of which servers have working ACL auth
     and which need fallback methods.
     """
-    results = {
+    results: dict[str, Any] = {
         "servers_tested": 0,
         "acl_working": 0,
         "acl_failed": 0,
@@ -474,7 +471,7 @@ def test_acl_authentication_health() -> dict[str, Any]:
     servers = VirtualminServer.objects.filter(status="active")
 
     for server in servers:
-        results["servers_tested"] += 1  # type: ignore[operator]
+        results["servers_tested"] += 1
 
         with get_virtualmin_auth_manager(server) as auth_manager:
             health_results = auth_manager.health_check_all_methods()
@@ -489,10 +486,10 @@ def test_acl_authentication_health() -> dict[str, Any]:
             }
 
             if acl_result and acl_result.success:
-                results["acl_working"] += 1  # type: ignore[operator]
+                results["acl_working"] += 1
                 server_info["status"] = "acl_healthy"
             else:
-                results["acl_failed"] += 1  # type: ignore[operator]
+                results["acl_failed"] += 1
 
                 # Check if any fallback method works
                 fallback_working = any(
@@ -500,12 +497,12 @@ def test_acl_authentication_health() -> dict[str, Any]:
                 )
 
                 if fallback_working:
-                    results["fallback_working"] += 1  # type: ignore[operator]
+                    results["fallback_working"] += 1
                     server_info["status"] = "fallback_available"
                 else:
-                    results["completely_failed"] += 1  # type: ignore[operator]
+                    results["completely_failed"] += 1
                     server_info["status"] = "all_failed"
 
-            results["server_details"].append(server_info)  # type: ignore[attr-defined]
+            results["server_details"].append(server_info)
 
     return results

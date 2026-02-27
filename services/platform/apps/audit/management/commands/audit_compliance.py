@@ -332,7 +332,7 @@ class Command(BaseCommand):
         ).select_related("user", "content_type")
 
         # Filter by severity
-        events = [e for e in events if severity_order.index(e.severity) >= min_severity_idx]
+        filtered_events = [e for e in events if severity_order.index(e.severity) >= min_severity_idx]
 
         # Get formatter
         formatters = {
@@ -353,13 +353,13 @@ class Command(BaseCommand):
         # Export
         output_path = options["output"]
         with open(output_path, "w", encoding="utf-8") as f:
-            for event in events:
+            for event in filtered_events:
                 entry = siem._create_log_entry(event)
                 formatted = formatter.format(entry, config)
                 f.write(formatted + "\n")
 
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS(f"Exported {len(events)} events to {output_path}"))
+        self.stdout.write(self.style.SUCCESS(f"Exported {len(filtered_events)} events to {output_path}"))
         self.stdout.write(f"Format: {options['format'].upper()}")
         self.stdout.write(f"Period: {period_start.date()} to {period_end.date()}")
         self.stdout.write(f"Min Severity: {options['min_severity']}")

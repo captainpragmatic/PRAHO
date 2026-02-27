@@ -184,7 +184,7 @@ class ExternalServicePool:
     _lock = threading.Lock()
 
     # Default configuration for known services
-    SERVICE_CONFIGS: ClassVar[dict] = {
+    SERVICE_CONFIGS: ClassVar[dict[str, Any]] = {
         "virtualmin": {
             "pool_connections": 5,
             "pool_maxsize": 10,
@@ -210,6 +210,9 @@ class ExternalServicePool:
             "timeout": (10.0, 30.0),
         },
     }
+
+    _pools: dict[str, HTTPConnectionPool]
+    _pool_lock: threading.Lock
 
     def __new__(cls) -> ExternalServicePool:
         with cls._lock:
@@ -353,7 +356,7 @@ class SSHConnectionPool:
 
             self._paramiko = paramiko
         except ImportError:
-            self._paramiko = None
+            self._paramiko = None  # type: ignore[assignment]
             logger.warning("paramiko not available, SSH pooling disabled")
             return
 

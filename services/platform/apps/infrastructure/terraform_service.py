@@ -100,9 +100,11 @@ class TerraformService:
             deploy_dir.mkdir(parents=True, exist_ok=True)
 
             # Get settings
-            dns_zone = SettingsService.get_setting("node_deployment.dns_default_zone", "")
-            cloudflare_zone_id = SettingsService.get_setting("node_deployment.dns_cloudflare_zone_id", "")
-            state_backend = SettingsService.get_setting("node_deployment.terraform_state_backend", "local")
+            dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+            cloudflare_zone_id = str(SettingsService.get_setting("node_deployment.dns_cloudflare_zone_id", "") or "")
+            state_backend = str(
+                SettingsService.get_setting("node_deployment.terraform_state_backend", "local") or "local"
+            )
 
             # Get provider config
             provider_type = deployment.provider.provider_type

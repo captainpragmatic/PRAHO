@@ -99,7 +99,7 @@ class BaseUBLBuilder:
 
     def __init__(self, invoice: Invoice):
         self.invoice = invoice
-        self.root: etree._Element | None = None
+        self.root: etree._Element = None  # type: ignore[assignment]
         self._supplier: CompanyInfo | None = None
         self._customer: CompanyInfo | None = None
 
@@ -397,7 +397,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             "cac": NAMESPACES["cac"],
             "cbc": NAMESPACES["cbc"],
         }
-        self.root = etree.Element(f"{{{NAMESPACES['ubl']}}}Invoice", nsmap=nsmap)
+        self.root = etree.Element(f"{{{NAMESPACES['ubl']}}}Invoice", nsmap=nsmap)  # type: ignore[arg-type]
 
     def _add_document_metadata(self) -> None:
         """Add invoice document metadata."""
@@ -410,7 +410,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # Invoice ID (sequential number) - Mandatory
         self._add_cbc(self.root, "ID", self.invoice.number)
 
-        # Issue Date - Mandatory
+        # Issue Date - Mandatory (validated in _validate_invoice)
+        if self.invoice.issued_at is None:
+            raise ValueError("Invoice must have issued_at set for e-Factura XML generation")
         self._add_cbc(self.root, "IssueDate", self._format_date(self.invoice.issued_at.date()))
 
         # Due Date - Optional but recommended
@@ -537,10 +539,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         """Add TaxTotal element."""
         tax_total = self._add_cac(self.root, "TaxTotal")
 
-        # Total tax amount
-        tax_amount_cents = getattr(self.invoice, "tax_total_cents", None)
-        if tax_amount_cents is None:
-            tax_amount_cents = getattr(self.invoice, "tax_cents", 0)
+        # Total tax amount — use None-check, not `or`, so explicit zero is preserved
+        _tax = getattr(self.invoice, "tax_total_cents", None)
+        tax_amount_cents = int(_tax if _tax is not None else getattr(self.invoice, "tax_cents", 0))
         tax_amount = Decimal(tax_amount_cents) / 100
         tax_amount_elem = self._add_cbc(tax_total, "TaxAmount", self._format_amount(tax_amount))
         tax_amount_elem.set("currencyID", self.invoice.currency.code)
@@ -733,13 +734,15 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
             "cac": NAMESPACES["cac"],
             "cbc": NAMESPACES["cbc"],
         }
-        self.root = etree.Element(f"{{{NAMESPACES['cn']}}}CreditNote", nsmap=nsmap)
+        self.root = etree.Element(f"{{{NAMESPACES['cn']}}}CreditNote", nsmap=nsmap)  # type: ignore[arg-type]
 
     def _add_document_metadata(self) -> None:
         """Add credit note document metadata."""
         self._add_cbc(self.root, "CustomizationID", CIUS_RO_CUSTOMIZATION_ID)
         self._add_cbc(self.root, "ProfileID", PEPPOL_PROFILE_ID)
         self._add_cbc(self.root, "ID", self.invoice.number)
+        if self.invoice.issued_at is None:
+            raise ValueError("Invoice must have issued_at set for e-Factura XML generation")
         self._add_cbc(self.root, "IssueDate", self._format_date(self.invoice.issued_at.date()))
         self._add_cbc(self.root, "CreditNoteTypeCode", INVOICE_TYPE_CREDIT_NOTE)
 
@@ -801,9 +804,8 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         """Add TaxTotal element."""
         tax_total = self._add_cac(self.root, "TaxTotal")
 
-        tax_amount_cents = getattr(self.invoice, "tax_total_cents", None)
-        if tax_amount_cents is None:
-            tax_amount_cents = getattr(self.invoice, "tax_cents", 0)
+        _tax = getattr(self.invoice, "tax_total_cents", None)
+        tax_amount_cents = int(_tax if _tax is not None else getattr(self.invoice, "tax_cents", 0))
         tax_amount = Decimal(tax_amount_cents) / 100
         tax_amount_elem = self._add_cbc(tax_total, "TaxAmount", self._format_amount(tax_amount))
         tax_amount_elem.set("currencyID", self.invoice.currency.code)

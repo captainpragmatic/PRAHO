@@ -175,7 +175,7 @@ class HybridFlowAnalyzer:
             all_issues.extend(cross_ref_issues)
 
         # Filter by minimum severity
-        all_issues = [i for i in all_issues if i.severity >= self.config.min_severity]
+        all_issues = [i for i in all_issues if i.severity >= self.config.min_severity]  # type: ignore[operator]
 
         return self._build_result(all_issues, context, start_time)
 
@@ -439,7 +439,7 @@ class HybridFlowAnalyzer:
         }
 
 
-def analyze_code(  # noqa: PLR0911
+def analyze_code(
     source: str | Path,
     config: HybridAnalysisConfig | None = None,
 ) -> AnalysisResult:
@@ -500,8 +500,3 @@ def analyze_code(  # noqa: PLR0911
                 total_lines=len(source.splitlines()),
                 analysis_mode=AnalysisMode.HYBRID,
             )
-
-    return AnalysisResult(
-        errors=["Invalid source provided"],
-        analysis_mode=AnalysisMode.HYBRID,
-    )

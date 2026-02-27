@@ -80,13 +80,14 @@ class NodeRegistrationService:
 
                 # Create VirtualminServer record
                 server = VirtualminServer.objects.create(
+                    name=f"Node: {deployment.hostname}",
                     hostname=deployment.fqdn,
-                    ip_address=deployment.ipv4_address,
-                    port=10000,
+                    api_port=10000,
                     use_ssl=True,
-                    verify_ssl=False,  # Self-signed initially
-                    is_active=True,
-                    description=f"Auto-deployed node: {deployment.hostname}",
+                    ssl_verify=False,  # Self-signed initially
+                    status="active",
+                    api_username=admin_username,
+                    encrypted_api_password=b"",  # Stored in CredentialVault instead
                     max_domains=deployment.node_size.max_domains if deployment.node_size else 50,
                     max_bandwidth_gb=deployment.node_size.max_bandwidth_gb if deployment.node_size else 1000,
                 )
@@ -194,16 +195,16 @@ class NodeRegistrationService:
                         logger.warning(
                             "📝 [Registration] VirtualminServer has accounts, deactivating instead of deleting"
                         )
-                        server.is_active = False
-                        server.save(update_fields=["is_active", "updated_at"])
+                        server.status = "disabled"
+                        server.save(update_fields=["status", "updated_at"])
                     else:
                         server_id = server.id
                         server.delete()
                         logger.info(f"📝 [Registration] Deleted VirtualminServer(id={server_id})")
                 else:
                     # Just deactivate
-                    server.is_active = False
-                    server.save(update_fields=["is_active", "updated_at"])
+                    server.status = "disabled"
+                    server.save(update_fields=["status", "updated_at"])
                     logger.info(f"📝 [Registration] Deactivated VirtualminServer(id={server.id})")
 
                 return Ok(True)
@@ -234,10 +235,6 @@ class NodeRegistrationService:
         try:
             # Update fields that might have changed
             updates = []
-
-            if deployment.ipv4_address and server.ip_address != deployment.ipv4_address:
-                server.ip_address = deployment.ipv4_address
-                updates.append("ip_address")
 
             if deployment.fqdn and server.hostname != deployment.fqdn:
                 server.hostname = deployment.fqdn

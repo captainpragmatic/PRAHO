@@ -45,12 +45,13 @@ def _get_billing_data(
     invoice_service: InvoiceViewService, customer_id: str, user_id: int
 ) -> tuple[list[Any], dict[str, Any]]:
     """Get billing documents and invoice summary"""
-    invoices = invoice_service.get_customer_invoices(customer_id, user_id)
-    proformas = invoice_service.get_customer_proformas(customer_id, user_id)
-    invoice_summary = invoice_service.get_invoice_summary(customer_id, user_id)
+    cid = int(customer_id)
+    invoices = invoice_service.get_customer_invoices(cid, user_id)
+    proformas = invoice_service.get_customer_proformas(cid, user_id)
+    invoice_summary = invoice_service.get_invoice_summary(cid, user_id)
 
     # Recent documents (invoices and proformas combined): newest first, show 4
-    recent_documents = []
+    recent_documents: list[Any] = []
     for invoice in invoices[:4]:
         invoice.document_type = "invoice"
         recent_documents.append(invoice)
@@ -68,7 +69,7 @@ def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str |
     greeting_name = None
 
     try:
-        response = api_client.get_customer_details(customer_id, user_id)
+        response = api_client.get_customer_details(int(customer_id), user_id)
         if response and response.get("success") and response.get("customer"):
             customer_obj = DictAsObj(response["customer"])
             customers = [customer_obj]
@@ -97,10 +98,10 @@ def _get_ticket_data(ticket_api: TicketAPIClient, customer_id: str, user_id: int
     """Get recent tickets and open tickets count"""
     recent_tickets = []
     try:
-        ticket_response = ticket_api.get_customer_tickets(customer_id, user_id, TicketFilters(page=1))
+        ticket_response = ticket_api.get_customer_tickets(int(customer_id), user_id, TicketFilters(page=1))
         raw_tickets = ticket_response.get("results", [])[:4]
         recent_tickets = [DictAsObj(ticket) for ticket in raw_tickets]
-        tickets_summary = ticket_api.get_tickets_summary(customer_id, user_id)
+        tickets_summary = ticket_api.get_tickets_summary(int(customer_id), user_id)
         open_tickets_count = tickets_summary.get("open_tickets", len(recent_tickets))
     except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
         logger.debug(f"⚠️ [Dashboard] Failed to load ticket data: {e}")
@@ -112,8 +113,8 @@ def _get_ticket_data(ticket_api: TicketAPIClient, customer_id: str, user_id: int
 def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_id: int) -> int:
     """Get active services count"""
     try:
-        services_summary = services_api.get_services_summary(customer_id, user_id)
-        return services_summary.get("active_services", 0)
+        services_summary = services_api.get_services_summary(int(customer_id), user_id)
+        return int(services_summary.get("active_services", 0))
     except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
         logger.debug(f"⚠️ [Dashboard] Failed to load services summary: {e}")
         return 0
@@ -153,13 +154,13 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         invoice_service = InvoiceViewService()
         ticket_api = TicketAPIClient()
         services_api = ServicesAPIClient()
-        user_id = request.user.id
+        user_id = int(request.user.id)  # type: ignore[union-attr, arg-type]
 
         # Get all data using helper functions
-        recent_documents, invoice_summary = _get_billing_data(invoice_service, customer_id, user_id)
-        customers, greeting_name = _get_customer_data(customer_id, user_id)
-        recent_tickets, open_tickets_count = _get_ticket_data(ticket_api, customer_id, user_id)
-        active_services = _get_services_data(services_api, customer_id, user_id)
+        recent_documents, invoice_summary = _get_billing_data(invoice_service, str(customer_id), user_id)
+        customers, greeting_name = _get_customer_data(str(customer_id), user_id)
+        recent_tickets, open_tickets_count = _get_ticket_data(ticket_api, str(customer_id), user_id)
+        active_services = _get_services_data(services_api, str(customer_id), user_id)
 
         # Fallback for greeting name if not resolved - use generic greeting instead of email
         if not greeting_name:
@@ -214,7 +215,7 @@ def account_overview_view(request: HttpRequest) -> HttpResponse:
 
     try:
         # Get customer information directly from API
-        customer_details = api_client.get_customer_details(customer_id, request.user.id)
+        customer_details = api_client.get_customer_details(int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
         context["account_info"] = customer_details
         context["customers"] = [customer_details]  # Single customer view
 

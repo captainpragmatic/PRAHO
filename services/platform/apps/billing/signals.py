@@ -407,14 +407,14 @@ def store_original_invoice_values(sender: type[Invoice], instance: Invoice, **kw
         if instance.pk:
             try:
                 original = Invoice.objects.get(pk=instance.pk)
-                instance._original_invoice_values = {  # type: ignore[attr-defined]
+                instance._original_invoice_values = {
                     "status": original.status,
                     "total_cents": original.total_cents,
                     "due_at": original.due_at,
                     "efactura_sent": original.efactura_sent,
                 }
             except Invoice.DoesNotExist:
-                instance._original_invoice_values = {}  # type: ignore[attr-defined]
+                instance._original_invoice_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Invoice Signal] Failed to store original values: {e}")
 
@@ -430,7 +430,7 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
             # Generate proper invoice number
             from .services import InvoiceNumberingService
 
-            sequence = InvoiceNumberingService.get_or_create_sequence("default")  # type: ignore[attr-defined]
+            sequence = InvoiceNumberingService.get_or_create_sequence("default")
             new_number = sequence.get_next_number("INV")
 
             # Update without triggering signals again
@@ -656,11 +656,11 @@ def handle_proforma_invoice_conversion(
 
                     if result.is_ok():
                         invoice = result.unwrap()
-                        logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")  # type: ignore[attr-defined]
+                        logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")
 
                         # Link any related orders to the new invoice
                         if hasattr(instance, "orders") and instance.orders.exists():
-                            invoice.orders.set(instance.orders.all())  # type: ignore[attr-defined]
+                            invoice.orders.set(instance.orders.all())
 
                     else:
                         logger.error(f"🔥 [Proforma] Conversion failed: {result.error}")
@@ -1479,9 +1479,9 @@ def _schedule_payment_retry(payment: Payment) -> None:
     try:
         from apps.billing.services import PaymentRetryService
 
-        policy = PaymentRetryService.get_customer_retry_policy(payment.customer)  # type: ignore[attr-defined]
+        policy = PaymentRetryService.get_customer_retry_policy(payment.customer)
         if policy and policy.is_active:
-            PaymentRetryService.schedule_retry(payment, policy)  # type: ignore[attr-defined]
+            PaymentRetryService.schedule_retry(payment, policy)
             logger.info(f"🔄 [Payment] Retry scheduled for payment {payment.id}")
     except Exception as e:
         logger.exception(f"🔥 [Payment] Failed to schedule retry: {e}")
@@ -1508,7 +1508,7 @@ def _update_customer_invoice_history(invoice: Invoice, event_type: str) -> None:
     try:
         from apps.customers.services import CustomerAnalyticsService
 
-        CustomerAnalyticsService.record_invoice_event(  # type: ignore[attr-defined]
+        CustomerAnalyticsService.record_invoice_event(
             customer=invoice.customer,
             event_type=event_type,
             invoice_amount_cents=invoice.total_cents,
@@ -1552,7 +1552,7 @@ def _handle_overdue_service_suspension(invoice: Invoice) -> None:
 
         # Suspend services for overdue invoices (configurable business rule)
         for service in services:
-            result = ServiceManagementService.suspend_service(  # type: ignore[attr-defined]
+            result = ServiceManagementService.suspend_service(
                 service=service,
                 reason=f"Invoice {invoice.number} overdue",
                 suspend_immediately=False,  # Grace period

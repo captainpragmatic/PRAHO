@@ -146,6 +146,7 @@ def render_template_safely(template_content: str, context: dict[str, Any]) -> st
             value_truncated = True
 
     # Use Django's template engine for rendering
+    rendered: str
     try:
         template = Template(template_content)
         rendered = template.render(Context(sanitized_context))
@@ -196,7 +197,7 @@ class EmailSuppressionService:
         # Check cache first
         cached = cache.get(cache_key)
         if cached is not None:
-            return cached  # Returns True or False
+            return bool(cached)
 
         # Check database
         from apps.notifications.models import EmailSuppression  # noqa: PLC0415
@@ -338,8 +339,8 @@ class EmailService:
         from django.core.mail import EmailMultiAlternatives  # noqa: PLC0415
 
         try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or SettingsService.get_setting(
-                "company.email_noreply", "noreply@pragmatichost.com"
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or str(
+                SettingsService.get_setting("company.email_noreply", "noreply@pragmatichost.com")
             )
 
             email = EmailMultiAlternatives(
@@ -532,6 +533,7 @@ class EmailService:
 
         try:
             # Build email message
+            msg: EmailMessage
             if body_html:
                 msg = EmailMultiAlternatives(
                     subject=subject,
@@ -564,10 +566,10 @@ class EmailService:
             # and silently ignored with standard Django email backends
             try:
                 if tags:
-                    msg.tags = list(tags.keys())
-                    msg.metadata = tags
-                msg.track_opens = track_opens
-                msg.track_clicks = track_clicks
+                    msg.tags = list(tags.keys())  # type: ignore[attr-defined]
+                    msg.metadata = tags  # type: ignore[attr-defined]
+                msg.track_opens = track_opens  # type: ignore[attr-defined]
+                msg.track_clicks = track_clicks  # type: ignore[attr-defined]
             except AttributeError:
                 # Standard Django EmailMessage doesn't support these
                 pass
@@ -1345,7 +1347,7 @@ class NotificationService:
                 logger.warning(f"⚠️ [Notification] No email for customer {customer_id}")
                 return False
 
-            return EmailService.send_template_email(notification_type, recipient, context)
+            return bool(EmailService.send_template_email(notification_type, recipient, context))
 
         except Customer.DoesNotExist:
             logger.warning(f"⚠️ [Notification] Customer not found: {customer_id}")
@@ -1383,7 +1385,7 @@ class EmailPreferenceService:
         if "marketing" in preferences:
             customer.marketing_consent = preferences["marketing"]
         if "newsletters" in preferences:
-            customer.newsletter_consent = preferences["newsletters"]
+            customer.newsletter_consent = preferences["newsletters"]  # type: ignore[attr-defined]
         customer.save(update_fields=["marketing_consent", "newsletter_consent"])
 
         # Log the preference change
@@ -1448,7 +1450,7 @@ class EmailPreferenceService:
             if category == "marketing" or category is None:
                 customer.marketing_consent = False
             if category == "newsletter" or category is None:
-                customer.newsletter_consent = False
+                customer.newsletter_consent = False  # type: ignore[attr-defined]
 
             customer.save()
 

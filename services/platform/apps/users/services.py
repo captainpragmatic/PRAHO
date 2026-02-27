@@ -444,7 +444,7 @@ class SecureUserRegistrationService:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
                     tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
                     tax_profile = tax_profile_manager.filter(vat_number=validated_vat).first()
-                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
+                    customer = tax_profile.customer if tax_profile else None
                 except ValidationError:
                     pass
             elif identification_type == "registration_number":
@@ -453,7 +453,7 @@ class SecureUserRegistrationService:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
                     tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
                     tax_profile = tax_profile_manager.filter(registration_number=validated_cui).first()
-                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
+                    customer = tax_profile.customer if tax_profile else None
                 except ValidationError:
                     pass
 
@@ -824,7 +824,7 @@ class SecureCustomerUserService:
                     validated_vat = SecureInputValidator.validate_vat_number_romanian(identifier)
                     tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
                     tax_profile = tax_profile_manager.filter(vat_number=validated_vat).first()
-                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
+                    customer = tax_profile.customer if tax_profile else None
                 except ValidationError:
                     pass
             elif identification_type == "registration_number":
@@ -833,7 +833,7 @@ class SecureCustomerUserService:
                     validated_cui = SecureInputValidator.validate_cui_romanian(identifier)
                     tax_profile_manager = cast(Any, CustomerTaxProfile.objects)
                     tax_profile = tax_profile_manager.filter(registration_number=validated_cui).first()
-                    customer = tax_profile.customer if tax_profile else None  # type: ignore[attr-defined]
+                    customer = tax_profile.customer if tax_profile else None
                 except ValidationError:
                     pass
 

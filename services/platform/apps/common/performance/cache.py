@@ -15,7 +15,7 @@ import functools
 import hashlib
 import logging
 from collections.abc import Callable
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
 from django.core.cache import cache, caches
@@ -138,7 +138,7 @@ class CacheService:
         if value is None:
             value = factory()
             self.set(key, value, timeout)
-        return value
+        return cast(T, value)
 
     def delete_pattern(self, pattern: str) -> int:
         """
@@ -149,7 +149,7 @@ class CacheService:
         # Check if Redis backend is available
         if hasattr(self._cache, "delete_pattern"):
             try:
-                return self._cache.delete_pattern(f"{self._version}:{pattern}")
+                return cast(int, self._cache.delete_pattern(f"{self._version}:{pattern}"))
             except Exception as e:
                 logger.warning(f"Pattern delete failed for {pattern}: {e}")
         return 0
@@ -187,7 +187,7 @@ class CacheService:
     ) -> dict[str, Any] | None:
         """Get a cached model instance data."""
         key = f"{self.PREFIX_MODEL}:{model_class._meta.app_label}.{model_class._meta.model_name}:{pk}"
-        return self.get(key)
+        return cast("dict[str, Any] | None", self.get(key))
 
     def cache_queryset_count(
         self,
@@ -202,7 +202,7 @@ class CacheService:
             count = queryset.count()
             self.set(key, count, timeout)
 
-        return count
+        return cast(int, count)
 
     def _queryset_count_key(self, queryset: models.QuerySet[Any]) -> str:
         """Generate a cache key for a queryset count."""
@@ -262,7 +262,7 @@ def cached_model_property(
 
             cached_value = cache.get(key)
             if cached_value is not None:
-                return cached_value
+                return cast(T, cached_value)
 
             value = func(self, *args, **kwargs)
             cache.set(key, value, timeout)
@@ -277,7 +277,7 @@ def cached_queryset(
     timeout: int = CACHE_TIMEOUT_SHORT,
     key_prefix: str = "",
     max_size: int = 1000,
-) -> Callable[[Callable[..., models.QuerySet[T]]], Callable[..., list[T]]]:
+) -> Callable[[Callable[..., Any]], Callable[..., list[Any]]]:
     """
     Decorator to cache queryset results.
 
@@ -289,9 +289,9 @@ def cached_queryset(
             return Product.objects.filter(is_active=True)
     """
 
-    def decorator(func: Callable[..., models.QuerySet[T]]) -> Callable[..., list[T]]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., list[Any]]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> list[T]:
+        def wrapper(*args: Any, **kwargs: Any) -> list[Any]:
             # Create a unique cache key based on function name and arguments
             key_parts = [key_prefix or func.__name__]
 
@@ -316,7 +316,7 @@ def cached_queryset(
             cached_result = cache.get(cache_key)
             if cached_result is not None:
                 logger.debug(f"QuerySet cache HIT: {func.__name__}")
-                return cached_result
+                return cast("list[Any]", cached_result)
 
             # Execute queryset and cache results
             queryset = func(*args, **kwargs)

@@ -371,7 +371,7 @@ class EFacturaSettings:
             try:
                 from apps.settings.services import SettingsService  # noqa: PLC0415
 
-                self._settings_service = SettingsService
+                self._settings_service = SettingsService  # type: ignore[assignment]
             except ImportError:
                 logger.warning("SettingsService not available, using Django settings fallback")
                 self._settings_service = None

@@ -125,28 +125,28 @@ def capture_price_changes(sender: type[ProductPrice], instance: ProductPrice, **
         if instance.pk:
             # Get the old instance from database to compare pricing
             old_instance = ProductPrice.objects.get(pk=instance.pk)
-            instance._old_monthly_price_cents = old_instance.monthly_price_cents  # type: ignore[attr-defined]
-            instance._old_setup_cents = old_instance.setup_cents  # type: ignore[attr-defined]
-            instance._old_promo_price_cents = old_instance.promo_price_cents  # type: ignore[attr-defined]
-            instance._old_is_active = old_instance.is_active  # type: ignore[attr-defined]
-            instance._old_semiannual_discount_percent = old_instance.semiannual_discount_percent  # type: ignore[attr-defined]
-            instance._old_annual_discount_percent = old_instance.annual_discount_percent  # type: ignore[attr-defined]
+            instance._old_monthly_price_cents = old_instance.monthly_price_cents
+            instance._old_setup_cents = old_instance.setup_cents
+            instance._old_promo_price_cents = old_instance.promo_price_cents
+            instance._old_is_active = old_instance.is_active
+            instance._old_semiannual_discount_percent = old_instance.semiannual_discount_percent
+            instance._old_annual_discount_percent = old_instance.annual_discount_percent
         else:
             # New price - no old values
-            instance._old_monthly_price_cents = None  # type: ignore[attr-defined]
-            instance._old_setup_cents = None  # type: ignore[attr-defined]
-            instance._old_promo_price_cents = None  # type: ignore[attr-defined]
-            instance._old_is_active = None  # type: ignore[attr-defined]
-            instance._old_semiannual_discount_percent = None  # type: ignore[attr-defined]
-            instance._old_annual_discount_percent = None  # type: ignore[attr-defined]
+            instance._old_monthly_price_cents = None
+            instance._old_setup_cents = None
+            instance._old_promo_price_cents = None
+            instance._old_is_active = None
+            instance._old_semiannual_discount_percent = None
+            instance._old_annual_discount_percent = None
     except ProductPrice.DoesNotExist:
         logger.warning("🚨 [Products] ProductPrice %s not found in pre_save", instance.pk)
-        instance._old_monthly_price_cents = None  # type: ignore[attr-defined]
-        instance._old_setup_cents = None  # type: ignore[attr-defined]
-        instance._old_promo_price_cents = None  # type: ignore[attr-defined]
-        instance._old_is_active = None  # type: ignore[attr-defined]
-        instance._old_semiannual_discount_percent = None  # type: ignore[attr-defined]
-        instance._old_annual_discount_percent = None  # type: ignore[attr-defined]
+        instance._old_monthly_price_cents = None
+        instance._old_setup_cents = None
+        instance._old_promo_price_cents = None
+        instance._old_is_active = None
+        instance._old_semiannual_discount_percent = None
+        instance._old_annual_discount_percent = None
     except Exception as e:
         logger.error("🔥 [Products] Error capturing price changes: %s", e)
 

@@ -56,13 +56,13 @@ class ContactService:
         """Create customer address with versioning support."""
         # If creating a new current address of this type, mark existing ones as non-current
         if kwargs.get("is_current", True):
-            CustomerAddress.objects.filter(
+            CustomerAddress.objects.filter(  # type: ignore[misc]
                 customer=customer, address_type=address_data.address_type, is_current=True
             ).update(is_current=False)
 
             # Get the next version number
             last_version = (
-                CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(
+                CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(  # type: ignore[misc]
                     models.Max("version")
                 )["version__max"]
                 or 0
@@ -134,17 +134,17 @@ class ContactService:
     @staticmethod
     def get_current_addresses(customer: Customer) -> QuerySet[CustomerAddress]:
         """Get all current addresses for customer."""
-        return CustomerAddress.objects.filter(customer=customer, is_current=True)  # type: ignore[return-value]
+        return CustomerAddress.objects.filter(customer=customer, is_current=True)  # type: ignore[misc, return-value]
 
     @staticmethod
     def get_active_payment_methods(customer: Customer) -> QuerySet[CustomerPaymentMethod]:
         """Get active payment methods for customer."""
-        return CustomerPaymentMethod.objects.filter(customer=customer, is_active=True)  # type: ignore[return-value]
+        return CustomerPaymentMethod.objects.filter(customer=customer, is_active=True)  # type: ignore[misc, return-value]
 
     @staticmethod
     def get_recent_notes(customer: Customer, limit: int = 10) -> QuerySet[CustomerNote]:
         """Get recent notes for customer."""
-        return CustomerNote.objects.filter(customer=customer)[:limit]  # type: ignore[return-value]
+        return CustomerNote.objects.filter(customer=customer)[:limit]  # type: ignore[misc, return-value]
 
     @staticmethod
     def set_default_payment_method(
@@ -152,7 +152,7 @@ class ContactService:
     ) -> CustomerPaymentMethod:
         """Set a payment method as default for customer."""
         # Remove default from other methods
-        CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)
+        CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)  # type: ignore[misc]
 
         # Set this method as default
         payment_method.is_default = True

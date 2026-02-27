@@ -16,8 +16,9 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from django.core.cache import cache
 from django.db import transaction
@@ -68,7 +69,7 @@ class TaskResult:
     def duration_seconds(self) -> float | None:
         """Calculate task duration in seconds."""
         if self.started_at and self.completed_at:
-            return (self.completed_at - self.started_at).total_seconds()
+            return float((self.completed_at - self.started_at).total_seconds())
         return None
 
     def to_dict(self) -> dict[str, Any]:
@@ -230,7 +231,7 @@ class TaskProgressTracker:
             result=data.get("result"),
             error=data.get("error"),
             started_at=self._start_time,
-            completed_at=timezone.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
             progress=data.get("progress", 0),
             total_steps=data.get("total_steps", self.total_steps),
             current_step=data.get("current_step", ""),
@@ -238,7 +239,8 @@ class TaskProgressTracker:
 
     def _get_cache(self) -> dict[str, Any] | None:
         """Get cached progress data."""
-        return cache.get(self._cache_key)
+        result = cache.get(self._cache_key)
+        return cast("dict[str, Any] | None", result)
 
     def _update_cache(self, data: dict[str, Any]) -> None:
         """Update cached progress data."""
@@ -261,8 +263,8 @@ def get_task_status(task_id: str) -> TaskResult:
         status=TaskStatus(data.get("status", TaskStatus.PENDING.value)),
         result=data.get("result"),
         error=data.get("error"),
-        started_at=timezone.fromisoformat(data["started_at"]) if data.get("started_at") else None,
-        completed_at=timezone.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+        started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+        completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
         progress=data.get("progress", 0),
         total_steps=data.get("total_steps", 100),
         current_step=data.get("current_step", ""),
@@ -650,7 +652,7 @@ def cancel_scheduled_task(task_id: str) -> bool:
         from django_q.models import Schedule  # noqa: PLC0415
 
         deleted, _ = Schedule.objects.filter(name=task_id).delete()
-        return deleted > 0
+        return bool(deleted > 0)
 
     except ImportError:
         return False

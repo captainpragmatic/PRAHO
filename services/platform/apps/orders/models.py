@@ -460,7 +460,7 @@ class OrderItem(models.Model):
     @property
     def billing_period(self) -> str:
         """Get billing period from config (default: monthly)"""
-        return self.config.get("billing_period", "monthly")
+        return str(self.config.get("billing_period", "monthly"))
 
     @billing_period.setter
     def billing_period(self, value: str) -> None:

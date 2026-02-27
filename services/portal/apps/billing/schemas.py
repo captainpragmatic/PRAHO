@@ -6,9 +6,10 @@ NO DATABASE MODELS - API-only communication.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from django.utils import timezone
 
@@ -65,7 +66,7 @@ class Invoice:
     issued_at: datetime | None
     due_at: datetime | None
     created_at: datetime
-    updated_at: datetime
+    updated_at: datetime | None
     locked_at: datetime | None
     sent_at: datetime | None
     paid_at: datetime | None
@@ -136,7 +137,7 @@ class InvoiceSummary:
     paid_invoices: int
     total_amount_due_cents: int
     currency_code: str
-    recent_invoices: list[dict]
+    recent_invoices: list[dict[str, Any]]
 
     @property
     def total_amount_due_display(self) -> str:
@@ -183,11 +184,7 @@ class Proforma:
     valid_until: datetime
     created_at: datetime
     notes: str = ""
-    lines: list[ProformaLine] = None
-
-    def __post_init__(self) -> None:
-        if self.lines is None:
-            self.lines = []
+    lines: list[ProformaLine] = field(default_factory=list)
 
     @property
     def is_expired(self) -> bool:

@@ -60,7 +60,7 @@ class PaymentService:
 
             # Calculate total amount in cents (Romanian VAT included)
             amount_cents = order.total_cents
-            currency = order.currency or "RON"
+            currency = str(order.currency or "RON")
 
             logger.info(
                 f"💳 Creating payment intent for order {order.order_number} "
@@ -101,7 +101,7 @@ class PaymentService:
                     payment_intent_id = result.get("payment_intent_id", "")
                     client_secret = result.get("client_secret", "")
 
-                    payment = Payment.objects.create(
+                    payment = Payment.objects.create(  # type: ignore[misc]
                         invoice=None,  # Will be linked when order is processed
                         customer=order.customer,
                         payment_method=gateway,
@@ -223,7 +223,7 @@ class PaymentService:
                     payment_intent_id = result.get("payment_intent_id", "")
                     client_secret = result.get("client_secret", "")
 
-                    payment = Payment.objects.create(
+                    payment = Payment.objects.create(  # type: ignore[misc]
                         invoice=None,  # Will be linked when order is processed
                         customer=customer_obj,  # May be None for cross-service calls
                         payment_method=gateway,
@@ -544,7 +544,7 @@ class PaymentService:
         """
         logger.info("🔄 Processing recurring billing...")
 
-        results = {"processed": 0, "succeeded": 0, "failed": 0, "suspended": 0, "errors": []}
+        results: dict[str, Any] = {"processed": 0, "succeeded": 0, "failed": 0, "suspended": 0, "errors": []}
 
         try:
             # TODO: Query active subscriptions that need billing

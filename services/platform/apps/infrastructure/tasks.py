@@ -28,7 +28,7 @@ def deploy_node_task(
     credentials: dict[str, str],
     cloudflare_api_token: str | None = None,
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to deploy a node.
 
@@ -92,7 +92,7 @@ def destroy_node_task(
     credentials: dict[str, str],
     cloudflare_api_token: str | None = None,
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to destroy a node.
 
@@ -150,7 +150,7 @@ def retry_deployment_task(
     credentials: dict[str, str],
     cloudflare_api_token: str | None = None,
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to retry a failed deployment.
 
@@ -207,7 +207,7 @@ def retry_deployment_task(
     }
 
 
-def validate_node_task(deployment_id: int) -> dict:
+def validate_node_task(deployment_id: int) -> dict[str, Any]:
     """
     Async task to validate a deployed node.
 
@@ -279,7 +279,7 @@ def validate_node_task(deployment_id: int) -> dict:
     }
 
 
-def bulk_validate_nodes_task() -> dict:
+def bulk_validate_nodes_task() -> dict[str, Any]:
     """
     Async task to validate all active deployed nodes.
 
@@ -348,7 +348,7 @@ def bulk_validate_nodes_task() -> dict:
     }
 
 
-def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict:
+def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     """
     Async task to clean up old failed deployments.
 
@@ -379,7 +379,7 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict:
     errors = []
 
     terraform_base = Path(
-        SettingsService.get_setting("node_deployment.terraform_state_path", "/var/lib/praho/terraform")
+        str(SettingsService.get_setting("node_deployment.terraform_state_path", "/var/lib/praho/terraform"))
     )
 
     for deployment in failed_deployments:
@@ -417,7 +417,7 @@ def upgrade_node_task(
     new_size_id: int,
     credentials: dict[str, str],
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to upgrade a node to a new size.
 
@@ -497,9 +497,9 @@ def upgrade_node_task(
 def maintenance_task(
     deployment_id: int,
     playbooks: list[str] | None = None,
-    extra_vars: dict | None = None,
+    extra_vars: dict[str, Any] | None = None,
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to run maintenance playbooks on a node.
 
@@ -577,7 +577,7 @@ def stop_node_task(
     deployment_id: int,
     credentials: dict[str, str],
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to stop (power off) a node.
 
@@ -649,7 +649,7 @@ def start_node_task(
     deployment_id: int,
     credentials: dict[str, str],
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to start (power on) a node.
 
@@ -721,7 +721,7 @@ def reboot_node_task(
     deployment_id: int,
     credentials: dict[str, str],
     user_id: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Async task to reboot a node.
 
@@ -933,7 +933,7 @@ def queue_upgrade_node(
 def queue_maintenance(
     deployment_id: int,
     playbooks: list[str] | None = None,
-    extra_vars: dict | None = None,
+    extra_vars: dict[str, Any] | None = None,
     user_id: int | None = None,
 ) -> str:
     """
@@ -1141,7 +1141,7 @@ def lifecycle_complete_hook(task: Any) -> None:
 # ===============================================================================
 
 
-def calculate_daily_costs_task() -> dict:
+def calculate_daily_costs_task() -> dict[str, Any]:
     """
     Scheduled task to calculate costs for the previous day.
 
@@ -1185,7 +1185,7 @@ def calculate_daily_costs_task() -> dict:
     }
 
 
-def calculate_monthly_costs_task(year: int, month: int) -> dict:
+def calculate_monthly_costs_task(year: int, month: int) -> dict[str, Any]:
     """
     Task to calculate costs for a specific month.
 
@@ -1232,7 +1232,7 @@ def calculate_monthly_costs_task(year: int, month: int) -> dict:
     }
 
 
-def generate_cost_report_task(year: int, month: int) -> dict:
+def generate_cost_report_task(year: int, month: int) -> dict[str, Any]:
     """
     Generate a cost report for a specific month.
 

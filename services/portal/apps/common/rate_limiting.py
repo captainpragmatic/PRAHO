@@ -8,7 +8,7 @@ import os
 import random
 import time
 from collections.abc import Callable
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -211,10 +211,12 @@ class AuthenticationRateLimitMiddleware:
                 return email
 
             # Try JSON data
-            if hasattr(request, "json") and request.json:
-                email = request.json.get("email", "").lower().strip()
-                if email:
-                    return email
+            if hasattr(request, "json"):
+                json_data = getattr(request, "json", None)
+                if json_data:
+                    json_email: str = json_data.get("email", "").lower().strip()
+                    if json_email:
+                        return json_email
 
             return None
         except Exception:
@@ -236,9 +238,9 @@ class AuthenticationRateLimitMiddleware:
                 # Take first IP if comma-separated
                 ip = forwarded_ip.split(",")[0].strip()
                 if ip and ip != "unknown":
-                    return ip
+                    return cast(str, ip)
 
-        return request.META.get("REMOTE_ADDR", "0.0.0.0")
+        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
 
     def _uniform_response_delay(self, start_time: float) -> None:
         """
@@ -365,6 +367,6 @@ class APIRateLimitMiddleware:
             if forwarded_ip:
                 ip = forwarded_ip.split(",")[0].strip()
                 if ip and ip != "unknown":
-                    return ip
+                    return cast(str, ip)
 
-        return request.META.get("REMOTE_ADDR", "0.0.0.0")
+        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))

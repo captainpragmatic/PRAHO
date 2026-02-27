@@ -37,7 +37,7 @@ from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 try:
-    import boto3  # type: ignore
+    import boto3
 except ImportError:
     boto3 = None
 
@@ -481,7 +481,8 @@ class VirtualminBackupService:
     def _get_backup_bucket(self) -> str:
         """Get S3 backup bucket name."""
         if self._backup_bucket is None:
-            self._backup_bucket = SettingsService.get_setting("backup.s3_bucket_name")
+            bucket_value = SettingsService.get_setting("backup.s3_bucket_name")
+            self._backup_bucket = str(bucket_value) if bucket_value is not None else None  # type: ignore[assignment]
 
             if self._backup_bucket is None:
                 raise ValueError("S3 backup bucket name is not configured")

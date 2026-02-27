@@ -152,7 +152,7 @@ def _validate_financial_document_access(
     return None
 
 
-def _validate_financial_document_access_with_redirect(  # noqa: PLR0912
+def _validate_financial_document_access_with_redirect(
     request: HttpRequest, document: Invoice | ProformaInvoice, action: str = "view"
 ) -> None | HttpResponseRedirect:
     """
@@ -179,11 +179,9 @@ def _validate_financial_document_access_with_redirect(  # noqa: PLR0912
                 redirect_response = HttpResponseRedirect(reverse("billing:invoice_list"))
         else:
             # Already a response (e.g., redirect), pass it through
-            redirect_response = result  # type: ignore[assignment]
+            redirect_response = result
     except PermissionDenied:
-        if request is None or document is None:
-            redirect_response = HttpResponseRedirect(reverse("users:login"))  # type: ignore[unreachable]
-        elif not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
+        if not hasattr(request, "user") or not isinstance(request.user, User) or not request.user.is_authenticated:
             login_url = reverse("users:login")
             full_path_getter = getattr(request, "get_full_path", None)
             if callable(full_path_getter):
@@ -219,7 +217,7 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
     elif isinstance(accessible_customers, list):
         return [customer.id for customer in accessible_customers]
     else:
-        return []
+        return []  # type: ignore[unreachable]
 
 
 @billing_staff_required
@@ -423,7 +421,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         ]
 
         # Sort by creation date (newest first)
-        proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)  # type: ignore[arg-type,return-value]
+        proforma_documents.sort(key=lambda x: x["created_at"], reverse=True)  # type: ignore[arg-type, return-value]
 
         # ⚡ PERFORMANCE: Paginate using DEFAULT_PAGE_SIZE
         paginator = Paginator(proforma_documents, DEFAULT_PAGE_SIZE)
@@ -742,8 +740,8 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "proforma": proforma,
         "lines": lines,
-        "can_edit": can_edit_proforma(request.user, proforma),
-        "can_convert": can_edit_proforma(request.user, proforma),  # Only staff can convert
+        "can_edit": can_edit_proforma(request.user, proforma),  # type: ignore[arg-type]
+        "can_convert": can_edit_proforma(request.user, proforma),  # type: ignore[arg-type]
         "is_staff_user": request.user.is_staff,
         "document_type": "proforma",
     }

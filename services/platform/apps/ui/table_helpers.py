@@ -208,6 +208,3 @@ def _get_order_status_variant(status: str) -> str:
         "refunded": "secondary",
     }
     return variant_map.get(status, "secondary")
-
-
-# TODO: Implement additional table data preparation helpers for other data types

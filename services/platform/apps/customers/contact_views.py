@@ -49,7 +49,7 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
 
             # Handle current address versioning
             address_type = address.address_type
-            existing_current = CustomerAddress.objects.filter(
+            existing_current = CustomerAddress.objects.filter(  # type: ignore[misc]
                 customer=customer, address_type=address_type, is_current=True
             ).first()
 

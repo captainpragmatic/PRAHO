@@ -4,7 +4,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from django.utils import timezone
 
@@ -63,7 +63,7 @@ class TicketAPIClient(PlatformAPIClient):
             filters = TicketFilters()
 
         try:
-            request_data = {
+            request_data: dict[str, Any] = {
                 "customer_id": customer_id,
                 "user_id": user_id,
                 "page": filters.page,
@@ -123,7 +123,7 @@ class TicketAPIClient(PlatformAPIClient):
             logger.error(f"🔥 [Tickets API] Error retrieving ticket {ticket_id} for customer {customer_id}: {e}")
             raise
 
-    def create_ticket(self, customer_id: int, user_id: int, request: TicketCreateRequest) -> dict[str, Any]:
+    def create_ticket(self, customer_id: int, user_id: int, request: TicketCreateRequest) -> dict[str, Any]:  # type: ignore[override]
         """
         Create a new support ticket for customer.
 
@@ -168,7 +168,7 @@ class TicketAPIClient(PlatformAPIClient):
             if response.get("success") and "data" in response and "ticket" in response["data"]:
                 ticket_data = response["data"]["ticket"]
                 logger.info(f"✅ [Tickets API] Created ticket {ticket_data.get('id')} for customer {customer_id}")
-                return ticket_data
+                return cast(dict[str, Any], ticket_data)
             else:
                 logger.error(f"🔥 [Tickets API] Unexpected response format: {response}")
                 raise PlatformAPIError(f"Unexpected response format: {response}")
@@ -178,7 +178,7 @@ class TicketAPIClient(PlatformAPIClient):
             raise
 
     def add_ticket_reply(
-        self, customer_id: int, user_id: int, ticket_id: int, message: str, attachments: list | None = None
+        self, customer_id: int, user_id: int, ticket_id: int, message: str, attachments: list[Any] | None = None
     ) -> dict[str, Any]:
         """
         Add customer reply to existing ticket.
@@ -230,7 +230,7 @@ class TicketAPIClient(PlatformAPIClient):
             response = self._make_request("POST", f"/tickets/{ticket_id}/reply/", data=data)
 
             logger.info(f"✅ [Tickets API] Retrieved replies for ticket {ticket_id} for customer {customer_id}")
-            return response.get("replies", [])
+            return cast(list[dict[str, Any]], response.get("replies", []))
 
         except PlatformAPIError as e:
             logger.error(
@@ -256,7 +256,7 @@ class TicketAPIClient(PlatformAPIClient):
             if response.get("success") and "data" in response:
                 summary_data = response["data"]
                 logger.info(f"✅ [Tickets API] Retrieved ticket summary for customer {customer_id}")
-                return summary_data
+                return cast(dict[str, Any], summary_data)
             else:
                 logger.warning(f"⚠️ [Tickets API] Unexpected summary response format: {response}")
                 return {

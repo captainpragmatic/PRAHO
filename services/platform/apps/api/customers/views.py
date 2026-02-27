@@ -58,7 +58,7 @@ class CustomerSearchViewSet(ReadOnlyAPIViewSet):
         customers = user.get_accessible_customers()
 
         # Handle both QuerySet and list return types
-        if hasattr(customers, "filter"):  # QuerySet
+        if isinstance(customers, QuerySet):
             return customers
         elif customers:  # List
             customer_ids = [c.id for c in customers]
@@ -590,7 +590,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 
         # Add optional expansions if requested
         if includes:
-            meta = {}
+            meta: dict[str, Any] = {}
 
             # Add membership role for requesting user
             if "membership" in includes:
@@ -605,12 +605,10 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 
             # Add stats if requested (cheap aggregates)
             if "stats" in includes:
-                # TODO: Replace with actual service/ticket/invoice counts from related models
-                # For now, return placeholder values
                 meta["stats"] = {
-                    "services": 0,  # customer.services.filter(status='active').count()
-                    "open_tickets": 0,  # customer.tickets.filter(status__in=['open', 'in_progress']).count()
-                    "outstanding_invoices": 0,  # customer.invoices.filter(status='pending').count()
+                    "services": customer.services.filter(status="active").count(),
+                    "open_tickets": customer.tickets.filter(status__in=["open", "in_progress"]).count(),
+                    "outstanding_invoices": customer.invoices.filter(status="pending").count(),
                 }
 
             # Add billing profile if requested (already included in serializer, but could be conditional)

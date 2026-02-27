@@ -18,6 +18,7 @@ Note: Unit tests for individual functions are in test_provider_config.py
 
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -48,7 +49,7 @@ User = get_user_model()
 # =============================================================================
 
 
-def create_test_infrastructure(provider_type: str = "hetzner") -> dict:
+def create_test_infrastructure(provider_type: str = "hetzner") -> dict[str, Any]:
     """Create test infrastructure objects for a specific provider."""
     import uuid
 
@@ -120,7 +121,7 @@ def create_test_infrastructure(provider_type: str = "hetzner") -> dict:
     }
 
 
-def create_test_deployment(infra: dict, **kwargs) -> NodeDeployment:
+def create_test_deployment(infra: dict[str, Any], **kwargs) -> NodeDeployment:
     """Create a test deployment with default values."""
     defaults = {
         "hostname": "prd-sha-het-us-tst1-001",
@@ -320,7 +321,7 @@ class TestTerraformServiceIntegration(TestCase):
         for provider_type in PROVIDER_CONFIG.keys():
             with self.subTest(provider=provider_type):
                 config = get_provider_config(provider_type)
-                self.assertIsNotNone(config, f"No config for {provider_type}")
+                assert config is not None, f"No config for {provider_type}"
 
                 tf_vars = config.get("terraform_vars", {})
                 self.assertIn(
@@ -361,6 +362,7 @@ class TestCredentialFlowIntegration(TestCase):
 
         # Verify the dict works with provider_config functions
         config = get_provider_config("hetzner")
+        assert config is not None
         credential_key = config["credential_key"]
 
         # Should be able to get token by provider-specific key
@@ -429,10 +431,7 @@ class TestMultiProviderIntegration(TestCase):
         for provider_type, config in PROVIDER_CONFIG.items():
             with self.subTest(provider=provider_type):
                 module_path = get_terraform_module_path(provider_type, base_path)
-                self.assertIsNotNone(
-                    module_path,
-                    f"No terraform module path for {provider_type}"
-                )
+                assert module_path is not None, f"No terraform module path for {provider_type}"
                 self.assertIn(
                     config["terraform_module"],
                     module_path,
@@ -747,7 +746,9 @@ class TestErrorHandlingIntegration(TestCase):
             level="ERROR",
         )
         self.assertGreater(error_logs.count(), 0, "No error logs created")
-        self.assertEqual(error_logs.first().message, "Test error message")
+        first_log = error_logs.first()
+        assert first_log is not None
+        self.assertEqual(first_log.message, "Test error message")
 
     def test_invalid_provider_returns_appropriate_error(self):
         """

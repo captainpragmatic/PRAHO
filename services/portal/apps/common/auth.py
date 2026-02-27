@@ -47,18 +47,18 @@ class APIUser:
 
     def get_full_name(self) -> str:
         """Return full name."""
-        return f"{self.first_name} {self.last_name}".strip() or self.email
+        return f"{self.first_name} {self.last_name}".strip() or str(self.email)
 
     def get_short_name(self) -> str:
         """Return first name or email."""
-        return self.first_name or self.email
+        return str(self.first_name or self.email)
 
     def get_username(self) -> str:
         """Return email as username."""
-        return self.email
+        return str(self.email)
 
     def __str__(self) -> str:
-        return self.email
+        return str(self.email)
 
 
 class PlatformAPIAuthenticationBackend(BaseBackend):
@@ -67,7 +67,7 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
     Returns APIUser instance on successful authentication.
     """
 
-    def authenticate(
+    def authenticate(  # type: ignore[override]
         self, request: HttpRequest | None, username: str | None = None, password: str | None = None, **kwargs: Any
     ) -> APIUser | None:
         """
@@ -86,7 +86,7 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
 
         try:
             # Call Platform API to authenticate
-            user_data = api_client.authenticate_user(username, password)
+            user_data = api_client.authenticate_user(username, password)  # type: ignore[attr-defined]
 
             if user_data:
                 logger.info(f"✅ [Auth] Successfully authenticated user {username}")
@@ -99,13 +99,13 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
             logger.error(f"🔥 [Auth] Platform API error during authentication: {e}")
             return None
 
-    def get_user(self, user_id: Any) -> APIUser | None:
+    def get_user(self, user_id: Any) -> APIUser | None:  # type: ignore[override]
         """
         Get user by ID from Platform API.
         Called by Django to refresh user data from session.
         """
         try:
-            user_data = api_client.get_user_by_id(user_id)
+            user_data = api_client.get_user_by_id(user_id)  # type: ignore[attr-defined]
 
             if user_data:
                 return APIUser(user_data)

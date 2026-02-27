@@ -180,7 +180,7 @@ class ServiceGroupService:
             if not services.exists():
                 return Err(f"No services found for group {group_id}")
 
-            results = {"total": services.count(), "processed": 0, "errors": []}
+            results: dict[str, Any] = {"total": services.count(), "processed": 0, "errors": []}
 
             for service in services:
                 try:

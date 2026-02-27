@@ -6,8 +6,8 @@ to ensure DRY compliance and easy maintenance.
 """
 
 import logging
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any
 
 from django.conf import settings
 
@@ -106,7 +106,7 @@ def get_invoice_payment_terms_days() -> int:
     try:
         from apps.settings.services import SettingsService  # noqa: PLC0415
 
-        value = SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
+        value: int = SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
         return max(1, value)
     except Exception:
         logger.warning("Failed to read invoice_payment_terms_days from SettingsService, using fallback", exc_info=True)
@@ -285,7 +285,7 @@ def is_eu_country(country_code: str | None) -> bool:
     return country_code.upper() in EU_COUNTRY_CODES
 
 
-def get_payment_due_date(issue_date: object = None) -> Any:
+def get_payment_due_date(issue_date: datetime | None = None) -> datetime:
     """
     Calculate payment due date based on issue date and configured terms.
 
@@ -295,8 +295,6 @@ def get_payment_due_date(issue_date: object = None) -> Any:
     Returns:
         datetime: Due date
     """
-    from datetime import timedelta  # noqa: PLC0415
-
     from django.utils import timezone  # noqa: PLC0415
 
     if issue_date is None:

@@ -35,7 +35,7 @@ class Command(BaseCommand):
     help = "Run audit data integrity checks and file integrity monitoring"
 
     # Check types supported
-    CHECK_TYPES: ClassVar[list] = [
+    CHECK_TYPES: ClassVar[list[str]] = [
         "hash_verification",
         "sequence_check",
         "gdpr_compliance",
@@ -43,7 +43,7 @@ class Command(BaseCommand):
     ]
 
     # Period shortcuts
-    PERIOD_MAP: ClassVar[dict] = {
+    PERIOD_MAP: ClassVar[dict[str, timedelta]] = {
         "1h": timedelta(hours=1),
         "6h": timedelta(hours=6),
         "12h": timedelta(hours=12),

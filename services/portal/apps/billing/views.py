@@ -3,6 +3,7 @@
 # ===============================================================================
 
 import logging
+from typing import Any
 
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -46,21 +47,19 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         force_sync = request.GET.get("sync") == "true"
 
         # Get both invoices and proformas from service
-        documents = []
+        documents: list[Any] = []
+        user_id = int(request.user.id)  # type: ignore[union-attr, arg-type]
+        cid = int(customer_id)  # type: ignore[arg-type]
 
         if doc_type in ["all", "invoice"]:
-            invoices = invoice_service.get_customer_invoices(
-                customer_id=customer_id, user_id=request.user.id, force_sync=force_sync
-            )
+            invoices = invoice_service.get_customer_invoices(customer_id=cid, user_id=user_id, force_sync=force_sync)
             # Add document type to each invoice
             for invoice in invoices:
                 invoice.document_type = "invoice"
             documents.extend(invoices)
 
         if doc_type in ["all", "proforma"]:
-            proformas = invoice_service.get_customer_proformas(
-                customer_id=customer_id, user_id=request.user.id, force_sync=force_sync
-            )
+            proformas = invoice_service.get_customer_proformas(customer_id=cid, user_id=user_id, force_sync=force_sync)
             # Add document type to each proforma
             for proforma in proformas:
                 proforma.document_type = "proforma"
@@ -77,7 +76,10 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         documents.sort(key=lambda x: x.created_at, reverse=True)
 
         # Simple pagination (could be enhanced)
-        page = max(1, int(request.GET.get("page", 1)))
+        try:
+            page = max(1, int(request.GET.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
         per_page = 20
         total_documents = len(documents)
         start_index = (page - 1) * per_page
@@ -199,7 +201,7 @@ def billing_dashboard_widget(request: HttpRequest) -> JsonResponse:
         invoice_service = InvoiceViewService()
 
         # Get invoice summary
-        summary = invoice_service.get_invoice_summary(customer_id, request.user.id)
+        summary = invoice_service.get_invoice_summary(int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
 
         # Format amounts for display
         if summary["total_amount_due"] > 0:
@@ -252,7 +254,7 @@ def sync_invoices_action(request: HttpRequest) -> JsonResponse:
         sync_service = BillingDataSyncService()
 
         # Force sync from platform
-        synced_invoices = sync_service.sync_customer_invoices(customer_id, request.user.id)
+        synced_invoices = sync_service.sync_customer_invoices(int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
 
         messages.success(request, _(f"Successfully synced {len(synced_invoices)} invoices."))
 
@@ -294,7 +296,7 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str) -> HttpRespons
         invoice_service = InvoiceViewService()
 
         # Get PDF data from platform API
-        pdf_data = invoice_service.get_invoice_pdf(invoice_number, customer_id, request.user.id)
+        pdf_data = invoice_service.get_invoice_pdf(invoice_number, int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
 
         # Create HTTP response with PDF
         response = HttpResponse(pdf_data, content_type="application/pdf")
@@ -327,7 +329,7 @@ def proforma_pdf_export(request: HttpRequest, proforma_number: str) -> HttpRespo
         invoice_service = InvoiceViewService()
 
         # Get PDF data from platform API
-        pdf_data = invoice_service.get_proforma_pdf(proforma_number, customer_id, request.user.id)
+        pdf_data = invoice_service.get_proforma_pdf(proforma_number, int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
 
         # Create HTTP response with PDF
         response = HttpResponse(pdf_data, content_type="application/pdf")

@@ -405,19 +405,28 @@ def generate_integrity_report(period_days: int = 30) -> dict[str, Any]:
         "critical_events": [],
     }
 
+    by_status: dict[str, int] = {}
+    by_type: dict[str, dict[str, int]] = {}
+    total_issues = 0
+
     # Aggregate by status
     for status in ["healthy", "warning", "compromised"]:
         count = checks.filter(status=status).count()
-        report["by_status"][status] = count
+        by_status[status] = count
 
     # Aggregate by type
     for check_type in ["hash_verification", "sequence_check", "gdpr_compliance", "file_integrity"]:
         type_checks = checks.filter(check_type=check_type)
-        report["by_type"][check_type] = {
+        type_entry = {
             "count": type_checks.count(),
             "issues": sum(c.issues_found for c in type_checks),
         }
-        report["total_issues"] += report["by_type"][check_type]["issues"]
+        by_type[check_type] = type_entry
+        total_issues += type_entry["issues"]
+
+    report["by_status"] = by_status
+    report["by_type"] = by_type
+    report["total_issues"] = total_issues
 
     # Get critical events
     critical_checks = checks.filter(status="compromised").order_by("-checked_at")[:10]

@@ -48,7 +48,7 @@ def get_client_ip(request: HttpRequest) -> str:
     ]
 
     for header in forwarded_headers:
-        forwarded_ip = request.META.get(header)
+        forwarded_ip: str | None = request.META.get(header)
         if forwarded_ip:
             # Take first IP if comma-separated list
             ip = forwarded_ip.split(",")[0].strip()
@@ -56,7 +56,7 @@ def get_client_ip(request: HttpRequest) -> str:
                 return ip
 
     # Fall back to direct connection IP
-    return request.META.get("REMOTE_ADDR", "0.0.0.0")
+    return str(request.META.get("REMOTE_ADDR", "0.0.0.0"))
 
 
 def _is_valid_ip(ip: str) -> bool:
@@ -108,13 +108,13 @@ class PriceSealingService:
                     "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
                     "Configure PRICE_SEALING_SECRET environment variable for production deployment."
                 )
-                return settings.SECRET_KEY
+                return str(settings.SECRET_KEY)
 
         # Validate secret key length for security
         if len(price_sealing_secret) < MIN_SECRET_LENGTH:
             raise ValidationError(_("PRICE_SEALING_SECRET must be at least 32 characters long for security"))
 
-        return price_sealing_secret
+        return str(price_sealing_secret)
 
     @staticmethod
     def seal_price(price_data: PriceData, client_ip: str, timestamp: float | None = None) -> str:
@@ -193,7 +193,7 @@ class PriceSealingService:
                 raise ValidationError(_("Price token signature invalid - possible tampering detected"))
 
             # Parse price data
-            price_data = json.loads(payload_json)
+            price_data: dict[str, Any] = json.loads(payload_json)
 
             # Validate timestamp (prevent replay attacks)
             token_timestamp = float(price_data.get("timestamp", 0))

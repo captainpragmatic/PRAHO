@@ -469,7 +469,7 @@ class SubscriptionService:
             status="issued",
             issued_at=timezone.now(),
             due_at=timezone.now() + timedelta(days=7),
-            bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",
+            bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
             bill_to_email=subscription.customer.primary_email or "",
             bill_to_country="RO",
             meta={
@@ -808,7 +808,7 @@ class RecurringBillingService:
                             result["payments_failed"] += 1
                             subscription.mark_payment_failed()
                             result["errors"].append(
-                                f"Payment failed for {subscription.subscription_number}: {payment_result.error}"
+                                f"Payment failed for {subscription.subscription_number}: {payment_result.error}"  # type: ignore[union-attr]
                             )
                     else:
                         # No payment method, just renew (manual payment expected)
@@ -816,7 +816,7 @@ class RecurringBillingService:
 
                 else:
                     result["errors"].append(
-                        f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"
+                        f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"  # type: ignore[union-attr]
                     )
 
             except Exception as e:
@@ -864,7 +864,7 @@ class RecurringBillingService:
                 status="issued",
                 issued_at=timezone.now(),
                 due_at=timezone.now() + timedelta(days=14),
-                bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",
+                bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
                 bill_to_email=subscription.customer.primary_email or "",
                 bill_to_country="RO",
                 meta={

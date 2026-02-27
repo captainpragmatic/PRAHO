@@ -535,7 +535,7 @@ class CouponService:
         discount_result = cls.calculate_discount(locked_coupon, order, items=cached_items)
 
         # Create redemption record
-        redemption = CouponRedemption.objects.create(
+        redemption = CouponRedemption.objects.create(  # type: ignore[misc]
             coupon=locked_coupon,
             order=order,
             customer=customer,
@@ -900,7 +900,7 @@ class PromotionRuleService:
             percent = Decimal(str(applicable_tier.get("percent", 0)))
             return int(base_amount_cents * percent / 100)
         else:
-            return applicable_tier.get("amount_cents", 0)
+            return int(applicable_tier.get("amount_cents", 0))
 
 
 # ===============================================================================

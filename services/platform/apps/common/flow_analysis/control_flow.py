@@ -422,7 +422,7 @@ class ControlFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             for stmt in ast.walk(node):
                 if isinstance(stmt, ast.Assign):
                     for target in stmt.targets:
-                        if isinstance(target, ast.Name) and target.name == target_name:
+                        if isinstance(target, ast.Name) and target.name == target_name:  # type: ignore[attr-defined]
                             location = CodeLocation.from_ast_node(stmt, self.context.file_path)
                             self.add_issue(
                                 category=IssueCategory.LOOP_INVARIANT,

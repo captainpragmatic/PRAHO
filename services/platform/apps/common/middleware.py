@@ -38,7 +38,7 @@ from apps.common.logging import clear_request_id, set_request_id  # noqa: E402
 try:
     from apps.users.services import SessionSecurityService
 except ImportError:
-    SessionSecurityService = None  # type: ignore[assignment,misc]
+    SessionSecurityService = None
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -277,7 +277,7 @@ class GDPRComplianceMiddleware:
         # Track consent for cookies and data processing
         if not request.session.get("gdpr_consent_shown"):
             # Mark that GDPR banner should be shown
-            request.gdpr_banner_required = True  # type: ignore[attr-defined]
+            request.gdpr_banner_required = True
             request.session["gdpr_consent_shown"] = True
 
         response = self.get_response(request)
@@ -447,7 +447,7 @@ class PortalServiceHMACMiddleware:
 
             # Build canonical string and verify signature
             if not error_msg:
-                method = request.method.upper()
+                method = request.method.upper() if request.method else ""
                 full_path = request.get_full_path()
                 parsed = urllib.parse.urlsplit(full_path)
                 query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -540,7 +540,7 @@ class PortalServiceHMACMiddleware:
                     and any(request.path.startswith(p) for p in STAFF_SESSION_ALLOWED_PREFIXES)
                 ):
                     logger.debug(
-                        f"🔓 [HMAC Auth] Allowing session-authenticated staff user {request.user.email} for {request.path}"
+                        f"🔓 [HMAC Auth] Allowing session-authenticated staff user {getattr(request.user, 'email', '')} for {request.path}"
                     )
                     return self.get_response(request)
 
@@ -731,6 +731,3 @@ class StaffOnlyPlatformMiddleware:
                 request, _("❌ Customers cannot access the platform. Please use the customer portal instead.")
             )
             return redirect("users:login")
-
-        # Fallback - continue with request
-        return self.get_response(request)

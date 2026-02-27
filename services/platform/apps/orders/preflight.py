@@ -65,7 +65,7 @@ class OrderPreflightValidationService:
             # Product state
             product = item.product
             if product is None:
-                errors.append(str(_("Item '{}': missing product reference").format(item.product_name)))
+                errors.append(str(_("Item '{}': missing product reference").format(item.product_name)))  # type: ignore[unreachable]
             else:
                 if not product.is_active:
                     warnings.append(str(_("Item '{}': product is inactive").format(item.product_name)))

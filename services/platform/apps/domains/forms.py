@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django import forms
 from django.utils.translation import gettext_lazy as _
@@ -10,11 +10,7 @@ from apps.settings.encryption import settings_encryption
 from .models import TLD, Registrar
 
 
-class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
-    website_url = forms.URLField(assume_scheme="https")
-    api_endpoint = forms.URLField(assume_scheme="https")
-    webhook_endpoint = forms.URLField(required=False, assume_scheme="https")
-
+class RegistrarForm(forms.ModelForm):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Do not prefill sensitive fields
@@ -80,10 +76,10 @@ class RegistrarForm(forms.ModelForm):  # type: ignore[type-arg]
         # webhook_secret may be used raw by webhooks; keep as provided (write-only)
         if commit:
             instance.save()
-        return instance  # type: ignore[no-any-return]
+        return cast(Registrar, instance)
 
 
-class TLDForm(forms.ModelForm):  # type: ignore[type-arg]
+class TLDForm(forms.ModelForm):
     class Meta:
         model = TLD
         fields: ClassVar = [

@@ -337,7 +337,7 @@ class SendGridWebhookView(View):
             EmailService.handle_delivery_event(
                 event_type=event_mapping[event_type],
                 message_id=sg_message_id,
-                recipient=email,
+                recipient=email,  # type: ignore[arg-type]
                 timestamp=event.get("timestamp"),
                 metadata={
                     "event": event_type,

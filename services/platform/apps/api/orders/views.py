@@ -379,10 +379,7 @@ def preflight_order(request: Request, customer: Customer) -> Response:  # noqa: 
                 )
 
         # Calculate VAT using the VAT calculator
-        from apps.orders.vat_rules import (  # noqa: PLC0415
-            CustomerVATInfo,
-            OrderVATCalculator,
-        )
+        from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
         company_name = billing_address.get("company_name", "")
         vat_number = billing_address.get("vat_number", "")
@@ -410,10 +407,6 @@ def preflight_order(request: Request, customer: Customer) -> Response:  # noqa: 
             "order_id": "preflight-preview",
         }
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
-
-        logger.info(
-            f"🔎 [API] VAT calculation result: subtotal={vat_result.subtotal_cents}¢, vat={vat_result.vat_cents}¢, total={vat_result.total_cents}¢, reasoning={vat_result.reasoning}"
-        )
 
         # Create a temporary order object for validation (not saved to DB)
         from apps.orders.models import Order  # noqa: PLC0415
@@ -633,7 +626,7 @@ def create_order(request: Request, customer: Customer) -> Response:  # noqa: C90
 
         order_create_data = OrderCreateData(
             customer=customer,
-            items=order_items,
+            items=order_items,  # type: ignore[arg-type]
             billing_address=billing_address_data,
             currency=validated_data["currency"],
             notes=validated_data.get("notes", ""),
@@ -655,7 +648,7 @@ def create_order(request: Request, customer: Customer) -> Response:  # noqa: C90
                 try:
                     status_change = StatusChangeData(
                         new_status="pending", notes="Auto-pending from API", changed_by=None
-                    )  # type: ignore[arg-type]
+                    )
                     promote_result = OrderService.update_order_status(order, status_change)
                     if promote_result.is_ok():
                         order.refresh_from_db()

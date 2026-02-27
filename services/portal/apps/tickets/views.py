@@ -52,7 +52,10 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "")
     priority_filter = request.GET.get("priority", "")
     search_query = request.GET.get("search", "")
-    page = int(request.GET.get("page", 1))
+    try:
+        page = int(request.GET.get("page", 1))
+    except (ValueError, TypeError):
+        page = 1
 
     try:
         # Create filters object
@@ -402,7 +405,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
         )
 
 
-def ticket_search_api(request: HttpRequest) -> JsonResponse:
+def ticket_search_api(request: HttpRequest) -> HttpResponse:
     """
     HTMX search endpoint for live ticket filtering.
     Returns filtered ticket list partial.
@@ -421,10 +424,12 @@ def ticket_search_api(request: HttpRequest) -> JsonResponse:
         response = ticket_api.get_customer_tickets(
             customer_id=customer_id,
             user_id=user_id,
-            page=1,
-            status=status_filter,
-            priority=priority_filter,
-            search=search_query,
+            filters=TicketFilters(
+                page=1,
+                status=status_filter,
+                priority=priority_filter,
+                search=search_query,
+            ),
         )
 
         tickets = response.get("results", [])
@@ -538,7 +543,7 @@ def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
         summary = ticket_api.get_tickets_summary(customer_id, user_id)
 
         # Get recent tickets (last 5)
-        response = ticket_api.get_customer_tickets(customer_id, user_id, page=1)
+        response = ticket_api.get_customer_tickets(customer_id, user_id, filters=TicketFilters(page=1))
         recent_tickets = response.get("results", [])[:5]
 
         context = {

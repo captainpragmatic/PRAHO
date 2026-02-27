@@ -32,8 +32,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
-from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
-from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.exceptions import Ratelimited
 
 from apps.audit.services import AuthenticationAuditService, LogoutEventData, RateLimitEventData, SecurityAuditService
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
@@ -634,7 +634,7 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
         messages.info(request, _("Backup code used. You have {count} codes remaining.").format(count=remaining_codes))
 
 
-@ratelimit(key="ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]
+@ratelimit(key="ip", rate="10/m", method="POST", block=False)
 def mfa_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get("pre_2fa_user_id")
@@ -797,7 +797,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
             response = redirect("users:user_profile")
             response.set_cookie(
                 cookie_name,
-                selected_language,
+                selected_language or "",
                 max_age=365 * 24 * 60 * 60,  # 1 year
             )
             return response
@@ -829,7 +829,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
 # ===============================================================================
 
 
-class UserListView(LoginRequiredMixin, ListView):  # type: ignore[type-arg]
+class UserListView(LoginRequiredMixin, ListView):
     """List all users (admin only)"""
 
     model = User
@@ -863,7 +863,7 @@ class UserListView(LoginRequiredMixin, ListView):  # type: ignore[type-arg]
         return queryset
 
 
-class UserDetailView(LoginRequiredMixin, DetailView):  # type: ignore[type-arg]
+class UserDetailView(LoginRequiredMixin, DetailView):
     """User detail view (admin only)"""
 
     model = User
@@ -938,8 +938,8 @@ def _uniform_response() -> JsonResponse:
 
 @require_http_methods(["POST"])
 # Soft rate limiting - degrades gracefully without blocking legitimate users
-@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST", block=False)  # type: ignore[misc]  # Short window
-@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST", block=False)  # type: ignore[misc]  # Long window
+@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST", block=False)  # Short window
+@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST", block=False)  # Long window
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """
     🔒 HARDENED EMAIL VALIDATION ENDPOINT

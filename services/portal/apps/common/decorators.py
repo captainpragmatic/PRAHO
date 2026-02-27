@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import Callable
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect
@@ -26,13 +26,13 @@ def _get_selected_customer_id(request: HttpRequest) -> str | None:
     """Get the currently selected customer ID, fallback to session customer_id"""
     selected_customer_id = request.session.get("selected_customer_id")
     if selected_customer_id:
-        return selected_customer_id
+        return cast(str, selected_customer_id)
 
     # Fallback to login customer_id for backward compatibility
-    return request.session.get("customer_id")
+    return cast(str, request.session.get("customer_id")) if request.session.get("customer_id") else None
 
 
-def _fetch_user_memberships(request: HttpRequest) -> list[dict]:
+def _fetch_user_memberships(request: HttpRequest) -> list[dict[str, Any]]:
     """Lazy-fetch user memberships from Platform API and cache in session"""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -94,7 +94,7 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
 
     for membership in memberships:
         if str(membership.get("customer_id")) == str(customer_id):
-            return membership.get("role")
+            return cast(str, membership.get("role"))
 
     # Customer not found — force one more fresh fetch in case we had stale data.
     # Skip if cache already expired (we just fetched above).
@@ -102,7 +102,7 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
         memberships = _fetch_user_memberships(request)
         for membership in memberships:
             if str(membership.get("customer_id")) == str(customer_id):
-                return membership.get("role")
+                return cast(str, membership.get("role"))
 
     logger.warning(
         f"🚨 [Security] No membership found for user {request.session.get('user_id')} "
@@ -111,7 +111,7 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
     return None
 
 
-def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> dict | None:
+def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> dict[str, Any] | None:
     """🔒 Real-time verification of user access to customer via Platform API"""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -137,7 +137,7 @@ def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> 
         return None
 
 
-def require_authentication(view_func: Callable) -> Callable:
+def require_authentication(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """🔒 Require user to be authenticated via Portal session"""
 
     @wraps(view_func)
@@ -147,12 +147,14 @@ def require_authentication(view_func: Callable) -> Callable:
                 return JsonResponse({"error": _("Autentificare necesară")}, status=401)
             return redirect("/login/")
 
-        return view_func(request, *args, **kwargs)
+        return cast(HttpResponse, view_func(request, *args, **kwargs))
 
     return wrapper
 
 
-def require_customer_role(required_roles: list[str] | None = None, realtime_verification: bool = False) -> Callable:  # noqa: C901
+def require_customer_role(  # noqa: C901
+    required_roles: list[str] | None = None, realtime_verification: bool = False
+) -> Callable[..., Any]:
     """
     🔒 Require specific customer role(s) for access
 
@@ -163,7 +165,7 @@ def require_customer_role(required_roles: list[str] | None = None, realtime_veri
     if required_roles is None:
         required_roles = ["viewer"]  # Default minimum role
 
-    def decorator(view_func: Callable) -> Callable:  # noqa: C901
+    def decorator(view_func: Callable[..., Any]) -> Callable[..., Any]:  # noqa: C901
         @wraps(view_func)
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:  # noqa: PLR0911
             # Check basic authentication first
@@ -215,49 +217,49 @@ def require_customer_role(required_roles: list[str] | None = None, realtime_veri
                 return HttpResponseForbidden(_("Permisiuni insuficiente"))
 
             # Store current role in request for use in view
-            request.user_role = user_role
-            request.current_customer_id = customer_id
+            request.user_role = user_role  # type: ignore[attr-defined]
+            request.current_customer_id = customer_id  # type: ignore[attr-defined]
 
-            return view_func(request, *args, **kwargs)
+            return cast(HttpResponse, view_func(request, *args, **kwargs))
 
         return wrapper
 
     return decorator
 
 
-def require_admin_role(realtime_verification: bool = False) -> Callable:
+def require_admin_role(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require admin role - shortcut for admin-only views"""
     return require_customer_role(["admin"], realtime_verification)
 
 
-def require_billing_access(realtime_verification: bool = False) -> Callable:
+def require_billing_access(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require billing access - owner, admin or billing role"""
     return require_customer_role(["owner", "admin", "billing"], realtime_verification)
 
 
-def require_technical_access(realtime_verification: bool = False) -> Callable:
+def require_technical_access(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require technical access - owner, admin or technical role"""
     return require_customer_role(["owner", "admin", "technical"], realtime_verification)
 
 
-def require_any_role(realtime_verification: bool = False) -> Callable:
+def require_any_role(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require any valid role - equivalent to authenticated user with customer access"""
     return require_customer_role(["owner", "admin", "billing", "technical", "viewer"], realtime_verification)
 
 
-def api_key_required(view_func: Callable) -> Callable:
+def api_key_required(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """🔒 Require valid API key for API endpoints (if implemented)"""
 
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         # Future implementation for API key authentication
         # For now, require session authentication
-        return require_authentication(view_func)(request, *args, **kwargs)
+        return cast(HttpResponse, require_authentication(view_func)(request, *args, **kwargs))
 
     return wrapper
 
 
-def log_access_attempt(view_func: Callable) -> Callable:
+def log_access_attempt(view_func: Callable[..., Any]) -> Callable[..., Any]:
     """🔒 Log access attempts for security monitoring"""
 
     @wraps(view_func)
@@ -271,7 +273,7 @@ def log_access_attempt(view_func: Callable) -> Callable:
             f"IP: {request.META.get('REMOTE_ADDR', 'unknown')}"
         )
 
-        response = view_func(request, *args, **kwargs)
+        response = cast(HttpResponse, view_func(request, *args, **kwargs))
 
         # Log access result
         ACCESS_DENIED_STATUS_CODE = 400  # noqa: N806

@@ -618,14 +618,15 @@ class Subscription(models.Model):
 
         with transaction.atomic():
             self.status = "active"
-            self.paused_at = None
-            self.resume_at = None
 
-            # Extend period by paused duration
+            # Extend period by paused duration (must happen before clearing paused_at)
             if self.paused_at:
                 paused_duration = timezone.now() - self.paused_at
                 self.current_period_end += paused_duration
                 self.next_billing_date += paused_duration
+
+            self.paused_at = None
+            self.resume_at = None
 
             self.save()
 

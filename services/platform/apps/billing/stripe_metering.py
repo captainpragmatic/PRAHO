@@ -200,7 +200,7 @@ class StripeMeterEventService:
             }
 
             # Prepare event params
-            event_params = {
+            event_params: dict[str, Any] = {
                 "event_name": event_name,
                 "payload": payload,
             }

@@ -50,7 +50,7 @@ class SecretValidator:
     """
 
     # Known weak/development secrets to flag immediately
-    KNOWN_WEAK_SECRETS: ClassVar[dict] = {
+    KNOWN_WEAK_SECRETS: ClassVar[set[str]] = {
         "portal-dev-key-change-in-production",
         "dev-shared-secret",
         "dev-shared-secret-change-in-production",
@@ -68,7 +68,7 @@ class SecretValidator:
     }
 
     # Common patterns that indicate weak secrets
-    WEAK_PATTERNS: ClassVar[list] = [
+    WEAK_PATTERNS: ClassVar[list[str]] = [
         r"^dev[-_]",  # Starts with "dev-" or "dev_"
         r"[-_]dev[-_]",  # Contains "-dev-" or "_dev_"
         r"test[-_]",  # Contains "test-" or "test_"
@@ -154,7 +154,7 @@ class SecretValidator:
             return 0.0
 
         # Count character frequencies
-        char_counts = {}
+        char_counts: dict[str, int] = {}
         for char in secret:
             char_counts[char] = char_counts.get(char, 0) + 1
 

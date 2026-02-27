@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django import template
 from django.template.context import RequestContext
@@ -50,7 +50,7 @@ def get_boolean_setting(key: str, default: bool = False) -> bool:
         {% setting_bool "domains.registration_enabled" default=True %}
     """
     try:
-        return SettingsService.get_boolean_setting(key, default)  # type: ignore[no-any-return]
+        return SettingsService.get_boolean_setting(key, default)
     except Exception as e:
         logger.error("🔥 [Settings Template] Error getting boolean setting %s: %s", key, str(e))
         return default
@@ -66,7 +66,7 @@ def get_integer_setting(key: str, default: int = 0) -> int:
         {% setting_int "users.session_timeout_minutes" default=120 %}
     """
     try:
-        return SettingsService.get_integer_setting(key, default)  # type: ignore[no-any-return]
+        return SettingsService.get_integer_setting(key, default)
     except Exception as e:
         logger.error("🔥 [Settings Template] Error getting integer setting %s: %s", key, str(e))
         return default
@@ -100,7 +100,7 @@ def get_list_setting(key: str, default: list[Any] | None = None) -> list[Any]:
         {% setting_list "users.allowed_roles" default="user,admin" %}
     """
     try:
-        return SettingsService.get_list_setting(key, default or [])  # type: ignore[no-any-return]
+        return cast(list[str], SettingsService.get_list_setting(key, default or []))
     except Exception as e:
         logger.error("🔥 [Settings Template] Error getting list setting %s: %s", key, str(e))
         return default or []
@@ -116,7 +116,7 @@ def get_settings_category(category: str) -> dict[str, Any]:
         {{ billing_settings.proforma_validity_days }}
     """
     try:
-        return SettingsService.get_settings_by_category(category)  # type: ignore[no-any-return]
+        return cast(dict[str, Any], SettingsService.get_settings_by_category(category))
     except Exception as e:
         logger.error("🔥 [Settings Template] Error getting category %s: %s", category, str(e))
         return {}
@@ -216,7 +216,7 @@ def is_feature_enabled(feature_key: str) -> bool:
         {% if domains_enabled %}...{% endif %}
     """
     try:
-        return SettingsService.get_boolean_setting(feature_key, False)  # type: ignore[no-any-return]
+        return SettingsService.get_boolean_setting(feature_key, False)
     except Exception as e:
         logger.error("🔥 [Settings Template] Error checking feature %s: %s", feature_key, str(e))
         return False
@@ -232,7 +232,7 @@ def is_maintenance_mode() -> bool:
         {% if is_maintenance %}...{% endif %}
     """
     try:
-        return SettingsService.get_boolean_setting("system.maintenance_mode", False)  # type: ignore[no-any-return]
+        return SettingsService.get_boolean_setting("system.maintenance_mode", False)
     except Exception as e:
         logger.error("🔥 [Settings Template] Error checking maintenance mode: %s", str(e))
         return False

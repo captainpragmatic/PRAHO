@@ -6,8 +6,8 @@ Session-based cart management with platform API integration.
 import hashlib
 import json
 import logging
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -303,10 +303,10 @@ class CartRateLimiter:
                 # Take first IP if comma-separated
                 ip = forwarded_ip.split(",")[0].strip()
                 if ip and ip != "unknown":
-                    return ip
+                    return cast(str, ip)
 
         # Fall back to direct connection
-        return request.META.get("REMOTE_ADDR", "0.0.0.0")
+        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
 
 
 class GDPRCompliantCartSession:
@@ -318,7 +318,7 @@ class GDPRCompliantCartSession:
     SESSION_KEY = "praho_portal_cart_v1"
     CART_EXPIRY_HOURS = 24
 
-    def __init__(self, session: object) -> None:
+    def __init__(self, session: Any) -> None:
         self.session = session
         self._load_cart()
 
@@ -330,7 +330,7 @@ class GDPRCompliantCartSession:
         # Check for expired cart
         if self.cart.get("expires_at"):
             try:
-                expires_at = timezone.datetime.fromisoformat(self.cart["expires_at"])
+                expires_at = datetime.fromisoformat(self.cart["expires_at"])
                 if timezone.now() > expires_at:
                     logger.info("🕒 [Cart] Cart expired, clearing")
                     self.cart = self._create_empty_cart()
@@ -491,7 +491,7 @@ class GDPRCompliantCartSession:
 
     def get_items(self) -> list[dict[str, Any]]:
         """Get all cart items"""
-        return self.cart.get("items", [])
+        return cast(list[dict[str, Any]], self.cart.get("items", []))
 
     def get_item_count(self) -> int:
         """Get total number of items in cart"""
@@ -544,7 +544,7 @@ class GDPRCompliantCartSession:
 
     def get_warnings(self) -> list[dict[str, Any]]:
         """Get cart warnings"""
-        return self.cart.get("warnings", [])
+        return cast(list[dict[str, Any]], self.cart.get("warnings", []))
 
     def clear_warnings(self) -> None:
         """Clear all cart warnings"""
@@ -554,7 +554,7 @@ class GDPRCompliantCartSession:
     @property
     def currency(self) -> str:
         """Get cart currency"""
-        return self.cart.get("currency", "RON")
+        return cast(str, self.cart.get("currency", "RON"))
 
     @currency.setter
     def currency(self, new_currency: str) -> None:
@@ -572,7 +572,7 @@ class GDPRCompliantCartSession:
             return False
 
         try:
-            expires_datetime = timezone.datetime.fromisoformat(expires_at)
+            expires_datetime = datetime.fromisoformat(expires_at)
             return timezone.now() > expires_datetime
         except (ValueError, TypeError):
             return True  # Invalid date = expired
@@ -615,7 +615,7 @@ class GDPRCompliantCartSession:
 
     def get_cart_version(self) -> str:
         """Get current cart version for ETag/version checks"""
-        return self.cart.get("version", "")
+        return cast(str, self.cart.get("version", ""))
 
     def validate_cart_version(self, expected_version: str) -> bool:
         """
@@ -834,7 +834,7 @@ class OrderCreationService:
             platform_api = platform_api_class()
 
             # Prepare order data
-            order_data = {
+            order_data: dict[str, Any] = {
                 "customer_id": customer_id,
                 "items": cart.get_api_items(),
                 "currency": cart.currency,

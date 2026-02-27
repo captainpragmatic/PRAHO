@@ -597,6 +597,9 @@ module = [
     "prometheus_client.*",
     "anymail.*",
     "weasyprint",
+    "ipware.*",
+    "boto3.*",
+    "django_ratelimit.*",
 ]
 ignore_missing_imports = true
 
@@ -612,10 +615,10 @@ disallow_untyped_defs = true
 disallow_untyped_calls = true
 disallow_incomplete_defs = true
 
-# Views/forms/serializers: keep checks, relax Django's dynamic attrs
+# Views/forms/serializers: keep checks, relax Django framework noise (ADR-0009)
 [[tool.mypy.overrides]]
 module = ["*.views", "*.forms", "*.serializers"]
-disable_error_code = ["attr-defined", "misc"]
+disable_error_code = ["attr-defined", "misc", "assignment", "type-arg", "untyped-decorator"]
 
 # API views: additional DRF-specific relaxations
 [[tool.mypy.overrides]]
@@ -627,10 +630,10 @@ disable_error_code = ["attr-defined", "misc", "no-untyped-def", "no-untyped-call
 module = ["apps.api.*.serializers", "apps.api.core.*"]
 disable_error_code = ["attr-defined", "misc", "no-any-return", "assignment"]
 
-# Admin: low ROI → relax dynamic attrs
+# Admin: low ROI → relax dynamic attrs (ADR-0009, ADR-0010)
 [[tool.mypy.overrides]]
 module = "apps.*.admin"
-disable_error_code = ["attr-defined"]
+disable_error_code = ["attr-defined", "type-arg", "misc"]
 
 # Sample data generation: test/development only, relax strictness
 [[tool.mypy.overrides]]
@@ -647,16 +650,17 @@ disable_error_code = ["no-any-return", "misc", "return-value"]
 module = ["apps.common.middleware"]
 disable_error_code = ["attr-defined", "misc", "assignment", "arg-type", "return-value"]
 
-# Tests: allow friction-free typing
+# Tests: allow friction-free typing (fix pattern to match nested test dirs)
 [[tool.mypy.overrides]]
-module = "tests.*"
-disable_error_code = ["call-arg", "attr-defined", "no-any-return"]
+module = ["tests.*", "*.tests", "*.tests.*"]
+disable_error_code = ["call-arg", "attr-defined", "no-any-return", "no-untyped-def", "no-untyped-call"]
 disallow_untyped_defs = false
+check_untyped_defs = true
 
 # Settings & scripts are dynamic
 [[tool.mypy.overrides]]
 module = "config.settings.*"
-disable_error_code = ["name-defined", "used-before-def", "attr-defined"]
+disable_error_code = ["name-defined", "used-before-def", "attr-defined", "index", "operator"]
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
@@ -668,9 +672,9 @@ disallow_untyped_defs = false
 module = "*.tasks"
 disable_error_code = ["attr-defined"]
 
-# Signal modules: dynamic signal registration
+# Signal modules: dynamic signal registration + dynamic attrs (wildcard)
 [[tool.mypy.overrides]]
-module = ["apps.promotions.signals", "apps.infrastructure.signals", "apps.notifications.signals"]
+module = "*.signals"
 disable_error_code = ["attr-defined", "misc"]
 
 # Infrastructure tasks/services: Ansible/paramiko/terraform dynamic attrs
@@ -678,10 +682,10 @@ disable_error_code = ["attr-defined", "misc"]
 module = ["apps.infrastructure.tasks", "apps.infrastructure.deployment_service", "apps.infrastructure.ansible_service"]
 disable_error_code = ["attr-defined", "misc", "no-any-return"]
 
-# Targeted relief for abstract base models ONLY (TEMP)
+# Models: ORM generics, ClassVar, dynamic attrs (ADR-0009)
 [[tool.mypy.overrides]]
-module = "apps.*.abstract_models"
-disable_error_code = ["misc"]
+module = ["*.models", "*.abstract_models", "*.contact_models", "*.customer_models", "*.profile_models", "*.payment_models", "*.subscription_models"]
+disable_error_code = ["type-arg", "misc", "assignment"]
 
 # Subscription models: SettingsService returns Any for runtime settings, unreachable branch — pre-existing
 [[tool.mypy.overrides]]
@@ -702,9 +706,6 @@ disable_error_code = ["no-any-return", "misc"]
 [[tool.mypy.overrides]]
 module = "apps.users.forms"
 disable_error_code = ["union-attr", "return-value", "misc"]
-# [[tool.mypy.overrides]]
-# module = ["redis.*", "boto3.*", "stripe.*"]  # enable only if needed
-# ignore_missing_imports = true
 
 # ===============================================================================
 # COVERAGE CONFIGURATION

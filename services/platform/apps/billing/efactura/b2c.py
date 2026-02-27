@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from .settings import efactura_settings
 
@@ -55,7 +55,7 @@ class CNPValidator:
     """
 
     # Gender/century codes
-    GENDER_CODES: ClassVar[dict] = {
+    GENDER_CODES: ClassVar[dict[str, tuple[str, int | None]]] = {
         "1": ("M", 1900),  # Male, 1900-1999
         "2": ("F", 1900),  # Female, 1900-1999
         "3": ("M", 1800),  # Male, 1800-1899
@@ -68,7 +68,7 @@ class CNPValidator:
     }
 
     # County codes (JJ)
-    COUNTY_CODES: ClassVar[dict] = {
+    COUNTY_CODES: ClassVar[dict[str, str]] = {
         "01": "Alba",
         "02": "Arad",
         "03": "Argeș",
@@ -120,7 +120,7 @@ class CNPValidator:
     }
 
     # Check digit weights
-    CHECK_WEIGHTS: ClassVar[list] = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9]
+    CHECK_WEIGHTS: ClassVar[list[int]] = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9]
 
     @classmethod
     def validate(cls, cnp: str) -> CNPValidationResult:
@@ -232,7 +232,7 @@ class B2CDetector:
     - Amount above minimum threshold
     """
 
-    def __init__(self, settings: object = None):
+    def __init__(self, settings: Any = None):
         """Initialize with optional settings override."""
         self._settings = settings or efactura_settings
 
@@ -320,7 +320,7 @@ class B2CXMLBuilder:
         cnp: str | None,
         name: str,
         is_test_environment: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Get buyer identification for B2C invoice XML.
 

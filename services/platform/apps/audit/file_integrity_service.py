@@ -223,7 +223,7 @@ class FileIntegrityMonitoringService:
         Returns:
             Dictionary with baseline establishment results
         """
-        results = {
+        results: dict[str, Any] = {
             "established_at": timezone.now().isoformat(),
             "files_baselined": 0,
             "skipped_existing": 0,
@@ -526,7 +526,7 @@ class FileIntegrityMonitoringService:
         Returns:
             Dictionary with verification results
         """
-        results = {
+        results: dict[str, Any] = {
             "verified_at": timezone.now().isoformat(),
             "files_checked": 0,
             "files_ok": 0,

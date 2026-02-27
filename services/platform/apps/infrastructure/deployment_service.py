@@ -13,9 +13,10 @@ Orchestrates the complete node deployment pipeline:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.db import transaction
 from django.utils import timezone
@@ -63,7 +64,7 @@ class DeploymentResult:
     terraform_result: TerraformResult | None = None
     ansible_results: list[AnsibleResult] | None = None
     validation_report: NodeValidationReport | None = None
-    virtualmin_server_id: int | None = None
+    virtualmin_server_id: Any = None
     error: str | None = None
     duration_seconds: float = 0.0
 
@@ -82,7 +83,7 @@ class NodeDeploymentService:
     """
 
     # Deployment stages with progress percentages
-    STAGES: ClassVar[dict] = {
+    STAGES: ClassVar[dict[str, tuple[int, str]]] = {
         "init": (0, "Initializing deployment"),
         "ssh_key": (5, "Generating SSH key"),
         "terraform_init": (10, "Initializing Terraform"),
@@ -112,7 +113,7 @@ class NodeDeploymentService:
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
-        progress_callback: callable | None = None,
+        progress_callback: Callable[..., None] | None = None,
     ) -> Result[DeploymentResult, str]:
         """
         Execute complete node deployment pipeline.
@@ -175,7 +176,7 @@ class NodeDeploymentService:
                 return Err(f"Provider prerequisites check failed: {prereq_result.unwrap_err()}")
 
             # Transition to provisioning
-            if not deployment.transition_to("provisioning_node"):
+            if not deployment.transition_to("provisioning_node"):  # type: ignore[func-returns-value]
                 return Err(f"Invalid state transition from '{deployment.status}' to 'provisioning_node'")
             deployment.save()
 
@@ -183,7 +184,7 @@ class NodeDeploymentService:
             report_progress("ssh_key")
             log_deployment("info", "Generating deployment SSH key")
 
-            key_result = self._ssh_manager.generate_deployment_key(
+            key_result = self._ssh_manager.generate_deployment_key(  # type: ignore[call-arg]
                 deployment,
                 user=user,
                 reason=f"Node deployment: {deployment.hostname}",
@@ -460,7 +461,9 @@ class NodeDeploymentService:
             from pathlib import Path  # noqa: PLC0415
 
             deploy_dir = (
-                Path(SettingsService.get_setting("node_deployment.terraform_state_path", "/var/lib/praho/terraform"))
+                Path(
+                    str(SettingsService.get_setting("node_deployment.terraform_state_path", "/var/lib/praho/terraform"))
+                )
                 / deployment.hostname
             )
 
@@ -654,9 +657,9 @@ class NodeDeploymentService:
         self,
         deployment: NodeDeployment,
         playbooks: list[str] | None = None,
-        extra_vars: dict | None = None,
+        extra_vars: dict[str, Any] | None = None,
         user: User | None = None,
-    ) -> Result[list, str]:
+    ) -> Result[list[AnsibleResult], str]:
         """
         Run maintenance playbooks on a deployed node.
 

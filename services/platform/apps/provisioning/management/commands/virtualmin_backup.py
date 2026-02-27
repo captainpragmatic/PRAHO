@@ -8,7 +8,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
+from apps.provisioning.virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 
 
@@ -105,14 +105,14 @@ class Command(BaseCommand):
         # Execute backup
         self.stdout.write(f"Starting {options['type']} backup for domain: {domain}")
 
-        result = backup_service.backup_domain(
-            account=account,
+        config = BackupConfig(
             backup_type=options["type"],
             include_email=not options.get("no_email", False),
             include_databases=not options.get("no_databases", False),
             include_files=not options.get("no_files", False),
             include_ssl=not options.get("no_ssl", False),
         )
+        result = backup_service.backup_domain(account=account, config=config)
 
         if result.is_err():
             raise CommandError(f"Backup failed: {result.unwrap_err()}")
@@ -148,15 +148,14 @@ class Command(BaseCommand):
         self.stdout.write(f"Starting restore for domain: {domain}")
         self.stdout.write(f"From backup: {backup_id}")
 
-        result = backup_service.restore_domain(
-            account=account,
+        restore_config = RestoreConfig(
             backup_id=backup_id,
             restore_email=not options.get("no_email", False),
             restore_databases=not options.get("no_databases", False),
             restore_files=not options.get("no_files", False),
             restore_ssl=not options.get("no_ssl", False),
-            target_server=target_server,
         )
+        result = backup_service.restore_domain(account=account, config=restore_config, target_server=target_server)
 
         if result.is_err():
             raise CommandError(f"Restore failed: {result.unwrap_err()}")

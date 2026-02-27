@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -49,7 +49,7 @@ def validate_safe_url_wrapper(value: Any) -> None:
 # ===============================================================================
 
 
-class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerForm(forms.ModelForm):
     """
     Core customer information form.
     Only essential identifying information.
@@ -129,7 +129,7 @@ class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
         """Validate website URL for SSRF prevention"""
         website: str | None = self.cleaned_data.get("website")
         if website:
-            return SecureInputValidator.validate_safe_url(website)
+            return cast(str, SecureInputValidator.validate_safe_url(website))
         return website or ""
 
 
@@ -138,7 +138,7 @@ class CustomerForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerTaxProfileForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerTaxProfileForm(forms.ModelForm):
     """
     Romanian tax compliance form - CUI, VAT, registration.
     """
@@ -223,7 +223,7 @@ class CustomerTaxProfileForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerBillingProfileForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerBillingProfileForm(forms.ModelForm):
     """
     Customer billing and financial information form.
     """
@@ -268,7 +268,7 @@ class CustomerBillingProfileForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerAddressForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerAddressForm(forms.ModelForm):
     """
     Customer address form with Romanian fields.
     """
@@ -340,7 +340,7 @@ class CustomerAddressForm(forms.ModelForm):  # type: ignore[type-arg]
 # ===============================================================================
 
 
-class CustomerNoteForm(forms.ModelForm):  # type: ignore[type-arg]
+class CustomerNoteForm(forms.ModelForm):
     """
     Customer interaction notes form.
     """
@@ -1265,7 +1265,7 @@ class CustomerEditForm(forms.Form):
         """Validate website URL for SSRF prevention"""
         website: str | None = self.cleaned_data.get("website")
         if website:
-            return SecureInputValidator.validate_safe_url(website)
+            return cast(str, SecureInputValidator.validate_safe_url(website))
         return website or ""
 
     def clean_postal_code(self) -> str:
@@ -1345,6 +1345,7 @@ class CustomerEditForm(forms.Form):
         if not tax_profile:
             tax_profile = CustomerTaxProfile.objects.create(customer=self.customer)
 
+        assert tax_profile is not None
         tax_profile.cui = data["cui"]
         tax_profile.registration_number = data["registration_number"]
         tax_profile.is_vat_payer = data["is_vat_payer"]
@@ -1357,6 +1358,7 @@ class CustomerEditForm(forms.Form):
         if not billing_profile:
             billing_profile = CustomerBillingProfile.objects.create(customer=self.customer)
 
+        assert billing_profile is not None
         billing_profile.payment_terms = data["payment_terms"]
         billing_profile.credit_limit = data["credit_limit"]
         billing_profile.preferred_currency = data["preferred_currency"]
@@ -1373,6 +1375,7 @@ class CustomerEditForm(forms.Form):
                 customer=self.customer, address_type="primary", is_current=True
             )
 
+        assert primary_address is not None
         primary_address.address_line1 = data["address_line1"]
         primary_address.address_line2 = data["address_line2"]
         primary_address.city = data["city"]

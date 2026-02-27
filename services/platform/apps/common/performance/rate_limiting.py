@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -22,7 +22,7 @@ from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
 logger = logging.getLogger(__name__)
 
 
-class CustomerRateThrottle(SimpleRateThrottle):
+class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Rate throttling based on customer account.
     Customers share rate limits across all their users.
@@ -37,7 +37,7 @@ class CustomerRateThrottle(SimpleRateThrottle):
     cache_format = "throttle_customer_%(scope)s_%(ident)s"
 
     # Default rates by customer tier
-    TIER_RATES: ClassVar[dict] = {
+    TIER_RATES: ClassVar[dict[str, str]] = {
         "basic": "100/minute",
         "professional": "500/minute",
         "enterprise": "2000/minute",
@@ -67,7 +67,7 @@ class CustomerRateThrottle(SimpleRateThrottle):
         return getattr(settings, "DEFAULT_CUSTOMER_THROTTLE_RATE", "100/minute")
 
 
-class BurstRateThrottle(SimpleRateThrottle):
+class BurstRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Throttle for burst traffic - short-term high-frequency limiting.
     Prevents API abuse from rapid requests.
@@ -81,13 +81,10 @@ class BurstRateThrottle(SimpleRateThrottle):
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         """Generate cache key based on user or IP for burst limiting."""
         ident = str(request.user.pk) if request.user and request.user.is_authenticated else self.get_ident(request)
-        return self.cache_format % {"scope": self.scope, "ident": ident}
+        return cast("str | None", self.cache_format % {"scope": self.scope, "ident": ident})
 
     def parse_rate(self, rate: str) -> tuple[int, int]:
         """Parse rate string with custom time units."""
-        if rate is None:
-            return (None, None)  # type: ignore[return-value]
-
         num, period = rate.split("/")
         num_requests = int(num)
 
@@ -110,7 +107,7 @@ class BurstRateThrottle(SimpleRateThrottle):
         return (num_requests, duration)
 
 
-class SustainedRateThrottle(SimpleRateThrottle):
+class SustainedRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Throttle for sustained traffic - long-term rate limiting.
     Prevents API overuse over time.
@@ -122,7 +119,7 @@ class SustainedRateThrottle(SimpleRateThrottle):
     rate = "1000/hour"
 
 
-class ServiceRateThrottle(BaseThrottle):
+class ServiceRateThrottle(BaseThrottle):  # type: ignore[misc]
     """
     Specialized throttle for service provisioning and heavy operations.
     Implements token bucket algorithm for more flexible limiting.
@@ -134,7 +131,7 @@ class ServiceRateThrottle(BaseThrottle):
     """
 
     # Tokens per operation type
-    OPERATION_COSTS: ClassVar[dict] = {
+    OPERATION_COSTS: ClassVar[dict[str, int]] = {
         "provision": 10,
         "backup": 5,
         "sync": 2,
@@ -176,7 +173,7 @@ class ServiceRateThrottle(BaseThrottle):
 
             # Check if we have enough tokens
             if bucket["tokens"] < cost:
-                self.wait = (cost - bucket["tokens"]) / self.refill_rate
+                self._wait_time = (cost - bucket["tokens"]) / self.refill_rate
                 return False
 
             bucket["tokens"] -= cost
@@ -195,7 +192,7 @@ class ServiceRateThrottle(BaseThrottle):
 
     def wait(self) -> float | None:
         """Return the recommended wait time."""
-        return getattr(self, "_wait", None)
+        return getattr(self, "_wait_time", None)
 
     def _get_ident(self, request: Request) -> str:
         """Get identifier for rate limiting."""
@@ -234,7 +231,7 @@ class ServiceRateThrottle(BaseThrottle):
         return "query"
 
 
-class AnonymousRateThrottle(SimpleRateThrottle):
+class AnonymousRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Strict rate limiting for unauthenticated requests.
     Prevents abuse from anonymous users.
@@ -249,13 +246,17 @@ class AnonymousRateThrottle(SimpleRateThrottle):
         if request.user and request.user.is_authenticated:
             return None  # Only throttle unauthenticated requests
 
-        return self.cache_format % {
-            "scope": self.scope,
-            "ident": self.get_ident(request),
-        }
+        return cast(
+            "str | None",
+            self.cache_format
+            % {
+                "scope": self.scope,
+                "ident": self.get_ident(request),
+            },
+        )
 
 
-class WriteOperationThrottle(SimpleRateThrottle):
+class WriteOperationThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Throttle for write operations (POST, PUT, PATCH, DELETE).
     More restrictive than read operations.
@@ -270,7 +271,7 @@ class WriteOperationThrottle(SimpleRateThrottle):
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True  # Don't throttle read operations
 
-        return super().allow_request(request, view)
+        return cast(bool, super().allow_request(request, view))
 
 
 # Rate limit header utilities
@@ -335,7 +336,7 @@ def get_throttle_rate_for_endpoint(endpoint: str) -> str:
     return ENDPOINT_THROTTLE_RATES.get(endpoint, "100/minute")
 
 
-class EndpointThrottle(SimpleRateThrottle):
+class EndpointThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Dynamic throttle that applies different rates based on endpoint.
     Rate is determined by view's throttle_scope attribute.

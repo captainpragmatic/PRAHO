@@ -32,7 +32,7 @@ class OrderInputValidator:
     DOMAIN_PATTERN = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
 
     # Configuration whitelists by product type
-    ALLOWED_CONFIG_KEYS: ClassVar[dict] = {
+    ALLOWED_CONFIG_KEYS: ClassVar[dict[str, set[str]]] = {
         "shared_hosting": {
             "php_version",
             "control_panel",

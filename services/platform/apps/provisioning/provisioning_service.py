@@ -89,7 +89,12 @@ class ProvisioningService:
             logger.warning("⚠️ [Provisioning] Cannot activate services for None invoice")
             return {"success": False, "error": "Invoice is None", "services_activated": 0}
 
-        results = {"success": True, "invoice_id": str(invoice.id), "services_activated": 0, "errors": []}
+        results: dict[str, Any] = {
+            "success": True,
+            "invoice_id": str(invoice.id),
+            "services_activated": 0,
+            "errors": [],
+        }
 
         try:
             # Get services linked to this invoice's order items
@@ -155,7 +160,7 @@ class ProvisioningService:
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.provisioning.models import Service  # noqa: PLC0415
 
-        results = {"success": True, "customer_id": customer_id, "services_suspended": 0, "errors": []}
+        results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_suspended": 0, "errors": []}
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -215,7 +220,7 @@ class ProvisioningService:
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.provisioning.models import Service  # noqa: PLC0415
 
-        results = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
+        results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -227,7 +232,7 @@ class ProvisioningService:
                         service.status = "active"
                         service.suspended_at = None
                         service.suspension_reason = ""
-                        service.reactivated_at = timezone.now()
+                        service.reactivated_at = timezone.now()  # type: ignore[attr-defined]
                         service.save(
                             update_fields=[
                                 "status",
@@ -269,7 +274,7 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_reactivated": 0}
 
     @staticmethod
-    def provision_service(service: Service) -> dict[str, str]:  # noqa: PLR0911, PLR0915
+    def provision_service(service: Service) -> dict[str, Any]:  # noqa: PLR0911, PLR0915
         """
         Provision a new service after order confirmation.
         This triggers the actual infrastructure setup for the service.
@@ -316,7 +321,7 @@ class ProvisioningService:
                         )
 
                         # Create gateway and test connection
-                        config = VirtualminConfig(server=service.server)
+                        config = VirtualminConfig(server=service.server)  # type: ignore[arg-type]
                         gateway = VirtualminGateway(config)
 
                         logger.info(f"📡 [Provisioning] Testing connection to {service.server.name}")

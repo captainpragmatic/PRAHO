@@ -558,7 +558,7 @@ class Coupon(models.Model):
         """Get number of times customer has used this coupon."""
         return self.redemptions.filter(customer=customer, status="applied").count()
 
-    def can_customer_use(self, customer: Customer | None) -> tuple[bool, str]:  # noqa: C901, PLR0911, PLR0912
+    def can_customer_use(self, customer: Customer | None) -> tuple[bool, str]:  # noqa: C901, PLR0911
         """
         Check if specific customer can use this coupon.
         Returns (is_valid, reason_if_invalid).
@@ -579,18 +579,17 @@ class Coupon(models.Model):
 
         # Customer target check
         if self.customer_target == "new":
-            if customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
+            if customer.orders.exclude(status="draft").exists():
                 return False, "Coupon only valid for new customers"
         elif self.customer_target == "existing":
-            if not customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
+            if not customer.orders.exclude(status="draft").exists():
                 return False, "Coupon only valid for existing customers"
         elif self.customer_target == "specific" and not self.assigned_customer:
             return False, "Coupon configuration error"
 
         # First order only check
-        if self.first_order_only:  # noqa: SIM102
-            if customer.orders.exclude(status="draft").exists():  # type: ignore[attr-defined]
-                return False, "Coupon only valid for first order"
+        if self.first_order_only and customer.orders.exclude(status="draft").exists():
+            return False, "Coupon only valid for first order"
 
         # Per-customer usage limit
         if self.max_uses_per_customer:
@@ -672,7 +671,7 @@ class Coupon(models.Model):
 
             coupons.append(coupon)
 
-        return cls.objects.bulk_create(coupons)
+        return cls.objects.bulk_create(coupons)  # type: ignore[arg-type, return-value]
 
 
 # ===============================================================================

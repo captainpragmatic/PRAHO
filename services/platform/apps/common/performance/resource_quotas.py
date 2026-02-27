@@ -164,7 +164,7 @@ class QuotaEnforcer:
         cache_key = f"{self.CACHE_PREFIX}:limit:{customer_id}:{quota_type.value}"
         cached_limit = cache.get(cache_key)
         if cached_limit is not None:
-            return cached_limit
+            return int(cached_limit)
 
         # Fall back to tier defaults
         tier_quotas = DEFAULT_QUOTAS.get(tier, DEFAULT_QUOTAS["basic"])
@@ -184,7 +184,7 @@ class QuotaEnforcer:
             usage = self._calculate_usage_from_db(customer_id, quota_type)
             cache.set(cache_key, usage, self.CACHE_TIMEOUT)
 
-        return usage
+        return int(usage)
 
     def increment_usage(
         self,
@@ -499,7 +499,7 @@ class CustomerIsolationMixin:
 
     def for_customer(self, customer_id: int) -> models.QuerySet[Any]:
         """Filter queryset by customer ID."""
-        return self.filter(customer_id=customer_id)  # type: ignore[attr-defined]
+        return self.filter(customer_id=customer_id)  # type: ignore[attr-defined, no-any-return]
 
     def for_request(self, request: HttpRequest) -> models.QuerySet[Any]:
         """Filter queryset by customer from request."""
@@ -511,7 +511,7 @@ class CustomerIsolationMixin:
             return self.for_customer(customer_id)
 
         # No customer context - return empty queryset for safety
-        return self.none()  # type: ignore[attr-defined]
+        return self.none()  # type: ignore[attr-defined, no-any-return]
 
 
 def get_customer_isolated_queryset(
@@ -524,7 +524,7 @@ def get_customer_isolated_queryset(
     Works with any model that has a customer foreign key.
     """
     if base_queryset is None:
-        base_queryset = model.objects.all()
+        base_queryset = model.objects.all()  # type: ignore[attr-defined]
 
     # Check for direct customer field
     if hasattr(model, "customer_id") or hasattr(model, "customer"):

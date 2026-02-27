@@ -19,7 +19,7 @@ from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
-from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
+from django_ratelimit.decorators import ratelimit
 
 from apps.billing.models import Invoice
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
@@ -453,7 +453,7 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
 
 
 @login_required
-@ratelimit(key="user", rate="30/m", method="GET", block=False)  # type: ignore[misc]
+@ratelimit(key="user", rate="30/m", method="GET", block=False)  # type: ignore[untyped-decorator]
 def customer_search_api(request: HttpRequest) -> JsonResponse:
     """
     🔍 AJAX customer search for dropdowns with rate limiting
@@ -672,7 +672,7 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
 
 
 @login_required
-@ratelimit(key="user", rate="60/m", method="GET", block=False)  # type: ignore[misc]
+@ratelimit(key="user", rate="60/m", method="GET", block=False)  # type: ignore[untyped-decorator]
 def customer_services_api(request: HttpRequest, customer_id: int) -> JsonResponse:
     """
     🔗 API endpoint for customer services (for ticket form) with rate limiting

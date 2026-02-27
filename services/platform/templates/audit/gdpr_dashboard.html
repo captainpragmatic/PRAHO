@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% load i18n %}
 {% load ui_components %}
+{% load settings_tags %}
 
 {% block title %}{% trans 'Privacy & Data Protection' %} - PRAHO{% endblock %}
 
@@ -237,8 +238,7 @@
         <a href="/terms/" class="text-blue-400 hover:text-blue-300">{% trans 'Terms of Service' %}</a>
         <a href="/gdpr-compliance/" class="text-blue-400 hover:text-blue-300">{% trans 'GDPR Compliance' %}</a>
         <span class="text-slate-500">|</span>
-        {# TODO: Replace with settings context variable from company.email_dpo #}
-        <span class="text-slate-400">{% trans 'Data Protection Officer:' %} dpo@praho.com</span>
+        <span class="text-slate-400">{% trans 'Data Protection Officer:' %} {% setting "company.email_dpo" %}</span>
       </div>
     </div>
   </div>

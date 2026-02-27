@@ -273,8 +273,8 @@ class EFacturaXMLGenerator:
         ET.SubElement(root, f"{{{cbc}}}InvoiceTypeCode").text = "380"
 
         # Note (optional)  # noqa: ERA001
-        if invoice.notes:
-            ET.SubElement(root, f"{{{cbc}}}Note").text = invoice.notes[:500]  # Limit length
+        if invoice.notes:  # type: ignore[attr-defined]
+            ET.SubElement(root, f"{{{cbc}}}Note").text = invoice.notes[:500]  # type: ignore[attr-defined]
 
         # Document currency code
         ET.SubElement(root, f"{{{cbc}}}DocumentCurrencyCode").text = invoice.currency.code
@@ -575,8 +575,8 @@ class EFacturaSubmissionService:
             return EFacturaSubmissionResult(
                 success=False,
                 status=EFacturaStatus.ERROR,
-                message=f"XML generation failed: {xml_result.error}",
-                errors=[xml_result.error],
+                message=f"XML generation failed: {xml_result.error}",  # type: ignore[union-attr]
+                errors=[xml_result.error],  # type: ignore[union-attr]
             )
 
         xml_content = xml_result.unwrap()

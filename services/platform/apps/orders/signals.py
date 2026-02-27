@@ -93,13 +93,13 @@ def store_original_order_values(sender: type[Order], instance: Order, **kwargs: 
                 # Read current database state for comparison
                 # Note: No select_for_update to avoid deadlocks in signal handlers
                 original = Order.objects.get(pk=instance.pk)
-                instance._original_values = {  # type: ignore[attr-defined]
+                instance._original_values = {
                     "status": original.status,
                     "total_cents": original.total_cents,
                     "notes": original.notes,
                 }
             except Order.DoesNotExist:
-                instance._original_values = {}  # type: ignore[attr-defined]
+                instance._original_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to store original values: {e}")
 
@@ -163,7 +163,7 @@ def _create_pending_services_for_order(order: Order) -> None:
             else:
                 logger.info(f"💡 [Order Signal] No new services created for order {order.order_number}")
         else:
-            logger.error(f"🔥 [Order Signal] Service creation failed: {result.error}")
+            logger.error(f"🔥 [Order Signal] Service creation failed: {result.error}")  # type: ignore[union-attr]
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Service creation failed: {e}")
@@ -179,7 +179,7 @@ def _update_services_to_provisioning(order: Order) -> None:
             updated_services = result.unwrap()
             logger.info(f"🔄 [Order Signal] Updated {len(updated_services)} services to provisioning status")
         else:
-            logger.error(f"🔥 [Order Signal] Service status update failed: {result.error}")
+            logger.error(f"🔥 [Order Signal] Service status update failed: {result.error}")  # type: ignore[union-attr]
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Service status update failed: {e}")
@@ -203,7 +203,7 @@ def _trigger_invoice_generation(order: Order) -> None:
             logger.info(f"📋 [Order] Invoice generation queued for {order.order_number}")
         except ImportError:
             # Fallback to synchronous generation
-            result = InvoiceService.generate_from_order(order)  # type: ignore[attr-defined]
+            result = InvoiceService.generate_from_order(order)
             if hasattr(result, "is_ok") and result.is_ok():
                 invoice = result.unwrap() if hasattr(result, "unwrap") else None
                 if invoice:
@@ -230,7 +230,7 @@ def _trigger_service_provisioning(order: Order) -> None:
                     logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
                 except ImportError:
                     # Fallback to synchronous provisioning
-                    result = ProvisioningService.provision_order_item(item)  # type: ignore[attr-defined]
+                    result = ProvisioningService.provision_order_item(item)
                     if result.is_ok():
                         logger.info(f"⚡ [Order] Item {item.id} provisioned successfully")
                     else:
@@ -267,7 +267,7 @@ def _handle_order_refund(order: Order, refund_status: str) -> None:
             services = [item.service for item in order.items.filter(service__isnull=False) if item.service]
 
             for service in services:
-                result = ServiceManagementService.suspend_service(  # type: ignore[attr-defined]
+                result = ServiceManagementService.suspend_service(
                     service, reason="Order fully refunded", suspend_immediately=True
                 )
                 if result.is_ok():
@@ -340,12 +340,12 @@ def store_original_item_values(sender: type[OrderItem], instance: OrderItem, **k
         if instance.pk:
             try:
                 original = OrderItem.objects.get(pk=instance.pk)
-                instance._original_item_values = {  # type: ignore[attr-defined]
+                instance._original_item_values = {
                     "provisioning_status": original.provisioning_status,
                     "quantity": original.quantity,
                 }
             except OrderItem.DoesNotExist:
-                instance._original_item_values = {}  # type: ignore[attr-defined]
+                instance._original_item_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to store original item values: {e}")
 

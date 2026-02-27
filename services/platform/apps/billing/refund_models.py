@@ -121,7 +121,7 @@ class Refund(models.Model):
             models.Index(fields=["invoice"]),
             models.Index(fields=["payment"]),
         )
-        constraints: ClassVar[list[models.CheckConstraint]] = [
+        constraints: ClassVar[list[models.BaseConstraint]] = [
             # Ensure either order OR invoice is specified, not both
             models.CheckConstraint(
                 condition=(

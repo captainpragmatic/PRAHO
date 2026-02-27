@@ -251,7 +251,7 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
         total_bandwidth_usage_gb = sum(service.bandwidth_usage_mb / 1024 for service in services)
 
         # Service type breakdown
-        service_types = {}
+        service_types: dict[str, int] = {}
         for service in services:
             plan_type = service.service_plan.get_plan_type_display()
             service_types[plan_type] = service_types.get(plan_type, 0) + 1

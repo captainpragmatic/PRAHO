@@ -55,7 +55,7 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
     )
 
     if result.is_err():
-        logger.error(f"🔥 [GDPR API] Cookie consent failed: {result.error}")
+        logger.error(f"🔥 [GDPR API] Cookie consent failed: {result.unwrap_err()}")
         return Response({"success": False, "error": "Failed to record consent"}, status=500)
 
     consent = result.unwrap()
@@ -124,7 +124,7 @@ def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     result = GDPRExportService.create_data_export_request(user, request_ip=ip_address)
 
     if result.is_err():
-        logger.error(f"🔥 [GDPR API] Data export request failed: {result.error}")
+        logger.error(f"🔥 [GDPR API] Data export request failed: {result.unwrap_err()}")
         return Response({"success": False, "error": "Failed to create export request"}, status=500)
 
     export_request = result.unwrap()

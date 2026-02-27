@@ -160,7 +160,8 @@ def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         # Use our custom encoder to serialize and then deserialize
         # This ensures all objects are converted to serializable forms
         serialized_json = json.dumps(metadata, cls=AuditJSONEncoder, ensure_ascii=False)
-        return json.loads(serialized_json)  # type: ignore[no-any-return]
+        result: dict[str, Any] = json.loads(serialized_json)
+        return result
     except (TypeError, ValueError) as e:
         logger.error(f"🔥 [Audit] Failed to serialize metadata: {e}")
         # Fallback: return a safe version with error information

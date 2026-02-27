@@ -104,7 +104,7 @@ class SIEMJSONFormatter(logging.Formatter):
     """
 
     # Mapping from Python log levels to severity numbers
-    SEVERITY_MAP: ClassVar[dict] = {
+    SEVERITY_MAP: ClassVar[dict[str, int]] = {
         "DEBUG": 7,
         "INFO": 6,
         "WARNING": 4,
@@ -357,7 +357,7 @@ class AuditLogFormatter(logging.Formatter):
         entry_json = json.dumps(audit_entry, sort_keys=True, default=str)
         entry_hash = hashlib.sha256(entry_json.encode()).hexdigest()
 
-        audit_entry["integrity"]["hash"] = entry_hash
+        audit_entry["integrity"]["hash"] = entry_hash  # type: ignore[index]
         self.previous_hash = entry_hash
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)
@@ -419,7 +419,7 @@ class ComplianceLogFormatter(logging.Formatter):
     - SOC 2
     """
 
-    COMPLIANCE_FRAMEWORKS: ClassVar[dict] = {
+    COMPLIANCE_FRAMEWORKS: ClassVar[dict[str, list[str]]] = {
         "authentication": ["ISO27001-A.9.4", "SOC2-CC6.1", "GDPR-Art32"],
         "authorization": ["ISO27001-A.9.2", "SOC2-CC6.2"],
         "data_modification": ["GDPR-Art30", "ISO27001-A.12.4"],

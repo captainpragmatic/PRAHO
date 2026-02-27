@@ -283,7 +283,7 @@ class CustomerRegistrationForm(forms.Form):
     )
 
     def clean_email(self) -> str:
-        email = self.cleaned_data.get("email", "").lower().strip()
+        email = str(self.cleaned_data.get("email", "")).lower().strip()
         return email
 
     def clean_password2(self) -> str:
@@ -296,11 +296,11 @@ class CustomerRegistrationForm(forms.Form):
         if password1 and len(password1) < REGISTRATION_PASSWORD_MIN_LENGTH:
             raise ValidationError(_("Password must be at least 12 characters long."))
 
-        return password2 or ""
+        return str(password2 or "")
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = self.cleaned_data.get("phone", "").strip()
+        phone = str(self.cleaned_data.get("phone", "")).strip()
         # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
         if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
@@ -308,7 +308,7 @@ class CustomerRegistrationForm(forms.Form):
 
     def clean_vat_number(self) -> str:
         """Validate VAT number format"""
-        vat_number = self.cleaned_data.get("vat_number", "").strip()
+        vat_number = str(self.cleaned_data.get("vat_number", "")).strip()
         if vat_number:
             if not vat_number.startswith("RO"):
                 if vat_number.isdigit() and len(vat_number) >= MIN_VAT_DIGITS:
@@ -323,7 +323,7 @@ class CustomerRegistrationForm(forms.Form):
 
     def clean_cnp(self) -> str:
         """Validate Romanian CNP (Cod Numeric Personal) format"""
-        cnp = self.cleaned_data.get("cnp", "").strip()
+        cnp = str(self.cleaned_data.get("cnp", "")).strip()
         if cnp:
             # CNP must be exactly 13 digits
             if not cnp.isdigit() or len(cnp) != CNP_LENGTH:
@@ -338,7 +338,7 @@ class CustomerRegistrationForm(forms.Form):
 
     def clean(self) -> dict[str, Any]:
         """Custom validation that depends on multiple fields"""
-        cleaned_data = super().clean()
+        cleaned_data = super().clean() or {}
         customer_type = cleaned_data.get("customer_type")
         vat_number = cleaned_data.get("vat_number")
         cnp = cleaned_data.get("cnp")
@@ -489,7 +489,7 @@ class CustomerProfileForm(forms.Form):
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = self.cleaned_data.get("phone", "").strip()
+        phone = str(self.cleaned_data.get("phone", "")).strip()
         if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
@@ -515,7 +515,7 @@ class TwoFactorSetupForm(forms.Form):
     )
 
     def clean_token(self) -> str:
-        token = self.cleaned_data.get("token", "").strip()
+        token = str(self.cleaned_data.get("token", "")).strip()
         if token and not token.isdigit():
             raise ValidationError(_("The code must contain only digits."))
         return token
@@ -542,7 +542,7 @@ class TwoFactorVerifyForm(forms.Form):
     )
 
     def clean_token(self) -> str:
-        token = self.cleaned_data.get("token", "").strip()
+        token = str(self.cleaned_data.get("token", "")).strip()
         if token and not token.isdigit():
             raise ValidationError(_("The code must contain only digits."))
         return token
@@ -604,7 +604,7 @@ class ChangePasswordForm(forms.Form):
     )
 
     def clean(self) -> dict[str, Any]:
-        cleaned_data = super().clean()
+        cleaned_data = super().clean() or {}
         new_password = cleaned_data.get("new_password")
         confirm_password = cleaned_data.get("confirm_password")
 
@@ -770,7 +770,7 @@ class CompanyProfileForm(forms.Form):
 
     def clean_vat_number(self) -> str:
         """Validate Romanian VAT number format"""
-        vat_number = self.cleaned_data.get("vat_number", "").strip().upper()
+        vat_number = str(self.cleaned_data.get("vat_number", "")).strip().upper()
 
         if not vat_number:
             raise ValidationError(_("VAT number / CUI is required"))
@@ -790,7 +790,7 @@ class CompanyProfileForm(forms.Form):
 
     def clean_primary_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = self.cleaned_data.get("primary_phone", "").strip()
+        phone = str(self.cleaned_data.get("primary_phone", "")).strip()
         if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
@@ -966,7 +966,7 @@ class CompanyCreationForm(forms.Form):
 
     def clean_company_name(self) -> str:
         """Validate company name"""
-        company_name = self.cleaned_data.get("company_name", "").strip()
+        company_name = str(self.cleaned_data.get("company_name", "")).strip()
 
         if not company_name:
             raise forms.ValidationError(_("Company name is required"))
@@ -985,7 +985,7 @@ class CompanyCreationForm(forms.Form):
 
     def clean_vat_number(self) -> str:
         """Validate Romanian VAT number (CUI)"""
-        vat_number = self.cleaned_data.get("vat_number", "").strip()
+        vat_number = str(self.cleaned_data.get("vat_number", "")).strip()
 
         if not vat_number:
             return vat_number
@@ -1006,7 +1006,7 @@ class CompanyCreationForm(forms.Form):
 
     def clean_primary_phone(self) -> str:
         """Validate Romanian phone number"""
-        phone = self.cleaned_data.get("primary_phone", "").strip()
+        phone = str(self.cleaned_data.get("primary_phone", "")).strip()
 
         if not phone:
             return phone
@@ -1039,7 +1039,7 @@ class CompanyCreationForm(forms.Form):
 
     def clean_postal_code(self) -> str:
         """Validate Romanian postal code"""
-        postal_code = self.cleaned_data.get("postal_code", "").strip()
+        postal_code = str(self.cleaned_data.get("postal_code", "")).strip()
 
         if not postal_code:
             return postal_code
@@ -1050,9 +1050,9 @@ class CompanyCreationForm(forms.Form):
 
         return postal_code
 
-    def clean(self) -> str:
+    def clean(self) -> dict[str, Any]:
         """Cross-field validation"""
-        cleaned_data = super().clean()
+        cleaned_data = super().clean() or {}
 
         # If VAT number is provided, trade registry should also be provided
         vat_number = cleaned_data.get("vat_number")

@@ -2,6 +2,7 @@
 {% load ui_components %}
 {% load formatting %}
 {% load i18n %}
+{% load settings_tags %}
 
 {% block title %}🆕 Register Domain - PRAHO{% endblock %}
 
@@ -163,10 +164,10 @@
                                     type="checkbox"
                                     class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-slate-300 dark:border-slate-600 rounded"
                                 >
-                                {# TODO: Replace hardcoded WHOIS privacy price (500 cents / 5 RON) with settings context variable #}
+                                {% setting_int "domains.whois_privacy_price_cents" default=500 as whois_price_cents %}
                                 <label for="whois_privacy" class="ml-2 block text-sm text-slate-900 dark:text-white">
                                     🔒 {% trans "WHOIS Privacy Protection" %}
-                                    <span class="text-slate-500 dark:text-slate-400">(+5 RON/{% trans "year" %})</span>
+                                    <span class="text-slate-500 dark:text-slate-400">(+{% widthratio whois_price_cents 100 1 %} RON/{% trans "year" %})</span>
                                 </label>
                             </div>
 
@@ -338,8 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let totalCost = baseCost * years;
 
         if (whoisPrivacy) {
-            // TODO: Replace hardcoded WHOIS privacy price with value from settings context
-            totalCost += 500 * years; // 5 RON (500 cents) per year for WHOIS privacy
+            totalCost += {% setting_int "domains.whois_privacy_price_cents" default=500 %} * years;
         }
 
         const costInRon = (totalCost / 100).toFixed(2);

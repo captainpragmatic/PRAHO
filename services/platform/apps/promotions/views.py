@@ -25,7 +25,7 @@ from django.views.generic import (
     TemplateView,
     UpdateView,
 )
-from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
+from django_ratelimit.decorators import ratelimit
 
 from .models import (
     Coupon,
@@ -55,7 +55,7 @@ class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     """Mixin requiring user to be staff."""
 
     def test_func(self) -> bool:
-        return self.request.user.is_staff
+        return bool(self.request.user.is_staff)
 
 
 # ===============================================================================
@@ -88,7 +88,7 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
     if not request.user.is_authenticated:
         # Anonymous users can only access their own session's draft orders
         # For now, we allow this as draft orders are tied to sessions
-        return order.status == "draft"
+        return bool(order.status == "draft")
 
     # Staff can access all orders
     if request.user.is_staff:
@@ -99,8 +99,8 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
     return bool(customer and order.customer_id == customer.id)
 
 
-@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")
 class ValidateCouponView(View):
     """
     API endpoint for validating a coupon code.
@@ -221,8 +221,8 @@ class ValidateCouponView(View):
         )
 
 
-@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")
 class ApplyCouponView(View):
     """
     API endpoint for applying a coupon to an order.
@@ -321,7 +321,7 @@ class ApplyCouponView(View):
             )
 
 
-@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")
 class RemoveCouponView(View):
     """
     API endpoint for removing a coupon from an order.
@@ -455,8 +455,8 @@ class AvailableCouponsView(View):
 # ===============================================================================
 
 
-@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="30/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="10/m", method="POST", block=False), name="dispatch")
 class ValidateGiftCardView(View):
     """
     API endpoint for validating a gift card.
@@ -510,8 +510,8 @@ class ValidateGiftCardView(View):
             )
 
 
-@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
-@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")  # type: ignore[misc]
+@method_decorator(ratelimit(key="ip", rate="20/m", method="POST", block=False), name="dispatch")
+@method_decorator(ratelimit(key="post:code", rate="5/m", method="POST", block=False), name="dispatch")
 class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 
@@ -632,7 +632,7 @@ class CampaignListView(StaffRequiredMixin, ListView):
         if search:
             queryset = queryset.filter(Q(name__icontains=search) | Q(slug__icontains=search))
 
-        return queryset.annotate(
+        return queryset.annotate(  # type: ignore[no-any-return]
             coupon_count=Count("coupons"),
             total_redemptions=Sum("coupons__total_uses"),
         )
@@ -950,7 +950,7 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
         coupons = Coupon.generate_batch(
             count=count,
             prefix=prefix,
-            **coupon_defaults,
+            **coupon_defaults,  # type: ignore[arg-type]
         )
 
         messages.success(request, f"Created {len(coupons)} coupons successfully.")

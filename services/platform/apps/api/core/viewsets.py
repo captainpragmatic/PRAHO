@@ -2,7 +2,7 @@
 # API BASE VIEWSETS 🎯
 # ===============================================================================
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.db.models import QuerySet
 from rest_framework import viewsets
@@ -34,7 +34,7 @@ class BaseAPIViewSet(viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
     throttle_classes: ClassVar = [StandardAPIThrottle]
 
-    def get_queryset(self) -> QuerySet:
+    def get_queryset(self) -> QuerySet[Any]:
         """
         Override in subclasses to filter based on user access.
         Each domain handles its own access control logic.
@@ -67,7 +67,7 @@ class ReadOnlyAPIViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
     throttle_classes: ClassVar = [BurstAPIThrottle]  # Higher rate limit for read-only
 
-    def get_queryset(self) -> QuerySet:
+    def get_queryset(self) -> QuerySet[Any]:
         """Must be implemented by subclasses"""
         queryset = getattr(self, "queryset", None)
         if queryset is None:

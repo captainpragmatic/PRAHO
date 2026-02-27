@@ -266,7 +266,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             raise serializers.ValidationError(_("Passwords do not match."))
         return data
 
-    def validate_uid(self, value: str) -> str:
+    def validate_uid(self, value: str) -> Any:
         """Validate UID and get user"""
         try:
             uid = force_str(urlsafe_base64_decode(value))

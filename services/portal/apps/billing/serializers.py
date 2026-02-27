@@ -5,7 +5,7 @@ Convert Platform API responses to portal dataclass instances.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.utils.dateparse import parse_datetime
 
@@ -27,8 +27,8 @@ def create_currency_from_api(data: dict[str, Any]) -> Currency:
 def create_invoice_line_from_api(data: dict[str, Any]) -> InvoiceLine:
     """Create InvoiceLine dataclass from API response"""
     return InvoiceLine(
-        id=data.get("id"),
-        invoice_id=data.get("invoice_id", data.get("invoice")),
+        id=cast(int, data.get("id")),
+        invoice_id=cast(int, data.get("invoice_id", data.get("invoice"))),
         kind=data["kind"],
         service_id=data.get("service_id"),
         description=data["description"],
@@ -56,15 +56,15 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
         id=data["id"],
         number=data["number"],
         status=data["status"],
-        currency=currency,
+        currency=cast(Currency, currency),
         exchange_to_ron=None,  # Not provided by list API
         subtotal_cents=data.get("subtotal_cents", 0),  # Not in list API
         tax_cents=data.get("tax_cents", 0),  # Not in list API
         total_cents=data["total_cents"],
         issued_at=None,  # Not provided by list API
         due_at=parse_date_field("due_at"),
-        created_at=parse_datetime(data["created_at"]),
-        updated_at=parse_datetime(data.get("updated_at")) if data.get("updated_at") else None,
+        created_at=cast(datetime, parse_datetime(data["created_at"])),
+        updated_at=cast(datetime, parse_datetime(data["updated_at"])) if data.get("updated_at") else None,
         locked_at=None,  # Not provided by list API
         sent_at=None,  # Not provided by list API
         paid_at=None,  # Not provided by list API
@@ -105,8 +105,8 @@ def create_invoice_summary_from_api(data: dict[str, Any]) -> InvoiceSummary:
 def create_proforma_line_from_api(data: dict[str, Any]) -> ProformaLine:
     """Create ProformaLine dataclass from API response"""
     return ProformaLine(
-        id=data.get("id"),  # Line items may not have IDs in detail API responses
-        proforma_id=data.get("proforma_id", data.get("proforma")),
+        id=cast(int, data.get("id")),  # Line items may not have IDs in detail API responses
+        proforma_id=cast(int, data.get("proforma_id", data.get("proforma"))),
         kind=data["kind"],
         service_id=data.get("service_id"),
         description=data["description"],
@@ -137,9 +137,9 @@ def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] |
         subtotal_cents=data.get("subtotal_cents", 0),  # Not in list API
         tax_cents=data.get("tax_cents", 0),  # Not in list API
         total_cents=data["total_cents"],
-        currency=currency,
-        valid_until=parse_datetime(data["valid_until"]),
-        created_at=parse_datetime(data["created_at"]),
+        currency=cast(Currency, currency),
+        valid_until=cast(datetime, parse_datetime(data["valid_until"])),
+        created_at=cast(datetime, parse_datetime(data["created_at"])),
         notes=data.get("notes", ""),
     )
 

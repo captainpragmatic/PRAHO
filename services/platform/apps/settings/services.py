@@ -10,7 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -361,8 +361,7 @@ class SettingsService:
 
             if cached_value is not None:
                 logger.debug("✅ [Settings] Cache hit for key: %s", key)
-                return cached_value  # type: ignore[no-any-return]
-
+                return cast("SettingValue", cached_value)
             # Cache miss - get value and cache it
             value = setting.get_typed_value()
             cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
@@ -383,7 +382,7 @@ class SettingsService:
             )
 
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
-            return fallback_value  # type: ignore[no-any-return]
+            return cast("SettingValue", fallback_value)
 
     @classmethod
     @monitor_performance()
@@ -448,7 +447,7 @@ class SettingsService:
         """🔢 Get integer setting with type safety"""
         value = cls.get_setting(key, default)
         try:
-            return int(value)
+            return int(value)  # type: ignore[arg-type]
         except (ValueError, TypeError):
             logger.warning("⚠️ [Settings] Invalid integer value for %s: %s", key, value)
             return default
@@ -628,10 +627,11 @@ class SettingsService:
                 key=update.key, value=update.value, user_id=user_id or update.user_id, reason=update.reason
             )
 
-            if result.is_ok():
-                updated_settings.append(result.value)
-            else:
-                errors.append(result.error)
+            match result:
+                case Ok(value):
+                    updated_settings.append(value)
+                case Err(error):
+                    errors.append(error)
 
         if errors:
             return Err(errors)
@@ -662,7 +662,7 @@ class SettingsService:
                 )
             )
 
-        return cls.update_setting(key=key, value=default_value, user_id=user_id, reason="Reset to default value")  # type: ignore[no-any-return]
+        return cls.update_setting(key=key, value=default_value, user_id=user_id, reason="Reset to default value")
 
     @classmethod
     @monitor_performance()

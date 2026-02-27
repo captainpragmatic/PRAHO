@@ -294,7 +294,7 @@ class CostTrackingService:
         ).select_related("deployment", "deployment__node_size")
 
         # Aggregate by deployment
-        deployment_costs: dict[str, dict] = {}
+        deployment_costs: dict[str, dict] = {}  # type: ignore[type-arg]
         for record in records:
             dep_id = str(record.deployment.id)
             if dep_id not in deployment_costs:

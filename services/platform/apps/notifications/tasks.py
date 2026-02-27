@@ -94,7 +94,7 @@ def send_email_task(  # noqa: PLR0913
             )
             msg.attach_alternative(body_html, "text/html")
         else:
-            msg = EmailMessage(
+            msg = EmailMessage(  # type: ignore[assignment]
                 subject=subject,
                 body=body_text,
                 from_email=from_email,

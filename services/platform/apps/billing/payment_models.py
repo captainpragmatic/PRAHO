@@ -116,7 +116,7 @@ class Payment(models.Model):
         """Get Stripe PaymentIntent ID from meta or gateway_txn_id"""
         if self.payment_method == "stripe":
             # Check meta first for new records
-            stripe_id = self.meta.get("payment_intent_id")
+            stripe_id: str | None = self.meta.get("payment_intent_id")
             if stripe_id:
                 return stripe_id
             # Fallback to gateway_txn_id for existing records

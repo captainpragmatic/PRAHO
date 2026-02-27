@@ -319,10 +319,10 @@ class UsageInvoiceService:
         try:
             from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
-            tax_profile = CustomerTaxProfile.objects.get(customer=customer)
+            tax_profile = CustomerTaxProfile.objects.get(customer=customer)  # type: ignore[misc]
 
             # EU B2B reverse charge - 0% VAT if valid EU VAT number
-            if tax_profile.is_reverse_charge_eligible and tax_profile.vat_number:
+            if tax_profile.is_reverse_charge_eligible and tax_profile.vat_number:  # type: ignore[attr-defined]
                 country = getattr(customer, "country", billing_config.DEFAULT_COUNTRY_CODE)
                 # Reverse charge applies to EU customers outside provider's country
                 if billing_config.is_eu_country(country) and country != billing_config.DEFAULT_COUNTRY_CODE:
@@ -353,17 +353,17 @@ class UsageInvoiceService:
         try:
             from apps.customers.models import CustomerAddress  # noqa: PLC0415
 
-            billing_addr = CustomerAddress.objects.filter(
+            billing_addr = CustomerAddress.objects.filter(  # type: ignore[misc]
                 customer=customer, address_type="billing", is_current=True
             ).first()
 
             if billing_addr:
-                address["address1"] = billing_addr.street_address or ""
-                address["address2"] = billing_addr.street_address_2 or ""
-                address["city"] = billing_addr.city or ""
-                address["region"] = billing_addr.region or ""
-                address["postal"] = billing_addr.postal_code or ""
-                address["country"] = billing_addr.country_code or billing_config.DEFAULT_COUNTRY_CODE
+                address["address1"] = billing_addr.street_address or ""  # type: ignore[attr-defined]
+                address["address2"] = billing_addr.street_address_2 or ""  # type: ignore[attr-defined]
+                address["city"] = billing_addr.city or ""  # type: ignore[attr-defined]
+                address["region"] = billing_addr.region or ""  # type: ignore[attr-defined]
+                address["postal"] = billing_addr.postal_code or ""  # type: ignore[attr-defined]
+                address["country"] = billing_addr.country_code or billing_config.DEFAULT_COUNTRY_CODE  # type: ignore[attr-defined]
         except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
             logger.debug("Could not resolve customer billing address")
 
@@ -371,8 +371,8 @@ class UsageInvoiceService:
         try:
             from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
-            tax_profile = CustomerTaxProfile.objects.get(customer=customer)
-            address["tax_id"] = tax_profile.cui or tax_profile.vat_number or ""
+            tax_profile = CustomerTaxProfile.objects.get(customer=customer)  # type: ignore[misc]
+            address["tax_id"] = tax_profile.cui or tax_profile.vat_number or ""  # type: ignore[attr-defined]
         except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
             logger.debug("Could not resolve customer tax profile for tax ID")
 

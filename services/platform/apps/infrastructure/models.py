@@ -43,11 +43,11 @@ class CloudProvider(models.Model):
 
     PROVIDER_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("hetzner", "Hetzner Cloud"),
-        ("digitalocean", "DigitalOcean"),  # TODO: future
-        ("vultr", "Vultr"),  # TODO: future
-        ("linode", "Linode"),  # TODO: future
-        ("aws", "Amazon Web Services"),  # TODO: future
-        ("gcp", "Google Cloud Platform"),  # TODO: future
+        ("digitalocean", "DigitalOcean"),
+        ("vultr", "Vultr"),
+        ("linode", "Linode"),
+        ("aws", "Amazon Web Services"),
+        ("gcp", "Google Cloud Platform"),
     ]
 
     name = models.CharField(max_length=50, unique=True, verbose_name=_("Provider Name"))
@@ -228,7 +228,7 @@ class PanelType(models.Model):
 
     PANEL_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("virtualmin", "Virtualmin GPL"),
-        ("blesta", "Blesta"),  # TODO: future
+        ("blesta", "Blesta"),
     ]
 
     name = models.CharField(max_length=50, unique=True, verbose_name=_("Panel Name"))
@@ -291,10 +291,10 @@ class NodeDeployment(models.Model):
 
     NODE_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("sha", _("Shared Hosting")),  # Virtualmin - implemented
-        ("vps", _("VPS Hosting")),  # TODO: future
-        ("ctr", _("Container")),  # TODO: future (Docker)
-        ("ded", _("Dedicated")),  # TODO: future
-        ("app", _("Application Platform")),  # TODO: future
+        ("vps", _("VPS Hosting")),
+        ("ctr", _("Container")),
+        ("ded", _("Dedicated")),
+        ("app", _("Application Platform")),
     ]
 
     # Deployment configuration

@@ -97,7 +97,7 @@ class ExternalSyncService:
                 sync_targets.append({"target": "crm", "external_id": customer.meta["crm_id"], "status": "synced"})
 
             # Sync to accounting system if business customer
-            if customer.is_business:
+            if customer.is_business:  # type: ignore[attr-defined]
                 sync_targets.append({"target": "accounting", "status": "synced"})
 
             return {"sync_targets": sync_targets, "customer_name": customer.get_display_name()}

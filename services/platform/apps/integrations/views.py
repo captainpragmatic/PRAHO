@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
@@ -10,7 +10,7 @@ from django.utils.html import escape
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
+from django_ratelimit.decorators import ratelimit
 
 from apps.audit.services import RateLimitEventData, SecurityAuditService
 from apps.common.request_ip import get_safe_client_ip
@@ -121,7 +121,7 @@ class WebhookView(View):
             raw_body = request.body
             payload = json.loads(raw_body)
             # Attach raw body to request for downstream signature verification
-            request._raw_body = raw_body  # type: ignore[attr-defined]
+            request._raw_body = raw_body
             return Ok(payload)
         except json.JSONDecodeError:
             return Err("Invalid JSON payload")
@@ -185,7 +185,7 @@ class WebhookView(View):
 
     def extract_signature(self, request: Any) -> str:
         """🔐 Extract webhook signature from headers - override in subclasses"""
-        return request.META.get("HTTP_X_SIGNATURE", "")  # type: ignore[no-any-return]
+        return str(request.META.get("HTTP_X_SIGNATURE", ""))
 
     def get_client_ip(self, request: Any) -> str:
         """🌐 Get client IP address"""
@@ -195,23 +195,23 @@ class WebhookView(View):
 class StripeWebhookView(WebhookView):
     """💳 Stripe webhook endpoint"""
 
-    source_name = "stripe"  # type: ignore[assignment]
+    source_name = "stripe"
 
     def extract_signature(self, request: Any) -> str:
         """🔐 Extract Stripe signature"""
-        return request.META.get("HTTP_STRIPE_SIGNATURE", "")  # type: ignore[no-any-return]
+        return str(request.META.get("HTTP_STRIPE_SIGNATURE", ""))
 
 
 class VirtualminWebhookView(WebhookView):
     """🖥️ Virtualmin webhook endpoint"""
 
-    source_name = "virtualmin"  # type: ignore[assignment]
+    source_name = "virtualmin"
 
 
 class PayPalWebhookView(WebhookView):
     """🟡 PayPal webhook endpoint"""
 
-    source_name = "paypal"  # type: ignore[assignment]
+    source_name = "paypal"
 
 
 # ===============================================================================
@@ -219,7 +219,7 @@ class PayPalWebhookView(WebhookView):
 # ===============================================================================
 
 
-@ratelimit(key="user", rate="30/m", method="GET", block=False)  # type: ignore[misc]
+@ratelimit(key="user", rate="30/m", method="GET", block=False)
 def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
     if not request.user.is_staff:
@@ -278,13 +278,13 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
         # First escape HTML
         escaped = escape(data)
         # Remove javascript: URLs and other dangerous patterns
-        escaped = re.sub(r"javascript:", "blocked-js:", escaped, flags=re.IGNORECASE)  # type: ignore[assignment]
-        escaped = re.sub(r"data:", "blocked-data:", escaped, flags=re.IGNORECASE)  # type: ignore[assignment]
+        escaped = re.sub(r"javascript:", "blocked-js:", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(r"data:", "blocked-data:", escaped, flags=re.IGNORECASE)
         # Block SQL injection patterns
-        escaped = re.sub(r"\bDROP\s+TABLE\b", "blocked-sql", escaped, flags=re.IGNORECASE)  # type: ignore[assignment]
-        escaped = re.sub(r"<script", "&lt;blocked-script", escaped, flags=re.IGNORECASE)  # type: ignore[assignment]
+        escaped = re.sub(r"\bDROP\s+TABLE\b", "blocked-sql", escaped, flags=re.IGNORECASE)
+        escaped = re.sub(r"<script", "&lt;blocked-script", escaped, flags=re.IGNORECASE)
         # Block other XSS patterns
-        escaped = re.sub(r"alert\(", "blocked-alert(", escaped, flags=re.IGNORECASE)  # type: ignore[assignment]
+        escaped = re.sub(r"alert\(", "blocked-alert(", escaped, flags=re.IGNORECASE)
         return escaped
 
     recent_data = [
@@ -336,7 +336,7 @@ def _check_webhook_retry_permissions(request: HttpRequest) -> JsonResponse | Non
 
 
 @require_http_methods(["POST"])
-@ratelimit(key="user", rate="10/m", method="POST", block=False)  # type: ignore[misc]
+@ratelimit(key="user", rate="10/m", method="POST", block=False)
 def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
     """🔄 Manually retry a failed webhook using result pipeline"""
     # Check permissions and rate limits
@@ -356,13 +356,10 @@ def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
         match result:
             case Ok(value):
                 # result is Ok type - safe to access .value
-                return value  # type: ignore[no-any-return]
+                return cast(JsonResponse, value)
             case Err(error):
                 # result is Err type - safe to access .error
                 return _create_retry_error_response(error)
-            case _:
-                # Fallback for any unexpected cases
-                return JsonResponse({"error": "Unknown result type"}, status=500)  # type: ignore[unreachable]
 
     except Exception:
         logger.exception(f"Error retrying webhook {webhook_id}")

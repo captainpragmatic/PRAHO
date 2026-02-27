@@ -89,6 +89,8 @@ class NodeDeploymentForm(forms.ModelForm):
 
     def clean(self) -> dict[str, Any]:
         cleaned_data = super().clean()
+        if cleaned_data is None:
+            return {}
         provider = cleaned_data.get("provider")
         region = cleaned_data.get("region")
         node_size = cleaned_data.get("node_size")
@@ -276,4 +278,4 @@ class DeploymentDestroyForm(forms.Form):
         confirm = self.cleaned_data["confirm_hostname"]
         if confirm != self.expected_hostname:
             raise ValidationError(_("Hostname must match exactly: %(hostname)s") % {"hostname": self.expected_hostname})
-        return confirm
+        return str(confirm)

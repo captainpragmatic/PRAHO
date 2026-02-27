@@ -13,7 +13,7 @@ from __future__ import annotations
 import functools
 import logging
 import time
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar, TypeVar, cast
 
 from django.conf import settings
 from django.db import connection, models, reset_queries
@@ -55,19 +55,19 @@ class OptimizedQuerySetMixin:
 
     def optimized(self, select: list[str] | None = None, prefetch: list[str] | None = None) -> QuerySet[Any]:
         """Apply optimizations to the queryset."""
-        qs = self
+        qs: Any = self
 
         # Apply select_related
         select_fields = select if select is not None else self.select_related_fields
         if select_fields:
-            qs = qs.select_related(*select_fields)  # type: ignore[attr-defined]
+            qs = qs.select_related(*select_fields)
 
         # Apply prefetch_related
         prefetch_fields = prefetch if prefetch is not None else self.prefetch_related_fields
         if prefetch_fields:
-            qs = qs.prefetch_related(*prefetch_fields)  # type: ignore[attr-defined]
+            qs = qs.prefetch_related(*prefetch_fields)
 
-        return qs  # type: ignore[return-value]
+        return cast("QuerySet[Any]", qs)
 
     def optimized_for_list(self) -> QuerySet[Any]:
         """Apply light optimizations suitable for list views."""
@@ -93,14 +93,14 @@ class OptimizedManager(models.Manager[T]):
     def get_queryset(self) -> QuerySet[T]:
         queryset_class = getattr(self.model, "OptimizedQuerySet", None)
         if queryset_class:
-            return queryset_class(self.model, using=self._db)
+            return cast("QuerySet[T]", queryset_class(self.model, using=self._db))
         return super().get_queryset()
 
     def optimized(self) -> QuerySet[T]:
         """Get an optimized queryset."""
         qs = self.get_queryset()
         if hasattr(qs, "optimized"):
-            return qs.optimized()  # type: ignore[return-value]
+            return cast("QuerySet[T]", qs.optimized())
         return qs
 
 
@@ -119,7 +119,7 @@ def select_related_for_detail(*relations: str) -> list[str]:
     return list(relations)
 
 
-def prefetch_related_for_list(*relations: str | Prefetch) -> list[str | Prefetch]:
+def prefetch_related_for_list(*relations: str | Prefetch[Any]) -> list[str | Prefetch[Any]]:
     """
     Helper to define prefetch_related fields for list views.
     Returns a list that can be used with prefetch_related().
@@ -179,7 +179,7 @@ class InvoiceQueryOptimization:
         }
 
     @staticmethod
-    def for_detail() -> dict[str, list[str] | list[Prefetch]]:
+    def for_detail() -> dict[str, list[str] | list[Prefetch[Any]]]:
         return {
             "select_related": ["customer", "currency", "created_by"],
             "prefetch_related": [
@@ -200,7 +200,7 @@ class OrderQueryOptimization:
         }
 
     @staticmethod
-    def for_detail() -> dict[str, list[str] | list[Prefetch]]:
+    def for_detail() -> dict[str, list[str] | list[Prefetch[Any]]]:
         return {
             "select_related": ["customer", "currency", "invoice"],
             "prefetch_related": [
@@ -345,7 +345,7 @@ def annotate_counts(
         )
     """
     annotations = {name: Count(relation) for name, relation in count_relations.items()}
-    return queryset.annotate(**annotations)
+    return cast("QuerySet[T]", queryset.annotate(**annotations))
 
 
 # Common index recommendations

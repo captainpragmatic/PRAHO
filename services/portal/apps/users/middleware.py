@@ -9,7 +9,7 @@ import random
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -79,8 +79,8 @@ class PortalAuthenticationMiddleware:
                 def __str__(self) -> str:
                     return "AnonymousUser"
 
-            request.user = AnonymousUser()
-            return self.get_response(request)
+            request.user = AnonymousUser()  # type: ignore[assignment]
+            return cast(HttpResponse, self.get_response(request))
 
         # Tier 1: Fast session check with age validation
         # Historically, 'customer_id' in session stored the platform user_id.
@@ -116,9 +116,9 @@ class PortalAuthenticationMiddleware:
 
         # If user has selected a specific customer via company switcher, use that
         if selected_customer_id:
-            request.customer_id = int(selected_customer_id)
+            request.customer_id = int(selected_customer_id)  # type: ignore[attr-defined]
         elif active_customer_id:
-            request.customer_id = active_customer_id
+            request.customer_id = active_customer_id  # type: ignore[attr-defined]
         # Fallback: resolve active customer context for this user (first accessible)
         elif user_id_int:
             try:
@@ -126,18 +126,18 @@ class PortalAuthenticationMiddleware:
                 if customers:
                     active_customer_id = customers[0].get("id")
                     request.session["active_customer_id"] = active_customer_id
-                    request.customer_id = active_customer_id
+                    request.customer_id = active_customer_id  # type: ignore[attr-defined]
                 else:
                     # No accessible customers for this user; use legacy customer_id
-                    request.customer_id = request.session.get("customer_id")
+                    request.customer_id = request.session.get("customer_id")  # type: ignore[attr-defined]
             except Exception as e:
                 logger.error(f"🔥 [Auth] Failed to fetch accessible customers for user {session_user_id}: {e}")
-                request.customer_id = request.session.get("customer_id")
+                request.customer_id = request.session.get("customer_id")  # type: ignore[attr-defined]
         else:
-            request.customer_id = request.session.get("customer_id")
-        request.user_id = session_user_id
-        request.customer_email = request.session.get("email")
-        request.is_authenticated = True
+            request.customer_id = request.session.get("customer_id")  # type: ignore[attr-defined]
+        request.user_id = session_user_id  # type: ignore[attr-defined]
+        request.customer_email = request.session.get("email")  # type: ignore[attr-defined]
+        request.is_authenticated = True  # type: ignore[attr-defined]
 
         # Create a simple user-like object for Django auth compatibility
         class PortalUser:
@@ -152,9 +152,9 @@ class PortalAuthenticationMiddleware:
             def __str__(self) -> str:
                 return self.email or f"customer_{self.id}"
 
-        request.user = PortalUser(str(session_user_id), request.session.get("email", ""))
+        request.user = PortalUser(str(session_user_id), request.session.get("email", ""))  # type: ignore[assignment]
 
-        return self.get_response(request)
+        return cast(HttpResponse, self.get_response(request))
 
     def is_public_url(self, path: str) -> bool:
         """Check if path requires authentication."""
@@ -190,7 +190,7 @@ class PortalAuthenticationMiddleware:
         # Initialize session metadata if missing
         if not validated_at or not next_validate_at:
             # Fresh session - validate immediately but set next validation with jitter
-            request.session["session_created_at"] = session_created_at.isoformat()
+            request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)
             request.session["next_validate_at"] = next_validate_at.isoformat()
             return self._perform_validation(request, customer_id, now, state_version)
@@ -218,7 +218,7 @@ class PortalAuthenticationMiddleware:
         logger.warning(f"🚨 [Auth] Customer {customer_id} past hard TTL deadline, forcing logout")
         return False
 
-    def _get_session_datetime(self, request: HttpRequest, key: str, default: datetime | None = None) -> datetime:
+    def _get_session_datetime(self, request: HttpRequest, key: str, default: datetime | None = None) -> datetime | None:
         """Get datetime from session, handling ISO format conversion."""
         value = request.session.get(key)
         if value:
@@ -368,5 +368,5 @@ class SessionLanguageMiddleware:
                     f"🌐 [Language Middleware] Activated {session_language} from session (was {current_language})"
                 )
 
-        response = self.get_response(request)
+        response: HttpResponse = self.get_response(request)
         return response

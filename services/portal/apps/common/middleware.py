@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from typing import cast
 
 from django.contrib.auth import logout
 from django.http import HttpRequest, HttpResponse
@@ -70,12 +71,14 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         try:
             # 🔒 SECURITY: Validate session integrity
             if not self._validate_session_integrity(request):
-                logger.warning(f"🔒 [Session] Session integrity failed for {request.session.session_key[:8]}...")
+                logger.warning(
+                    f"🔒 [Session] Session integrity failed for {(request.session.session_key or 'unknown')[:8]}..."
+                )
                 return self._handle_security_violation(request, "session_integrity_failed")
 
             # 🔒 SECURITY: Check session timeout
             if self._is_session_expired(request):
-                logger.info(f"🔒 [Session] Session expired for {request.session.session_key[:8]}...")
+                logger.info(f"🔒 [Session] Session expired for {(request.session.session_key or 'unknown')[:8]}...")
                 return self._handle_session_timeout(request)
 
             # 🔒 SECURITY: Update last activity
@@ -120,7 +123,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
                 "last_validated": time.time(),
             }
             session.modified = True
-            logger.info(f"🔒 [Session] Security fingerprint created for {session.session_key[:8]}...")
+            logger.info(f"🔒 [Session] Security fingerprint created for {(session.session_key or 'unknown')[:8]}...")
             return True
 
         fingerprint = session["security_fingerprint"]
@@ -131,7 +134,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
 
         if not self.IP_CHANGE_TOLERANCE and expected_ip_hash != current_ip_hash:
             logger.warning(
-                f"🔒 [Session] IP address changed for session {session.session_key[:8]}... "
+                f"🔒 [Session] IP address changed for session {(session.session_key or 'unknown')[:8]}... "
                 f"(expected: {expected_ip_hash}, got: {current_ip_hash})"
             )
             return False
@@ -140,7 +143,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         expected_ua_hash = fingerprint.get("user_agent_hash", "")
         if expected_ua_hash != user_agent_hash:
             logger.warning(
-                f"🔒 [Session] User agent changed for session {session.session_key[:8]}... "
+                f"🔒 [Session] User agent changed for session {(session.session_key or 'unknown')[:8]}... "
                 f"(expected: {expected_ua_hash}, got: {user_agent_hash})"
             )
             return False
@@ -161,7 +164,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         # Check absolute session age
         fingerprint = session.get("security_fingerprint", {})
         created_at = fingerprint.get("created_at", current_time)
-        return current_time - created_at > self.MAX_SESSION_AGE_SECONDS
+        return bool(current_time - created_at > self.MAX_SESSION_AGE_SECONDS)
 
     def _update_session_activity(self, request: HttpRequest) -> None:
         """Update session last activity timestamp"""
@@ -175,7 +178,8 @@ class SessionSecurityMiddleware(MiddlewareMixin):
     def _handle_security_violation(self, request: HttpRequest, violation_type: str) -> HttpResponse:
         """🔒 Handle detected security violations"""
 
-        session_key = getattr(request.session, "session_key", "unknown")[:8]
+        session_key_raw = getattr(request.session, "session_key", "unknown")
+        session_key = (session_key_raw or "unknown")[:8]
 
         # Log security event
         logger.error(
@@ -223,9 +227,9 @@ class SessionSecurityMiddleware(MiddlewareMixin):
                 # Take first IP if comma-separated
                 ip = forwarded_ip.split(",")[0].strip()
                 if ip and ip != "unknown":
-                    return ip
+                    return cast(str, ip)
 
-        return request.META.get("REMOTE_ADDR", "0.0.0.0")
+        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
 
 
 class SecurityHeadersMiddleware:

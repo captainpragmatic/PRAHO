@@ -141,17 +141,17 @@ class RequestIDFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Add request_id attribute to log record"""
         if not hasattr(record, "request_id"):
-            record.request_id = getattr(_request_context, "request_id", "-")  # type: ignore[attr-defined]
+            record.request_id = getattr(_request_context, "request_id", "-")
 
         # Add other context if available
         if not hasattr(record, "user_id"):
-            record.user_id = getattr(_request_context, "user_id", None)  # type: ignore[attr-defined]
+            record.user_id = getattr(_request_context, "user_id", None)
         if not hasattr(record, "user_email"):
-            record.user_email = getattr(_request_context, "user_email", None)  # type: ignore[attr-defined]
+            record.user_email = getattr(_request_context, "user_email", None)
         if not hasattr(record, "ip_address"):
-            record.ip_address = getattr(_request_context, "ip_address", None)  # type: ignore[attr-defined]
+            record.ip_address = getattr(_request_context, "ip_address", None)
         if not hasattr(record, "session_id"):
-            record.session_id = getattr(_request_context, "session_id", None)  # type: ignore[attr-defined]
+            record.session_id = getattr(_request_context, "session_id", None)
 
         return True
 
@@ -164,14 +164,14 @@ class SecurityEventFilter(logging.Filter):
     or come from security-related loggers.
     """
 
-    SECURITY_LOGGERS: ClassVar[list] = [
+    SECURITY_LOGGERS: ClassVar[list[str]] = [
         "apps.users",
         "apps.audit",
         "django.security",
         "apps.common.middleware",
     ]
 
-    SECURITY_KEYWORDS: ClassVar[list] = [
+    SECURITY_KEYWORDS: ClassVar[list[str]] = [
         "login",
         "logout",
         "auth",
@@ -209,7 +209,7 @@ class SensitiveDataFilter(logging.Filter):
     and credit card numbers from appearing in logs.
     """
 
-    SENSITIVE_PATTERNS: ClassVar[list] = [
+    SENSITIVE_PATTERNS: ClassVar[list[str]] = [
         "password",
         "secret",
         "token",
@@ -237,7 +237,7 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
-class StructuredLogAdapter(logging.LoggerAdapter):
+class StructuredLogAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
     """
     Log adapter that adds structured context to all log messages.
 
@@ -249,7 +249,7 @@ class StructuredLogAdapter(logging.LoggerAdapter):
         logger.info("Invoice created", invoice_id=123)
     """
 
-    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def process(self, msg: str, kwargs: Any) -> tuple[str, Any]:
         """Process log message and add structured context"""
         # Merge extra context
         extra = kwargs.get("extra", {})

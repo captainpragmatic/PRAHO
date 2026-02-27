@@ -304,7 +304,7 @@ class FileUploadSecurityService:
         file_size = file.size if hasattr(file, "size") else 0
         max_size_bytes = int((self.max_size_override_mb or file_type.max_size_mb) * 1024 * 1024)
 
-        if file_size > max_size_bytes:
+        if file_size is not None and file_size > max_size_bytes:
             logger.warning(
                 f"File upload rejected - too large: {file_size} bytes",
                 extra={
@@ -315,8 +315,8 @@ class FileUploadSecurityService:
             )
             return FileValidationResult(
                 is_valid=False,
-                error_message=f"File size ({file_size // (1024*1024)}MB) exceeds maximum ({file_type.max_size_mb}MB)",
-                file_size=file_size,
+                error_message=f"File size ({(file_size or 0) // (1024*1024)}MB) exceeds maximum ({file_type.max_size_mb}MB)",
+                file_size=file_size or 0,
                 detected_extension=extension,
             )
 
@@ -375,7 +375,7 @@ class FileUploadSecurityService:
 
         # Calculate file hash for integrity tracking
         file.seek(0)
-        file_hash = self._calculate_file_hash(file)
+        file_hash = self._calculate_file_hash(file)  # type: ignore[arg-type]
         file.seek(0)
 
         logger.info(
@@ -393,7 +393,7 @@ class FileUploadSecurityService:
             file_hash=file_hash,
             detected_mime_type=detected_mime,
             detected_extension=extension,
-            file_size=file_size,
+            file_size=file_size or 0,
             category=file_type.category,
         )
 

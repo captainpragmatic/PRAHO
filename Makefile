@@ -473,8 +473,8 @@ lint-credentials:
 type-check:
 	@echo "🏷️ [All Services] Comprehensive type checking..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml || echo "⚠️ MyPy not configured"
-	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/mypy portal/ --config-file=../../pyproject.toml || echo "⚠️ MyPy not configured"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
+	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 	@echo "🎉 All services type checking complete!"
 
 # ===============================================================================

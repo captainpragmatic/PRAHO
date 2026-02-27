@@ -157,7 +157,7 @@ def _invalidate_tax_cache(sender: type, instance: object, **kwargs: object) -> N
     try:
         from apps.common.tax_service import TaxService  # noqa: PLC0415
 
-        TaxService.invalidate_cache(instance.country_code)
+        TaxService.invalidate_cache(instance.country_code)  # type: ignore[attr-defined]
     except Exception:  # noqa: S110
         pass  # Cache invalidation is best-effort
 

@@ -664,7 +664,7 @@ class AuditSearchQuery(models.Model):
 
     # Sharing
     is_shared = models.BooleanField(default=False)  # Available to all staff
-    shared_with: models.ManyToManyField = models.ManyToManyField(User, related_name="shared_audit_queries", blank=True)  # type: ignore[type-arg]
+    shared_with: models.ManyToManyField = models.ManyToManyField(User, related_name="shared_audit_queries", blank=True)
 
     class Meta:
         db_table = "audit_search_query"

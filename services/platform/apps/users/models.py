@@ -73,7 +73,7 @@ class User(AbstractUser):
     )
 
     # Basic information
-    username = None  # type: ignore[assignment]  # Remove username field, using email instead
+    username = None  # Remove username field, using email instead
     email = models.EmailField(_("email address"), unique=True)
     phone = models.CharField(max_length=20, blank=True, help_text=_("Romanian phone number format: +40 721 123 456"))
 
@@ -118,7 +118,7 @@ class User(AbstractUser):
     )
 
     # Custom manager with explicit typing to avoid MyPy override warnings
-    objects: UserManager = UserManager()  # type: ignore[assignment,misc]  # UserManager - Custom email-based manager
+    objects: UserManager = UserManager()  # UserManager - Custom email-based manager
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []

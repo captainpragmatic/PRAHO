@@ -11,5 +11,5 @@ class UsersConfig(AppConfig):
     verbose_name = "Users"
 
     def ready(self) -> None:
-        """Import signals when the app is ready"""
-        from . import signals  # Signals must be imported after Django ready  # noqa: F401
+        """Import signals and MFA models when the app is ready."""
+        from . import mfa, signals  # noqa: F401 — register WebAuthnCredential model + connect signals

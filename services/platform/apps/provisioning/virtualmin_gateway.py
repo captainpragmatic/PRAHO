@@ -397,7 +397,7 @@ class VirtualminConfig:
         temp_server.get_api_password = lambda: password
 
         return cls(
-            server=temp_server,  # type: ignore[arg-type]  # We know this works
+            server=temp_server,  # type: ignore[arg-type]  # SimpleNamespace duck-types VirtualminServer
             timeout=timeout,
             verify_ssl=verify_ssl,
             cert_fingerprint=cert_fingerprint,
@@ -557,8 +557,8 @@ class VirtualminGateway:
         self.config = config
         self.server = config.server
         self._session = self._create_session()
-        self._auth_manager = None
-        self._credential_vault = None
+        self._auth_manager: VirtualminAuthenticationManager | None = None
+        self._credential_vault: CredentialVault | None = None
 
     def _get_auth_manager(self) -> VirtualminAuthenticationManager:
         """Lazy load authentication manager"""
@@ -566,16 +566,16 @@ class VirtualminGateway:
             # Import here to avoid circular imports
             from .virtualmin_auth_manager import VirtualminAuthenticationManager  # noqa: PLC0415
 
-            self._auth_manager = VirtualminAuthenticationManager(self.server)  # type: ignore[assignment]
-        return self._auth_manager  # type: ignore[return-value]
+            self._auth_manager = VirtualminAuthenticationManager(self.server)
+        return self._auth_manager
 
     def _get_credential_vault(self) -> CredentialVault:
         """Lazy load credential vault"""
         if not self._credential_vault:
             from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
 
-            self._credential_vault = get_credential_vault()  # type: ignore[assignment]
-        return self._credential_vault  # type: ignore[return-value]
+            self._credential_vault = get_credential_vault()
+        return self._credential_vault
 
     def _get_credentials(self, reason: str = "Virtualmin API call") -> Result[tuple[str, str], str]:
         """
@@ -993,18 +993,15 @@ class VirtualminGateway:
 
     def _parse_domains_response(self, data: dict[str, Any], name_only: bool) -> list[dict[str, Any]]:
         """Parse domains response based on different formats"""
-        if not isinstance(data, dict):
-            return []  # type: ignore[unreachable]
-
         # Handle different response formats
         if "domains" in data:
-            return data["domains"]  # type: ignore[no-any-return]
+            return list(data["domains"])
         elif "data" in data:
             return self._parse_table_format_domains(data["data"], name_only)
         elif "items" in data:
-            return data["items"]  # type: ignore[no-any-return]
+            return list(data["items"])
         else:
-            return self._parse_raw_response_domains(data)  # type: ignore[return-value]
+            return self._parse_raw_response_domains(data)  # type: ignore[return-value]  # returns list[str] for name_only fallback
 
     def _parse_table_format_domains(self, data_items: list[dict[str, Any]], name_only: bool) -> list[dict[str, Any]]:
         """Parse Virtualmin's table-like response format"""

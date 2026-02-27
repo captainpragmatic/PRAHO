@@ -208,7 +208,8 @@ def get_cli_tool_path(provider_type: str) -> str | None:
         return None
 
     tool_name = config["cli"]["tool"]
-    return shutil.which(tool_name)
+    result: str | None = shutil.which(tool_name)
+    return result
 
 
 def is_cli_available(provider_type: str) -> bool:
@@ -550,7 +551,7 @@ def get_credentials_for_provider(
 
     try:
         # Get credential from vault using provider's credential_identifier
-        secret = vault.get_secret(provider.credential_identifier)
+        secret = vault.get_secret(provider.credential_identifier)  # type: ignore[attr-defined]
         if not secret:
             return Err(f"No credentials found for provider: {provider.name}")
 

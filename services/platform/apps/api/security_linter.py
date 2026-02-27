@@ -7,6 +7,7 @@ Automated detection of security vulnerabilities in API endpoints.
 import ast
 import re
 from pathlib import Path
+from typing import Any
 
 
 class SecurityViolation:
@@ -89,15 +90,15 @@ class APISecurityLinter:
         """Check for violations using AST analysis"""
 
         class APIVisitor(ast.NodeVisitor):
-            def __init__(self, linter: object, file_path: str, lines: list[str]) -> None:
+            def __init__(self, linter: Any, file_path: Path, lines: list[str]) -> None:
                 self.linter = linter
                 self.file_path = file_path
                 self.lines = lines
                 self.in_api_view = False
-                self.current_function = None
-                self.http_methods = set()
+                self.current_function: str | None = None
+                self.http_methods: set[str] = set()
 
-            def visit_FunctionDef(self, node: object) -> None:
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
                 self.current_function = node.name
 
                 # Check for @api_view decorators
@@ -110,7 +111,7 @@ class APISecurityLinter:
                         # Extract HTTP methods
                         if decorator.args and isinstance(decorator.args[0], ast.List):
                             for method in decorator.args[0].elts:
-                                if isinstance(method, ast.Constant):
+                                if isinstance(method, ast.Constant) and isinstance(method.value, str):
                                     self.http_methods.add(method.value)
 
                 # Check function body for violations
@@ -123,7 +124,7 @@ class APISecurityLinter:
                 self.in_api_view = False
                 self.http_methods = set()
 
-            def _check_function_violations(self, node: object) -> None:
+            def _check_function_violations(self, node: ast.FunctionDef) -> None:
                 """Check specific function for security violations"""
 
                 function_source = ast.get_source_segment(content, node)
@@ -190,8 +191,8 @@ class APISecurityLinter:
 
             # Track function definitions
             if line.strip().startswith("def ") and in_api_endpoint:
-                current_function = re.search(r"def\s+(\w+)", line)
-                current_function = current_function.group(1) if current_function else "unknown"
+                fn_match = re.search(r"def\s+(\w+)", line)
+                current_function = fn_match.group(1) if fn_match else "unknown"
 
             # Check for violations in API endpoints
             if in_api_endpoint and current_function:
@@ -264,7 +265,7 @@ class APISecurityLinter:
         report = ["🚨 SECURITY VIOLATIONS DETECTED:", ""]
 
         # Group by severity
-        by_severity = {}
+        by_severity: dict[str, list[SecurityViolation]] = {}
         for violation in self.violations:
             if violation.severity not in by_severity:
                 by_severity[violation.severity] = []

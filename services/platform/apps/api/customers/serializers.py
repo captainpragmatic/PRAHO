@@ -2,9 +2,11 @@
 # CUSTOMER API SERIALIZERS 📊
 # ===============================================================================
 
+from __future__ import annotations
+
 import logging
 import re
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -14,6 +16,9 @@ from rest_framework import serializers
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.users.services import SecureUserRegistrationService
+
+if TYPE_CHECKING:
+    from apps.users.models import User
 
 User = get_user_model()
 
@@ -134,7 +139,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
     user_data = UserRegistrationDataSerializer()
     customer_data = CustomerRegistrationDataSerializer()
 
-    def create(self, validated_data: dict[str, Any]) -> User:
+    def create(self, validated_data: dict[str, Any]) -> dict[str, Any]:
         """
         Create new customer owner using secure registration service.
         """

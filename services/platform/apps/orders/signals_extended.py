@@ -262,7 +262,7 @@ def handle_order_item_service_cleanup(sender: type[OrderItem], instance: OrderIt
                     service=instance.service, reason=f"Order item {instance.id} deleted", priority="high"
                 )
 
-                if result.is_ok():  # type: ignore[attr-defined]
+                if result.is_ok():
                     logger.info(f"⚠️ [Service] Marked service {instance.service.id} for review")
 
             except Exception as e:

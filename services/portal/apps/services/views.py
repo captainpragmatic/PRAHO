@@ -28,7 +28,10 @@ def service_list(request: HttpRequest) -> HttpResponse:
     # Get filter parameters
     status_filter = request.GET.get("status", "")
     service_type_filter = request.GET.get("service_type", "")
-    page = request.GET.get("page", 1)
+    try:
+        page = int(request.GET.get("page", 1))
+    except (ValueError, TypeError):
+        page = 1
 
     try:
         # Get services from platform API
@@ -159,7 +162,7 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
         period = "30d"
 
     try:
-        usage = services_api.get_service_usage(customer_id, service_id, period)
+        usage = services_api.get_service_usage(int(customer_id or 0), int(customer_id or 0), service_id, period=period)
 
         return render(
             request, "services/partials/usage_chart.html", {"usage": usage, "period": period, "service_id": service_id}
@@ -302,7 +305,7 @@ def service_plans(request: HttpRequest) -> HttpResponse:
     service_type = request.GET.get("type", "")
 
     try:
-        plans = services_api.get_available_plans(customer_id, service_type)
+        plans = services_api.get_available_plans(int(customer_id or 0), service_type)
 
         context = {
             "plans": plans,

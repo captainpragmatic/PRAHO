@@ -27,7 +27,7 @@ import secrets
 import time
 import urllib.parse
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 
 import requests
 from django.conf import settings
@@ -51,7 +51,7 @@ _HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
 
-    def __init__(self, message: str, status_code: int | None = None, response_data: dict | None = None):
+    def __init__(self, message: str, status_code: int | None = None, response_data: dict[str, Any] | None = None):
         self.message = message
         self.status_code = status_code
         self.response_data = response_data
@@ -108,7 +108,8 @@ class PlatformAPIClient:
         )
 
         # Generate HMAC signature
-        signature = hmac.new(self.portal_secret.encode(), canonical_string.encode(), hashlib.sha256).hexdigest()
+        secret = self.portal_secret or ""
+        signature = hmac.new(secret.encode(), canonical_string.encode(), hashlib.sha256).hexdigest()
 
         return {
             "X-Portal-Id": self.portal_id,
@@ -138,7 +139,7 @@ class PlatformAPIClient:
         logger.debug(f"🔍 [API Client] Building URL: base='{self.base_url}' endpoint='{endpoint}' -> '{built_url}'")
         return built_url
 
-    def _prepare_json_body(self, data: dict | None, user_id: int | None) -> tuple[bytes, dict]:
+    def _prepare_json_body(self, data: dict[str, Any] | None, user_id: int | None) -> tuple[bytes, dict[str, Any]]:
         payload: dict[str, Any] = {} if data is None else dict(data)
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
@@ -153,7 +154,7 @@ class PlatformAPIClient:
 
         return body_bytes, serialized_payload
 
-    def _normalized_path_with_query(self, url: str, params: dict | None) -> str:
+    def _normalized_path_with_query(self, url: str, params: dict[str, Any] | None) -> str:
         parsed_url = urllib.parse.urlsplit(url)
         pairs = urllib.parse.parse_qsl(parsed_url.query, keep_blank_values=True)
         if params:
@@ -175,7 +176,7 @@ class PlatformAPIClient:
         return urllib.parse.urlsplit(url).scheme.lower() == "https" and not settings.DEBUG
 
     def _prepare_request_headers(
-        self, method: str, url: str, params: dict | None, body: bytes, body_ts: str | None
+        self, method: str, url: str, params: dict[str, Any] | None, body: bytes, body_ts: str | None
     ) -> dict[str, str]:
         if self._should_use_legacy_canonical(url):
             return self._prepare_legacy_request_headers(method, url, params, body, body_ts)
@@ -187,7 +188,7 @@ class PlatformAPIClient:
         self,
         method: str,
         url: str,
-        params: dict | None,
+        params: dict[str, Any] | None,
         body: bytes,
         body_ts: str | None,
     ) -> dict[str, str]:
@@ -201,8 +202,9 @@ class PlatformAPIClient:
         path_with_query = self._normalized_path_with_query(url, params)
         body_text = body.decode("utf-8")
         canonical = f"{method}|{path_with_query}|{body_text}|{self.portal_id}|{nonce}|{timestamp}"
+        secret = self.portal_secret or ""
         signature = hmac.new(
-            self.portal_secret.encode(),
+            secret.encode(),
             canonical.encode(),
             hashlib.sha256,
         ).hexdigest()
@@ -222,14 +224,11 @@ class PlatformAPIClient:
                 return value
         return None
 
-    def _headers_allow_success_fallback(self, headers: dict[str, Any]) -> bool:  # noqa: PLR0911
+    def _headers_allow_success_fallback(self, headers: dict[str, Any]) -> bool:
         """
         Allow lenient fallback for mock Platform responses that only include
         {"success": true}, while still rejecting obviously malformed auth headers.
         """
-        if not isinstance(headers, dict):
-            return False
-
         portal_id = self._get_header_case_insensitive(headers, "X-Portal-Id")
         signature = self._get_header_case_insensitive(headers, "X-Signature")
         nonce = self._get_header_case_insensitive(headers, "X-Nonce")
@@ -253,7 +252,7 @@ class PlatformAPIClient:
     def _handle_api_response(self, response: requests.Response, endpoint: str) -> dict[str, Any]:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             try:
-                return response.json()
+                return cast(dict[str, Any], response.json())
             except ValueError:
                 return {"success": True}
 
@@ -268,13 +267,13 @@ class PlatformAPIClient:
             response_data=error_data,
         )
 
-    def _make_request(  # noqa: C901, PLR0912, PLR0913
+    def _make_request(  # noqa: PLR0913
         self,
         method: str,
         endpoint: str,
         user_id: int | None = None,
-        data: dict | None = None,
-        params: dict | None = None,
+        data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         retry_on_status: set[int] | None = None,
         max_retries: int = 0,
     ) -> dict[str, Any]:
@@ -285,10 +284,7 @@ class PlatformAPIClient:
         body_bytes, payload = self._prepare_json_body(data, user_id)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
-        if isinstance(headers, dict):
-            self._last_request_headers = dict(headers)
-        else:
-            self._last_request_headers = {}
+        self._last_request_headers = dict(headers)
 
         retry_statuses = retry_on_status or set()
         legacy_retry_attempted = False
@@ -335,8 +331,7 @@ class PlatformAPIClient:
                     if "hmac" in error_text:
                         legacy_headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
                         headers = legacy_headers
-                        if isinstance(headers, dict):
-                            self._last_request_headers = dict(headers)
+                        self._last_request_headers = dict(headers)
                         legacy_retry_attempted = True
                         continue
 
@@ -364,6 +359,8 @@ class PlatformAPIClient:
             logger.error(f"🔥 [API Client] Request error: {e}")
             raise PlatformAPIError(f"Request failed: {e!s}") from e
 
+        raise PlatformAPIError("Request failed: no response after retries")
+
     def _handle_binary_response(self, response: requests.Response, endpoint: str) -> bytes:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             return response.content
@@ -380,7 +377,7 @@ class PlatformAPIClient:
         )
 
     def _make_binary_request(
-        self, method: str, endpoint: str, params: dict | None = None, data: dict | None = None
+        self, method: str, endpoint: str, params: dict[str, Any] | None = None, data: dict[str, Any] | None = None
     ) -> bytes:
         """Make HMAC-authenticated request and return binary response (for PDFs). Supports signed JSON body."""
         url = self._build_url(endpoint)
@@ -414,8 +411,8 @@ class PlatformAPIClient:
             raise PlatformAPIError(f"Binary request failed: {e!s}") from e
 
     def _make_binary_request_with_headers(
-        self, method: str, endpoint: str, params: dict | None = None, data: dict | None = None
-    ) -> tuple[bytes, dict]:
+        self, method: str, endpoint: str, params: dict[str, Any] | None = None, data: dict[str, Any] | None = None
+    ) -> tuple[bytes, dict[str, str]]:
         """Make HMAC-authenticated request and return both binary content and headers."""
         url = self._build_url(endpoint)
 
@@ -508,7 +505,7 @@ class PlatformAPIClient:
         return self._make_request(
             "POST",
             "/users/session/validate/",
-            user_id=user_id,
+            user_id=int(user_id),
             data=request_data,  # Context in body, signed by HMAC
         )
 
@@ -521,7 +518,7 @@ class PlatformAPIClient:
         cache_key = f"user_customers_{user_id}"
         cached_data = cache.get(cache_key)
         if cached_data:
-            return cached_data
+            return cast(list[dict[str, Any]], cached_data)
 
         request_data = {
             "action": "get_user_customers",
@@ -547,7 +544,7 @@ class PlatformAPIClient:
         """Search customers"""
         params = {"q": query}
         data = self._make_request("GET", "/customers/search/", user_id=user_id, params=params)
-        return data.get("results", [])
+        return cast(list[dict[str, Any]], data.get("results", []))
 
     def get_customer_profile(self, user_id: int) -> dict[str, Any] | None:
         """Get user profile data (user-scoped, HMAC body with user_id)"""
@@ -576,7 +573,7 @@ class PlatformAPIClient:
                 data=update_data,
             )
 
-            return data.get("success", False)
+            return bool(data.get("success", False))
 
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
@@ -595,7 +592,7 @@ class PlatformAPIClient:
                 },
             )
 
-            return data.get("success", False)
+            return bool(data.get("success", False))
 
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
@@ -634,7 +631,7 @@ class PlatformAPIClient:
         """Verify TOTP token and enable MFA"""
         try:
             data = self._make_request("POST", "/users/mfa/verify/", data={"customer_id": customer_id, "token": token})
-            return data.get("success", False)
+            return bool(data.get("success", False))
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
             return False
@@ -674,7 +671,7 @@ class PlatformAPIClient:
                 request_data["confirmation_token"] = confirmation_token
 
             data = self._make_request("POST", "/users/mfa/disable/", data=request_data)
-            return data.get("success", False)
+            return bool(data.get("success", False))
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to disable MFA: {e}")
             return False
@@ -683,15 +680,15 @@ class PlatformAPIClient:
     # GENERIC HTTP METHODS
     # ===============================================================================
 
-    def get(self, endpoint: str, params: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+    def get(self, endpoint: str, params: dict[str, Any] | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Generic GET request"""
         return self._make_request("GET", endpoint, user_id=user_id, params=params)
 
-    def post(self, endpoint: str, data: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+    def post(self, endpoint: str, data: dict[str, Any] | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Generic POST request"""
         return self._make_request("POST", endpoint, user_id=user_id, data=data)
 
-    def put(self, endpoint: str, data: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+    def put(self, endpoint: str, data: dict[str, Any] | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Generic PUT request"""
         return self._make_request("PUT", endpoint, user_id=user_id, data=data)
 
@@ -703,7 +700,9 @@ class PlatformAPIClient:
     # BILLING API ENDPOINTS
     # ===============================================================================
 
-    def post_billing(self, endpoint: str, data: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+    def post_billing(
+        self, endpoint: str, data: dict[str, Any] | None = None, user_id: int | None = None
+    ) -> dict[str, Any]:
         """POST request to billing endpoints (outside /api/ namespace)"""
         # Save current base URL
         original_base = self.base_url
@@ -715,7 +714,9 @@ class PlatformAPIClient:
             # Restore original base URL
             self.base_url = original_base
 
-    def get_billing(self, endpoint: str, params: dict | None = None, user_id: int | None = None) -> dict[str, Any]:
+    def get_billing(
+        self, endpoint: str, params: dict[str, Any] | None = None, user_id: int | None = None
+    ) -> dict[str, Any]:
         """GET request to billing endpoints (outside /api/ namespace)"""
         # Save current base URL
         original_base = self.base_url
@@ -756,7 +757,8 @@ class PlatformAPIClient:
     def get_customer_services(self, customer_id: int, user_id: int) -> list[dict[str, Any]]:
         """Get services for customer"""
         data = self._make_request("GET", f"/customers/{customer_id}/services/", user_id=user_id)
-        return data if isinstance(data, list) else []
+        results = data.get("results", data.get("services", []))
+        return cast(list[dict[str, Any]], results) if isinstance(results, list) else []
 
     # ===============================================================================
     # DASHBOARD DATA

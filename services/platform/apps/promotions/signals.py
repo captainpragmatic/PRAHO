@@ -42,12 +42,12 @@ def create_audit_event(  # noqa: PLR0913
     instance: Any,
     category: str = "business_operation",
     severity: str = "low",
-    old_values: dict | None = None,
-    new_values: dict | None = None,
+    old_values: dict[str, Any] | None = None,
+    new_values: dict[str, Any] | None = None,
     description: str = "",
     user: Any | None = None,
     is_sensitive: bool = False,
-    metadata: dict | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> AuditEvent:
     """Create an audit event for a promotion-related action via the audit service."""
     audit_metadata = dict(metadata or {})
@@ -85,7 +85,7 @@ def _serialize_value(value: Any) -> Any:
     return value
 
 
-def get_model_changes(instance: Any, fields: list[str]) -> tuple[dict, dict]:
+def get_model_changes(instance: Any, fields: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Get old and new values for specified fields."""
     old_values = {}
     new_values = {}

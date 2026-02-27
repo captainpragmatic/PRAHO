@@ -63,7 +63,7 @@ class NodeValidationService:
     """
 
     # Required ports for a Virtualmin hosting server
-    REQUIRED_PORTS: ClassVar[list] = [
+    REQUIRED_PORTS: ClassVar[list[tuple[int, str]]] = [
         (22, "SSH"),
         (80, "HTTP"),
         (443, "HTTPS"),
@@ -71,7 +71,7 @@ class NodeValidationService:
     ]
 
     # Optional ports (warn if not open)
-    OPTIONAL_PORTS: ClassVar[list] = [
+    OPTIONAL_PORTS: ClassVar[list[tuple[int, str]]] = [
         (25, "SMTP"),
         (993, "IMAPS"),
         (995, "POP3S"),
@@ -192,7 +192,7 @@ class NodeValidationService:
 
             # Connect
             client.connect(
-                hostname=deployment.ipv4_address,
+                hostname=deployment.ipv4_address,  # type: ignore[arg-type]
                 port=22,
                 username="root",
                 pkey=pkey,
@@ -245,7 +245,7 @@ class NodeValidationService:
         closed_ports: list[tuple[int, str]] = []
 
         for port, name in self.REQUIRED_PORTS:
-            if self._is_port_open(ip, port):
+            if self._is_port_open(ip, port):  # type: ignore[arg-type]
                 open_ports.append((port, name))
             else:
                 closed_ports.append((port, name))

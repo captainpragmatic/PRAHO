@@ -127,7 +127,7 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
     spent_display.short_description = _("Spent")
 
     def coupon_count(self, obj: Any) -> int:
-        return obj.coupons.count()
+        return int(obj.coupons.count())
 
     coupon_count.short_description = _("Coupons")
 
@@ -217,7 +217,7 @@ class CouponAdmin(admin.ModelAdmin):
             return f"{obj.discount_percent}%"
         elif obj.discount_type == "fixed":
             return f"{obj.discount_amount_cents / 100:.2f}"
-        return obj.get_discount_type_display()
+        return str(obj.get_discount_type_display())
 
     discount_display.short_description = _("Discount")
 
@@ -324,7 +324,7 @@ class PromotionRuleAdmin(admin.ModelAdmin):
             return f"{obj.discount_percent}%"
         elif obj.discount_type in ("fixed", "tiered_fixed"):
             return f"{obj.discount_amount_cents / 100:.2f}"
-        return obj.get_discount_type_display()
+        return str(obj.get_discount_type_display())
 
     discount_display.short_description = _("Discount")
 
@@ -466,7 +466,7 @@ class LoyaltyProgramAdmin(admin.ModelAdmin):
     inlines = [LoyaltyTierInline]
 
     def member_count(self, obj: Any) -> int:
-        return obj.memberships.filter(is_active=True).count()
+        return int(obj.memberships.filter(is_active=True).count())
 
     member_count.short_description = _("Members")
 

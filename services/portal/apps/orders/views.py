@@ -220,7 +220,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
     if not session_key:
         # Force session creation if it doesn't exist yet
         request.session.save()
-        session_key = request.session.session_key
+        session_key = request.session.session_key or ""
 
     client_ip = CartRateLimiter.get_client_ip(request)
     if not isinstance(client_ip, str) or not client_ip:
@@ -339,7 +339,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     session_key = request.session.session_key
     if not session_key:
         request.session.save()
-        session_key = request.session.session_key
+        session_key = request.session.session_key or ""
 
     client_ip = CartRateLimiter.get_client_ip(request)
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
@@ -404,7 +404,7 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     session_key = request.session.session_key
     if not session_key:
         request.session.save()
-        session_key = request.session.session_key
+        session_key = request.session.session_key or ""
 
     client_ip = CartRateLimiter.get_client_ip(request)
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
@@ -474,7 +474,9 @@ def cart_review(request: HttpRequest) -> HttpResponse:
     calculation_error = None
 
     try:
-        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
+        calculation_result = CartCalculationService.calculate_cart_totals(
+            cart, str(customer_id or ""), int(user_id or 0)
+        )
     except ValidationError as e:
         calculation_error = str(e)
         logger.error(f"🔥 [Cart] Calculation error: {e}")
@@ -516,7 +518,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
     session_key = request.session.session_key
     if not session_key:
         request.session.save()
-        session_key = request.session.session_key
+        session_key = request.session.session_key or ""
 
     client_ip = CartRateLimiter.get_client_ip(request)
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
@@ -555,7 +557,9 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
             return render(request, "orders/partials/cart_empty.html")
 
         # Calculate totals
-        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
+        calculation_result = CartCalculationService.calculate_cart_totals(
+            cart, str(customer_id or ""), int(user_id or 0)
+        )
 
         # 🔒 SECURITY: Record successful operation with IP tracking
         CartRateLimiter.record_operation(session_key, client_ip)
@@ -609,10 +613,12 @@ def checkout(request: HttpRequest) -> HttpResponse:
     preflight_result = None
 
     try:
-        calculation_result = CartCalculationService.calculate_cart_totals(cart, customer_id, user_id)
+        calculation_result = CartCalculationService.calculate_cart_totals(
+            cart, str(customer_id or ""), int(user_id or 0)
+        )
 
         # 🔎 SECURITY: Run preflight validation to check for issues
-        preflight_result = OrderCreationService.preflight_order(cart, customer_id, user_id)
+        preflight_result = OrderCreationService.preflight_order(cart, str(customer_id or ""), str(user_id or ""))
 
         # 🔒 CRITICAL: Check if preflight validation failed with profile-related errors
         if preflight_result and not preflight_result.get("valid", False):
@@ -708,8 +714,8 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
         if not idempotency_key:
             preflight_result = OrderCreationService.preflight_order(
                 cart,
-                customer_id,
-                user_id,
+                str(customer_id or ""),
+                str(user_id or ""),
                 api_client_factory=PlatformAPIClient,
             )
 
@@ -744,8 +750,8 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
         # Create order with auto-pending (promotes to pending if validation passes)
         result = OrderCreationService.create_draft_order(
             cart,
-            customer_id,
-            user_id,
+            str(customer_id or ""),
+            str(user_id or ""),
             notes,
             auto_pending=True,
             idempotency_key=idempotency_key or None,
@@ -865,7 +871,8 @@ def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR091
 
     # If bank transfer, create order directly
     if payment_method == "bank_transfer":
-        return create_order(request)
+        response: HttpResponse = create_order(request)
+        return response
 
     # For Stripe payment, we need to:
     # 1. Create the order first
@@ -898,7 +905,7 @@ def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR091
             return redirect("orders:cart_review")
 
         # Run preflight validation
-        preflight_result = OrderCreationService.preflight_order(cart, customer_id, user_id)
+        preflight_result = OrderCreationService.preflight_order(cart, str(customer_id or ""), str(user_id or ""))
 
         if not preflight_result.get("valid", False):
             errors = preflight_result.get("errors", [])
@@ -917,8 +924,8 @@ def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR091
         # Create order ready for payment (pending status)
         result = OrderCreationService.create_draft_order(
             cart,
-            customer_id,
-            user_id,
+            str(customer_id or ""),
+            str(user_id or ""),
             notes,
             auto_pending=True,  # Promote to pending for immediate payment processing
         )
@@ -962,7 +969,7 @@ def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR091
                         "created_via": "portal_checkout",
                     },
                 },
-                user_id=int(user_id),
+                user_id=int(user_id or 0),
             )
 
             if payment_result and payment_result.get("success"):
@@ -1026,7 +1033,7 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
                 "timestamp": int(timezone.now().timestamp()),
                 "action": "get_order_detail",
             },
-            user_id=int(user_id),
+            user_id=int(user_id or 0),
         )
 
         if not order_data or order_data.get("error"):

@@ -116,7 +116,7 @@ class TokenResponse:
         return timezone.now() >= self.expires_at
 
     @classmethod
-    def from_dict(cls, data: dict) -> TokenResponse:
+    def from_dict(cls, data: dict[str, Any]) -> TokenResponse:
         return cls(
             access_token=data.get("access_token", ""),
             token_type=data.get("token_type", "Bearer"),
@@ -134,7 +134,7 @@ class UploadResponse:
     upload_index: str = ""  # index_incarcare
     message: str = ""
     errors: list[str] = field(default_factory=list)
-    raw_response: dict = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
@@ -179,8 +179,8 @@ class StatusResponse:
 
     status: str  # 'in processing', 'ok', 'nok'
     download_id: str = ""  # id_descarcare
-    errors: list[dict] = field(default_factory=list)
-    raw_response: dict = field(default_factory=dict)
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    raw_response: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_processing(self) -> bool:
@@ -237,7 +237,7 @@ class MessageInfo:
     details: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict) -> MessageInfo:
+    def from_dict(cls, data: dict[str, Any]) -> MessageInfo:
         return cls(
             message_id=data.get("id", ""),
             upload_index=data.get("id_solicitare", ""),

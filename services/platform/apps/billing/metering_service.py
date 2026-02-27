@@ -430,7 +430,7 @@ class AggregationService:
         query = UsageEvent.objects.filter(is_processed=False)
 
         if meter_id:
-            query = query.filter(meter_id=meter_id)
+            query = query.filter(meter_id=meter_id)  # type: ignore[misc]
         if customer_id:
             query = query.filter(customer_id=customer_id)
 
@@ -511,7 +511,7 @@ class AggregationService:
 
         aggregations = query.select_related("meter")
 
-        summary = {
+        summary: dict[str, Any] = {
             "customer_id": customer_id,
             "period_start": period_start,
             "period_end": period_end,
@@ -578,7 +578,7 @@ class RatingEngine:
 
             if sub_item:
                 included_quantity = _get_allowance_from_subscription_item(sub_item)
-                pricing_tier = None
+                pricing_tier = meter.pricing_tiers.filter(is_active=True, is_default=True).first()
                 unit_price_cents = sub_item.effective_price_cents
 
             service_plan = getattr(subscription.product, "default_service_plan", None)
@@ -596,7 +596,10 @@ class RatingEngine:
 
         if overage_value > 0 and meter.is_billable:
             if pricing_tier:
-                charge_cents = self._calculate_tiered_charge(overage_value, pricing_tier)
+                charge_cents = self._calculate_tiered_charge(
+                    overage_value,
+                    pricing_tier,
+                )
             elif unit_price_cents is not None:
                 charge_cents = int(overage_value * unit_price_cents)
             else:
@@ -721,9 +724,9 @@ class RatingEngine:
 
     def _calculate_per_unit_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         if not pricing_tier.unit_price_cents:
-            return pricing_tier.minimum_charge_cents
+            return int(pricing_tier.minimum_charge_cents)
         charge = int(quantity * pricing_tier.unit_price_cents)
-        return max(charge, pricing_tier.minimum_charge_cents)
+        return max(charge, int(pricing_tier.minimum_charge_cents))
 
     def _calculate_volume_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         applicable_bracket = next(
@@ -736,10 +739,10 @@ class RatingEngine:
             None,
         )
         if not applicable_bracket:
-            return pricing_tier.minimum_charge_cents
+            return int(pricing_tier.minimum_charge_cents)
 
-        charge = int(quantity * applicable_bracket.unit_price_cents) + applicable_bracket.flat_fee_cents
-        return max(charge, pricing_tier.minimum_charge_cents)
+        charge = int(quantity * applicable_bracket.unit_price_cents) + int(applicable_bracket.flat_fee_cents)
+        return max(charge, int(pricing_tier.minimum_charge_cents))
 
     def _calculate_graduated_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         total_charge = 0
@@ -751,16 +754,16 @@ class RatingEngine:
 
             bracket_size = bracket.to_quantity - bracket.from_quantity if bracket.to_quantity else remaining_quantity
             quantity_in_bracket = min(remaining_quantity, bracket_size)
-            total_charge += int(quantity_in_bracket * bracket.unit_price_cents) + bracket.flat_fee_cents
+            total_charge += int(quantity_in_bracket * bracket.unit_price_cents) + int(bracket.flat_fee_cents)
             remaining_quantity -= quantity_in_bracket
 
-        return max(total_charge, pricing_tier.minimum_charge_cents)
+        return max(total_charge, int(pricing_tier.minimum_charge_cents))
 
     def _calculate_package_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         for bracket in self._get_pricing_brackets(pricing_tier):
             if bracket.to_quantity is None or quantity <= bracket.to_quantity:
-                return bracket.flat_fee_cents
-        return pricing_tier.minimum_charge_cents
+                return int(bracket.flat_fee_cents)
+        return int(pricing_tier.minimum_charge_cents)
 
     def _calculate_tiered_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         """Calculate charge using tiered pricing"""
@@ -772,7 +775,7 @@ class RatingEngine:
         }
         calculator = calculators.get(pricing_tier.pricing_model)
         if not calculator:
-            return pricing_tier.minimum_charge_cents
+            return int(pricing_tier.minimum_charge_cents)
         return calculator(quantity, pricing_tier)
 
 
@@ -887,12 +890,14 @@ class UsageAlertService:
         return False, None
 
     def _alert_already_exists(self, usage_alert_model: Any, threshold: Any, customer: Any, aggregation: Any) -> bool:
-        return usage_alert_model.objects.filter(
-            threshold=threshold,
-            customer=customer,
-            aggregation=aggregation,
-            status__in=("pending", "sent"),
-        ).exists()
+        return bool(
+            usage_alert_model.objects.filter(
+                threshold=threshold,
+                customer=customer,
+                aggregation=aggregation,
+                status__in=("pending", "sent"),
+            ).exists()
+        )
 
     def _log_threshold_alert(
         self,

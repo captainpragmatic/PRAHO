@@ -19,9 +19,9 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -51,18 +51,14 @@ class SubmissionResult:
     success: bool
     document: EFacturaDocument | None = None
     error_message: str = ""
-    errors: list[dict] = None
-
-    def __post_init__(self) -> None:
-        if self.errors is None:
-            self.errors = []
+    errors: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def ok(cls, document: EFacturaDocument) -> SubmissionResult:
         return cls(success=True, document=document)
 
     @classmethod
-    def error(cls, message: str, errors: list[dict] | None = None) -> SubmissionResult:
+    def error(cls, message: str, errors: list[dict[str, Any]] | None = None) -> SubmissionResult:
         return cls(success=False, error_message=message, errors=errors or [])
 
 
@@ -73,11 +69,7 @@ class StatusCheckResult:
     status: str
     is_terminal: bool = False
     download_id: str = ""
-    errors: list[dict] = None
-
-    def __post_init__(self) -> None:
-        if self.errors is None:
-            self.errors = []
+    errors: list[dict[str, Any]] = field(default_factory=list)
 
 
 class EFacturaService:
@@ -288,7 +280,7 @@ class EFacturaService:
 
     # --- Batch Operations ---
 
-    def process_pending_submissions(self, limit: int = 100) -> dict:
+    def process_pending_submissions(self, limit: int = 100) -> dict[str, int]:
         """
         Process queued documents waiting for submission.
 
@@ -307,7 +299,7 @@ class EFacturaService:
 
         return results
 
-    def poll_awaiting_documents(self, limit: int = 100) -> dict:
+    def poll_awaiting_documents(self, limit: int = 100) -> dict[str, int]:
         """
         Poll status for documents awaiting ANAF response.
 
@@ -326,7 +318,7 @@ class EFacturaService:
 
         return results
 
-    def process_retries(self) -> dict:
+    def process_retries(self) -> dict[str, int]:
         """
         Process documents ready for retry.
 
@@ -425,6 +417,7 @@ class EFacturaService:
     def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str | None:
         """Generate UBL XML for invoice."""
         try:
+            builder: UBLInvoiceBuilder | UBLCreditNoteBuilder
             if document.document_type == EFacturaDocumentType.CREDIT_NOTE.value:
                 # Get original invoice for credit note reference
                 original = getattr(invoice, "original_invoice", None)
@@ -498,7 +491,7 @@ class EFacturaService:
         self,
         document: EFacturaDocument,
         status: str,
-        response_data: dict | None = None,
+        response_data: dict[str, Any] | None = None,
     ) -> None:
         """Record ANAF response as WebhookEvent for deduplication and audit."""
         try:

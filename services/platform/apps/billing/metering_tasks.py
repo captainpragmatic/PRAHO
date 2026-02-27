@@ -265,7 +265,7 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
     """
     logger.info("Running billing cycle workflow")
 
-    results = {
+    results: dict[str, Any] = {
         "closed_cycles": None,
         "rated": None,
         "invoices": None,
@@ -540,7 +540,7 @@ def collect_virtualmin_usage() -> dict[str, Any]:
 
             try:
                 # Record disk usage
-                disk_gb = Decimal(account.current_disk_usage_gb or 0)
+                disk_gb = Decimal(account.current_disk_usage_gb or 0)  # type: ignore[attr-defined]
                 if disk_gb > 0:
                     result = service.record_event(
                         UsageEventData(
@@ -561,7 +561,7 @@ def collect_virtualmin_usage() -> dict[str, Any]:
                         errors += 1
 
                 # Record bandwidth usage
-                bandwidth_gb = Decimal(account.current_bandwidth_usage_gb or 0)
+                bandwidth_gb = Decimal(account.current_bandwidth_usage_gb or 0)  # type: ignore[attr-defined]
                 if bandwidth_gb > 0:
                     result = service.record_event(
                         UsageEventData(
@@ -710,28 +710,32 @@ def collect_service_usage() -> dict[str, Any]:
 
 def update_aggregation_for_event_async(event_id: str) -> str:
     """Queue aggregation update task."""
-    return async_task("apps.billing.metering_tasks.update_aggregation_for_event", event_id, timeout=TASK_TIMEOUT)
+    return str(async_task("apps.billing.metering_tasks.update_aggregation_for_event", event_id, timeout=TASK_TIMEOUT))
 
 
 def check_usage_thresholds_async(customer_id: str, meter_id: str, subscription_id: str | None = None) -> str:
     """Queue threshold check task."""
-    return async_task(
-        "apps.billing.metering_tasks.check_usage_thresholds",
-        customer_id,
-        meter_id,
-        subscription_id,
-        timeout=TASK_TIMEOUT,
+    return str(
+        async_task(
+            "apps.billing.metering_tasks.check_usage_thresholds",
+            customer_id,
+            meter_id,
+            subscription_id,
+            timeout=TASK_TIMEOUT,
+        )
     )
 
 
 def send_usage_alert_notification_async(alert_id: str) -> str:
     """Queue alert notification task."""
-    return async_task("apps.billing.metering_tasks.send_usage_alert_notification", alert_id, timeout=TASK_TIMEOUT)
+    return str(async_task("apps.billing.metering_tasks.send_usage_alert_notification", alert_id, timeout=TASK_TIMEOUT))
 
 
 def sync_aggregation_to_stripe_async(aggregation_id: str) -> str:
     """Queue Stripe sync task."""
-    return async_task("apps.billing.metering_tasks.sync_aggregation_to_stripe", aggregation_id, timeout=TASK_TIMEOUT)
+    return str(
+        async_task("apps.billing.metering_tasks.sync_aggregation_to_stripe", aggregation_id, timeout=TASK_TIMEOUT)
+    )
 
 
 # ===============================================================================

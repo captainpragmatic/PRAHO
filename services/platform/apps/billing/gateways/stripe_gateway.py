@@ -6,6 +6,7 @@ Production-ready Stripe integration with Romanian compliance.
 from __future__ import annotations
 
 import logging
+import types
 from typing import Any
 
 from .base import (
@@ -37,7 +38,7 @@ class StripeGateway(BasePaymentGateway):
 
     def __init__(self) -> None:
         super().__init__()
-        self._stripe = None
+        self._stripe: types.ModuleType = None  # type: ignore[assignment]  # Set by _initialize_stripe; raises on failure
         self._initialize_stripe()
 
     def _initialize_stripe(self) -> None:
@@ -52,7 +53,7 @@ class StripeGateway(BasePaymentGateway):
             if not api_key:
                 raise ValueError("Stripe secret key not configured in settings system")
 
-            stripe.api_key = api_key
+            stripe.api_key = str(api_key)
             self._stripe = stripe
 
             # Set API version for consistency

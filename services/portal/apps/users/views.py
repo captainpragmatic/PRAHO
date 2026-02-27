@@ -99,10 +99,11 @@ def _get_selected_customer_id(request: HttpRequest) -> str | None:
     """Get the currently selected customer ID, fallback to session customer_id"""
     selected_customer_id = request.session.get("selected_customer_id")
     if selected_customer_id:
-        return selected_customer_id
+        return str(selected_customer_id)
 
     # Fallback to login customer_id for backward compatibility
-    return request.session.get("customer_id")
+    cid = request.session.get("customer_id")
+    return str(cid) if cid else None
 
 
 def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str | None:
@@ -110,7 +111,8 @@ def _get_user_role_for_customer(request: HttpRequest, customer_id: str) -> str |
     memberships = request.session.get("user_memberships", [])
     for membership in memberships:
         if str(membership.get("customer_id")) == str(customer_id):
-            return membership.get("role")
+            role = membership.get("role")
+            return str(role) if role is not None else None
     return None
 
 
@@ -255,7 +257,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
 
                     # Get customer name for personalized message
                     try:
-                        profile_data = api_client.get_customer_profile(user_id)
+                        profile_data = api_client.get_customer_profile(int(user_id))  # type: ignore[arg-type]
                         if profile_data and profile_data.get("first_name"):
                             customer_name = profile_data.get("first_name")
                             messages.success(request, _("Sign in confirmed, %(name)s!") % {"name": customer_name})
@@ -467,19 +469,19 @@ def profile_view(request: HttpRequest) -> HttpResponse:
     customer_email = request.session.get("email")
 
     if request.method == "GET":
-        form = _load_profile_form_data(request, user_id)
+        form = _load_profile_form_data(request, int(user_id))  # type: ignore[arg-type]
     else:  # POST
         form = CustomerProfileForm(request.POST)
 
         # Handle profile update
-        redirect_response = _handle_profile_update(request, form, user_id, customer_id)
+        redirect_response = _handle_profile_update(request, form, int(user_id), str(customer_id))  # type: ignore[arg-type]
         if redirect_response:
             return redirect_response
 
     # Get profile data from Platform API for context
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(user_id) or {}
+        profile_data = api_client.get_customer_profile(int(user_id)) or {}  # type: ignore[arg-type]
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -583,14 +585,14 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
 
             try:
                 # First verify current password via Platform API
-                auth_response = api_client.authenticate_customer(customer_email, current_password)
+                auth_response = api_client.authenticate_customer(str(customer_email), current_password)
 
                 if not auth_response or not auth_response.get("valid"):
                     logger.warning(f"⚠️ [Portal Change Password] Invalid current password for {customer_email}")
                     messages.error(request, _("Current password is incorrect."))
                 else:
                     # Update password via Platform API
-                    update_result = api_client.update_customer_password(user_id, new_password)
+                    update_result = api_client.update_customer_password(int(user_id), new_password)  # type: ignore[arg-type]
 
                     if update_result:
                         logger.info(
@@ -640,7 +642,7 @@ def privacy_dashboard_view(request: HttpRequest) -> HttpResponse:
     # Get customer profile data with privacy information
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(customer_id) or {}
+        profile_data = api_client.get_customer_profile(int(customer_id)) or {}  # type: ignore[arg-type]
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -739,7 +741,7 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
     # Get customer profile data with consent information
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(customer_id) or {}
+        profile_data = api_client.get_customer_profile(int(customer_id)) or {}  # type: ignore[arg-type]
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -787,7 +789,7 @@ def mfa_management_view(request: HttpRequest) -> HttpResponse:
     # Get customer profile data with 2FA status
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(customer_id) or {}
+        profile_data = api_client.get_customer_profile(int(customer_id)) or {}  # type: ignore[arg-type]
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -822,7 +824,7 @@ def mfa_setup_totp_view(request: HttpRequest) -> HttpResponse:
     customer_email = request.session.get("email")
 
     if request.method == "GET":
-        return _handle_totp_setup_get(request, customer_id, customer_email)
+        return _handle_totp_setup_get(request, customer_id, str(customer_email))
     else:  # POST - verify TOTP token
         token = request.POST.get("token", "").strip()
         return _handle_totp_setup_post(request, customer_id, token)
@@ -845,7 +847,7 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
     # Check if user has 2FA enabled
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(str(customer_id)) or {}
+        profile_data = api_client.get_customer_profile(int(str(customer_id))) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 

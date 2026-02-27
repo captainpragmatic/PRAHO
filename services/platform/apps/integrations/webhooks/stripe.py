@@ -87,7 +87,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 payload_body = raw_body if isinstance(raw_body, bytes) else raw_body.encode("utf-8")
 
             return verify_stripe_signature(
-                payload_body=payload_body, stripe_signature=signature, webhook_secret=webhook_secret
+                payload_body=payload_body, stripe_signature=signature, webhook_secret=str(webhook_secret)
             )
         except Exception as e:
             logger.error(f"🔥 Error verifying Stripe webhook signature: {e}")
@@ -346,13 +346,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         """
         try:
             # Extract order ID from payment metadata
-            order_id = payment.meta.get("order_id")
+            order_id = payment.meta.get("order_id")  # type: ignore[attr-defined]
             if not order_id:
                 logger.warning("⚠️ No order_id in payment metadata - skipping Portal notification")
                 return
 
             # Check if this payment was created via Portal
-            created_via = payment.meta.get("created_via")
+            created_via = payment.meta.get("created_via")  # type: ignore[attr-defined]
             if created_via != "portal_checkout":
                 logger.info("⏭️ Payment not from Portal checkout - skipping notification")
                 return
@@ -360,7 +360,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Prepare notification data
             notification_data = {
                 "order_id": order_id,
-                "payment_id": str(payment.id),
+                "payment_id": str(payment.id),  # type: ignore[attr-defined]
                 "status": "succeeded",
                 "stripe_payment_intent_id": payment_intent.get("id"),
                 "amount_received": payment_intent.get("amount_received"),

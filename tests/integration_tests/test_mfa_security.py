@@ -37,7 +37,7 @@ class MFACryptographicSecurityTests(TestCase):
     """🔐 Test cryptographic implementations and key security"""
 
     def setUp(self):
-        self.user = User.objects.create_user(  # type: ignore
+        self.user = User.objects.create_user(  # type: ignore[misc]
             email="testuser@praho.com",
             password="securetestpass123"
         )
@@ -138,7 +138,7 @@ class MFAAttackPreventionTests(TestCase):
     """🛡️ Test protection against common attack vectors"""
 
     def setUp(self):
-        self.user = User.objects.create_user(  # type: ignore
+        self.user = User.objects.create_user(  # type: ignore[misc]
             email="attacker@example.com",
             password="password123"
         )
@@ -237,7 +237,7 @@ class MFABusinessLogicTests(TestCase):
     """⚖️ Test business logic and edge cases"""
 
     def setUp(self):
-        self.user = User.objects.create_user(  # type: ignore
+        self.user = User.objects.create_user(  # type: ignore[misc]
             email="business@praho.com",
             password="password123"
         )
@@ -246,7 +246,7 @@ class MFABusinessLogicTests(TestCase):
     def test_admin_2fa_reset_security(self):
         """👮 Admin 2FA reset must require proper authorization"""
         # Create admin user
-        admin_user = User.objects.create_user(  # type: ignore
+        admin_user = User.objects.create_user(  # type: ignore[misc]
             email="admin@praho.com",
             password="adminpass123",
             is_staff=True,
@@ -295,7 +295,7 @@ class MFAComplianceTests(TestCase):
     """📋 Test Romanian GDPR and business compliance"""
 
     def setUp(self):
-        self.user = User.objects.create_user(  # type: ignore
+        self.user = User.objects.create_user(  # type: ignore[misc]
             email="compliance@praho.com",
             password="password123"
         )
@@ -346,7 +346,7 @@ class MFAPerformanceSecurityTests(TestCase):
     def setUp(self):
         self.users = []
         for i in range(5):  # Reduced for faster tests
-            user = User.objects.create_user(  # type: ignore
+            user = User.objects.create_user(  # type: ignore[misc]
                 email=f"user{i}@praho.com",
                 password="password123"
             )

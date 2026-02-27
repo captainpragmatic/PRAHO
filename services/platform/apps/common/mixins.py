@@ -159,7 +159,7 @@ class PaginationMixin:
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         """Add pagination context to template"""
-        context = super().get_context_data(**kwargs)  # type: ignore
+        context: dict[str, Any] = super().get_context_data(**kwargs)  # type: ignore[misc]
 
         # Add preserved query parameters for pagination links
         if hasattr(self, "request"):
@@ -168,4 +168,4 @@ class PaginationMixin:
                 del query_params["page"]
             context["extra_params"] = "&" + query_params.urlencode() if query_params else ""
 
-        return context  # type: ignore[no-any-return]
+        return context

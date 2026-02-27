@@ -9,7 +9,7 @@ import contextlib
 import enum
 import uuid
 from decimal import Decimal
-from typing import Any, Generic, TypedDict, TypeVar
+from typing import Any, Generic, TypedDict, TypeVar, cast
 
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, Sum
@@ -39,20 +39,20 @@ class Result(Generic[T, E]):
     def unwrap(self) -> T:
         """Get the success value (raises if error)"""
         if self._is_success:
-            return self._value  # type: ignore
+            return cast(T, self._value)
         raise RuntimeError(f"Called unwrap on error result: {self._value}")
 
     def unwrap_err(self) -> E:
         """Get the error value (raises if success)"""
         if not self._is_success:
-            return self._value  # type: ignore
+            return cast(E, self._value)
         raise RuntimeError("Called unwrap_err on success result")
 
     @property
     def error(self) -> E:
         """Get the error value"""
         if not self._is_success:
-            return self._value  # type: ignore
+            return cast(E, self._value)
         raise RuntimeError("Called error on success result")
 
     @property
@@ -841,7 +841,7 @@ class RefundService:
 
             # Create status history
             with contextlib.suppress(DatabaseError):
-                RefundStatusHistory.objects.create(  # type: ignore[misc]
+                RefundStatusHistory.objects.create(
                     refund=refund, previous_status="", new_status="pending", change_reason="Refund initiated"
                 )
 
@@ -989,7 +989,7 @@ class RefundService:
 
         # Check related refunds
         try:
-            return Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"]  # type: ignore[no-any-return]
+            return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError):
             # Handle cases where order doesn't have proper relationships or Sum returns unexpected type
             return 0
@@ -1008,7 +1008,7 @@ class RefundService:
 
         # Check related refunds
         try:
-            return Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"]  # type: ignore[no-any-return]
+            return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError):
             # Handle cases where invoice doesn't have proper relationships or Sum returns unexpected type
             return 0
@@ -1250,10 +1250,11 @@ class RefundQueryService:
 
             # First, try to get the entity to check metadata
             try:
+                entity: Order | Invoice
                 if entity_type == "order":
                     entity = Order.objects.get(id=entity_id)
                 else:  # invoice
-                    entity = Invoice.objects.get(id=entity_id)  # type: ignore[assignment]
+                    entity = Invoice.objects.get(id=entity_id)
 
                 # Check metadata for refunds first
                 if hasattr(entity, "meta") and isinstance(entity.meta, dict):

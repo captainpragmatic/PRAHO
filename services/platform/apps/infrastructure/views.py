@@ -5,7 +5,10 @@ Staff interface for managing node deployments, providers, and configurations.
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from apps.users.models import User
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -273,8 +276,8 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
             deployment.save()
 
             # Get API tokens from credential vault
-            api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
-            cloudflare_token = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "")
+            api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+            cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
             if not api_token:
                 messages.error(request, f"No API token found for provider {deployment.provider.name}")
@@ -283,7 +286,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             # Queue deployment task with provider-agnostic credentials
-            credentials = {"api_token": api_token}
+            credentials: dict[str, str] = {"api_token": str(api_token)}
             task_id = queue_deploy_node(
                 deployment_id=deployment.id,
                 credentials=credentials,
@@ -295,7 +298,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
                 request,
                 f"Deployment '{deployment.hostname}' created and queued for provisioning.",
             )
-            logger.info(f"[Deployment] Created {deployment.hostname} by {request.user.email}, task_id={task_id}")
+            logger.info(f"[Deployment] Created {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
 
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
     else:
@@ -394,7 +397,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "status_icon": _get_status_icon(deployment.status),
         "can_retry": deployment.status == "failed",
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
-        "can_manage": can_manage_deployments(request.user),
+        "can_manage": can_manage_deployments(cast("User", request.user)),
         "is_in_progress": deployment.status
         in (
             "pending",
@@ -449,15 +452,15 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API tokens
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
-    cloudflare_token = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "")
+    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+    cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Queue retry task with provider-agnostic credentials
-    credentials = {"api_token": api_token}
+    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_retry_deployment(
         deployment_id=deployment.id,
         credentials=credentials,
@@ -466,7 +469,7 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
     messages.success(request, f"Retry queued for deployment '{deployment.hostname}'.")
-    logger.info(f"[Deployment] Retry queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")
+    logger.info(f"[Deployment] Retry queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
 
     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
@@ -487,15 +490,15 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
         form = DeploymentDestroyForm(request.POST, hostname=deployment.hostname)
         if form.is_valid():
             # Get API tokens
-            api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
-            cloudflare_token = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "")
+            api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+            cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
             if not api_token:
                 messages.error(request, f"No API token found for provider {deployment.provider.name}")
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
             # Queue destroy task with provider-agnostic credentials
-            credentials = {"api_token": api_token}
+            credentials: dict[str, str] = {"api_token": str(api_token)}
             task_id = queue_destroy_node(
                 deployment_id=deployment.id,
                 credentials=credentials,
@@ -505,7 +508,7 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
 
             messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
             logger.info(
-                f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}"
+                f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}"  # type: ignore[union-attr]
             )
 
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -568,13 +571,13 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
                 new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
 
                 # Get API token
-                api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
+                api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
                 if not api_token:
                     messages.error(request, f"No API token found for provider {deployment.provider.name}")
                     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
                 # Queue upgrade task with provider-agnostic credentials
-                credentials = {"api_token": api_token}
+                credentials: dict[str, str] = {"api_token": str(api_token)}
                 task_id = queue_upgrade_node(
                     deployment_id=deployment.id,
                     new_size_id=new_size.id,
@@ -588,7 +591,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
                 )
                 logger.info(
                     f"[Deployment] Upgrade queued for {deployment.hostname} to {new_size.name} "
-                    f"by {request.user.email}, task_id={task_id}"
+                    f"by {request.user.email}, task_id={task_id}"  # type: ignore[union-attr]
                 )
 
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -630,13 +633,13 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
+    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Queue stop task with provider-agnostic credentials
-    credentials = {"api_token": api_token}
+    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_stop_node(
         deployment_id=deployment.id,
         credentials=credentials,
@@ -644,7 +647,7 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
     messages.success(request, f"Stop queued for '{deployment.hostname}'.")
-    logger.info(f"[Deployment] Stop queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")
+    logger.info(f"[Deployment] Stop queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
 
     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
@@ -662,13 +665,13 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
+    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Queue start task with provider-agnostic credentials
-    credentials = {"api_token": api_token}
+    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_start_node(
         deployment_id=deployment.id,
         credentials=credentials,
@@ -676,7 +679,7 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
     messages.success(request, f"Start queued for '{deployment.hostname}'.")
-    logger.info(f"[Deployment] Start queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")
+    logger.info(f"[Deployment] Start queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
 
     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
@@ -694,13 +697,13 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)
+    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Queue reboot task with provider-agnostic credentials
-    credentials = {"api_token": api_token}
+    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_reboot_node(
         deployment_id=deployment.id,
         credentials=credentials,
@@ -708,7 +711,7 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
     messages.success(request, f"Reboot queued for '{deployment.hostname}'.")
-    logger.info(f"[Deployment] Reboot queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")
+    logger.info(f"[Deployment] Reboot queued for {deployment.hostname} by {request.user.email}, task_id={task_id}")  # type: ignore[union-attr]
 
     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
@@ -757,7 +760,7 @@ def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
             )
             logger.info(
                 f"[Deployment] Maintenance queued for {deployment.hostname} "
-                f"({playbook_names}) by {request.user.email}, task_id={task_id}"
+                f"({playbook_names}) by {request.user.email}, task_id={task_id}"  # type: ignore[union-attr]
             )
 
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -937,7 +940,7 @@ def provider_create(request: HttpRequest) -> HttpResponse:
             api_token = form.cleaned_data.get("api_token")
             if api_token:
                 credential_id = f"cloud_provider_{provider.code}"
-                get_credential_vault().store_credential(credential_id, api_token)
+                get_credential_vault().store_credential(credential_id, api_token)  # type: ignore[call-arg, arg-type]
                 provider.credential_identifier = credential_id
 
             provider.save()
@@ -980,7 +983,7 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
             api_token = form.cleaned_data.get("api_token")
             if api_token:
                 credential_id = provider.credential_identifier or f"cloud_provider_{provider.code}"
-                get_credential_vault().store_credential(credential_id, api_token)
+                get_credential_vault().store_credential(credential_id, api_token)  # type: ignore[call-arg, arg-type]
                 provider.credential_identifier = credential_id
 
             provider.save()
@@ -1288,16 +1291,16 @@ def cost_api_summary(request: HttpRequest) -> JsonResponse:
     """API endpoint for cost summary data."""
     from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
 
-    year = request.GET.get("year")
-    month = request.GET.get("month")
+    year_str = request.GET.get("year")
+    month_str = request.GET.get("month")
 
-    if not year or not month:
+    if not year_str or not month_str:
         now = timezone.now()
         year = now.year
         month = now.month
     else:
-        year = int(year)
-        month = int(month)
+        year = int(year_str)
+        month = int(month_str)
 
     service = get_cost_tracking_service()
     summary = service.get_monthly_summary(year, month)

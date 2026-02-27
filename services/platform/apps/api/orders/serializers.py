@@ -38,7 +38,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
             "sealed_price_token",
         ]
 
-    def get_sealed_price_token(self, obj: ProductPrice) -> dict[str, str]:
+    def get_sealed_price_token(self, obj: ProductPrice) -> dict[str, str] | None:
         """🔒 Generate sealed price tokens for all billing periods"""
         logger = logging.getLogger(__name__)
 

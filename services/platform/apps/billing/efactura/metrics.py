@@ -66,7 +66,7 @@ def _create_counter(name: str, description: str, labels: list[str]) -> Any:
     return NoOpMetric()
 
 
-def _create_histogram(name: str, description: str, labels: list[str], buckets: tuple | None = None) -> Any:
+def _create_histogram(name: str, description: str, labels: list[str], buckets: tuple[float, ...] | None = None) -> Any:
     """Create a Prometheus histogram or no-op."""
     if PROMETHEUS_AVAILABLE and efactura_settings.metrics_enabled:
         prefix = efactura_settings.metrics_prefix
@@ -391,7 +391,7 @@ class EFacturaMetrics:
             self.record_submission(status, document_type, duration)
 
     @contextmanager
-    def time_api_request(self, endpoint: str) -> Generator[dict, None, None]:
+    def time_api_request(self, endpoint: str) -> Generator[dict[str, Any], None, None]:
         """Context manager to time API requests."""
         start = time.monotonic()
         context: dict[str, Any] = {"status_code": 0}
@@ -406,7 +406,7 @@ class EFacturaMetrics:
             )
 
 
-def timed_operation(metric_name: str) -> Callable:
+def timed_operation(metric_name: str) -> Callable[..., Any]:
     """
     Decorator to time operations and record to histogram.
 
@@ -419,7 +419,7 @@ def timed_operation(metric_name: str) -> Callable:
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             if not efactura_settings.metrics_enabled:

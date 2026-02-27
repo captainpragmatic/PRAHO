@@ -83,7 +83,7 @@ def queue_service_provisioning(service: Service, delay_seconds: int = 0) -> str:
     service.save(update_fields=["provisioning_task_id"])
 
     logger.info(f"📋 [Queue] Service {service.id} queued with task ID: {task_id}")
-    return task_id
+    return str(task_id)
 
 
 def provisioning_complete_hook(task: object) -> None:

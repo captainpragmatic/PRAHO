@@ -19,7 +19,7 @@ from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
-from django_ratelimit.decorators import ratelimit  # type: ignore[import-untyped]
+from django_ratelimit.decorators import ratelimit
 
 from apps.settings.services import SettingsService
 from apps.users.models import User
@@ -170,7 +170,7 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@ratelimit(key="user", rate="5/m", method="POST", block=False)  # type: ignore[misc]
+@ratelimit(key="user", rate="5/m", method="POST", block=False)
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """+ Create new support ticket"""
     user = cast(User, request.user)  # Safe after @login_required
@@ -259,7 +259,7 @@ def _is_file_size_valid(uploaded_file: UploadedFile) -> bool:
     if uploaded_file.size is None:
         return False
     max_file_size = SettingsService.get_integer_setting("tickets.max_file_size_bytes", _DEFAULT_MAX_FILE_SIZE_BYTES)
-    return uploaded_file.size <= max_file_size
+    return bool(uploaded_file.size <= max_file_size)
 
 
 def _is_file_type_allowed(content_type: str) -> bool:
@@ -385,7 +385,7 @@ def _handle_ticket_status_update(
         }
 
         success_msg = success_messages.get(reply_action, _("✅ Your reply has been added!"))
-        return success_msg, None
+        return str(success_msg), None
 
     except ValueError as e:
         # Handle validation errors from TicketStatusService
@@ -569,7 +569,7 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@ratelimit(key="user", rate="30/m", method="GET", block=False)  # type: ignore[misc]
+@ratelimit(key="user", rate="30/m", method="GET", block=False)
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
     user = cast(User, request.user)  # Safe after @login_required

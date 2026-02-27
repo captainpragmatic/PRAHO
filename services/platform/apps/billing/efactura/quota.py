@@ -184,7 +184,7 @@ class ANAFQuotaTracker:
     ) -> int:
         """Get current usage count for endpoint."""
         cache_key = self._get_cache_key(endpoint, cui, message_id)
-        return cache.get(cache_key, 0, version=self.CACHE_VERSION)
+        return int(cache.get(cache_key, 0, version=self.CACHE_VERSION))
 
     def get_limit(self, endpoint: QuotaEndpoint) -> int:
         """Get limit for endpoint from settings."""
@@ -248,7 +248,7 @@ class ANAFQuotaTracker:
             return True
 
         key = self._get_global_minute_key()
-        current = cache.get(key, 0, version=self.CACHE_VERSION)
+        current: int = cache.get(key, 0, version=self.CACHE_VERSION)
         return current < global_limit
 
     def increment(
@@ -346,7 +346,7 @@ class ANAFQuotaTracker:
         endpoint: QuotaEndpoint,
         cui_param: str = "cui",
         message_id_param: str = "message_id",
-    ) -> Callable:
+    ) -> Callable[..., Any]:
         """
         Decorator to enforce rate limits on functions.
 
@@ -361,7 +361,7 @@ class ANAFQuotaTracker:
                 ...
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 # Extract CUI from kwargs or args

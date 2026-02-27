@@ -701,7 +701,9 @@ class EmailSuppression(models.Model):
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         expires_at = None
         if expires_days:
-            expires_at = timezone.now() + timezone.timedelta(days=expires_days)
+            from datetime import timedelta  # noqa: PLC0415
+
+            expires_at = timezone.now() + timedelta(days=expires_days)
 
         now = timezone.now()
 

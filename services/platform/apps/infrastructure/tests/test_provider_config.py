@@ -158,14 +158,14 @@ class TestGetProviderConfig(TestCase):
     def test_get_hetzner_config(self):
         """Test retrieving Hetzner configuration."""
         config = get_provider_config("hetzner")
-        self.assertIsNotNone(config)
+        assert config is not None
         self.assertEqual(config["terraform_module"], "hetzner")
         self.assertEqual(config["credential_key"], "hcloud_token")
 
     def test_get_digitalocean_config(self):
         """Test retrieving DigitalOcean configuration."""
         config = get_provider_config("digitalocean")
-        self.assertIsNotNone(config)
+        assert config is not None
         self.assertEqual(config["terraform_module"], "digitalocean")
         self.assertEqual(config["credential_key"], "do_token")
 
@@ -365,14 +365,14 @@ class TestTerraformHelpers(TestCase):
     def test_get_terraform_provider_block_hetzner(self):
         """Test Terraform provider block generation for Hetzner."""
         block = get_terraform_provider_block("hetzner")
-        self.assertIsNotNone(block)
+        assert block is not None
         self.assertIn("hetznercloud/hcloud", block)
         self.assertIn("~> 1.45", block)
 
     def test_get_terraform_provider_block_digitalocean(self):
         """Test Terraform provider block generation for DigitalOcean."""
         block = get_terraform_provider_block("digitalocean")
-        self.assertIsNotNone(block)
+        assert block is not None
         self.assertIn("digitalocean/digitalocean", block)
 
     def test_get_terraform_provider_block_unknown_returns_none(self):
@@ -399,7 +399,7 @@ class TestOutputMappings(TestCase):
             "ipv6_address": "2001:db8::1",
         }
 
-        map_terraform_outputs_to_deployment("hetzner", outputs, deployment)
+        map_terraform_outputs_to_deployment("hetzner", outputs, deployment)  # type: ignore[arg-type]
 
         self.assertEqual(deployment.external_node_id, "12345")
         self.assertEqual(deployment.ipv4_address, "1.2.3.4")
@@ -418,7 +418,7 @@ class TestOutputMappings(TestCase):
             "ipv4_address": {"value": "1.2.3.4"},
         }
 
-        map_terraform_outputs_to_deployment("hetzner", outputs, deployment)
+        map_terraform_outputs_to_deployment("hetzner", outputs, deployment)  # type: ignore[arg-type]
 
         self.assertEqual(deployment.external_node_id, "12345")
         self.assertEqual(deployment.ipv4_address, "1.2.3.4")
@@ -431,7 +431,7 @@ class TestOutputMappings(TestCase):
         deployment = MockDeployment()
         outputs = {"server_id": "new_value"}
 
-        map_terraform_outputs_to_deployment("unknown", outputs, deployment)
+        map_terraform_outputs_to_deployment("unknown", outputs, deployment)  # type: ignore[arg-type]
 
         self.assertEqual(deployment.external_node_id, "original")
 

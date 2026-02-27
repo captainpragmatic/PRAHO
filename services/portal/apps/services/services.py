@@ -14,7 +14,7 @@ Security guidelines:
 # ===============================================================================
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
@@ -32,7 +32,7 @@ class ServicesAPIClient(PlatformAPIClient):
     - Service management (limited customer actions)
     """
 
-    def get_customer_services(
+    def get_customer_services(  # type: ignore[override]
         self, customer_id: int, user_id: int, page: int = 1, status: str = "", service_type: str = ""
     ) -> dict[str, Any]:
         """
@@ -49,7 +49,7 @@ class ServicesAPIClient(PlatformAPIClient):
             Dict containing services list and pagination info
         """
         try:
-            data = {
+            data: dict[str, Any] = {
                 "customer_id": customer_id,
                 "user_id": user_id,
                 "page": page,
@@ -103,7 +103,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if response.get("success") and "data" in response and "service" in response["data"]:
                 service_data = response["data"]["service"]
                 logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
-                return service_data
+                return cast(dict[str, Any], service_data)
             else:
                 logger.warning(f"⚠️ [Services API] Unexpected service detail response format: {response}")
                 return {}
@@ -133,7 +133,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if response.get("success") and "data" in response and "usage" in response["data"]:
                 usage_data = response["data"]["usage"]
                 logger.info(f"✅ [Services API] Retrieved usage for service {service_id} for customer {customer_id}")
-                return usage_data
+                return cast(dict[str, Any], usage_data)
             else:
                 logger.warning(f"⚠️ [Services API] Unexpected usage response format: {response}")
                 return {
@@ -172,7 +172,7 @@ class ServicesAPIClient(PlatformAPIClient):
                 logger.info(
                     f"✅ [Services API] Retrieved services summary for customer {customer_id}: {summary_data.get('active_services', 0)} active"
                 )
-                return summary_data
+                return cast(dict[str, Any], summary_data)
             else:
                 logger.warning(f"⚠️ [Services API] Unexpected summary response format: {response}")
                 return {
@@ -209,7 +209,7 @@ class ServicesAPIClient(PlatformAPIClient):
             response = self._make_request("POST", f"/services/{service_id}/domains/", data=data)
 
             logger.info(f"✅ [Services API] Retrieved domains for service {service_id} for customer {customer_id}")
-            return response.get("domains", [])
+            return cast(list[dict[str, Any]], response.get("domains", []))
 
         except PlatformAPIError as e:
             logger.error(
@@ -274,7 +274,7 @@ class ServicesAPIClient(PlatformAPIClient):
             response = self._make_request("GET", "/services/plans/", params=params)
 
             logger.info(f"✅ [Services API] Retrieved available plans for customer {customer_id}")
-            return response.get("plans", [])
+            return cast(list[dict[str, Any]], response.get("plans", []))
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving plans for customer {customer_id}: {e}")

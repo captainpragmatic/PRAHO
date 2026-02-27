@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load settings_tags %}
 
 {% block title %}{% trans "Terms of Service" %} - PRAHO Platform{% endblock %}
 
@@ -334,18 +335,12 @@
         <section id="contact" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">12. {% trans "Contact Information" %}</h2>
             <div class="bg-slate-900/50 rounded p-4">
-                {# TODO: Replace with settings context variable from company.legal_name #}
-                <p class="text-slate-300"><strong class="text-white">{% trans "Company" %}:</strong> PragmaticHost SRL</p>
-                {# TODO: Replace with settings context variable from company.registration_number #}
-                <p class="text-slate-300"><strong class="text-white">{% trans "Registration Number" %}:</strong> RO12345678</p>
-                {# TODO: Replace with settings context variable from company.address #}
-                <p class="text-slate-300"><strong class="text-white">{% trans "Address" %}:</strong> Str. Exemplu 123, București, România</p>
-                {# TODO: Replace with settings context variable from company.email_contact #}
-                <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> contact@pragmatichost.com</p>
-                {# TODO: Replace with settings context variable from company.phone #}
-                <p class="text-slate-300"><strong class="text-white">{% trans "Phone" %}:</strong> +40.21.123.4567</p>
-                {# TODO: Replace with settings context variable from company.email_support #}
-                <p class="text-slate-300"><strong class="text-white">{% trans "Support" %}:</strong> support@pragmatichost.com</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Company" %}:</strong> {% setting "company.legal_name" %}</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Registration Number" %}:</strong> {% setting "company.registration_number" %}</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Address" %}:</strong> {% setting "company.address" %}</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> {% setting "company.email_contact" %}</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Phone" %}:</strong> {% setting "company.phone" %}</p>
+                <p class="text-slate-300"><strong class="text-white">{% trans "Support" %}:</strong> {% setting "company.email_support" %}</p>
             </div>
         </section>
 

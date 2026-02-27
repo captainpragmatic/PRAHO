@@ -23,35 +23,35 @@ logger = logging.getLogger(__name__)
 
 # Expose imports at module scope for patching in tests
 try:
-    from apps.billing.invoice_models import Invoice  # type: ignore
+    from apps.billing.invoice_models import Invoice
 
-    InvoiceDoesNotExist = Invoice.DoesNotExist  # type: ignore[attr-defined]
+    InvoiceDoesNotExist = Invoice.DoesNotExist
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
-    Invoice = None  # type: ignore
-    InvoiceDoesNotExist = Exception  # type: ignore
+    Invoice = None  # type: ignore[misc, assignment]
+    InvoiceDoesNotExist = Exception  # type: ignore[misc, assignment]
 
 try:
-    from django_q.models import Schedule  # type: ignore
+    from django_q.models import Schedule
 except Exception:  # pragma: no cover - optional dependency
-    Schedule = None  # type: ignore
+    Schedule = None
 
 try:
-    from django_q.tasks import async_task  # type: ignore
+    from django_q.tasks import async_task
 except Exception:  # pragma: no cover - optional dependency
-    async_task = None  # type: ignore
+    async_task = None
 
 try:
-    from .models import EFacturaDocument  # type: ignore
+    from .models import EFacturaDocument
 
-    EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist  # type: ignore[attr-defined]
+    EFacturaDocumentDoesNotExist = EFacturaDocument.DoesNotExist
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
-    EFacturaDocument = None  # type: ignore
-    EFacturaDocumentDoesNotExist = Exception  # type: ignore
+    EFacturaDocument = None  # type: ignore[misc, assignment]
+    EFacturaDocumentDoesNotExist = Exception  # type: ignore[misc, assignment]
 
 try:
-    from .service import EFacturaService  # type: ignore
+    from .service import EFacturaService
 except Exception:  # pragma: no cover - import guard for test/runtime isolation
-    EFacturaService = None  # type: ignore
+    EFacturaService = None  # type: ignore[misc, assignment]
 
 # Task timeout in seconds
 TASK_TIMEOUT = 300  # 5 minutes
@@ -292,7 +292,7 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
         return {"success": False, "error": "Download failed"}
 
 
-def _create_deadline_alerts(approaching_documents: list) -> None:
+def _create_deadline_alerts(approaching_documents: list[Any]) -> None:
     """Create audit alerts for approaching deadlines."""
     try:
         from apps.audit.models import AuditAlert  # noqa: PLC0415
@@ -397,7 +397,7 @@ def queue_efactura_submission(invoice_id: str) -> str | None:
             timeout=TASK_TIMEOUT,
         )
         logger.info(f"Queued e-Factura submission for invoice {invoice_id}: task {task_id}")
-        return task_id
+        return str(task_id)
 
     except ImportError:
         logger.warning("Django-Q not installed, running synchronously")
@@ -426,7 +426,7 @@ def queue_status_poll(document_id: str) -> str | None:
             str(document_id),
             timeout=TASK_TIMEOUT,
         )
-        return task_id
+        return str(task_id)
 
     except ImportError:
         result = poll_efactura_status_task(str(document_id))

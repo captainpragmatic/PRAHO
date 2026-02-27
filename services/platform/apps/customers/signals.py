@@ -127,7 +127,7 @@ def store_original_customer_values(sender: type[Customer], instance: Customer, *
         if instance.pk:
             try:
                 original = Customer.objects.get(pk=instance.pk)
-                instance._original_customer_values = {  # type: ignore[attr-defined]
+                instance._original_customer_values = {
                     "status": original.status,
                     "customer_type": original.customer_type,
                     "company_name": original.company_name,
@@ -139,7 +139,7 @@ def store_original_customer_values(sender: type[Customer], instance: Customer, *
                     "assigned_account_manager": original.assigned_account_manager,
                 }
             except Customer.DoesNotExist:
-                instance._original_customer_values = {}  # type: ignore[attr-defined]
+                instance._original_customer_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original values: {e}")
 
@@ -264,7 +264,7 @@ def store_original_tax_values(sender: type[CustomerTaxProfile], instance: Custom
         if instance.pk:
             try:
                 original = CustomerTaxProfile.objects.get(pk=instance.pk)
-                instance._original_tax_values = {  # type: ignore[attr-defined]
+                instance._original_tax_values = {
                     "cui": getattr(original, "cui", None),
                     "vat_number": getattr(original, "vat_number", None),
                     "is_vat_payer": getattr(original, "is_vat_payer", None),
@@ -272,7 +272,7 @@ def store_original_tax_values(sender: type[CustomerTaxProfile], instance: Custom
                     "reverse_charge_eligible": getattr(original, "reverse_charge_eligible", None),
                 }
             except CustomerTaxProfile.DoesNotExist:
-                instance._original_tax_values = {}  # type: ignore[attr-defined]
+                instance._original_tax_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original tax values: {e}")
 
@@ -349,7 +349,7 @@ def store_original_billing_values(
         if instance.pk:
             try:
                 original = CustomerBillingProfile.objects.get(pk=instance.pk)
-                instance._original_billing_values = {  # type: ignore[attr-defined]
+                instance._original_billing_values = {
                     "payment_terms": getattr(original, "payment_terms", None),
                     "credit_limit": float(getattr(original, "credit_limit", 0)),
                     "preferred_currency": getattr(original, "preferred_currency", None),
@@ -357,7 +357,7 @@ def store_original_billing_values(
                     "auto_payment_enabled": getattr(original, "auto_payment_enabled", None),
                 }
             except CustomerBillingProfile.DoesNotExist:
-                instance._original_billing_values = {}  # type: ignore[attr-defined]
+                instance._original_billing_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original billing values: {e}")
 
@@ -436,7 +436,7 @@ def store_original_address_values(sender: type[CustomerAddress], instance: Custo
         if instance.pk:
             try:
                 original = CustomerAddress.objects.get(pk=instance.pk)
-                instance._original_address_values = {  # type: ignore[attr-defined]
+                instance._original_address_values = {
                     "address_type": getattr(original, "address_type", None),
                     "address_line1": getattr(original, "address_line1", None),
                     "city": getattr(original, "city", None),
@@ -447,7 +447,7 @@ def store_original_address_values(sender: type[CustomerAddress], instance: Custo
                     "is_validated": getattr(original, "is_validated", None),
                 }
             except CustomerAddress.DoesNotExist:
-                instance._original_address_values = {}  # type: ignore[attr-defined]
+                instance._original_address_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original address values: {e}")
 
@@ -534,14 +534,14 @@ def store_original_payment_values(
         if instance.pk:
             try:
                 original = CustomerPaymentMethod.objects.get(pk=instance.pk)
-                instance._original_payment_values = {  # type: ignore[attr-defined]
+                instance._original_payment_values = {
                     "method_type": getattr(original, "method_type", None),
                     "display_name": getattr(original, "display_name", None),
                     "is_default": getattr(original, "is_default", None),
                     "is_active": getattr(original, "is_active", None),
                 }
             except CustomerPaymentMethod.DoesNotExist:
-                instance._original_payment_values = {}  # type: ignore[attr-defined]
+                instance._original_payment_values = {}
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to store original payment values: {e}")
 
@@ -1113,9 +1113,7 @@ def _suspend_customer_services(customer: Customer) -> None:
 
         for service in active_services:
             service_management = ServiceManagementService()
-            result = service_management.suspend_service(  # type: ignore
-                service, reason="Customer suspended", suspend_immediately=True
-            )
+            result = service_management.suspend_service(service, reason="Customer suspended", suspend_immediately=True)
             if result.is_ok():
                 logger.info(f"⏸️ [Customer] Service suspended: {service.id}")
 

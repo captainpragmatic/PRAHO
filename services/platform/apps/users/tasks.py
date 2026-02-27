@@ -220,7 +220,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
     """
     logger.info("🕵️ [UserSecurity] Starting suspicious login pattern audit")
 
-    results = {
+    results: dict[str, Any] = {
         "suspicious_ips": [],
         "suspicious_users": [],
         "alerts_generated": 0,
@@ -256,7 +256,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                         }
                     )
 
-                    results["patterns_detected"]["multiple_failed_ips"] += 1  # type: ignore[index]
+                    results["patterns_detected"]["multiple_failed_ips"] += 1
 
                     # Generate security alert
                     AuditService.log_security_event(
@@ -272,7 +272,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                         },
                     )
 
-                    results["alerts_generated"] += 1  # type: ignore[operator]
+                    results["alerts_generated"] += 1
 
                 except User.DoesNotExist:
                     continue
@@ -313,7 +313,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                 },
             )
 
-            results["alerts_generated"] += 1  # type: ignore[operator]
+            results["alerts_generated"] += 1
 
         # Pattern 3: Successful logins from new countries/cities for users
         # (This would require geographic data in UserLoginLog - currently optional)
@@ -338,7 +338,7 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                 )
 
                 if login.country not in previous_countries:
-                    results["patterns_detected"]["new_locations"] += 1  # type: ignore[index]
+                    results["patterns_detected"]["new_locations"] += 1
 
                     # Log new location login
                     AuditService.log_security_event(
@@ -354,12 +354,12 @@ def audit_suspicious_login_patterns() -> dict[str, Any]:
                         },
                     )
 
-                    results["alerts_generated"] += 1  # type: ignore[operator]
+                    results["alerts_generated"] += 1
 
         logger.info(
             f"🕵️ [UserSecurity] Suspicious pattern audit completed: "
-            f"{len(results['suspicious_users'])} suspicious users, "  # type: ignore[arg-type]
-            f"{len(results['suspicious_ips'])} suspicious IPs, "  # type: ignore[arg-type]
+            f"{len(results['suspicious_users'])} suspicious users, "
+            f"{len(results['suspicious_ips'])} suspicious IPs, "
             f"{results['alerts_generated']} alerts generated"
         )
 
