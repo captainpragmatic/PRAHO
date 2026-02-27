@@ -5,17 +5,21 @@
 [![Version](https://img.shields.io/badge/version-0.18.0--alpha-orange.svg)](CHANGELOG.md)
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![PostgreSQL 16+](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
 [![HTMX](https://img.shields.io/badge/HTMX-2.0-blue.svg)](https://htmx.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.1-blue.svg)](https://tailwindcss.com/)
 [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE.md)
 
 [![Platform CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml)
 [![Portal CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml)
 [![Integration Tests](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml)
+![Tests](https://img.shields.io/badge/tests-3%2C000%2B-brightgreen.svg)
 
 [![mypy: strict](https://img.shields.io/badge/mypy-strict_%E2%9C%93-brightgreen.svg)](https://mypy-lang.org/)
 [![Ruff](https://img.shields.io/badge/Ruff-lint_%E2%9C%93-brightgreen.svg)](https://docs.astral.sh/ruff/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
 [![i18n: RO+EN](https://img.shields.io/badge/i18n-RO%20%2B%20EN%20100%25-brightgreen.svg)](services/platform/locale/)
+![GDPR](https://img.shields.io/badge/GDPR-compliant-brightgreen.svg)
 
 ## Overview
 
