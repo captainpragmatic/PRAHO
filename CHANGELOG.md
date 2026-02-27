@@ -7,21 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.18.0] - 2026-02-27
+
 ### Added
 - **Full i18n Coverage**: 100% Romanian translations for Platform (4,470 entries) and Portal (1,285 entries) — wrapped all hardcoded Python strings (`ValidationError`, `help_text`, `verbose_name`, `short_description`, `choices`) and template strings (`alert()`, `{% button %}`) with `_()` / `{% trans %}`
 - **i18n Linter** (`scripts/lint_i18n_coverage.py`): AST-based linter detecting unwrapped i18n strings (7 Python checks + 3 template checks), integrated into `make lint` Phase 4 and pre-commit
 - **Translation Tooling** (`scripts/translate_po.py`): Dictionary engine (500+ Romanian terms), Claude AI mode (`--claude`), YAML review workflow (generate → review → approve → apply), per-app coverage stats
 - **Makefile i18n Targets**: `make translate`, `make translate-ai`, `make translate-apply`, `make translate-stats`, `make i18n-extract`, `make i18n-compile`
 - **i18n Allowlist** (`scripts/i18n_coverage_allowlist.txt`): Suppression file for programmatic strings that are not user-facing (filter tuples, seed data, `unique_together` constraints); `--allowlist` flag wired into all `lint_i18n_coverage.py` invocations in Makefile and pre-commit hook
+- **CI**: Automated GitHub Release creation from annotated tags
 
 ### Fixed
 - **Subscription Resume Bug**: Fixed `Subscription.resume()` clearing `paused_at` before calculating paused duration, which caused subscriptions to not extend `current_period_end` and `next_billing_date` by the time spent paused
 - **Legal Views DateTime**: Replaced `timezone.datetime(..., tzinfo=timezone.utc)` with stdlib `datetime(..., tzinfo=UTC)` in legal views — the Django `timezone` module has no `datetime` constructor, so the previous code was using a re-export that could break across Django versions
 - **WebAuthn Model Registration**: Fixed `signals.E001` system check error — `WebAuthnCredential` model (defined in `mfa.py`) was not discoverable by Django's model registry; now imported in `UsersConfig.ready()`
+- **e-Factura XML Tax Fallback**: Fixed `or`-based tax amount fallback that treated `0` as falsy — replaced with explicit `None`-check so zero-tax invoices generate correct XML
+- **Portal Page Param Parsing**: Added `try/except` around `int()` conversion of page query parameters in billing, tickets, and services views to prevent 500 errors on malformed input
 
 ### Changed
 - **MyPy Type Safety Cleanup**: Removed 178 redundant `# type: ignore` comments across 75 files, fixed real type bugs (`any` → `Any`, missing imports, incorrect return types), removed dead code, and audited all remaining type suppressions to use specific error codes (`[arg-type]`, `[assignment]`, etc.) instead of bare `# type: ignore`
 - **Incremental Type-Check Hook**: Rewrote `check_types_modified.py` to use a ratchet pattern — compares mypy error counts against the merge-base and only fails if new errors are introduced, allowing the hook to work on codebases with pre-existing type errors
+- **Test Passwords**: Standardized test passwords to `testpass123` across all test suites
 
 ---
 
