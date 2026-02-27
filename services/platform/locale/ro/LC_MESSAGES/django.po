@@ -15816,12 +15816,15 @@ msgid_plural ""
 msgstr[0] ""
 "\n"
 "      %(total_customers)s client în total\n"
+"      "
 msgstr[1] ""
 "\n"
 "      %(total_customers)s clienți în total\n"
+"      "
 msgstr[2] ""
 "\n"
 "      %(total_customers)s de clienți în total\n"
+"      "
 
 #: templates/customers/list.html:73 templates/customers/list.html:249
 #: templates/provisioning/service_detail.html:154
