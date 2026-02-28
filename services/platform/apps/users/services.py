@@ -29,6 +29,7 @@ from apps.common.constants import (
     MIN_RESPONSE_TIME_SECONDS,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.security_decorators import secure_invitation_system, secure_user_registration
 from apps.common.types import (
     CUIString,
     EmailAddress,
@@ -153,6 +154,7 @@ class SecureUserRegistrationService:
         billing_postal_code: str | None
 
     @classmethod
+    @secure_user_registration()
     def register_new_customer_owner(
         cls,
         user_data: dict[str, Any],
@@ -644,6 +646,7 @@ class SecureCustomerUserService:
             return Err(SecureErrorHandler.safe_error_response(e, "user_linking"))
 
     @classmethod
+    @secure_invitation_system()
     def invite_user_to_customer(cls, request: UserInvitationRequest, **kwargs: Any) -> Result[CustomerMembership, str]:
         """
         🔒 Secure user invitation with comprehensive protection
@@ -769,7 +772,7 @@ class SecureCustomerUserService:
         request_ip: str | None = None,
         user_id: int | None = None,
         **kwargs: Any,
-    ) -> Result[CustomerMembership, str]:
+    ) -> Result[Any, str]:
         """Legacy wrapper for backward compatibility"""
         request = UserInvitationRequest(
             inviter=inviter,
@@ -779,7 +782,8 @@ class SecureCustomerUserService:
             request_ip=request_ip,
             user_id=user_id,
         )
-        return cls.invite_user_to_customer(request, **kwargs)
+        result: Result[Any, str] = cls.invite_user_to_customer(request, **kwargs)
+        return result
 
     # ===============================================================================
     # SECURE HELPER METHODS

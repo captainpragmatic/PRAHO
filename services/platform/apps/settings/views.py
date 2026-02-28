@@ -654,3 +654,129 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
 def test_export(request: HttpRequest) -> HttpResponse:
     """Test view to debug URL routing issues"""
     return JsonResponse({"message": "Test view works", "user": str(request.user)})
+
+
+# ===============================================================================
+# SETTINGS IMPORT
+# ===============================================================================
+
+MAX_IMPORT_SIZE = 1_048_576  # 1 MB
+
+
+def _extract_import_payload(request: HttpRequest) -> tuple[bytes | None, str | None]:
+    """Extract raw bytes from JSON body or multipart file upload. Returns (data, error)."""
+    content_type = request.content_type or ""
+    if "multipart/form-data" in content_type:
+        uploaded = request.FILES.get("file")
+        if not uploaded:
+            return None, "No file uploaded"
+        return uploaded.read(), None
+    return request.body, None
+
+
+def _build_import_updates(
+    settings_list: list[dict[str, Any]],
+    include_sensitive: bool,
+    user_id: int | None,
+) -> tuple[list[Any], list[dict[str, str]]]:
+    """Validate setting entries and build SettingUpdate list. Returns (updates, skipped)."""
+    from .services import SettingUpdate  # noqa: PLC0415
+
+    updates: list[SettingUpdate] = []
+    skipped: list[dict[str, str]] = []
+
+    for entry in settings_list:
+        key = entry.get("key")
+        if not key or "value" not in entry:
+            skipped.append({"key": key or "(missing)", "reason": "missing key or value"})
+            continue
+
+        key_known = key in SettingsService.DEFAULT_SETTINGS or SystemSetting.objects.filter(key=key).exists()
+        if not key_known:
+            skipped.append({"key": key, "reason": "unknown setting key"})
+            continue
+
+        if not include_sensitive and SystemSetting.objects.filter(key=key, is_sensitive=True).exists():
+            skipped.append({"key": key, "reason": "sensitive (use ?include_sensitive=true)"})
+            continue
+
+        updates.append(SettingUpdate(key=key, value=entry["value"], user_id=user_id, reason="Settings import"))
+
+    return updates, skipped
+
+
+@admin_required
+@require_http_methods(["POST"])
+def import_settings(request: HttpRequest) -> JsonResponse:
+    """
+    📤 Import settings from JSON (backup restore / environment migration)
+
+    POST /api/settings/import/
+
+    Accepts JSON body or multipart file upload. Settings are validated
+    against known keys. Sensitive settings are skipped unless
+    ?include_sensitive=true is provided.
+    """
+    try:
+        raw_data, extract_error = _extract_import_payload(request)
+        if extract_error:
+            return JsonResponse({"success": False, "error": extract_error}, status=400)
+        assert raw_data is not None  # guaranteed when extract_error is None
+
+        if len(raw_data) > MAX_IMPORT_SIZE:
+            return JsonResponse(
+                {"success": False, "error": f"Payload too large (max {MAX_IMPORT_SIZE // 1024}KB)"},
+                status=400,
+            )
+
+        try:
+            payload = json.loads(raw_data)
+        except json.JSONDecodeError as exc:
+            return JsonResponse({"success": False, "error": f"Invalid JSON: {exc}"}, status=400)
+
+        settings_list = payload.get("settings")
+        if not isinstance(settings_list, list):
+            return JsonResponse(
+                {"success": False, "error": "Payload must contain a 'settings' list"},
+                status=400,
+            )
+
+        include_sensitive = request.GET.get("include_sensitive") == "true"
+        user_id = (
+            request.user.id if hasattr(request.user, "id") and not isinstance(request.user, AnonymousUser) else None
+        )
+
+        updates, skipped = _build_import_updates(settings_list, include_sensitive, user_id)
+
+        imported_count = 0
+        errors: list[dict[str, str]] = []
+        if updates:
+            result = SettingsService.bulk_update_settings(updates, user_id=user_id)
+            if isinstance(result, Ok):
+                imported_count = len(result.value)
+            else:
+                errors.extend({"key": err.key, "error": err.message} for err in result.error)
+
+        log_security_event(
+            event_type="settings_imported",
+            details={
+                "imported_count": imported_count,
+                "skipped_count": len(skipped),
+                "error_count": len(errors),
+                "resource_type": "SystemSetting",
+            },
+            request_ip=request.META.get("REMOTE_ADDR"),
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "imported": imported_count,
+                "skipped": skipped,
+                "errors": errors,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"💥 Error importing settings: {e}")
+        return JsonResponse({"success": False, "error": "Failed to import settings"}, status=500)

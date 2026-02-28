@@ -288,7 +288,27 @@ def _send_integrity_escalation_alert(results: dict[str, Any]) -> None:
 
         logger.critical(f"[Integrity Alert] Created critical alert {alert.id} for " f"compromised audit data")
 
-        # TODO: Integrate with notification system for email/SMS alerts
+        # Send email notification to admins
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        if SettingsService.get_boolean_setting("audit.notify_on_critical_alerts", True):
+            try:
+                from apps.notifications.services import NotificationService  # noqa: PLC0415
+
+                NotificationService.send_admin_alert(
+                    subject="Audit Data Integrity Compromised",
+                    message=(
+                        f"Automated integrity check detected {results['total_issues']} issues "
+                        f"indicating possible data tampering.\n\n"
+                        f"Alert ID: {alert.id}\n"
+                        f"Affected checks: {', '.join(c['type'] for c in results['checks'] if c.get('status') == 'compromised')}\n"
+                        f"Immediate investigation required."
+                    ),
+                    alert_type="critical",
+                    metadata={"alert_id": str(alert.id), "source": "integrity_monitoring"},
+                )
+            except Exception as e:
+                logger.error(f"[Integrity Alert] Failed to send email notification: {e}")
 
     except Exception as e:
         logger.exception(f"[Integrity Alert] Failed to create escalation alert: {e}")
@@ -324,6 +344,26 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
         )
 
         logger.warning(f"[File Integrity Alert] Created alert {alert.id} for " f"{len(changed_files)} file changes")
+
+        # Send email notification to admins
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        if SettingsService.get_boolean_setting("audit.notify_on_file_integrity_alerts", True):
+            try:
+                from apps.notifications.services import NotificationService  # noqa: PLC0415
+
+                NotificationService.send_admin_alert(
+                    subject=f"File Integrity: {len(changed_files)} Critical Files Modified",
+                    message=(
+                        f"File integrity monitoring detected changes to critical files:\n"
+                        f"{chr(10).join('- ' + f for f in changed_files[:5])}\n\n"
+                        f"Please review these changes immediately."
+                    ),
+                    alert_type="warning",
+                    metadata={"alert_id": str(alert.id), "source": "file_integrity_monitoring"},
+                )
+            except Exception as e:
+                logger.error(f"[File Integrity Alert] Failed to send email notification: {e}")
 
     except Exception as e:
         logger.exception(f"[File Integrity Alert] Failed to create alert: {e}")

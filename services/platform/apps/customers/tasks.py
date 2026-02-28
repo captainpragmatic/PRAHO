@@ -25,6 +25,11 @@ TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
 _DEFAULT_TASK_TIME_LIMIT = 600  # 10 minutes
 TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
+# Engagement score recency thresholds (days since last login)
+_RECENCY_THRESHOLD_HIGH = 7
+_RECENCY_THRESHOLD_MEDIUM = 30
+_RECENCY_THRESHOLD_LOW = 90
+
 
 def get_task_soft_time_limit() -> int:
     """Get task soft time limit from SettingsService (runtime)."""
@@ -168,16 +173,26 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
 
         customer = Customer.objects.get(id=customer_id)
 
-        # TODO: Implement actual analytics calculations
-        # This could include LTV, usage metrics, engagement scores, etc.
-        logger.info(f"📊 [CustomerAnalytics] Would update analytics for {customer.get_display_name()}")
+        from django.db.models import Sum  # noqa: PLC0415
+
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415
+        from apps.orders.models import Order  # noqa: PLC0415
+
+        total_orders = Order.objects.filter(customer=customer).count()
+
+        revenue_result = Invoice.objects.filter(customer=customer, status="paid").aggregate(total=Sum("total_cents"))
+        total_revenue = revenue_result["total"] or 0
+
+        account_age_days = (timezone.now().date() - customer.created_at.date()).days
+
+        engagement_score = _calculate_engagement_score(customer, total_orders, account_age_days)
 
         analytics_data = {
             "last_updated": timezone.now().isoformat(),
-            "total_orders": 0,  # TODO: Calculate from orders
-            "total_revenue": 0,  # TODO: Calculate from payments
-            "account_age_days": (timezone.now().date() - customer.created_at.date()).days,
-            "engagement_score": 0,  # TODO: Calculate based on activity
+            "total_orders": total_orders,
+            "total_revenue": total_revenue,
+            "account_age_days": account_age_days,
+            "engagement_score": engagement_score,
         }
 
         # Log the analytics update
@@ -326,6 +341,45 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
     except Exception as e:
         logger.exception(f"💥 [CustomerWelcome] Error sending welcome email to customer {customer_id}: {e}")
         return {"success": False, "error": str(e)}
+
+
+def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
+    """Calculate customer engagement score (0-100) based on weighted factors."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    order_weight = SettingsService.get_integer_setting("customers.engagement_order_weight", 40)
+    recency_weight = SettingsService.get_integer_setting("customers.engagement_recency_weight", 30)
+    activity_weight = SettingsService.get_integer_setting("customers.engagement_activity_weight", 30)
+
+    # Order score: 0-100 based on order count (10+ orders = 100)
+    order_score = min(total_orders * 10, 100)
+
+    # Recency score: based on most recent login of any member user
+    recency_score = 0
+    last_login = (
+        customer.memberships.filter(user__last_login__isnull=False)
+        .values_list("user__last_login", flat=True)
+        .order_by("-user__last_login")
+        .first()
+    )
+    if last_login:
+        days_since_login = (timezone.now() - last_login).days
+        if days_since_login <= _RECENCY_THRESHOLD_HIGH:
+            recency_score = 100
+        elif days_since_login <= _RECENCY_THRESHOLD_MEDIUM:
+            recency_score = 50
+        elif days_since_login <= _RECENCY_THRESHOLD_LOW:
+            recency_score = 25
+
+    # Activity score: orders per month normalized
+    activity_score = 0
+    if account_age_days > 0:
+        orders_per_month = (total_orders / account_age_days) * 30
+        activity_score = min(int(orders_per_month * 25), 100)
+
+    total = (order_score * order_weight + recency_score * recency_weight + activity_score * activity_weight) // 100
+
+    return max(0, min(100, total))
 
 
 # ===============================================================================

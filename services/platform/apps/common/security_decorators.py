@@ -102,6 +102,9 @@ def secure_service_method(
                 # Log successful execution
                 _log_success_event(config, func.__name__, user, request_ip)
 
+                # Don't double-wrap if function already returns Result
+                if isinstance(result, (Ok, Err)):
+                    return result
                 return Ok(result)
 
             except ValidationError as e:
@@ -400,10 +403,21 @@ def _validate_customer_data_input(args: tuple[Any, ...], kwargs: dict[str, Any])
 
 def _validate_invitation_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
     """Validate invitation input data"""
-    inviter = kwargs.get("inviter") or (args[1] if len(args) > INVITER_ARG_POSITION else None)
-    invitee_email = kwargs.get("invitee_email") or (args[2] if len(args) > INVITEE_EMAIL_ARG_POSITION else None)
-    customer = kwargs.get("customer") or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
-    role = kwargs.get("role", "viewer") or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else "viewer")
+    request_ip = kwargs.get("request_ip")
+
+    # Check if args[1] is a request object (e.g., UserInvitationRequest dataclass)
+    request_obj = args[1] if len(args) > 1 else None
+    if request_obj and hasattr(request_obj, "inviter") and hasattr(request_obj, "invitee_email"):
+        inviter = request_obj.inviter
+        invitee_email = request_obj.invitee_email
+        customer = request_obj.customer
+        role = getattr(request_obj, "role", "viewer")
+        request_ip = getattr(request_obj, "request_ip", None) or request_ip
+    else:
+        inviter = kwargs.get("inviter") or (args[1] if len(args) > INVITER_ARG_POSITION else None)
+        invitee_email = kwargs.get("invitee_email") or (args[2] if len(args) > INVITEE_EMAIL_ARG_POSITION else None)
+        customer = kwargs.get("customer") or (args[3] if len(args) > INVITATION_CUSTOMER_ARG_POSITION else None)
+        role = kwargs.get("role", "viewer") or (args[4] if len(args) > INVITATION_ROLE_ARG_POSITION else "viewer")
 
     if (
         all([inviter, invitee_email, customer, role])
@@ -417,7 +431,7 @@ def _validate_invitation_input(args: tuple[Any, ...], kwargs: dict[str, Any]) ->
             customer=customer,
             role=role,
             user_id=inviter.id,
-            request_ip=kwargs.get("request_ip"),
+            request_ip=request_ip,
         )
 
 

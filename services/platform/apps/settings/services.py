@@ -129,6 +129,9 @@ class SettingsService:
         "customers.services_medium_threshold": 2,
         "customers.task_soft_time_limit": 300,
         "customers.task_time_limit": 600,
+        "customers.engagement_order_weight": 40,
+        "customers.engagement_recency_weight": 30,
+        "customers.engagement_activity_weight": 30,
         "customers.base_credit_score": 750,
         "customers.credit_adjustments": {
             "positive_payment": 15,
@@ -263,6 +266,8 @@ class SettingsService:
         "audit.webhook_suspicious_retry_threshold": 3,
         "audit.file_hash_cache_timeout": 2592000,
         "audit.max_files_displayed": 5,
+        "audit.notify_on_critical_alerts": True,
+        "audit.notify_on_file_integrity_alerts": True,
         # ── External Integrations ───────────────────────────────────────
         "integrations.stripe_secret_key": "",
         "integrations.stripe_publishable_key": "",

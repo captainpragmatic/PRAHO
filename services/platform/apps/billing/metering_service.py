@@ -977,14 +977,45 @@ class UsageAlertService:
             # Just the notification, no service action
             pass
         elif action == "throttle":
-            # TODO: Implement service throttling
-            logger.info(f"Would throttle service for {alert.customer}")
+            from apps.provisioning.provisioning_service import ProvisioningService  # noqa: PLC0415
+
+            ProvisioningService.suspend_services_for_customer(customer_id=alert.customer.id, reason="usage_throttled")
+            AuditService.log_simple_event(
+                event_type="metering_throttle_applied",
+                user=None,
+                content_object=alert.customer,
+                description=f"Services throttled for {alert.customer} due to usage threshold breach",
+                actor_type="system",
+                metadata={"alert_id": str(alert.id), "action": action},
+            )
+            logger.info(f"⚠️ [Metering] Throttled services for {alert.customer}")
         elif action == "suspend":
-            # TODO: Implement service suspension
-            logger.info(f"Would suspend service for {alert.customer}")
+            from apps.provisioning.provisioning_service import ProvisioningService  # noqa: PLC0415
+
+            ProvisioningService.suspend_services_for_customer(customer_id=alert.customer.id, reason="usage_exceeded")
+            AuditService.log_simple_event(
+                event_type="metering_suspension_applied",
+                user=None,
+                content_object=alert.customer,
+                description=f"Services suspended for {alert.customer} due to usage exceeded",
+                actor_type="system",
+                metadata={"alert_id": str(alert.id), "action": action},
+            )
+            logger.info(f"🛑 [Metering] Suspended services for {alert.customer}")
         elif action == "block_new":
-            # TODO: Block new usage
-            logger.info(f"Would block new usage for {alert.customer}")
+            from django.core.cache import cache as django_cache  # noqa: PLC0415
+
+            cache_key = f"usage_blocked:{alert.customer.id}"
+            django_cache.set(cache_key, True, timeout=86400)  # 24 hours
+            AuditService.log_simple_event(
+                event_type="metering_new_usage_blocked",
+                user=None,
+                content_object=alert.customer,
+                description=f"New usage blocked for {alert.customer} due to threshold breach",
+                actor_type="system",
+                metadata={"alert_id": str(alert.id), "action": action, "block_duration_hours": 24},
+            )
+            logger.info(f"🚫 [Metering] Blocked new usage for {alert.customer}")
 
         alert.action_taken = action
         alert.action_at = timezone.now()

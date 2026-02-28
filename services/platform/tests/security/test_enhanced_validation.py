@@ -449,9 +449,8 @@ class TestSecureUserRegistrationService(TestCase):
         self.assertEqual(membership.role, 'owner')
         self.assertTrue(membership.is_primary)
 
-        # Verify security logging (currently not implemented)
-        # TODO: Implement security event logging
-        # self.assertTrue(mock_log.called)
+        # Verify security logging via decorator
+        self.assertTrue(mock_log.called)
 
     def test_registration_prevents_xss_attacks(self):
         """Test XSS prevention in registration"""
@@ -473,9 +472,8 @@ class TestSecureUserRegistrationService(TestCase):
             request_ip='192.168.1.1'
         )
 
-        # Current implementation doesn't prevent XSS - returns success
-        # TODO: Implement XSS input validation
-        self.assertTrue(result.is_ok())
+        # Decorator validates input and rejects XSS patterns
+        self.assertTrue(result.is_err())
 
     def test_registration_prevents_privilege_escalation(self):
         """Test privilege escalation prevention"""
@@ -499,9 +497,8 @@ class TestSecureUserRegistrationService(TestCase):
             request_ip='192.168.1.1'
         )
 
-        # Current implementation doesn't prevent privilege escalation - returns success
-        # TODO: Implement privilege escalation prevention
-        self.assertTrue(result.is_ok())
+        # Decorator detects restricted fields (is_staff, is_superuser, staff_role) and rejects
+        self.assertTrue(result.is_err())
 
     @patch('apps.common.security_decorators.cache')
     def test_registration_rate_limiting(self, mock_cache):
@@ -525,9 +522,8 @@ class TestSecureUserRegistrationService(TestCase):
             request_ip='192.168.1.1'
         )
 
-        # Current implementation doesn't enforce rate limiting - returns success
-        # TODO: Implement registration rate limiting
-        self.assertTrue(result.is_ok())
+        # Decorator enforces rate limiting — returns error when limit exceeded
+        self.assertTrue(result.is_err())
 
 
 class TestSecureCustomerUserService(TestCase):
@@ -583,14 +579,13 @@ class TestSecureCustomerUserService(TestCase):
             inviter=self.owner,
             invitee_email='hacker@example.com',
             customer=self.customer,
-            role='superuser',  # Invalid role
+            role='superuser',  # Invalid role — not in ALLOWED_CUSTOMER_ROLES
             request_ip='192.168.1.1',
             user_id=self.owner.id
         )
 
-        # Current implementation doesn't validate roles - returns success
-        # TODO: Implement role validation security
-        self.assertTrue(result.is_ok())
+        # Decorator validates role against ALLOWED_CUSTOMER_ROLES and rejects 'superuser'
+        self.assertTrue(result.is_err())
 
     def test_invitation_requires_owner_permissions(self):
         """Test that invitations require owner permissions"""
@@ -618,9 +613,8 @@ class TestSecureCustomerUserService(TestCase):
             user_id=viewer.id
         )
 
-        # Current implementation doesn't check permissions - returns success
-        # TODO: Implement owner permission validation
-        self.assertTrue(result.is_ok())
+        # Decorator validates owner permissions — viewer lacks owner/admin role
+        self.assertTrue(result.is_err())
 
 
 class TestPerformanceAndMonitoring:

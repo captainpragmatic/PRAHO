@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/export/", views.export_settings, name="export_settings"),
     path("api/export/full/", views.export_settings_full, name="export_settings_full"),
     path("api/export/test/", views.test_export, name="test_export"),
+    path("api/import/", views.import_settings, name="import_settings"),
     # Settings CRUD API
     path("api/", views.SettingsAPIView.as_view(), name="settings_api"),
     path("api/<str:key>/", views.SettingsAPIView.as_view(), name="setting_detail_api"),
@@ -44,5 +45,4 @@ urlpatterns = [
     path("manage/", views.SettingsManagementView.as_view(), name="manage"),
     # HTMX partial for category content
     path("manage/category/<str:category_key>/", views.category_management_partial, name="category_management_partial"),
-    # TODO: Add import settings endpoint
 ]
