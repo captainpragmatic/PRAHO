@@ -11,6 +11,23 @@ _No unreleased changes._
 
 ---
 
+## [0.19.1] - 2026-02-28
+
+### Fixed
+- **Security Hardening**: Harden templates against XSS across platform and portal services, fix CSRF and security decorator issues in views
+- **Portal Auth**: Add ADR-0017 documenting portal auth fail-open strategy
+- **E2E Stability**: Add `NORELOAD=1` support to dev targets for E2E reliability, harden billing and services test selectors
+
+### Changed
+- **Dependencies**: Remove legacy `requirements.txt` files — all dependencies now managed via uv workspace
+- **Docker**: Update Dockerfiles and Makefile for uv-only dependency management
+- **Billing Tests**: Expand portal billing test coverage
+
+### Added
+- **HMAC Test Helpers**: Shared `HMACTestMixin` for portal-to-platform API tests (`tests/helpers/hmac.py`)
+
+---
+
 ## [0.19.0] - 2026-02-28
 
 ### Added
