@@ -123,8 +123,15 @@ def test_customer_billing_list_display_own_invoices_only(page: Page) -> None:
         assert create_invoice_button.count() == 0, "Customer should NOT see invoice creation button"
 
         # Check if billing documents are displayed and verify they belong to customer
+        # Portal fetches billing data from Platform API — may need a moment on first load
         document_items = page.locator('tr:has-text("PRO-"), tr:has-text("INV-"), div:has-text("PRO-"), div:has-text("INV-")')
         document_count = document_items.count()
+        if document_count == 0:
+            # Retry: Platform API may be slow on first billing sync
+            page.reload()
+            page.wait_for_load_state("networkidle")
+            document_items = page.locator('tr:has-text("PRO-"), tr:has-text("INV-"), div:has-text("PRO-"), div:has-text("INV-")')
+            document_count = document_items.count()
         assert document_count > 0, "Customer should see at least one billing document"
         if document_count > 0:
             print(f"  ✅ Customer sees {document_count} billing documents (should be own company only)")

@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans 'Account Overview' %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="py-6">
+  {% if not platform_available %}
+  <div class="mb-6 bg-red-900 border border-red-700 rounded-lg p-4">
+    <div class="flex items-center">
+      <span class="text-red-400 mr-2">⚠️</span>
+      <span class="text-red-100 text-sm sm:text-base">{% trans 'Platform service temporarily unavailable. Some features may be limited.' %}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-white">{% trans 'Account Overview' %}</h1>
+    <p class="mt-2 text-slate-400">{% trans 'View your account and customer information.' %}</p>
+  </div>
+
+  <!-- Account Info Card -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
+    <h2 class="text-xl font-semibold text-white mb-4">{% trans 'Account Details' %}</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <p class="text-sm text-slate-400">{% trans 'Email' %}</p>
+        <p class="text-white">{{ customer_email|default:"-" }}</p>
+      </div>
+      <div>
+        <p class="text-sm text-slate-400">{% trans 'Customer ID' %}</p>
+        <p class="text-white">{{ customer_id|default:"-" }}</p>
+      </div>
+      {% if account_info.company_name %}
+      <div>
+        <p class="text-sm text-slate-400">{% trans 'Company' %}</p>
+        <p class="text-white">{{ account_info.company_name }}</p>
+      </div>
+      {% endif %}
+      {% if account_info.tax_id %}
+      <div>
+        <p class="text-sm text-slate-400">{% trans 'Tax ID' %}</p>
+        <p class="text-white">{{ account_info.tax_id }}</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Quick Links -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
+    <h2 class="text-xl font-semibold text-white mb-4">{% trans 'Quick Links' %}</h2>
+    <div class="flex flex-wrap gap-3">
+      <a href="{% url 'users:profile' %}" class="inline-flex items-center px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">
+        {% trans 'Edit Profile' %}
+      </a>
+      <a href="{% url 'users:change_password' %}" class="inline-flex items-center px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">
+        {% trans 'Change Password' %}
+      </a>
+      <a href="/dashboard/" class="inline-flex items-center px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">
+        {% trans 'Back to Dashboard' %}
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}
