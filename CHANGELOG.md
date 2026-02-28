@@ -11,6 +11,29 @@ _No unreleased changes._
 
 ---
 
+## [0.19.0] - 2026-02-28
+
+### Added
+- **Security Hardening**: Applied `@secure_user_registration()` and `@secure_invitation_system()` decorators to `UserService` — enforces privilege escalation prevention (strips `is_staff`/`is_superuser` from user data), XSS sanitization (`strip_tags` on name fields), cache-based rate limiting, and role validation against allowed roles
+- **Audit → Notification Integration**: Critical audit alerts and file integrity alerts now trigger admin email notifications via `NotificationService.send_admin_alert()`, gated by `SettingsService` toggles (`audit.notify_on_critical_alerts`, `audit.notify_on_file_integrity_alerts`)
+- **Settings Import Endpoint**: New `POST /settings/api/import/` endpoint accepting JSON body or multipart file upload — validates keys against `DEFAULT_SETTINGS`, skips sensitive settings unless `?include_sensitive=true`, logs imports via `log_security_event`, protected by `@admin_required`
+- **Customer Analytics**: `update_customer_analytics` task now queries real data — `total_orders` from Order count, `total_revenue` from paid Invoice aggregation, `engagement_score` from weighted formula (order frequency 40%, login recency 30%, ticket activity 30%) with configurable weights via `SettingsService`
+- **Metering Threshold Enforcement**: `_take_threshold_action` in `UsageAlertService` now executes real enforcement — `throttle`/`suspend` call `ProvisioningService.suspend_services_for_customer()`, `block_new` sets a 24h cache flag, all actions audit-logged
+- **E2E Portal Test Suite**: Comprehensive Playwright E2E tests for customer services (detail views, plans, action requests, usage stats), billing (invoice sync, filtering), users (team management, invitations, roles, access control), tickets (creation, replies, search/filter), dashboard (widgets, responsive layout), navigation (sidebar, breadcrumbs, mobile), and signup/order flows
+- **Makefile `dev-e2e-bg`**: Backgrounded dev server target that starts both services with rate limiting disabled, waits for readiness, and returns — suitable for CI pipelines
+
+### Changed
+- **README Badges**: Added PostgreSQL, Tailwind CSS, GDPR compliance, and test count (4,000+) badges; added mypy strict and Ruff lint quality badges; removed DCO badge (PR-only workflow)
+- **CI Coverage**: Switched from Codecov to gist-based dynamic badge for coverage reporting, then removed Codecov integration entirely
+- **Portal Billing Template**: Added invoice sync button (desktop + mobile responsive) to `invoices_list.html` using HTMX `hx-post` with CSRF token
+
+### Testing
+- **Audit Coverage**: 6 new test files — compliance reporting, SIEM integration, logging formatters, management commands, services coverage, views coverage (692 tests)
+- **Billing Coverage**: 11 new test files — views, signals, tasks, e-Factura, invoices, payments, refunds, subscriptions, metering gateway, misc coverage (1,165 tests)
+- **Security Tests**: Updated 6 placeholder assertions in `test_enhanced_validation.py` from `is_ok()` to proper `is_err()` failure checks
+
+---
+
 ## [0.18.0] - 2026-02-27
 
 ### Added
