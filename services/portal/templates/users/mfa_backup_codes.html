@@ -169,6 +169,7 @@ function copyAllCodes() {
   const allCodes = codes.join('\n');
 
   navigator.clipboard.writeText(allCodes).then(function() {
+    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
     {% trans "All backup codes copied to clipboard!" as codes_copied_msg %}
     alert('{{ codes_copied_msg|escapejs }}');
   }).catch(function(err) {

@@ -151,6 +151,11 @@ install:
 # ===============================================================================
 # DEVELOPMENT SERVERS 🚀
 # ===============================================================================
+#
+# Convention: NORELOAD=1 disables Django's auto-reloader (used by E2E targets).
+# All dev-* targets share the same runserver recipes; E2E targets just set the flag.
+
+RUNSERVER_FLAGS := $(if $(NORELOAD),--noreload,)
 
 dev-platform: build-css
 	@echo "🏗️ [Platform] Starting admin platform service..."
@@ -170,9 +175,9 @@ dev-platform: build-css
 	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 &
 	@QCLUSTER_PID=$$!; \
 	echo "📊 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
-	echo "🌐 Starting platform server on :8700..."; \
+	echo "🌐 Starting platform server on :8700$(if $(NORELOAD), (no-reload),)..."; \
 	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
-	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev
+	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev $(RUNSERVER_FLAGS)
 
 dev-portal: build-css
 	@echo "🌐 [Portal] Starting customer portal service..."
@@ -181,8 +186,8 @@ dev-portal: build-css
 	@echo "🔍 Validating portal configuration..."
 	@$(PYTHON_PORTAL_MANAGE) check
 	@echo "✅ Portal configuration valid"
-	@echo "🌐 Starting portal server on :8701..."
-	@$(PYTHON_PORTAL_MANAGE) runserver 0.0.0.0:8701
+	@echo "🌐 Starting portal server on :8701$(if $(NORELOAD), (no-reload),)..."
+	@$(PYTHON_PORTAL_MANAGE) runserver 0.0.0.0:8701 $(RUNSERVER_FLAGS)
 
 dev-all: build-css
 	@echo "🚀 [All Services] Starting platform + portal..."
@@ -193,12 +198,12 @@ dev: build-css
 	@$(MAKE) dev-all
 
 dev-e2e: build-css
-	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled..."
+	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@RATELIMIT_ENABLE=false $(MAKE) dev-all
+	@RATELIMIT_ENABLE=false $(MAKE) NORELOAD=1 dev-all
 
 dev-e2e-bg: build-css
-	@echo "🎭 [E2E Background] Starting services in background with rate limiting disabled..."
+	@echo "🎭 [E2E Background] Starting services in background (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@mkdir -p logs
 	@# Kill stale processes on E2E ports
@@ -206,12 +211,12 @@ dev-e2e-bg: build-css
 	@-lsof -tiTCP:8701 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
 	@sleep 1
 	@echo "🏗️  Starting platform (port :8700) in background..."
-	@RATELIMIT_ENABLE=false sh -c '$(MAKE) dev-platform 2>&1 | tee logs/platform_e2e.log' &
+	@RATELIMIT_ENABLE=false sh -c '$(MAKE) NORELOAD=1 dev-platform 2>&1 | tee logs/platform_e2e.log' &
 	@echo "🌐 Starting portal (port :8701) in background..."
-	@RATELIMIT_ENABLE=false sh -c '$(MAKE) dev-portal 2>&1 | tee logs/portal_e2e.log' &
+	@RATELIMIT_ENABLE=false sh -c '$(MAKE) NORELOAD=1 dev-portal 2>&1 | tee logs/portal_e2e.log' &
 	@echo "⏳ Waiting for services to be ready..."
 	@for i in $$(seq 1 30); do \
-		platform=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8700/admin/login/ 2>/dev/null); \
+		platform=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8700/auth/login/ 2>/dev/null); \
 		portal=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8701/login/ 2>/dev/null); \
 		if [ "$$platform" = "200" ] && [ "$$portal" = "200" ]; then \
 			echo "✅ Both services ready (platform=$$platform portal=$$portal)"; \
@@ -481,6 +486,8 @@ lint-security:
 		echo "❌ Semgrep reported findings (exit $$SEMGREP_EXIT)."; \
 		exit $$SEMGREP_EXIT; \
 	fi
+	@echo "🔒 [Security] PRAHO architectural security scan..."
+	@$(VENV_DIR)/bin/python scripts/security_scanner.py services/ --min-severity HIGH || true
 	@echo "✅ Security linting complete!"
 
 lint-credentials:

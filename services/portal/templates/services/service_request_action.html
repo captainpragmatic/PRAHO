@@ -396,6 +396,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedAction = document.querySelector('input[name="action"]:checked');
     if (!selectedAction) {
       e.preventDefault();
+      {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "Please select an action type." as select_action_msg %}
       alert('{{ select_action_msg|escapejs }}');
       return;
@@ -413,6 +414,7 @@ document.addEventListener('DOMContentLoaded', function() {
         reasonField.classList.remove('border-red-500');
       }, 3000);
 
+      {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "Please provide a reason for this request." as provide_reason_msg %}
       alert('{{ provide_reason_msg|escapejs }}');
     }

@@ -5,6 +5,8 @@
 
 FROM python:3.11-slim
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # ===============================================================================
 # METADATA & LABELS 📋
 # ===============================================================================
@@ -42,9 +44,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
 
-# Install uv and sync portal production dependencies
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && ~/.local/bin/uv sync --group portal --no-dev --frozen
+# Sync portal production dependencies
+RUN uv sync --group portal --group prod --frozen --no-dev
 
 # Copy portal service code
 COPY services/portal/ ./

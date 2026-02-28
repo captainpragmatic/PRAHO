@@ -22,7 +22,7 @@
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-white">
       {% if greeting_name %}
-        {% blocktrans with name=greeting_name %}👋 Welcome {{ name }}{% endblocktrans %}
+        {% filter force_escape %}{% blocktrans with name=greeting_name %}👋 Welcome {{ name }}{% endblocktrans %}{% endfilter %}
       {% else %}
         👋 {% trans 'Welcome' %}
       {% endif %}

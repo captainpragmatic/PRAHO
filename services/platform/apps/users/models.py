@@ -41,7 +41,9 @@ class UserManager(BaseUserManager["User"]):
         if "staff_role" not in extra_fields or extra_fields.get("staff_role") is None:
             extra_fields["staff_role"] = ""
         user = self.model(email=email, **extra_fields)
-        user.set_password(password)
+        user.set_password(
+            password
+        )  # nosemgrep: unvalidated-password — AbstractBaseUser.create_user, validation done at form/serializer level
         user.save(using=self._db)
         return user
 
@@ -157,7 +159,7 @@ class User(AbstractUser):
         falls back to database query if not prefetched.
         """
         # Try to use prefetched data first (O(1) if prefetched)
-        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {}) or {}
         if "customer_memberships" in prefetched_cache:
             return len(prefetched_cache["customer_memberships"]) > 0
 
@@ -172,7 +174,7 @@ class User(AbstractUser):
         falls back to optimized database query if not prefetched.
         """
         # Try to use prefetched data first (O(N) where N = user's memberships, typically small)
-        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {}) or {}
         if "customer_memberships" in prefetched_cache:
             for membership in prefetched_cache["customer_memberships"]:
                 if membership.is_primary:
@@ -194,7 +196,7 @@ class User(AbstractUser):
             return Customer.objects.all()
 
         # Try to use prefetched data first (O(N) where N = user's memberships)
-        prefetched_cache = getattr(self, "_prefetched_objects_cache", {})
+        prefetched_cache = getattr(self, "_prefetched_objects_cache", {}) or {}
         if "customer_memberships" in prefetched_cache:
             return [membership.customer for membership in prefetched_cache["customer_memberships"]]
 

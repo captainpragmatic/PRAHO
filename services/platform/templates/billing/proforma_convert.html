@@ -211,6 +211,7 @@
       ⚡ {% trans 'Conversion Actions' %}
     </h3>
 
+    {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
     <form method="post" class="space-y-6">
       {% csrf_token %}
 

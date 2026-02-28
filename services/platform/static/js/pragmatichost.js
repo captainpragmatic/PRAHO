@@ -333,12 +333,13 @@ class PragmaticHostCRM {
                 <span class="mr-2">${type === 'error' ? '❌' :
         type === 'success' ? '✅' : 'ℹ️'
       }</span>
-                <span>${message}</span>
+                <span class="notification-message"></span>
                 <button class="ml-4 text-white opacity-70 hover:opacity-100" onclick="this.parentElement.parentElement.remove()">
                     ✕
                 </button>
             </div>
         `;
+    notification.querySelector('.notification-message').textContent = message;
 
     document.body.appendChild(notification);
 

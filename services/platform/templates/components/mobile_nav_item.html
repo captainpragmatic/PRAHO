@@ -40,6 +40,7 @@ Optional Parameters:
             </div>
         </div>
     {% elif is_button %}
+        {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
         <form method="post" action="{{ url }}" class="w-full">
             {% csrf_token %}
             <button type="submit" class="mobile-nav-item group w-full text-left {{ extra_classes }}">

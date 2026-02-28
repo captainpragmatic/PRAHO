@@ -305,7 +305,7 @@
       <div class="flex flex-col sm:flex-row items-center justify-between space-y-3 sm:space-y-0">
         <div class="text-sm text-slate-400 text-center sm:text-left">
           {% with start=products.start_index end=products.end_index total=products.paginator.count %}
-            {% blocktrans %}Showing {{ start }} to {{ end }} of {{ total }} products{% endblocktrans %}
+            {% filter force_escape %}{% blocktrans %}Showing {{ start }} to {{ end }} of {{ total }} products{% endblocktrans %}{% endfilter %}
           {% endwith %}
         </div>
 
@@ -351,7 +351,7 @@
     </h3>
     <p class="text-slate-400 mb-6">
       {% if search_query %}
-        {% blocktrans %}No products match your search criteria. Try adjusting your filters.{% endblocktrans %}
+        {% filter force_escape %}{% blocktrans %}No products match your search criteria. Try adjusting your filters.{% endblocktrans %}{% endfilter %}
       {% else %}
         {% trans 'Start building your product catalog by creating your first product.' %}
       {% endif %}

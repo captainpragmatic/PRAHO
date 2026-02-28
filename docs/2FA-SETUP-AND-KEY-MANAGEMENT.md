@@ -34,7 +34,7 @@ python manage.py test tests.test_2fa_security_improvements
 
 1. **Install Dependencies**
    ```bash
-   pip install cryptography pyotp qrcode[pil]
+   uv sync --group platform
    ```
 
 2. **Create .env File**

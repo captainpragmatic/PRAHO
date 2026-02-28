@@ -13,7 +13,7 @@
       🚀 {% trans 'Dashboard PragmaticHost' %}
       {% else %}
       {% if user.first_name %}
-        {% blocktrans with first_name=user.first_name %}👋 Welcome {{ first_name }}{% endblocktrans %}
+        {% filter force_escape %}{% blocktrans with first_name=user.first_name %}👋 Welcome {{ first_name }}{% endblocktrans %}{% endfilter %}
       {% else %}
         👋 {% trans 'Welcome' %}
       {% endif %}
@@ -21,7 +21,7 @@
     </h1>
     <p class="mt-2 text-slate-400">
       {% if user.is_staff %}
-      {% blocktrans with first_name=user.first_name|default:user.username %}Hello, {{ first_name }}! Here is an overview of your business activity.{% endblocktrans %}
+      {% filter force_escape %}{% blocktrans with first_name=user.first_name|default:user.username %}Hello, {{ first_name }}! Here is an overview of your business activity.{% endblocktrans %}{% endfilter %}
       {% else %}
       {% trans 'Here is an overview of your hosting services and account.' %}
       {% endif %}

@@ -155,6 +155,7 @@
                 </a>
 
                 <!-- Sign Out -->
+                {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
                 <form action="{% url 'users:logout' %}" method="post">
                     {% csrf_token %}
                     <button type="submit" class="mobile-nav-item group w-full text-left">

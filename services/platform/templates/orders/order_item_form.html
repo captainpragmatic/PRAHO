@@ -330,6 +330,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }).catch(error => {
                 console.error('Form submission error:', error);
+                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "Error submitting form. Please try again." as form_error_msg %}
                 alert('{{ form_error_msg|escapejs }}');
             });

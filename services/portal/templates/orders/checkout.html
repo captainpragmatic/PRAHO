@@ -349,6 +349,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 if (!canSubmit) {
                     console.log('🚫 Submission blocked - profile incomplete');
+                    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                     {% trans "Please complete your company profile information before creating the order." as profile_incomplete_msg %}
                     alert('{{ profile_incomplete_msg|escapejs }}');
                     return false;
@@ -380,6 +381,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('🏦 Creating bank transfer order to:', actionUrl);
                 } else {
                     console.error('❌ No payment method selected!');
+                    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                     {% trans "Please select a payment method" as select_payment_msg %}
                     alert('{{ select_payment_msg|escapejs }}');
 
@@ -404,6 +406,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } catch (error) {
                 console.error('🔥 Error during form submission:', error);
+                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "An error occurred. Please try again." as checkout_error_msg %}
                 alert('{{ checkout_error_msg|escapejs }}');
 

@@ -2,6 +2,7 @@
 # PORTAL BILLING VIEWS - CUSTOMER INVOICE INTERFACE 💳
 # ===============================================================================
 
+import json
 import logging
 from typing import Any
 
@@ -394,3 +395,94 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
         logger.error(f"🔥 [Portal Billing] Proforma detail error for {proforma_number}: {e}")
         messages.error(request, _("Unable to load proforma details. Please try again."))
         return render(request, "billing/proforma_not_found.html", {"proforma_number": proforma_number, "error": True})
+
+
+# ===============================================================================
+# PAYMENT METHODS VIEW 💳
+# ===============================================================================
+
+
+@require_http_methods(["GET"])
+def payment_methods_view(request: HttpRequest) -> JsonResponse:
+    """
+    💳 Payment Methods API
+
+    GET /billing/payment-methods/
+
+    Returns available payment methods for the current customer.
+    Used by checkout and account pages via HTMX/fetch.
+    """
+    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
+    if not customer_id:
+        return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
+
+    try:
+        invoice_service = InvoiceViewService()
+        user_id = getattr(request.user, "id", None)
+        if not user_id:
+            return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
+        methods = invoice_service.get_payment_methods(
+            int(customer_id),
+            int(user_id),
+        )
+
+        return JsonResponse({"success": True, "payment_methods": methods})
+
+    except Exception as e:
+        logger.error(f"🔥 [Portal Billing] Payment methods error for customer {customer_id}: {e}")
+        return JsonResponse({"success": False, "error": "Unable to load payment methods"}, status=500)
+
+
+# ===============================================================================
+# REFUND REQUEST VIEW 🔄
+# ===============================================================================
+
+
+@require_http_methods(["POST"])
+def request_refund_view(request: HttpRequest, invoice_number: str) -> JsonResponse:
+    """
+    🔄 Request Invoice Refund
+
+    POST /billing/invoices/{invoice_number}/refund/
+
+    Submits a refund request for a specific invoice through the Platform API.
+    """
+    customer_id = getattr(request, "customer_id", None)
+    user_id = getattr(request, "user_id", None)
+    if not customer_id or not user_id:
+        return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+        reason = data.get("refund_reason", "customer_request")
+        amount_cents = data.get("amount_cents")
+
+        invoice_service = InvoiceViewService()
+        result = invoice_service.request_refund(
+            invoice_number=invoice_number,
+            customer_id=int(customer_id),
+            user_id=int(user_id),
+            amount_cents=int(amount_cents) if amount_cents else None,
+            reason=reason,
+        )
+
+        if result.get("success"):
+            logger.info(f"✅ [Portal Billing] Refund requested for invoice {invoice_number} by customer {customer_id}")
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": _("Refund request submitted successfully."),
+                    "refund_id": result.get("refund_id"),
+                }
+            )
+
+        error_msg = result.get("error", _("Unable to process refund request."))
+        logger.warning(f"⚠️ [Portal Billing] Refund request failed for {invoice_number}: {error_msg}")
+        return JsonResponse({"success": False, "error": error_msg}, status=400)
+
+    except Exception as e:
+        logger.error(f"🔥 [Portal Billing] Refund request error for {invoice_number}: {e}")
+        return JsonResponse(
+            {"success": False, "error": _("Unable to process refund request. Please try again.")},
+            status=500,
+        )

@@ -30,6 +30,8 @@ from apps.common.request_ip import get_safe_client_ip
 
 # Security constants
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
+HMAC_NONCE_MIN_LENGTH = 32
+HMAC_NONCE_MAX_LENGTH = 256
 
 # Import logging utilities for request ID propagation
 from apps.common.logging import clear_request_id, set_request_id  # noqa: E402
@@ -412,6 +414,10 @@ class PortalServiceHMACMiddleware:
             if not all([portal_id, nonce, timestamp, body_hash, signature]):
                 error_msg = "Missing HMAC authentication headers"
 
+            # Validate nonce format (must be sufficient length to prevent collisions)
+            if not error_msg and (len(nonce) < HMAC_NONCE_MIN_LENGTH or len(nonce) > HMAC_NONCE_MAX_LENGTH):
+                error_msg = "Invalid nonce format"
+
             # Validate timestamp (5-minute window)
             request_body = b""
             if not error_msg:
@@ -430,6 +436,13 @@ class PortalServiceHMACMiddleware:
                 added = cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS)
                 if not added:
                     error_msg = "Nonce already used (replay attack)"
+
+            # Enforce body size limit before reading into memory (DoS prevention)
+            if not error_msg:
+                max_body_size = 10 * 1024 * 1024  # 10 MB
+                content_length = int(request.META.get("CONTENT_LENGTH") or 0)
+                if content_length > max_body_size:
+                    error_msg = "Request body too large"
 
             # Verify body hash
             if not error_msg:
@@ -499,9 +512,11 @@ class PortalServiceHMACMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
         if request.path.startswith("/api/"):
-            # Skip HMAC validation for authentication endpoints (can't be pre-authenticated)
+            # Skip HMAC validation for public endpoints only.
+            # NOTE: /api/users/login/ is NOT exempt - the portal service signs
+            # login requests with HMAC, so we validate portal origin to prevent
+            # direct credential brute-force from external attackers.
             auth_exempt_paths = [
-                "/api/users/login/",
                 "/api/users/register/",
                 "/api/users/password/reset/",
                 "/api/users/health/",

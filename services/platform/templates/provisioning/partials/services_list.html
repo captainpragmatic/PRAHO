@@ -296,7 +296,7 @@
       <!-- Page Range Info -->
       <div class="text-sm text-slate-400">
         {% with start_index=services.start_index end_index=services.end_index total_count=services.paginator.count %}
-          {% blocktrans %}Page {{ page_number }} of {{ num_pages }}{% endblocktrans %}
+          {% filter force_escape %}{% blocktrans %}Page {{ page_number }} of {{ num_pages }}{% endblocktrans %}{% endfilter %}
         {% endwith %}
       </div>
 

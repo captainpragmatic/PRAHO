@@ -611,7 +611,7 @@ def highlight_search(text: str, search_term: str) -> SafeString:
         search_term: Term to highlight
     """
     if not text or not search_term:
-        return mark_safe(escape(text) if text else "")  # noqa: S308
+        return mark_safe(escape(text) if text else "")  # noqa: S308  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe
 
     # First escape HTML to prevent XSS
     escaped_text = escape(text)
@@ -648,4 +648,4 @@ def highlight_search(text: str, search_term: str) -> SafeString:
         # Update the normalized text for next search
         normalized_text = normalize_text(highlighted)
 
-    return mark_safe(highlighted)  # nosec B308 B703 - Input is HTML-escaped before highlighting  # noqa: S308
+    return mark_safe(highlighted)  # nosec B308 B703 - Input is HTML-escaped before highlighting  # noqa: S308  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe

@@ -10,11 +10,11 @@
       🛒 {% trans "Your Cart" %}
     </h3>
     <p class="text-xs text-slate-400 mt-1">
-      {% blocktrans count counter=total_items %}
+      {% filter force_escape %}{% blocktrans count counter=total_items %}
         {{ counter }} product
       {% plural %}
         {{ counter }} products
-      {% endblocktrans %}
+      {% endblocktrans %}{% endfilter %}
     </p>
   </div>
 

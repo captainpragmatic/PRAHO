@@ -31,7 +31,7 @@ def safe_message(value: Any) -> str:
     # Clean the HTML to prevent XSS
     cleaned = bleach.clean(str(value), tags=allowed_tags, attributes=allowed_attributes, strip=True)
 
-    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach  # noqa: S308
+    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach  # noqa: S308  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe
 
 
 @register.filter

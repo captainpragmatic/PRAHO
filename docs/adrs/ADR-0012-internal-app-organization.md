@@ -765,7 +765,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --all-groups
 
       - name: Verify all imports work
         run: python scripts/verify_migration_safety.py --all-phases --all-apps

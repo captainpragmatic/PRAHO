@@ -144,6 +144,7 @@ function checkWebAuthnSupport() {
     window.location.href = "{% url 'users:mfa_setup_webauthn' %}";
   } else {
     // WebAuthn not supported
+    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
     {% trans "Your browser or device doesn't support passkeys. Please try the Authenticator App method or update your browser." as passkey_unsupported_msg %}
     alert('{{ passkey_unsupported_msg|escapejs }}');
   }

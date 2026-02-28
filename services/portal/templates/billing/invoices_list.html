@@ -304,9 +304,9 @@
       <div class="bg-slate-700 px-4 sm:px-6 py-3 border-t border-slate-600">
         <div class="flex items-center justify-between">
           <div class="text-xs sm:text-sm text-slate-400">
-            {% blocktrans with pagination.current_page as page_number and pagination.total_pages as num_pages %}
+            {% filter force_escape %}{% blocktrans with pagination.current_page as page_number and pagination.total_pages as num_pages %}
             Page {{ page_number }} of {{ num_pages }}
-            {% endblocktrans %}
+            {% endblocktrans %}{% endfilter %}
           </div>
 
           <div class="flex space-x-1">

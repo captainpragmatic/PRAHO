@@ -315,8 +315,9 @@ def process_customer(customer: 'Customer') -> None:
 
 **2. Missing Third-Party Stubs**
 ```bash
-# Install stubs or add to requirements/dev.txt
-pip install types-requests types-python-dateutil
+# Stubs are included in development dependencies
+# Ensure your environment is synced
+uv sync --group dev
 ```
 
 **3. Complex Django QuerySet Types**
@@ -359,7 +360,7 @@ mypy --config-file=pyproject.toml --verbose apps/common/types.py
 ### Development Workflow
 ```bash
 # 1. Install/update type dependencies
-pip install -r requirements/dev.txt
+uv sync --all-groups
 
 # 2. Test current type coverage
 python scripts/test_gradual_typing.py

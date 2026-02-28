@@ -1094,7 +1094,9 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
                     messages.success(request, _("Company profile updated successfully!"))
 
                     # Handle redirect based on 'next' parameter for order flow continuity
-                    next_url = request.GET.get("next") or request.POST.get("next")
+                    next_url = request.GET.get("next") or request.POST.get(
+                        "next"
+                    )  # nosemgrep: django-using-request-post-after-is-valid — redirect param, not form field
                     if next_url and url_has_allowed_host_and_scheme(
                         url=next_url,
                         allowed_hosts={request.get_host()},
@@ -1151,7 +1153,10 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
     if not customer_id:
         logger.warning(f"🚨 [Security] Empty customer_id in switch request from user {user_id}")
         messages.error(request, _("Please select a valid customer."))
-        return redirect(request.META.get("HTTP_REFERER", "/profile/"))
+        referer = request.META.get("HTTP_REFERER", "/profile/")
+        if not url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
+            referer = "/profile/"
+        return redirect(referer)
 
     # 🔒 SECURITY: Real-time verification with Platform API
     try:
@@ -1238,6 +1243,8 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
 
     # Redirect to the page they came from, or profile by default
     next_url = request.POST.get("next", request.META.get("HTTP_REFERER", "/profile/"))
+    if not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        next_url = "/profile/"
     return redirect(next_url)
 
 

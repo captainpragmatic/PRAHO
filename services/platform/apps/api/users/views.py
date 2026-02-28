@@ -53,7 +53,7 @@ HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 logger = logging.getLogger(__name__)
 
 
-@csrf_exempt
+@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 def portal_login_api(request: HttpRequest) -> JsonResponse:
     """
@@ -307,7 +307,7 @@ class SessionValidationThrottle(BaseThrottle):
         return True
 
 
-@never_cache
+@never_cache  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @csrf_exempt
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware

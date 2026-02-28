@@ -70,6 +70,7 @@ def cookie_consent_view(request: HttpRequest) -> HttpResponse:
             max_age=365 * 24 * 60 * 60,
             httponly=True,
             samesite="Lax",
+            secure=request.is_secure(),
         )
 
     return response

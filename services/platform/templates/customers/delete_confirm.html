@@ -174,6 +174,7 @@ document.addEventListener('DOMContentLoaded', function() {
     form.addEventListener('submit', function(e) {
         if (confirmInput.value.trim() !== customerName) {
             e.preventDefault();
+            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Please type the exact customer name to confirm deletion." as confirm_delete_msg %}
             alert('{{ confirm_delete_msg|escapejs }}');
             return false;

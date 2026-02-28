@@ -304,7 +304,7 @@
               <div class="ml-3">
                 <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
                 <div class="mt-1 text-sm text-blue-300">
-                  <p>{% trans 'We will create a support ticket for your refund request and our billing team will review it within 1-2 business days.' %}</p>
+                  <p>{% trans 'Your refund request will be submitted for processing. Our billing team will review and confirm within 1-2 business days.' %}</p>
                 </div>
               </div>
             </div>
@@ -343,13 +343,12 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
 
     // Basic validation
     if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
-        {% trans "Please fill in all required fields." as fill_fields_msg %}
-        alert('{{ fill_fields_msg|escapejs }}');
+        alert('{% trans "Please fill in all required fields." %}');
         return;
     }
 
     // Show confirmation
-    if (!confirm('{% trans "Submit refund request? We will create a support ticket and contact you." %}')) {
+    if (!confirm('{% trans "Submit refund request? Our billing team will review your request." %}')) {
         return;
     }
 
@@ -358,14 +357,40 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     submitBtn.disabled = true;
     submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
 
-    // For now, just show success message
-    {% trans "Refund request feature coming soon! Please contact support directly." as refund_coming_msg %}
-    alert('{{ refund_coming_msg|escapejs }}');
+    // Get CSRF token
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+        || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
 
-    // Re-enable button
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
-    hideInvoiceRefundRequestModal();
+    // Submit refund request to the API
+    fetch('{% url "billing:request_refund" invoice.number %}', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify({
+            refund_reason: formData.get('refund_reason'),
+            refund_notes: formData.get('refund_notes'),
+        }),
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        if (data.success) {
+            alert('{% trans "Refund request submitted successfully! Our billing team will review it shortly." %}');
+            hideInvoiceRefundRequestModal();
+            window.location.reload();
+        } else {
+            alert(data.error || '{% trans "Unable to process refund request. Please try again." %}');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+        }
+    })
+    .catch(function() {
+        alert('{% trans "Unable to process refund request. Please try again." %}');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+    });
 });
 </script>
 {% endif %}

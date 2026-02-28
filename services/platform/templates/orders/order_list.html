@@ -366,9 +366,9 @@
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div class="text-sm text-slate-400 text-center sm:text-left">
-              {% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
+              {% filter force_escape %}{% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
               Page {{ page_number }} of {{ num_pages }}
-              {% endblocktrans %}
+              {% endblocktrans %}{% endfilter %}
             </div>
 
             <div class="flex justify-center sm:justify-end space-x-2">

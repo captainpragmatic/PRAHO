@@ -27,5 +27,9 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.18",
     "tailwindcss": "^4.1.13"
+  },
+  "optionalDependencies": {
+    "@parcel/watcher-linux-arm64-glibc": "^2.5.6",
+    "@parcel/watcher-linux-arm64-musl": "^2.5.6"
   }
 }

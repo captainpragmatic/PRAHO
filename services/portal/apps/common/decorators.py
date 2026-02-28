@@ -179,7 +179,9 @@ def require_customer_role(  # noqa: C901
                 logger.warning(f"🚨 [Security] No customer selected for user {request.session.get('user_id')}")
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("Niciun client selectat")}, status=403)
-                return HttpResponseForbidden(_("Niciun client selectat"))
+                return HttpResponseForbidden(
+                    _("Niciun client selectat")
+                )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
 
             # Real-time verification if requested
             if realtime_verification:
@@ -191,7 +193,9 @@ def require_customer_role(  # noqa: C901
                     )
                     if request.headers.get("Accept") == "application/json":
                         return JsonResponse({"error": _("Acces interzis")}, status=403)
-                    return HttpResponseForbidden(_("Acces interzis"))
+                    return HttpResponseForbidden(
+                        _("Acces interzis")
+                    )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
 
                 user_role = verification.get("role", "viewer")
             else:
@@ -204,7 +208,9 @@ def require_customer_role(  # noqa: C901
                 )
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("Rol inexistent")}, status=403)
-                return HttpResponseForbidden(_("Rol inexistent"))
+                return HttpResponseForbidden(
+                    _("Rol inexistent")
+                )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
 
             # Check role permissions
             if user_role not in required_roles:
@@ -214,7 +220,9 @@ def require_customer_role(  # noqa: C901
                 )
                 if request.headers.get("Accept") == "application/json":
                     return JsonResponse({"error": _("Permisiuni insuficiente")}, status=403)
-                return HttpResponseForbidden(_("Permisiuni insuficiente"))
+                return HttpResponseForbidden(
+                    _("Permisiuni insuficiente")
+                )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
 
             # Store current role in request for use in view
             request.user_role = user_role  # type: ignore[attr-defined]

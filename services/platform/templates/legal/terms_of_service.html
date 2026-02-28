@@ -41,23 +41,23 @@
         <section id="acceptance" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">1. {% trans "Acceptance of Terms" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 By accessing or using the PRAHO Platform services provided by PragmaticHost SRL ("Company", "we", "us", "our"),
                 you ("Customer", "you", "your") agree to be bound by these Terms of Service ("Terms").
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 If you do not agree to these Terms, you may not access or use our services. These Terms constitute
                 a legally binding agreement between you and PragmaticHost SRL.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <div class="bg-amber-900/30 rounded p-4 border border-amber-700">
                 <p class="text-amber-300 text-sm">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     IMPORTANT: By creating an account or using our services, you confirm that you are at least 18 years old
                     and have the legal capacity to enter into binding contracts.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
             </div>
         </section>
@@ -66,9 +66,9 @@
         <section id="services" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">2. {% trans "Description of Services" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 PragmaticHost SRL provides web hosting and related services through the PRAHO Platform, including but not limited to:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-2">
                 <li>{% trans "Shared and VPS web hosting" %}</li>
@@ -79,10 +79,10 @@
                 <li>{% trans "Automated backup solutions" %}</li>
             </ul>
             <p class="text-slate-300 mt-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Service specifications, features, and limitations are described in the specific service plans
                 available on our platform.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -92,10 +92,10 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "3.1 Registration Requirements" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 To use our services, you must create an account by providing accurate, current, and complete information.
                 You agree to update your information promptly if it changes.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.2 Account Security" %}</h3>
@@ -108,10 +108,10 @@
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.3 Business Customers" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Business customers must provide accurate company information, including VAT registration number (CUI/CIF)
                 for Romanian companies. This information is required for invoicing and tax compliance.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -121,10 +121,10 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "4.1 Pricing and Fees" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 All prices are displayed in Romanian Lei (RON) and include VAT (19%) for Romanian customers.
                 Prices may change with 30 days' prior notice.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.2 Payment Methods" %}</h3>
@@ -136,27 +136,27 @@
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.3 Billing Cycle" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Services are billed in advance according to the billing cycle selected (monthly, annually, etc.).
                 Proforma invoices are issued before service activation; fiscal invoices are issued upon payment.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.4 Late Payment" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Invoices are due within 14 days of issue. Late payments may result in service suspension.
                 We reserve the right to charge interest on overdue amounts at the legal rate.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "4.5 Refund Policy" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We offer a 30-day money-back guarantee for new hosting services. Domain registration fees,
                 SSL certificates, and add-on services are non-refundable. Refund requests must be submitted
                 through the support ticket system.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -164,10 +164,10 @@
         <section id="acceptable-use" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">5. {% trans "Acceptable Use Policy" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 You agree to use our services only for lawful purposes and in compliance with these Terms.
                 You must NOT use our services to:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="bg-red-900/30 rounded p-4 border border-red-700 mb-4">
@@ -186,10 +186,10 @@
             </div>
 
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Violation of this policy may result in immediate service termination without refund.
                 We reserve the right to remove content that violates these terms.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -199,18 +199,18 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "6.1 Our Property" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 The PRAHO Platform, including its software, design, logos, and documentation, is owned by
                 PragmaticHost SRL and protected by intellectual property laws.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "6.2 Your Content" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 You retain all rights to the content you upload to our services. By using our services,
                 you grant us a limited license to store and transmit your content as necessary to provide the services.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -218,11 +218,11 @@
         <section id="data-protection" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">7. {% trans "Data Protection and Privacy" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We process personal data in accordance with the General Data Protection Regulation (GDPR)
                 and Romanian Law 190/2018. Please review our Privacy Policy for detailed information about
                 how we collect, use, and protect your data.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <a href="{% url 'privacy_policy' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">
                 {% trans "View Privacy Policy" %}
@@ -230,10 +230,10 @@
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "7.1 Customer Data Responsibility" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 If you collect personal data through services hosted on our platform, you are the data controller
                 for that data and are responsible for compliance with applicable data protection laws.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -243,20 +243,20 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "8.1 Service Level" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We strive to maintain 99.9% uptime for our hosting services. Service credits may be issued
                 for downtime exceeding this threshold, as specified in our Service Level Agreement.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "8.2 Disclaimer" %}</h3>
             <div class="bg-amber-900/30 rounded p-4 border border-amber-700">
                 <p class="text-slate-300 text-sm">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     SERVICES ARE PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED,
                     INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
                     AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT SERVICES WILL BE UNINTERRUPTED OR ERROR-FREE.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
             </div>
         </section>
@@ -265,9 +265,9 @@
         <section id="liability" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">9. {% trans "Limitation of Liability" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 To the maximum extent permitted by Romanian law:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-2">
                 <li>{% trans "We shall not be liable for indirect, incidental, special, or consequential damages." %}</li>
@@ -282,17 +282,17 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "10.1 By Customer" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 You may cancel your services at any time through the customer portal or by contacting support.
                 Prepaid fees are non-refundable except as specified in our refund policy.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "10.2 By Company" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We may suspend or terminate services immediately if you:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-1">
                 <li>{% trans "Violate these Terms or Acceptable Use Policy" %}</li>
@@ -302,10 +302,10 @@
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "10.3 Data After Termination" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Upon termination, we will retain your data for 30 days to allow for retrieval.
                 After this period, data may be permanently deleted unless legally required to be retained.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -313,21 +313,21 @@
         <section id="governing-law" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">11. {% trans "Governing Law and Disputes" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 These Terms shall be governed by and construed in accordance with the laws of Romania.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Any disputes arising from these Terms shall be submitted to the exclusive jurisdiction of
                 the courts of Bucharest, Romania.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 For consumers in the EU, this does not affect your statutory rights or your right to bring
                 claims before the courts of your country of residence.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -348,11 +348,11 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Changes to These Terms" %}</h2>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We reserve the right to modify these Terms at any time. We will notify you of material changes
                 at least 30 days before they take effect. Your continued use of our services after changes
                 become effective constitutes acceptance of the modified Terms.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 

@@ -15,6 +15,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from apps.api.secure_auth import validate_portal_service_request
 from apps.audit.services import AuditContext, ProvisioningAuditService
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
@@ -447,10 +448,14 @@ def server_webhook_health_check(request: HttpRequest, server_id: str) -> JsonRes
         return JsonResponse({"status": "unhealthy", "error": str(e)}, status=500)
 
 
-@require_http_methods(["POST"])
+@require_http_methods(["POST"])  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @csrf_exempt
 def resource_allocation_webhook(request: HttpRequest) -> JsonResponse:
     """🎯 Handle resource allocation confirmation webhooks"""
+    _, auth_error = validate_portal_service_request(request)
+    if auth_error:
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+
     try:
         # Get webhook payload
         payload_body = request.body.decode("utf-8")

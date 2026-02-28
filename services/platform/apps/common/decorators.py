@@ -274,7 +274,7 @@ def rate_limit(
                 )
 
                 # Return rate limit response
-                response = HttpResponse(
+                response = HttpResponse(  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
                     f"Rate limit exceeded. Maximum {requests_per_minute} requests per minute allowed.", status=429
                 )
                 response["Retry-After"] = "60"  # Suggest retry after 60 seconds

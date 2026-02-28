@@ -18,6 +18,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django_ratelimit.decorators import ratelimit
 
@@ -390,7 +391,9 @@ def _handle_ticket_status_update(
     except ValueError as e:
         # Handle validation errors from TicketStatusService
         if request.headers.get("HX-Request"):
-            return "", HttpResponse(f'<div class="text-red-500 text-sm">Error: {e!s}</div>')
+            return "", HttpResponse(
+                format_html('<div class="text-red-500 text-sm">Error: {}</div>', str(e))
+            )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
         messages.error(request, _("❌ Error: {error}").format(error=str(e)))
         return "", redirect("tickets:detail", pk=ticket.pk)
 

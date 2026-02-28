@@ -196,7 +196,7 @@ class Command(BaseCommand):
         e2e_admin.is_staff = True
         e2e_admin.is_superuser = True
         e2e_admin.staff_role = "admin"
-        e2e_admin.set_password("test123")
+        e2e_admin.set_password("test123")  # nosemgrep: unvalidated-password — test fixture data, not user-facing
         e2e_admin.save()
         self.stdout.write("  ✓ E2E admin: e2e-admin@test.local")
 
@@ -214,7 +214,7 @@ class Command(BaseCommand):
         e2e_customer.is_active = True
         e2e_customer.is_staff = False
         e2e_customer.is_superuser = False
-        e2e_customer.set_password("test123")
+        e2e_customer.set_password("test123")  # nosemgrep: unvalidated-password — test fixture data, not user-facing
         e2e_customer.save()
         self.stdout.write("  ✓ E2E customer: e2e-customer@test.local")
 

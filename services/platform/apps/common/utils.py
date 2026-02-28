@@ -243,7 +243,9 @@ def maintenance_mode_check(view_func: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if getattr(settings, "MAINTENANCE_MODE", False) and not request.user.is_staff:
-            return HttpResponse(_("System is under maintenance. Please try again later."), status=503)
+            return HttpResponse(
+                _("System is under maintenance. Please try again later."), status=503
+            )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
         return view_func(request, *args, **kwargs)
 
     return wrapper

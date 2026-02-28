@@ -41,22 +41,22 @@
         <section id="introduction" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">1. {% trans "Introduction" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 PragmaticHost SRL ("we", "us", "our") is committed to protecting your privacy and personal data.
                 This Privacy Policy explains how we collect, use, store, and protect your personal information
                 when you use our PRAHO Platform hosting services.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We comply with the General Data Protection Regulation (GDPR - EU 2016/679), Romanian Law 190/2018
                 implementing GDPR, and other applicable data protection legislation.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 By using our services, you acknowledge that you have read and understood this Privacy Policy.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -74,10 +74,10 @@
                 <h3 class="text-lg font-medium text-blue-300 mb-2">{% trans "Data Protection Officer (DPO)" %}</h3>
                 <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> {% setting "company.email_dpo" %}</p>
                 <p class="text-slate-300 text-sm mt-2">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     For any privacy-related inquiries or to exercise your data protection rights,
                     please contact our Data Protection Officer.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
             </div>
         </section>
@@ -104,11 +104,11 @@
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "3.3 Special Categories of Data" %}</h3>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We do not intentionally collect special categories of personal data (such as health data,
                 religious beliefs, or political opinions). If you provide such data in support tickets or
                 other communications, we will treat it with additional care.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -194,9 +194,9 @@
         <section id="data-sharing" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">6. {% trans "Data Sharing and Third Parties" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We do not sell your personal data. We may share your data with:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <ul class="list-disc list-inside text-slate-300 space-y-2">
@@ -207,9 +207,9 @@
             </ul>
 
             <p class="text-slate-300 mt-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 All third-party processors are bound by Data Processing Agreements (DPAs) ensuring GDPR compliance.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
                 <a href="{% url 'data_processors' %}" class="text-blue-400 hover:text-blue-300">{% trans "View our Third-Party Data Processors" %}</a>
             </p>
         </section>
@@ -218,9 +218,9 @@
         <section id="your-rights" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">7. {% trans "Your Rights Under GDPR" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Under the General Data Protection Regulation, you have the following rights:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="grid gap-4">
@@ -257,9 +257,9 @@
             <div class="bg-green-900/30 rounded p-4 mt-6 border border-green-700">
                 <h4 class="text-green-300 font-medium mb-2">{% trans "Exercise Your Rights" %}</h4>
                 <p class="text-slate-300 text-sm mb-2">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     You can exercise your rights through our GDPR Privacy Dashboard or by contacting our DPO.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
                 {% if user.is_authenticated %}
                 <a href="{% url 'audit:gdpr_dashboard' %}" class="inline-block bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
@@ -277,9 +277,9 @@
         <section id="data-retention" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">8. {% trans "Data Retention" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We retain your personal data only as long as necessary for the purposes outlined in this policy:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="overflow-x-auto">
@@ -326,9 +326,9 @@
         <section id="security" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">9. {% trans "Security Measures" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We implement appropriate technical and organizational measures to protect your personal data:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="grid md:grid-cols-2 gap-4">
@@ -371,10 +371,10 @@
         <section id="cookies" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">10. {% trans "Cookies and Tracking" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We use cookies and similar technologies to operate our service and improve your experience.
                 For detailed information, please see our Cookie Policy.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <a href="{% url 'cookie_policy' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">
                 {% trans "View Cookie Policy" %}
@@ -385,10 +385,10 @@
         <section id="international" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">11. {% trans "International Data Transfers" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Your data is primarily processed within the European Economic Area (EEA). If we transfer data
                 outside the EEA, we ensure adequate safeguards through:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-1">
                 <li>{% trans "EU-approved Standard Contractual Clauses (SCCs)" %}</li>
@@ -401,9 +401,9 @@
         <section id="contact" class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">12. {% trans "Contact Us" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 For questions about this Privacy Policy or to exercise your data protection rights:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="grid md:grid-cols-2 gap-6">
@@ -421,9 +421,9 @@
             <div class="bg-amber-900/30 rounded p-4 mt-6 border border-amber-700">
                 <h4 class="text-amber-300 font-medium mb-2">{% trans "Supervisory Authority" %}</h4>
                 <p class="text-slate-300 text-sm">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     You have the right to lodge a complaint with the Romanian Data Protection Authority (ANSPDCP):
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
                 <p class="text-slate-400 text-sm mt-2">
                     Autoritatea Nationala de Supraveghere a Prelucrarii Datelor cu Caracter Personal (ANSPDCP)<br>
@@ -437,11 +437,11 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Changes to This Policy" %}</h2>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We may update this Privacy Policy from time to time. We will notify you of significant changes
                 by email or through our platform. The "Last updated" date at the top of this policy indicates
                 when it was last revised.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 

@@ -44,9 +44,9 @@ Features:
       {% with page_obj.start_index as start_index and page_obj.end_index as end_index and page_obj.paginator.count as count %}
         {# Consistent format for both mobile and desktop #}
         <span>
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
             {{ start_index }}–{{ end_index }} of {{ count }} results
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </span>
       {% endwith %}
     </div>

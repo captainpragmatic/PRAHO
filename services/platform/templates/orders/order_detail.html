@@ -468,6 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Error:', error);
+                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "An error occurred while updating the status." as status_error_msg %}
                 alert('{{ status_error_msg|escapejs }}');
             });
@@ -644,6 +645,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
     })
     .catch(error => {
         console.error('Error:', error);
+        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
         {% trans "An error occurred while processing the refund." as refund_error_msg %}
         alert('{{ refund_error_msg|escapejs }}');
         // Re-enable button
@@ -750,6 +752,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
 
     // Basic validation
     if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
+        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
         {% trans "Please fill in all required fields." as fill_fields_msg %}
         alert('{{ fill_fields_msg|escapejs }}');
         return;
@@ -776,6 +779,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
     .then(data => {
         if (data.success) {
             hideOrderRefundRequestModal();
+            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Refund request submitted successfully! You will receive a confirmation email with your ticket number." as refund_success_msg %}
             alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
@@ -788,6 +792,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
     })
     .catch(error => {
         console.error('Error:', error);
+        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
         {% trans "An error occurred. Please try again." as generic_error_msg %}
         alert('{{ generic_error_msg|escapejs }}');
         // Re-enable button

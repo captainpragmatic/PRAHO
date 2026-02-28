@@ -338,11 +338,13 @@ function sendProforma(proformaId) {
             if (data.success) {
                 location.reload();
             } else {
+                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "Failed to send proforma. Please try again." as proforma_fail_msg %}
                 alert('{{ proforma_fail_msg|escapejs }}');
             }
         })
         .catch(error => {
+            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "An error occurred. Please try again." as proforma_error_msg %}
             alert('{{ proforma_error_msg|escapejs }}');
         });

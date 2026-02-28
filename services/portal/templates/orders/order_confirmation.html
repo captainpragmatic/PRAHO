@@ -308,6 +308,7 @@
 {% block extra_js %}
 <!-- Stripe Elements Integration -->
 {% if payment_info and stripe_config %}{% if order.status == 'pending' %}
+{# nosemgrep: missing-integrity — Stripe does not support SRI on js.stripe.com #}
 <script src="https://js.stripe.com/v3/"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {

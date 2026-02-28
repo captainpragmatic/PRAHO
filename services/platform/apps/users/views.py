@@ -799,6 +799,9 @@ def user_profile(request: HttpRequest) -> HttpResponse:
                 cookie_name,
                 selected_language or "",
                 max_age=365 * 24 * 60 * 60,  # 1 year
+                httponly=True,
+                samesite="Lax",
+                secure=request.is_secure(),
             )
             return response
 

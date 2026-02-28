@@ -8,7 +8,12 @@ from .base import *  # noqa: F403
 
 # Security - similar to production but with debug info
 DEBUG = False
-SECRET_KEY = os.environ.get("SECRET_KEY", "staging-key-change-before-prod")
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError(
+        "SECURITY ERROR: SECRET_KEY environment variable must be set in staging.\n"
+        'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
 
 # Allowed hosts for staging
 ALLOWED_HOSTS = os.environ.get(
@@ -17,7 +22,12 @@ ALLOWED_HOSTS = os.environ.get(
 
 # Platform API configuration for staging
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://platform-staging:8700/api")
-PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET", "staging-shared-secret")
+PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
+if not PLATFORM_API_SECRET:
+    raise ValueError(
+        "SECURITY ERROR: PLATFORM_API_SECRET must be set in staging.\n"
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "20"))
 
 # Security settings (less strict than production for testing)

@@ -44,17 +44,17 @@
   <div class="mb-4">
     <p class="text-slate-400 text-sm">
       {% if search_query %}
-      {% blocktrans count total_customers=total_customers %}
+      {% filter force_escape %}{% blocktrans count total_customers=total_customers %}
       {{ total_customers }} result for "{{ search_query }}"
       {% plural %}
       {{ total_customers }} results for "{{ search_query }}"
-      {% endblocktrans %}
+      {% endblocktrans %}{% endfilter %}
       {% else %}
-      {% blocktrans count total_customers=total_customers %}
+      {% filter force_escape %}{% blocktrans count total_customers=total_customers %}
       {{ total_customers }} customer in total
       {% plural %}
       {{ total_customers }} customers in total
-      {% endblocktrans %}
+      {% endblocktrans %}{% endfilter %}
       {% endif %}
     </p>
   </div>
@@ -171,7 +171,7 @@
               <div class="text-slate-400">
                 {% if search_query %}
                 <div class="text-4xl mb-4">🔍</div>
-                <p>{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}</p>
+                <p>{% filter force_escape %}{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}{% endfilter %}</p>
                 {% else %}
                 <div class="text-4xl mb-4">👥</div>
                 <p>{% trans 'No customers yet' %}</p>
@@ -298,7 +298,7 @@
       <div class="text-slate-400">
         {% if search_query %}
         <div class="text-4xl mb-4">🔍</div>
-        <p>{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}</p>
+        <p>{% filter force_escape %}{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}{% endfilter %}</p>
         {% else %}
         <div class="text-4xl mb-4">👥</div>
         <p>{% trans 'No customers yet' %}</p>
@@ -318,9 +318,9 @@
   <div class="mt-6 bg-slate-800 rounded-lg border border-slate-700 p-4">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div class="text-sm text-slate-400 text-center sm:text-left">
-        {% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
+        {% filter force_escape %}{% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
         Page {{ page_number }} of {{ num_pages }}
-        {% endblocktrans %}
+        {% endblocktrans %}{% endfilter %}
       </div>
 
       <div class="flex justify-center sm:justify-end space-x-2">

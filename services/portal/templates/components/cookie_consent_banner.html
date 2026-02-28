@@ -26,10 +26,10 @@
                         &#127850; {% trans "We Value Your Privacy" %}
                     </h3>
                     <p class="text-slate-300 text-sm">
-                        {% blocktrans %}
+                        {% filter force_escape %}{% blocktrans %}
                         We use cookies to enhance your browsing experience, analyze site traffic, and personalize content.
                         By clicking "Accept All", you consent to our use of cookies.
-                        {% endblocktrans %}
+                        {% endblocktrans %}{% endfilter %}
                         <a href="{% url 'cookie_policy' %}" class="text-blue-400 hover:text-blue-300 underline" aria-label="{% trans 'Learn more about our cookie policy' %}">
                             {% trans "Learn more" %}
                         </a>

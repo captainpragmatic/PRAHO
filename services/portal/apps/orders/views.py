@@ -1101,7 +1101,7 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 from django.views.decorators.csrf import csrf_exempt  # noqa: E402
 
 
-@csrf_exempt
+@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     """

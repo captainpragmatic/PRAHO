@@ -23,9 +23,9 @@
       </h2>
       {% if invoice_number %}
         <p class="text-slate-400">
-          {% blocktrans with number=invoice_number %}
+          {% filter force_escape %}{% blocktrans with number=invoice_number %}
           Invoice {{ number }} could not be found or you don't have access to it.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
       {% else %}
         <p class="text-slate-400">

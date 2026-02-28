@@ -271,6 +271,7 @@
                                         <input type="hidden" name="is_active" value="false">
                                         <button type="submit"
                                                 class="text-xs px-2 py-1 text-yellow-400 hover:text-yellow-300 border border-yellow-600 rounded hover:border-yellow-500 transition-colors"
+                                                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                                 {% trans "Are you sure you want to suspend this user?" as confirm_suspend %}
                                                 onclick="return confirm('{{ confirm_suspend|escapejs }}')">
                                             ⏸️ {% trans "Suspend" %}
@@ -282,6 +283,7 @@
                                         <input type="hidden" name="is_active" value="true">
                                         <button type="submit"
                                                 class="text-xs px-2 py-1 text-green-400 hover:text-green-300 border border-green-600 rounded hover:border-green-500 transition-colors"
+                                                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                                 {% trans "Are you sure you want to activate this user?" as confirm_activate %}
                                                 onclick="return confirm('{{ confirm_activate|escapejs }}')">
                                             ▶️ {% trans "Activate" %}
@@ -310,6 +312,7 @@
                                         {% csrf_token %}
                                         <button type="submit"
                                                 class="text-xs px-2 py-1 text-red-400 hover:text-red-300 border border-red-600 rounded hover:border-red-500 transition-colors"
+                                                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                                 {% trans "Are you sure you want to remove this user from the customer? They will lose all access to this customer's data." as confirm_remove %}
                                                 onclick="return confirm('{{ confirm_remove|escapejs }}')">
                                             🗑️ {% trans "Remove" %}

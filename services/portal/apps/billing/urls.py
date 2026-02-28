@@ -19,4 +19,8 @@ urlpatterns = [
     # Dashboard widget and actions
     path("dashboard-widget/", views.billing_dashboard_widget, name="dashboard_widget"),
     path("sync/", views.sync_invoices_action, name="sync_invoices"),
+    # Payment methods
+    path("payment-methods/", views.payment_methods_view, name="payment_methods"),
+    # Refund request
+    path("invoices/<str:invoice_number>/refund/", views.request_refund_view, name="request_refund"),
 ]

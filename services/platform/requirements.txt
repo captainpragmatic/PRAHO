@@ -1,5 +1,0 @@
-# PRAHO Platform Service - Requirements
-# Uses shared constraints for version consistency
-
--c ../../constraints.txt
--r requirements/base.txt

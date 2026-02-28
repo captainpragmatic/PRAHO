@@ -1627,7 +1627,7 @@ This ticket was automatically created from a customer refund request.
 # ===============================================================================
 
 
-@csrf_exempt
+@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 def api_create_payment_intent(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     """
@@ -1710,7 +1710,7 @@ def api_create_payment_intent(request: HttpRequest) -> JsonResponse:  # noqa: PL
         return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
-@csrf_exempt
+@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 def api_confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     """
@@ -1761,7 +1761,7 @@ def api_confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
         return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
-@csrf_exempt
+@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 def api_create_subscription(request: HttpRequest) -> JsonResponse:
     """
@@ -1829,7 +1829,7 @@ def api_payment_methods(request: HttpRequest, customer_id: str) -> JsonResponse:
         return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
-@csrf_exempt
+@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 def api_process_refund(request: HttpRequest) -> JsonResponse:
     """

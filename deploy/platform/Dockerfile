@@ -5,6 +5,8 @@
 
 FROM python:3.11-slim
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # ===============================================================================
 # METADATA & LABELS 📋
 # ===============================================================================
@@ -45,9 +47,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY services/platform/pyproject.toml ./services/platform/pyproject.toml
 
-# Install uv and sync platform production dependencies
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && ~/.local/bin/uv sync --group platform --no-dev --frozen
+# Sync platform production dependencies
+RUN uv sync --group platform --group prod --frozen --no-dev
 
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ ./

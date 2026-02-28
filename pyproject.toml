@@ -166,6 +166,7 @@ platform = [
     "dj-database-url>=2.1.0",
 
     # Authentication & Security
+    "cryptography>=46.0.5",  # CVE-2026-26007: SECT curve subgroup validation bypass
     "django-allauth>=0.57.0",
     "pyotp>=2.9.0",
     "qrcode[pil]>=7.4.0",
@@ -178,7 +179,7 @@ platform = [
     "django-cors-headers>=4.3.0",
 
     # File handling & Storage
-    "Pillow>=10.0.0",
+    "Pillow>=12.1.1",  # CVE-2026-25990: OOB write in PSD parser
     "django-storages>=1.14.0",
     "boto3>=1.28.0",
 

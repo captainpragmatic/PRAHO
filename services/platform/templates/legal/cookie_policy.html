@@ -23,6 +23,7 @@
                     {% trans "You can update your cookie preferences at any time." %}
                 </p>
             </div>
+            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Cookie preferences panel will appear on next page load." as cookie_msg %}
             <button onclick="window.showCookiePreferences ? window.showCookiePreferences() : alert('{{ cookie_msg|escapejs }}')"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium transition-colors">
@@ -38,17 +39,17 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "What Are Cookies?" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Cookies are small text files that are stored on your device (computer, tablet, or mobile)
                 when you visit a website. They help websites function properly, remember your preferences,
                 and provide information to website owners.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 This Cookie Policy explains what cookies we use, why we use them, and how you can control them.
                 This policy should be read alongside our Privacy Policy.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -63,10 +64,10 @@
                     <span class="bg-green-700 text-green-100 text-xs px-2 py-1 rounded">{% trans "Always Active" %}</span>
                 </div>
                 <p class="text-slate-300 text-sm mb-4">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     These cookies are strictly necessary for the website to function. They enable core functionality
                     such as security, session management, and accessibility. You cannot disable these cookies.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
 
                 <div class="overflow-x-auto">
@@ -111,10 +112,10 @@
                     <span class="bg-blue-700 text-blue-100 text-xs px-2 py-1 rounded">{% trans "Optional" %}</span>
                 </div>
                 <p class="text-slate-300 text-sm mb-4">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     These cookies enable enhanced functionality and personalization, such as remembering your
                     preferences and providing improved features. Disabling these may affect your user experience.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
 
                 <div class="overflow-x-auto">
@@ -154,10 +155,10 @@
                     <span class="bg-purple-700 text-purple-100 text-xs px-2 py-1 rounded">{% trans "Optional" %}</span>
                 </div>
                 <p class="text-slate-300 text-sm mb-4">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     These cookies help us understand how visitors interact with our website by collecting
                     information anonymously. This helps us improve our service and user experience.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
 
                 <div class="overflow-x-auto">
@@ -194,10 +195,10 @@
                 </div>
 
                 <p class="text-slate-400 text-xs mt-3">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     We use Matomo, a privacy-focused analytics platform. Data is processed on our servers
                     in the EU and is not shared with third parties.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
             </div>
 
@@ -208,10 +209,10 @@
                     <span class="bg-amber-700 text-amber-100 text-xs px-2 py-1 rounded">{% trans "Optional" %}</span>
                 </div>
                 <p class="text-slate-300 text-sm mb-4">
-                    {% blocktrans %}
+                    {% filter force_escape %}{% blocktrans %}
                     These cookies are used to track visitors across websites to display relevant advertisements.
                     We currently do not use third-party marketing cookies on our platform.
-                    {% endblocktrans %}
+                    {% endblocktrans %}{% endfilter %}
                 </p>
 
                 <div class="bg-slate-800/50 rounded p-4 text-center">
@@ -226,10 +227,10 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Third-Party Cookies" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Some cookies may be set by third-party services that appear on our pages.
                 We do not control these cookies and recommend reviewing the respective privacy policies.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="overflow-x-auto">
@@ -263,9 +264,9 @@
 
             <h3 class="text-lg font-medium text-white mt-4 mb-3">{% trans "Using Our Cookie Banner" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 When you first visit our website, you will see a cookie consent banner. You can:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-1 mb-4">
                 <li>{% trans "Accept all cookies" %}</li>
@@ -275,9 +276,9 @@
 
             <h3 class="text-lg font-medium text-white mt-6 mb-3">{% trans "Browser Settings" %}</h3>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 Most web browsers allow you to control cookies through their settings. You can:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-1 mb-4">
                 <li>{% trans "View what cookies are stored" %}</li>
@@ -301,10 +302,10 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Do Not Track Signals" %}</h2>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We respect Do Not Track (DNT) browser signals. When enabled, we will not load
                 optional analytics or marketing cookies until you explicitly consent.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -312,11 +313,11 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Updates to This Policy" %}</h2>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We may update this Cookie Policy from time to time to reflect changes in our practices
                 or for legal reasons. We will notify you of significant changes by updating the
                 "Last updated" date and, where appropriate, through the cookie consent banner.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -324,9 +325,9 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Contact Us" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 If you have questions about our use of cookies, please contact us:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <div class="bg-slate-900/50 rounded p-4">
                 <p class="text-slate-300"><strong class="text-white">{% trans "Email" %}:</strong> {% setting "company.email_privacy" %}</p>

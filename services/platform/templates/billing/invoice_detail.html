@@ -391,6 +391,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
     })
     .catch(error => {
         console.error('Error:', error);
+        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
         {% trans "An error occurred while processing the refund." as refund_error_msg %}
         alert('{{ refund_error_msg|escapejs }}');
         // Re-enable button
@@ -497,6 +498,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
 
     // Basic validation
     if (!formData.get('refund_reason') || !formData.get('refund_notes').trim()) {
+        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
         {% trans "Please fill in all required fields." as fill_fields_msg %}
         alert('{{ fill_fields_msg|escapejs }}');
         return;
@@ -523,6 +525,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     .then(data => {
         if (data.success) {
             hideInvoiceRefundRequestModal();
+            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Refund request submitted successfully! You will receive a confirmation email with your ticket number." as refund_success_msg %}
             alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
@@ -535,6 +538,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     })
     .catch(error => {
         console.error('Error:', error);
+        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
         {% trans "An error occurred. Please try again." as generic_error_msg %}
         alert('{{ generic_error_msg|escapejs }}');
         // Re-enable button

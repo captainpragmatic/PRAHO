@@ -17,11 +17,11 @@
     <!-- Introduction -->
     <div class="bg-slate-800 rounded-lg p-6 mb-8 border border-slate-700">
         <p class="text-slate-300">
-            {% blocktrans %}
+            {% filter force_escape %}{% blocktrans %}
             Under GDPR Article 28, we are required to disclose the third-party data processors that help us
             provide our services. All processors listed below are bound by Data Processing Agreements (DPAs)
             ensuring GDPR compliance.
-            {% endblocktrans %}
+            {% endblocktrans %}{% endfilter %}
         </p>
     </div>
 
@@ -238,26 +238,26 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "International Transfer Safeguards" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 For processors located outside the EEA, we ensure data protection through:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
 
             <div class="grid md:grid-cols-2 gap-4">
                 <div class="bg-slate-900/50 rounded p-4">
                     <h4 class="text-white font-medium mb-2">{% trans "EU SCCs" %}</h4>
                     <p class="text-slate-400 text-sm">
-                        {% blocktrans %}
+                        {% filter force_escape %}{% blocktrans %}
                         Standard Contractual Clauses approved by the European Commission for international data transfers.
-                        {% endblocktrans %}
+                        {% endblocktrans %}{% endfilter %}
                     </p>
                 </div>
                 <div class="bg-slate-900/50 rounded p-4">
                     <h4 class="text-white font-medium mb-2">{% trans "EU-US DPF" %}</h4>
                     <p class="text-slate-400 text-sm">
-                        {% blocktrans %}
+                        {% filter force_escape %}{% blocktrans %}
                         EU-US Data Privacy Framework certification where applicable.
-                        {% endblocktrans %}
+                        {% endblocktrans %}{% endfilter %}
                     </p>
                 </div>
             </div>
@@ -267,9 +267,9 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Data Processing Agreements" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 All processors listed above have signed Data Processing Agreements (DPAs) with us that include:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <ul class="list-disc list-inside text-slate-300 space-y-1">
                 <li>{% trans "Clear description of processing activities" %}</li>
@@ -285,10 +285,10 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Updates to This List" %}</h2>
             <p class="text-slate-300">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 We may update this list as we add or change service providers. Material changes will be
                 communicated through our platform and may be reflected in our Privacy Policy updates.
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
         </section>
 
@@ -296,9 +296,9 @@
         <section class="bg-slate-800/50 rounded-lg p-6 border border-slate-700">
             <h2 class="text-xl font-semibold text-white mb-4">{% trans "Questions?" %}</h2>
             <p class="text-slate-300 mb-4">
-                {% blocktrans %}
+                {% filter force_escape %}{% blocktrans %}
                 If you have questions about our data processors or require copies of relevant DPAs, please contact:
-                {% endblocktrans %}
+                {% endblocktrans %}{% endfilter %}
             </p>
             <div class="bg-slate-900/50 rounded p-4">
                 <p class="text-slate-300"><strong class="text-white">{% trans "Data Protection Officer" %}:</strong> {% setting "company.email_dpo" %}</p>

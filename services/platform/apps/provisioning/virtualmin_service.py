@@ -154,7 +154,9 @@ class VirtualminProvisioningService:
                     praho_customer_id=creation_data.service.customer.id,
                     praho_service_id=creation_data.service.id,
                 )
-                account.set_password(password)
+                account.set_password(
+                    password
+                )  # nosemgrep: unvalidated-password — system-generated random password, not user input
                 account.save()
 
                 # Create provisioning job

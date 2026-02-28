@@ -21,17 +21,17 @@
       <h2 class="text-lg font-medium text-white mb-4">{% trans 'About Cookies' %}</h2>
       <div class="text-sm text-slate-300 space-y-3">
         <p>
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           This website uses cookies and similar technologies to ensure its proper functioning,
           improve your browsing experience, and analyze how you interact with our services.
           This policy explains what cookies we use, why we use them, and how you can control them.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
         <p>
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           In accordance with EU Regulation 2016/679 (GDPR) and Romanian Law 506/2004,
           we require your explicit consent before placing any non-essential cookies on your device.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
       </div>
     </div>
@@ -48,10 +48,10 @@
           <span class="bg-green-700 text-green-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Always Active' %}</span>
         </div>
         <p class="text-sm text-slate-300 mb-4">
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           These cookies are strictly necessary for the website to function and cannot be disabled.
           They are set in response to actions made by you, such as logging in or filling in forms.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
         <p class="text-xs text-slate-400 mb-4">
           <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Legitimate interest (GDPR Art. 6(1)(f)) — necessary for service delivery' %}
@@ -106,11 +106,11 @@
           <span class="bg-blue-700 text-blue-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
         </div>
         <p class="text-sm text-slate-300 mb-4">
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           These cookies enable enhanced functionality and personalization, such as remembering
           your language preference, timezone, and display settings. If you do not allow these
           cookies, some or all of these features may not function properly.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
         <p class="text-xs text-slate-400 mb-4">
           <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Consent (GDPR Art. 6(1)(a))' %}
@@ -153,11 +153,11 @@
           <span class="bg-yellow-700 text-yellow-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
         </div>
         <p class="text-sm text-slate-300 mb-4">
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           These cookies help us understand how visitors interact with our website by collecting
           and reporting information anonymously. This helps us improve our services and user
           experience.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
         <p class="text-xs text-slate-400 mb-4">
           <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Consent (GDPR Art. 6(1)(a))' %}
@@ -194,11 +194,11 @@
           <span class="bg-red-700 text-red-100 text-xs px-2.5 py-1 rounded-full font-medium">{% trans 'Optional' %}</span>
         </div>
         <p class="text-sm text-slate-300 mb-4">
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           These cookies may be set through our site by advertising partners. They may be used
           by those companies to build a profile of your interests and show you relevant adverts
           on other sites. We currently do not use third-party marketing cookies.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
         <p class="text-xs text-slate-400">
           <strong>{% trans 'Legal Basis:' %}</strong> {% trans 'Consent (GDPR Art. 6(1)(a))' %}
@@ -215,10 +215,10 @@
     <div class="p-6">
       <h2 class="text-lg font-medium text-white mb-4">{% trans 'Manage Your Preferences' %}</h2>
       <p class="text-sm text-slate-300 mb-4">
-        {% blocktrans %}
+        {% filter force_escape %}{% blocktrans %}
         You can change your cookie preferences at any time. Withdrawing consent is as easy
         as giving it, as required by GDPR Article 7(3).
-        {% endblocktrans %}
+        {% endblocktrans %}{% endfilter %}
       </p>
       <button onclick="if(window.showCookiePreferences){window.showCookiePreferences()}" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors text-sm">
         {% trans 'Open Cookie Preferences' %}
@@ -232,17 +232,17 @@
       <h2 class="text-lg font-medium text-white mb-4">{% trans 'Legal Information' %}</h2>
       <div class="text-sm text-slate-300 space-y-2">
         <p>
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           This cookie policy complies with EU Regulation 2016/679 (General Data Protection Regulation),
           Directive 2002/58/EC (ePrivacy Directive), and Romanian Law 506/2004 on the processing of
           personal data and privacy protection in electronic communications.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
         <p>
-          {% blocktrans %}
+          {% filter force_escape %}{% blocktrans %}
           For any questions about our use of cookies, please contact our Data Protection Officer
           at privacy@pragmatichost.com.
-          {% endblocktrans %}
+          {% endblocktrans %}{% endfilter %}
         </p>
       </div>
     </div>

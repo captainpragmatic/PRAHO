@@ -25,11 +25,11 @@
         <!-- Items Header -->
         <div class="px-6 py-4 border-b border-slate-700">
           <h2 class="text-lg font-medium text-white">
-            {% blocktrans count counter=cart_items|length %}
+            {% filter force_escape %}{% blocktrans count counter=cart_items|length %}
               {{ counter }} product in cart
             {% plural %}
               {{ counter }} products in cart
-            {% endblocktrans %}
+            {% endblocktrans %}{% endfilter %}
           </h2>
         </div>
 

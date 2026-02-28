@@ -284,7 +284,7 @@ class NodeValidationService:
             request = urllib.request.Request(url, method="HEAD")  # noqa: S310
             request.add_header("User-Agent", "PRAHO-Validation/1.0")
 
-            with urllib.request.urlopen(request, timeout=self.timeout, context=ctx) as response:  # noqa: S310
+            with urllib.request.urlopen(request, timeout=self.timeout, context=ctx) as response:  # noqa: S310  # nosemgrep: dynamic-urllib-use-detected — admin-managed server URL
                 status_code = response.getcode()
 
                 # Webmin typically returns 200 or 401 (needs auth)

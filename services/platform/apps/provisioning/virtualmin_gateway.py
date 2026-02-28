@@ -670,7 +670,9 @@ class VirtualminGateway:
             pool_maxsize=VIRTUALMIN_CONNECTION_POOL_SIZE,
             max_retries=0,  # Handle retries manually
         )
-        session.mount("http://", adapter)
+        session.mount(
+            "http://", adapter
+        )  # nosemgrep: request-session-with-http — Virtualmin uses HTTP on trusted internal network
         session.mount("https://", adapter)
 
         # Set authentication

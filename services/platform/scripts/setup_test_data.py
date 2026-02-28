@@ -75,7 +75,7 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
             },
         )
         if created:
-            superuser.set_password("admin123")
+            superuser.set_password("admin123")  # nosemgrep: unvalidated-password — test fixture data, not user-facing
             superuser.save()
             print("✅ Created superuser")
         else:
@@ -154,7 +154,9 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
             },
         )
         if created:
-            customer_user.set_password("admin123")
+            customer_user.set_password(
+                "admin123"
+            )  # nosemgrep: unvalidated-password — test fixture data, not user-facing
             customer_user.save()
             print("✅ Created customer user")
         else:
@@ -185,7 +187,7 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
             },
         )
         # Ensure known password for repeatable E2E runs
-        e2e_admin.set_password("test123")
+        e2e_admin.set_password("test123")  # nosemgrep: unvalidated-password — test fixture data, not user-facing
         e2e_admin.save()
         print("✅ Ensured E2E admin user (e2e-admin@test.local)")
 
@@ -201,7 +203,7 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
             },
         )
         # Ensure known password for repeatable E2E runs
-        e2e_customer.set_password("test123")
+        e2e_customer.set_password("test123")  # nosemgrep: unvalidated-password — test fixture data, not user-facing
         e2e_customer.save()
         print("✅ Ensured E2E customer user (e2e-customer@test.local)")
 

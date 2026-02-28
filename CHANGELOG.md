@@ -32,6 +32,60 @@ _No unreleased changes._
 - **Billing Coverage**: 11 new test files — views, signals, tasks, e-Factura, invoices, payments, refunds, subscriptions, metering gateway, misc coverage (1,165 tests)
 - **Security Tests**: Updated 6 placeholder assertions in `test_enhanced_validation.py` from `is_ok()` to proper `is_err()` failure checks
 
+### Security
+- **🔒 Semgrep Full Triage & Remediation**: Triaged and resolved all 192 Semgrep findings (15 true positives, 73 defense-in-depth, 104 false positives)
+  - **True Positives Fixed (15)**:
+    - **CRITICAL**: Stored XSS via `user.first_name` in `{% blocktranslate %}` — wrapped with `{% filter force_escape %}`
+    - **HIGH**: Open redirect in customer switch views — validated with `url_has_allowed_host_and_scheme()`
+    - **HIGH**: Unauthenticated `resource_allocation_webhook` — added HMAC validation
+    - **MEDIUM**: Stored XSS via `search_query` in customer list — wrapped with `{% filter force_escape %}`
+    - **MEDIUM**: DOM XSS via `innerHTML` in `showNotification()` — replaced with `textContent`
+    - **MEDIUM**: Unescaped f-strings in Virtualmin HTMX responses (5 locations) — replaced with `format_html()`
+    - **MEDIUM**: HttpResponse XSS in ticket views — replaced with `format_html()`
+    - **LOW**: Missing `validate_password()` in password reset serializer — added Django password policy enforcement
+  - **Defense-in-Depth Hardening (73)**:
+    - Wrapped all `{% blocktranslate %}` blocks across 18 template files with `{% filter force_escape %}` (excluding plain-text email templates)
+    - Added `secure=request.is_secure()`, `httponly=True`, `samesite="Lax"` to language and consent cookies
+    - Added DRF anonymous rate throttling (60/min) to Portal REST endpoints
+    - Removed redundant Alpine.js CDN tag from `service_detail.html` (already loaded from base.html)
+    - Added `|escapejs` filter to JS-interpolated domain name in `domain_renew.html`
+  - **False Positive Suppression (104)**: Added `nosemgrep` comments with justifications
+    - 34 `template-translate-as-no-escape` — output already escaped via `|escapejs` filter
+    - 14 `avoid-mark-safe` — content sanitized by bleach/escape before `mark_safe`
+    - 8 `unvalidated-password` — test data generation and `UserManager` (not user-facing)
+    - 6 `direct-use-of-httpresponse` — string literals and developer-configured integers
+    - 6 `django-no-csrf-token` — CSRF token present on adjacent line (parser limitation)
+    - 5 `no-csrf-exempt` — HMAC-authenticated inter-service endpoints
+    - Remaining misc: plain-text email templates, admin-managed URLs, Stripe SRI limitation, internal network HTTP
+- **🔒 PRAHO Architectural Security Scanner**: 18 custom rules detecting PRAHO-specific vulnerabilities
+  - Rules PRAHO-001 through PRAHO-018 covering: missing middleware, HMAC secret fallback, AllowAny on destructive endpoints, fail-open middleware, unprotected billing views, SSL verification, CSP misconfiguration, and more
+  - AST-based detection for complex patterns (decorator analysis, class scope tracking, inline auth recognition)
+  - Inline suppression support via `# praho-security: ignore[RULE-ID]`
+  - Wired into `make lint-security` as third scanning phase
+  - 22 unit tests with 100% rule coverage
+- **🔒 Legacy HMAC Removal**: Eliminated all legacy pipe-delimited HMAC canonical format code
+  - Removed `_should_use_legacy_canonical()`, `_prepare_legacy_request_headers()`, and legacy retry block from Portal API client
+  - Modern newline-separated format with body hash is now the only HMAC implementation
+- **🔒 ADR-0017 Portal Auth Fail-Open Strategy**: Documented intentional fail-open behavior in Portal authentication middleware
+  - Critical path comments explaining why Portal fails open during Platform API outages (stateless service cannot fail closed)
+  - 5 safeguards: 6h hard TTL, no metadata update on failure, independent session security, error type split, thundering herd protection
+  - Scanner suppression with `# praho-security: ignore[PRAHO-006]`
+- **🔒 CVE Patches**: Patched hardcoded secrets and removed sensitive defaults from non-dev settings
+
+### Changed
+- **📦 Complete uv Migration**: Fully migrated package management from pip/requirements.txt to uv
+  - `make install` now runs `uv sync --all-groups` instead of `pip install -r requirements/*.txt`
+  - Dockerfiles use `COPY --from=ghcr.io/astral-sh/uv:latest` with `uv sync --frozen` for reproducible builds
+  - All 4 GitHub Actions workflows migrated to `astral-sh/setup-uv@v4`
+  - Added `semgrep>=1.56.0` to dev dependency group
+  - Deleted 8 legacy requirements files
+  - Updated 5 documentation files with uv commands
+- **🔧 Ruff Bug Fixes**: Fixed pre-existing code quality issues
+  - Fixed undefined variable `ticket_number` in API ticket views (F821)
+  - Fixed bare `except` in customer serializer (E722)
+  - Removed unused import `User` in customer API views (F811)
+  - Removed unused variable assignments in portal conftest and ticket views (F841)
+
 ---
 
 ## [0.18.0] - 2026-02-27

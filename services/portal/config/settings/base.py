@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from django.utils.translation import gettext_lazy as _
+
 # ===============================================================================
 # CORE DJANGO SETTINGS
 # ===============================================================================
@@ -141,8 +143,8 @@ USE_I18N = True
 USE_TZ = True
 
 LANGUAGES = [
-    ("en", "English"),
-    ("ro", "Română"),
+    ("en", _("English")),
+    ("ro", _("Română")),
 ]
 
 LOCALE_PATHS = [
@@ -221,11 +223,7 @@ PLATFORM_API_BASE_URL = os.environ.get(
     "PLATFORM_API_BASE_URL",
     "http://localhost:8700/api",  # Default to local development
 )
-PLATFORM_API_SECRET = os.environ.get(
-    "PLATFORM_API_SECRET",
-    # Development fallback - MUST be changed in production
-    "dev-shared-secret-change-in-production",
-)
+PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
 # ===============================================================================

@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from xml.sax.saxutils import escape as xml_escape
 
 from django.conf import settings
 from django.db.models import Sum
@@ -303,23 +304,36 @@ def generate_e_factura_xml(invoice: Invoice) -> str:
         vat_amount = Decimal(invoice.tax_cents or 0) / 100
         total_with_vat = Decimal(invoice.total_cents or 0) / 100
 
+        # XML-escape all dynamic values to prevent XML injection
+        invoice_number = xml_escape(str(invoice.number))
+        issue_date = xml_escape(invoice.created_at.strftime("%Y-%m-%d") if invoice.created_at else "")
+        due_date = xml_escape(
+            invoice.due_date.strftime("%Y-%m-%d") if hasattr(invoice, "due_date") and invoice.due_date else ""
+        )
+        company_name = xml_escape(str(getattr(settings, "COMPANY_NAME", "PRAHO Platform")))
+        company_vat = xml_escape(str(getattr(settings, "COMPANY_VAT_NUMBER", "")))
+        customer_name = xml_escape(customer.get_display_name() if customer else "")
+        customer_vat = xml_escape(
+            customer.vat_number if customer and hasattr(customer, "vat_number") and customer.vat_number else ""
+        )
+
         xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-    <cbc:ID>{invoice.number}</cbc:ID>
-    <cbc:IssueDate>{invoice.created_at.strftime('%Y-%m-%d') if invoice.created_at else ''}</cbc:IssueDate>
-    <cbc:DueDate>{invoice.due_date.strftime('%Y-%m-%d') if hasattr(invoice, 'due_date') and invoice.due_date else ''}</cbc:DueDate>
+    <cbc:ID>{invoice_number}</cbc:ID>
+    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+    <cbc:DueDate>{due_date}</cbc:DueDate>
     <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
     <cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>
 
     <cac:AccountingSupplierParty>
         <cac:Party>
             <cac:PartyName>
-                <cbc:Name>{getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')}</cbc:Name>
+                <cbc:Name>{company_name}</cbc:Name>
             </cac:PartyName>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>{getattr(settings, 'COMPANY_VAT_NUMBER', '')}</cbc:CompanyID>
+                <cbc:CompanyID>{company_vat}</cbc:CompanyID>
                 <cac:TaxScheme>
                     <cbc:ID>VAT</cbc:ID>
                 </cac:TaxScheme>
@@ -330,10 +344,10 @@ def generate_e_factura_xml(invoice: Invoice) -> str:
     <cac:AccountingCustomerParty>
         <cac:Party>
             <cac:PartyName>
-                <cbc:Name>{customer.get_display_name() if customer else ''}</cbc:Name>
+                <cbc:Name>{customer_name}</cbc:Name>
             </cac:PartyName>
             <cac:PartyTaxScheme>
-                <cbc:CompanyID>{customer.vat_number if customer and hasattr(customer, 'vat_number') else ''}</cbc:CompanyID>
+                <cbc:CompanyID>{customer_vat}</cbc:CompanyID>
                 <cac:TaxScheme>
                     <cbc:ID>VAT</cbc:ID>
                 </cac:TaxScheme>
