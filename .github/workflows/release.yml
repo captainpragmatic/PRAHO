@@ -28,6 +28,12 @@ jobs:
         with:
           fetch-depth: 0  # Need full history for tag metadata
 
+      - name: Fetch annotated tag objects
+        run: git fetch --tags --force
+        # actions/checkout can convert annotated tags to lightweight refs;
+        # re-fetching with --force ensures the full tag objects are present
+        # so %(contents:subject) can extract the tag message.
+
       - name: Extract version and tag metadata
         id: meta
         run: |
@@ -36,12 +42,19 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-          # Get the annotated tag subject line for the release title
-          TAG_SUBJECT=$(git tag -l --format='%(contents:subject)' "${TAG}")
+          # Get the annotated tag message for the release title.
+          # Try %(contents:subject) first, then git cat-file fallback,
+          # then the bare tag name as last resort.
+          TAG_SUBJECT=$(git tag -l --format='%(contents:subject)' "${TAG}" 2>/dev/null)
+          if [ -z "${TAG_SUBJECT}" ]; then
+            # Fallback: extract first line of annotated tag body via cat-file
+            TAG_SUBJECT=$(git cat-file -p "${TAG}" 2>/dev/null | sed -n '/^$/,$ { /^$/d; p; q; }')
+          fi
           if [ -z "${TAG_SUBJECT}" ]; then
             TAG_SUBJECT="${TAG}"
           fi
           echo "title=${TAG_SUBJECT}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Release title: ${TAG_SUBJECT}"
 
           # Determine pre-release status:
           #   - Major version 0 → always pre-release (alpha)
