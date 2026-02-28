@@ -13,7 +13,7 @@
 [![Platform CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml)
 [![Portal CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml)
 [![Integration Tests](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml)
-![Tests](https://img.shields.io/badge/tests-3%2C000%2B-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-4%2C000%2B-brightgreen.svg)
 
 [![mypy: strict](https://img.shields.io/badge/mypy-strict_%E2%9C%93-brightgreen.svg)](https://mypy-lang.org/)
 [![Ruff](https://img.shields.io/badge/Ruff-lint_%E2%9C%93-brightgreen.svg)](https://docs.astral.sh/ruff/)
