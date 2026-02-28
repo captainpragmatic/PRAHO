@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-e2e dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal
+.PHONY: help install dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -35,7 +35,8 @@ help:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🏗️  DEVELOPMENT SERVICES:"
 	@echo "  make dev             - Run all services (platform + portal)"
-	@echo "  make dev-e2e         - Run all services with rate limiting disabled"
+	@echo "  make dev-e2e         - Run all services with rate limiting disabled (foreground)"
+	@echo "  make dev-e2e-bg      - Same as dev-e2e but backgrounded (waits until ready, returns)"
 	@echo "  make dev-platform    - Run platform service only (:8700)"
 	@echo "  make dev-portal      - Run portal service only (:8701)"
 	@echo ""
@@ -195,6 +196,32 @@ dev-e2e: build-css
 	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@RATELIMIT_ENABLE=false $(MAKE) dev-all
+
+dev-e2e-bg: build-css
+	@echo "🎭 [E2E Background] Starting services in background with rate limiting disabled..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@mkdir -p logs
+	@# Kill stale processes on E2E ports
+	@-lsof -tiTCP:8700 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
+	@-lsof -tiTCP:8701 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
+	@sleep 1
+	@echo "🏗️  Starting platform (port :8700) in background..."
+	@RATELIMIT_ENABLE=false sh -c '$(MAKE) dev-platform 2>&1 | tee logs/platform_e2e.log' &
+	@echo "🌐 Starting portal (port :8701) in background..."
+	@RATELIMIT_ENABLE=false sh -c '$(MAKE) dev-portal 2>&1 | tee logs/portal_e2e.log' &
+	@echo "⏳ Waiting for services to be ready..."
+	@for i in $$(seq 1 30); do \
+		platform=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8700/admin/login/ 2>/dev/null); \
+		portal=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8701/login/ 2>/dev/null); \
+		if [ "$$platform" = "200" ] && [ "$$portal" = "200" ]; then \
+			echo "✅ Both services ready (platform=$$platform portal=$$portal)"; \
+			echo "📜 Logs: logs/platform_e2e.log, logs/portal_e2e.log"; \
+			exit 0; \
+		fi; \
+		sleep 2; \
+	done; \
+	echo "❌ Services failed to start within 60s. Check logs/"; \
+	exit 1
 
 # Start both services and write logs to files via tee
 .PHONY: dev-with-logs

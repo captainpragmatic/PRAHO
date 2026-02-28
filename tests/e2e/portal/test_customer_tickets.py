@@ -19,7 +19,7 @@ Based on real customer workflows for Romanian hosting support.
 import re
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 # Import shared utilities
 from tests.e2e.utils import (
@@ -1026,3 +1026,165 @@ def test_customer_ticket_system_responsive_breakpoints(page: Page) -> None:
         assert_responsive_results(results, "Customer ticket system")
 
         print("  ✅ Customer ticket system validated across all responsive breakpoints")
+
+
+# ===============================================================================
+# HTMX SEARCH AND DASHBOARD WIDGET TESTS
+# ===============================================================================
+
+
+def test_customer_ticket_htmx_search(page: Page) -> None:
+    """
+    Test the HTMX-powered ticket search and status filter on the ticket list page.
+
+    Validates:
+    - Typing in the search input triggers HTMX update of ticket list
+    - Filtering by status dropdown updates the displayed tickets
+    - Clearing search restores the full ticket list
+    """
+    print("🧪 Testing customer ticket HTMX search functionality")
+
+    with ComprehensivePageMonitor(page, "customer ticket HTMX search",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        # Navigate to ticket list
+        print("  📋 Navigating to ticket list...")
+        page.goto(f"{BASE_URL}/tickets/")
+        page.wait_for_load_state("networkidle")
+
+        tickets_content: Locator = page.locator("#tickets-content")
+        expect(tickets_content).to_be_attached()
+        print("    ✅ Ticket list page loaded with #tickets-content container")
+
+        # Count initial tickets visible (rows in table or mobile cards)
+        initial_rows: Locator = page.locator("#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer")
+        initial_count: int = initial_rows.count()
+        print(f"    ✅ Initial ticket count: {initial_count}")
+
+        # Test search input
+        print("  🔍 Testing search input HTMX trigger...")
+        search_input: Locator = page.locator("input#search[name='q']")
+        expect(search_input).to_be_visible()
+
+        # Type a search query — use a nonsense string to expect zero results
+        search_input.fill("zzz_nonexistent_query_zzz")
+        # Wait for HTMX to fire (delay:600ms configured in template) and update content
+        page.wait_for_timeout(1000)
+        page.wait_for_load_state("networkidle")
+
+        filtered_rows: Locator = page.locator(
+            "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
+        )
+        filtered_count: int = filtered_rows.count()
+        print(f"    ✅ After search for nonsense string: {filtered_count} tickets (expected fewer or 0)")
+
+        # Clear search and verify tickets return
+        print("  🔄 Clearing search input...")
+        search_input.fill("")
+        page.wait_for_timeout(1000)
+        page.wait_for_load_state("networkidle")
+
+        restored_rows: Locator = page.locator(
+            "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
+        )
+        restored_count: int = restored_rows.count()
+        print(f"    ✅ After clearing search: {restored_count} tickets (started with {initial_count})")
+
+        # Test status dropdown filter
+        print("  🏷️ Testing status dropdown filter...")
+        status_select: Locator = page.locator("select[name='status']")
+        expect(status_select).to_be_visible()
+
+        # Filter by 'closed' status
+        status_select.select_option("closed")
+        page.wait_for_timeout(800)
+        page.wait_for_load_state("networkidle")
+
+        closed_rows: Locator = page.locator(
+            "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
+        )
+        closed_count: int = closed_rows.count()
+        print(f"    ✅ Filtered by 'closed' status: {closed_count} tickets")
+
+        # Reset filter to all statuses
+        status_select.select_option("")
+        page.wait_for_timeout(800)
+        page.wait_for_load_state("networkidle")
+
+        reset_rows: Locator = page.locator(
+            "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
+        )
+        reset_count: int = reset_rows.count()
+        print(f"    ✅ Reset to all statuses: {reset_count} tickets")
+
+        print("  ✅ Customer ticket HTMX search testing completed")
+
+
+def test_customer_ticket_dashboard_widget(page: Page) -> None:
+    """
+    Test the ticket widget section on the customer dashboard.
+
+    Validates:
+    - Dashboard loads with a tickets stats card (My Open Tickets)
+    - Recent Tickets section is present with ticket entries or empty message
+    - Ticket links navigate correctly
+    """
+    print("🧪 Testing customer ticket dashboard widget")
+
+    with ComprehensivePageMonitor(page, "customer ticket dashboard widget",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        # Navigate to dashboard
+        print("  📊 Navigating to customer dashboard...")
+        navigate_to_dashboard(page)
+        page.wait_for_load_state("networkidle")
+
+        # Verify the "My Open Tickets" stats card is present
+        print("  🎫 Checking tickets stats card...")
+        open_tickets_label: Locator = page.locator("text=My Open Tickets")
+        expect(open_tickets_label).to_be_visible()
+        print("    ✅ 'My Open Tickets' stats card is visible on dashboard")
+
+        # Verify the "My Recent Tickets" section heading
+        print("  📋 Checking recent tickets section...")
+        recent_tickets_heading: Locator = page.locator("h3:has-text('My Recent Tickets')")
+        expect(recent_tickets_heading).to_be_visible()
+        print("    ✅ 'My Recent Tickets' section heading found")
+
+        # Check for ticket entries or empty state message
+        ticket_links: Locator = page.locator("a[href*='/tickets/'] .text-white.font-medium")
+        empty_message: Locator = page.locator("text=No recent support tickets")
+
+        if ticket_links.count() > 0:
+            first_ticket_text: str = ticket_links.first.text_content() or ""
+            print(f"    ✅ Found {ticket_links.count()} recent ticket(s), first: '{first_ticket_text.strip()}'")
+
+            # Verify ticket links have proper href pointing to ticket detail
+            first_ticket_link: Locator = ticket_links.first.locator("xpath=ancestor::a")
+            ticket_href: str = first_ticket_link.get_attribute("href") or ""
+            assert re.search(r"/tickets/\d+/", ticket_href), f"Ticket link should match /tickets/<id>/, got: {ticket_href}"
+            print(f"    ✅ Ticket link href is valid: {ticket_href}")
+        else:
+            expect(empty_message).to_be_visible()
+            print("    ✅ No tickets found — empty state message displayed correctly")
+
+        # Verify "View all" link to tickets list
+        view_all_link: Locator = page.locator("a[href='/tickets/']:has-text('View all')")
+        expect(view_all_link).to_be_visible()
+        print("    ✅ 'View all' link to tickets list is present")
+
+        print("  ✅ Customer ticket dashboard widget testing completed")

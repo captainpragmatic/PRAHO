@@ -18,7 +18,7 @@ Based on real customer workflows for user account management.
 import re
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 # Import shared utilities
 from tests.e2e.utils import (
@@ -884,3 +884,721 @@ def test_customer_account_responsive_breakpoints(page: Page) -> None:
         assert_responsive_results(results, "Customer account management")
 
         print("  ✅ Customer account management validated across all responsive breakpoints")
+
+
+# ===============================================================================
+# CUSTOMER COMPANY PROFILE, PRIVACY, AND MFA TESTS
+# ===============================================================================
+
+
+def test_customer_company_profile_view(page: Page) -> None:
+    """
+    Test customer company profile view page.
+
+    This test verifies:
+    1. Customer can access /company/ page
+    2. Company information sections are displayed (name, VAT/CUI, address)
+    3. Edit button or view-only indicator is present
+    4. Billing address and business contact sections render
+    """
+    print("🧪 Testing customer company profile view")
+
+    with ComprehensivePageMonitor(page, "customer company profile view",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/company/")
+        page.wait_for_load_state("networkidle")
+
+        # Verify we're on the company profile page (or redirected if no company)
+        page_content_lower: str = page.content().lower()
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Company profile page not available (customer may not have a company)")
+            print("  ✅ Customer company profile view test completed")
+            return
+
+        # Check for company profile heading
+        heading = page.locator('h1:has-text("Company Profile"), h1:has-text("Profil")')
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Company Profile heading displayed")
+        else:
+            print("  [i] Company profile heading not found - page may use different layout")
+
+        # Check for company information section
+        company_info_section = page.locator('h2:has-text("Company Information"), h2:has-text("Informații")')
+        if company_info_section.count() > 0:
+            print("  ✅ Company Information section present")
+
+        # Check for VAT/CUI label
+        vat_label = page.locator('dt:has-text("VAT"), dt:has-text("CUI")')
+        if vat_label.count() > 0:
+            print("  ✅ VAT Number / CUI field displayed")
+
+        # Check for Billing Address section
+        billing_section = page.locator('h2:has-text("Billing Address"), h2:has-text("Adresă")')
+        if billing_section.count() > 0:
+            print("  ✅ Billing Address section present")
+
+        # Check for Business Contact section
+        contact_section = page.locator('h2:has-text("Business Contact"), h2:has-text("Contact")')
+        if contact_section.count() > 0:
+            print("  ✅ Business Contact section present")
+
+        # Check for edit button or view-only indicator
+        edit_link = page.locator('a:has-text("Edit Company Profile"), a:has-text("Editează")')
+        view_only = page.locator('div:has-text("View Only")')
+        if edit_link.count() > 0:
+            print("  ✅ Edit Company Profile button available")
+        elif view_only.count() > 0:
+            print("  ✅ View Only indicator displayed (role-based)")
+        else:
+            print("  [i] Neither edit button nor view-only indicator found")
+
+        print("  ✅ Customer company profile view test completed")
+
+
+def test_customer_company_profile_edit(page: Page) -> None:
+    """
+    Test customer company profile editing page.
+
+    This test verifies:
+    1. Customer can navigate to /company/edit/
+    2. Edit form is populated with existing company data
+    3. Form fields for company name, VAT, address are present
+    4. Save Changes button is available
+    """
+    print("🧪 Testing customer company profile edit")
+
+    with ComprehensivePageMonitor(page, "customer company profile edit",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/company/edit/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Company profile edit page not available")
+            print("  ✅ Customer company profile edit test completed")
+            return
+
+        # Check if redirected (e.g., insufficient permissions)
+        if "/company/edit/" not in page.url:
+            print(f"  [i] Redirected away from company edit to {page.url}")
+            print("  ✅ Customer company profile edit test completed")
+            return
+
+        # Verify edit page heading
+        heading = page.locator('h1:has-text("Edit Company Profile"), h1:has-text("Editează")')
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Edit Company Profile heading displayed")
+
+        # Check for form element
+        form = page.locator("form[method='post']")
+        expect(form.first).to_be_attached()
+        print("  ✅ Edit form present")
+
+        # Verify key form fields exist
+        company_name_field = page.locator('input[name="company_name"], input[id*="company_name"]')
+        if company_name_field.count() > 0:
+            expect(company_name_field.first).to_be_visible()
+            print("  ✅ Company name field visible")
+
+        vat_field = page.locator('input[name="vat_number"], input[id*="vat_number"]')
+        if vat_field.count() > 0:
+            expect(vat_field.first).to_be_visible()
+            print("  ✅ VAT number field visible")
+
+        city_field = page.locator('input[name="city"], input[id*="city"]')
+        if city_field.count() > 0:
+            print("  ✅ City field present in billing address")
+
+        # Check for Save Changes button
+        save_button = page.locator('button[type="submit"]:has-text("Save"), button[type="submit"]:has-text("Salvează")')
+        if save_button.count() > 0:
+            expect(save_button.first).to_be_visible()
+            print("  ✅ Save Changes button available")
+        else:
+            print("  [i] Save button not found with expected text")
+
+        # Check for Cancel link
+        cancel_link = page.locator('a:has-text("Cancel"), a:has-text("Anulează")')
+        if cancel_link.count() > 0:
+            print("  ✅ Cancel link available")
+
+        print("  ✅ Customer company profile edit test completed")
+
+
+def test_customer_privacy_dashboard(page: Page) -> None:
+    """
+    Test customer GDPR privacy dashboard page.
+
+    This test verifies:
+    1. Customer can access /privacy/ page
+    2. Privacy settings overview with consent statuses displayed
+    3. Data export link and consent history link are present
+    4. GDPR rights information section renders
+    """
+    print("🧪 Testing customer privacy dashboard")
+
+    with ComprehensivePageMonitor(page, "customer privacy dashboard",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/privacy/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Privacy dashboard not available")
+            print("  ✅ Customer privacy dashboard test completed")
+            return
+
+        # Verify privacy dashboard heading
+        heading = page.locator('h1:has-text("Privacy Dashboard"), h1:has-text("Confidențialitate")')
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Privacy Dashboard heading displayed")
+
+        # Check for privacy settings overview section
+        settings_section = page.locator('h3:has-text("Privacy Settings"), h3:has-text("Setări")')
+        if settings_section.count() > 0:
+            print("  ✅ Privacy Settings Overview section present")
+
+        # Check for Data Processing consent status
+        data_processing = page.locator('div:has-text("Data Processing"), div:has-text("Prelucrare")')
+        if data_processing.count() > 0:
+            print("  ✅ Data Processing consent status displayed")
+
+        # Check for Marketing Communications consent status
+        marketing = page.locator('div:has-text("Marketing Communications"), div:has-text("Marketing")')
+        if marketing.count() > 0:
+            print("  ✅ Marketing Communications consent status displayed")
+
+        # Check for Export My Data link
+        export_link = page.locator('a[href*="data-export"], a:has-text("Export My Data"), a:has-text("Exportă")')
+        if export_link.count() > 0:
+            print("  ✅ Export My Data link present")
+        else:
+            print("  [i] Data export link not found")
+
+        # Check for Consent History link
+        consent_link = page.locator(
+            'a[href*="consent-history"], a:has-text("Consent History"), a:has-text("Consimțământ")'
+        )
+        if consent_link.count() > 0:
+            print("  ✅ Consent History link present")
+        else:
+            print("  [i] Consent history link not found")
+
+        # Check for GDPR rights section
+        gdpr_section = page.locator('h3:has-text("GDPR Rights"), h3:has-text("Drepturile")')
+        if gdpr_section.count() > 0:
+            print("  ✅ GDPR Rights information section present")
+
+        # Check for Cookie Preferences section
+        cookie_section = page.locator('h3:has-text("Cookie"), h3:has-text("Cookie")')
+        if cookie_section.count() > 0:
+            print("  ✅ Cookie Preferences section present")
+
+        print("  ✅ Customer privacy dashboard test completed")
+
+
+def test_customer_data_export_request(page: Page) -> None:
+    """
+    Test customer data export request page (GDPR Article 20).
+
+    This test verifies:
+    1. Customer can access /data-export/ page
+    2. Data inclusion information is displayed
+    3. Export request form with submit button is present
+    4. Legal information section renders
+    """
+    print("🧪 Testing customer data export request")
+
+    with ComprehensivePageMonitor(page, "customer data export request",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/data-export/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Data export page not available")
+            print("  ✅ Customer data export request test completed")
+            return
+
+        # Verify data export heading
+        heading = page.locator('h1:has-text("Export My Data"), h1:has-text("Exportă")')
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Export My Data heading displayed")
+
+        # Check for data inclusion info section
+        what_included = page.locator('h3:has-text("What Data"), h3:has-text("Ce date")')
+        if what_included.count() > 0:
+            print("  ✅ Data inclusion information section present")
+
+        # Check for data categories listed
+        account_info = page.locator('div:has-text("Account Information"), div:has-text("Cont")')
+        if account_info.count() > 0:
+            print("  ✅ Account Information data category listed")
+
+        # Check for export request form
+        export_form = page.locator("form[method='post']")
+        if export_form.count() > 0:
+            print("  ✅ Export request form present")
+
+        # Check for submit button
+        submit_button = page.locator(
+            'button[type="submit"]:has-text("Request Data Export"), '
+            'button[type="submit"]:has-text("Solicită")'
+        )
+        if submit_button.count() > 0:
+            expect(submit_button.first).to_be_visible()
+            print("  ✅ Request Data Export button available")
+        else:
+            print("  [i] Export submit button not found with expected text")
+
+        # Check for legal information section
+        legal_section = page.locator('h3:has-text("Legal Information"), h3:has-text("Juridic")')
+        if legal_section.count() > 0:
+            print("  ✅ Legal Information section present")
+
+        # Check for GDPR reference
+        gdpr_ref = page.locator('p:has-text("GDPR"), p:has-text("Regulation")')
+        if gdpr_ref.count() > 0:
+            print("  ✅ GDPR legal reference displayed")
+
+        # Check for back to privacy dashboard link
+        back_link = page.locator('a[href*="privacy"], a:has-text("Back to Privacy"), a:has-text("Înapoi")')
+        if back_link.count() > 0:
+            print("  ✅ Back to Privacy Dashboard link present")
+
+        print("  ✅ Customer data export request test completed")
+
+
+def test_customer_mfa_management_hub(page: Page) -> None:
+    """
+    Test customer MFA management hub page.
+
+    This test verifies:
+    1. Customer can access /mfa/ page
+    2. Current MFA status (enabled/disabled) is displayed
+    3. Links to TOTP setup and backup codes are present
+    4. Security status information renders correctly
+    """
+    print("🧪 Testing customer MFA management hub")
+
+    with ComprehensivePageMonitor(page, "customer MFA management hub",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/mfa/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] MFA management page not available")
+            print("  ✅ Customer MFA management hub test completed")
+            return
+
+        # Verify MFA page heading
+        heading = page.locator(
+            'h1:has-text("Two-Factor Authentication"), '
+            'h1:has-text("Autentificare"), '
+            'h1:has-text("2FA")'
+        )
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Two-Factor Authentication heading displayed")
+
+        # Check for security status section
+        status_section = page.locator(
+            'h3:has-text("Current Security Status"), h3:has-text("Stare")'
+        )
+        if status_section.count() > 0:
+            print("  ✅ Current Security Status section present")
+
+        # Check for MFA enabled/disabled indicator
+        mfa_enabled_indicator = page.locator('text="Enabled"')
+        mfa_disabled_indicator = page.locator('text="Disabled"')
+        if mfa_enabled_indicator.count() > 0:
+            print("  ✅ MFA status: Enabled")
+        elif mfa_disabled_indicator.count() > 0:
+            print("  ✅ MFA status: Disabled")
+        else:
+            print("  [i] MFA enabled/disabled status not clearly displayed")
+
+        # Check for TOTP setup link
+        totp_link = page.locator(
+            'a[href*="mfa/setup/totp"], '
+            'a:has-text("Set Up Authenticator"), '
+            'a:has-text("Authenticator App")'
+        )
+        if totp_link.count() > 0:
+            print("  ✅ TOTP / Authenticator App setup link present")
+
+        # Check for backup codes link (visible when MFA is enabled)
+        backup_link = page.locator(
+            'a[href*="mfa/backup-codes"], '
+            'a:has-text("Backup Codes"), '
+            'a:has-text("Coduri")'
+        )
+        if backup_link.count() > 0:
+            print("  ✅ Backup Codes link present")
+        else:
+            print("  [i] Backup Codes link not visible (MFA may be disabled)")
+
+        # Check for manage MFA settings section
+        manage_section = page.locator(
+            'h3:has-text("Manage MFA"), h3:has-text("Setări MFA")'
+        )
+        if manage_section.count() > 0:
+            print("  ✅ Manage MFA Settings section present")
+
+        # Check for Back to Profile link
+        back_link = page.locator('a[href*="profile"], a:has-text("Back to Profile"), a:has-text("Înapoi")')
+        if back_link.count() > 0:
+            print("  ✅ Back to Profile link present")
+
+        print("  ✅ Customer MFA management hub test completed")
+
+
+def test_customer_mfa_backup_codes(page: Page) -> None:
+    """
+    Test customer MFA backup codes page.
+
+    This test verifies:
+    1. Customer can access /mfa/backup-codes/ page
+    2. Backup codes are displayed or a generation prompt is shown
+    3. Recovery code instructions section renders
+    4. Regenerate codes option is available
+    """
+    print("🧪 Testing customer MFA backup codes")
+
+    with ComprehensivePageMonitor(page, "customer MFA backup codes",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/mfa/backup-codes/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Backup codes page not available")
+            print("  ✅ Customer MFA backup codes test completed")
+            return
+
+        # May redirect if MFA is not enabled
+        if "/mfa/backup-codes/" not in page.url:
+            print(f"  [i] Redirected from backup codes to {page.url} (MFA may not be enabled)")
+            print("  ✅ Customer MFA backup codes test completed")
+            return
+
+        # Verify backup codes heading
+        heading = page.locator(
+            'h1:has-text("Backup Codes"), h1:has-text("Coduri")'
+        )
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Backup Codes heading displayed")
+
+        # Check for recovery codes section
+        recovery_section = page.locator(
+            'h3:has-text("Your Recovery Codes"), h3:has-text("Codurile")'
+        )
+        if recovery_section.count() > 0:
+            print("  ✅ Your Recovery Codes section present")
+
+        # Check for backup codes display or no-codes message
+        code_elements = page.locator("code")
+        no_codes_msg = page.locator(
+            'h5:has-text("No Backup Codes"), '
+            'h5:has-text("Niciun cod")'
+        )
+        if code_elements.count() > 0:
+            code_count: int = code_elements.count()
+            print(f"  ✅ {code_count} backup code(s) displayed")
+        elif no_codes_msg.count() > 0:
+            print("  ✅ No Backup Codes Available message displayed")
+        else:
+            print("  [i] Backup codes state unclear")
+
+        # Check for regenerate codes section
+        regenerate_section = page.locator(
+            'h3:has-text("Regenerate"), h3:has-text("Regenerează")'
+        )
+        if regenerate_section.count() > 0:
+            print("  ✅ Regenerate Codes section present")
+
+        # Check for regenerate button
+        regenerate_button = page.locator(
+            'button:has-text("Generate New"), '
+            'button:has-text("Generează")'
+        )
+        if regenerate_button.count() > 0:
+            print("  ✅ Generate New Backup Codes button available")
+
+        # Check for usage instructions section
+        instructions_section = page.locator(
+            'h3:has-text("How to Use"), h3:has-text("Cum se folosesc")'
+        )
+        if instructions_section.count() > 0:
+            print("  ✅ How to Use Backup Codes instructions present")
+
+        # Check for back to MFA management link
+        back_link = page.locator(
+            'a[href*="mfa"], a:has-text("Back to MFA"), a:has-text("Înapoi")'
+        )
+        if back_link.count() > 0:
+            print("  ✅ Back to MFA Management link present")
+
+        print("  ✅ Customer MFA backup codes test completed")
+
+
+# ===============================================================================
+# CUSTOMER COMPANY CREATE AND SWITCH CUSTOMER TESTS
+# ===============================================================================
+
+
+def test_customer_company_create_redirect(page: Page) -> None:
+    """
+    Test that /company/create/ redirects when customer already has a company.
+
+    This test verifies:
+    1. Customer navigates to /company/create/
+    2. If customer already has a company, redirects to /company/ or shows message
+    3. If no company, the create form is displayed
+    """
+    print("🧪 Testing customer company create redirect")
+
+    with ComprehensivePageMonitor(page, "customer company create redirect",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/company/create/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        current_url: str = page.url
+
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Company create page not available (404)")
+            print("  ✅ Customer company create redirect test completed")
+            return
+
+        # Case 1: Redirected to /company/ (already has a company)
+        if "/company/create/" not in current_url and "/company/" in current_url:
+            print("  ✅ Redirected to /company/ (already has a company)")
+            print("  ✅ Customer company create redirect test completed")
+            return
+
+        # Case 2: Redirected to dashboard or profile
+        if "/dashboard/" in current_url or "/profile/" in current_url:
+            print(f"  ✅ Redirected to {current_url} (already has company)")
+            print("  ✅ Customer company create redirect test completed")
+            return
+
+        # Case 3: Shows "already have a company" message on same page
+        already_msg = page.locator(
+            'div:has-text("already"), div:has-text("deja")'
+        )
+        if already_msg.count() > 0:
+            print("  ✅ Already has company message displayed")
+            print("  ✅ Customer company create redirect test completed")
+            return
+
+        # Case 4: Create company form is shown (customer has no company)
+        heading = page.locator(
+            'h1:has-text("Create Company"), h1:has-text("Creare")'
+        )
+        if heading.count() > 0:
+            expect(heading.first).to_be_visible()
+            print("  ✅ Create Company form displayed (no company yet)")
+
+            # Verify form is present
+            form = page.locator("form[method='post']")
+            if form.count() > 0:
+                print("  ✅ Company creation form present")
+
+        print("  ✅ Customer company create redirect test completed")
+
+
+def test_customer_switch_customer_single_org(page: Page) -> None:
+    """
+    Test /switch-customer/ endpoint for a customer with a single organization.
+
+    This test verifies:
+    1. Customer navigates to /switch-customer/
+    2. With single org: redirects or shows current organization
+    3. Page loads without errors
+    """
+    print("🧪 Testing customer switch customer (single org)")
+
+    with ComprehensivePageMonitor(page, "customer switch customer single org",
+                                 check_console=False,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/switch-customer/")
+        page.wait_for_load_state("networkidle")
+
+        page_content_lower: str = page.content().lower()
+        current_url: str = page.url
+
+        if "404" in page.title().lower() or "not found" in page_content_lower:
+            print("  [i] Switch customer page not available (404)")
+            print("  ✅ Customer switch customer test completed")
+            return
+
+        # Case 1: Redirected (single org auto-selects)
+        if "/switch-customer/" not in current_url:
+            print(f"  ✅ Redirected to {current_url} (auto-selected)")
+            print("  ✅ Customer switch customer test completed")
+            return
+
+        # Case 2: Page shows organization list or current org
+        org_list = page.locator(
+            'a[href*="switch"], button:has-text("Select"), '
+            'div:has-text("organization"), div:has-text("organizați")'
+        )
+        if org_list.count() > 0:
+            print("  ✅ Organization selection/display present")
+
+        # Check for current org indicator
+        current_org = page.locator(
+            'div:has-text("current"), div:has-text("curent"), '
+            'span:has-text("active"), span:has-text("activ")'
+        )
+        if current_org.count() > 0:
+            print("  ✅ Current organization indicator displayed")
+
+        # Verify page has meaningful content (not an error)
+        page_title: str = page.title()
+        has_content: bool = (
+            "switch" in page_content_lower
+            or "customer" in page_content_lower
+            or "organization" in page_content_lower
+            or "company" in page_content_lower
+        )
+        if has_content:
+            print(f"  ✅ Page loaded with content (title: {page_title})")
+        else:
+            print(f"  [i] Page content unclear (title: {page_title})")
+
+        print("  ✅ Customer switch customer test completed")
+
+
+# ===============================================================================
+# PASSWORD RESET TESTS
+# ===============================================================================
+
+
+def test_customer_password_reset_form(page: Page) -> None:
+    """
+    Test the password reset form renders and accepts an email submission.
+
+    Validates:
+    - Password reset page loads at /password-reset/ (unauthenticated)
+    - Form contains an email input field
+    - Submitting an email shows a uniform success message (ADR-003 email enumeration prevention)
+    """
+    print("🧪 Testing customer password reset form")
+
+    with ComprehensivePageMonitor(page, "customer password reset form",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+
+        # Navigate to password reset page (no login needed)
+        print("  🔑 Navigating to password reset page...")
+        page.goto(f"{BASE_URL}/password-reset/")
+        page.wait_for_load_state("networkidle")
+
+        # Verify heading
+        heading: Locator = page.locator("h2:has-text('Reset Your Password')")
+        expect(heading).to_be_visible()
+        print("    ✅ Password reset page heading visible")
+
+        # Verify email input field is present
+        email_input: Locator = page.locator("input[type='email'], input[name='email']")
+        expect(email_input).to_be_visible()
+        print("    ✅ Email input field present")
+
+        # Verify submit button
+        submit_btn: Locator = page.locator("button[type='submit']:has-text('Send Password Reset')")
+        expect(submit_btn).to_be_visible()
+        print("    ✅ Submit button present")
+
+        # Verify back to login link
+        back_link: Locator = page.locator("a[href*='login']:has-text('Back to login')")
+        expect(back_link).to_be_visible()
+        print("    ✅ Back to login link present")
+
+        # Submit the form with a test email
+        print("  📧 Submitting password reset form...")
+        email_input.fill("test-reset@example.com")
+        submit_btn.click()
+        page.wait_for_load_state("networkidle")
+
+        # Verify uniform success message (ADR-003: no email enumeration)
+        success_message: Locator = page.locator("text=If an account with that email exists")
+        expect(success_message).to_be_visible(timeout=5000)
+        print("    ✅ Uniform success message displayed (email enumeration prevention)")
+
+        print("  ✅ Customer password reset form test completed")

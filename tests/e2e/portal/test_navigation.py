@@ -561,4 +561,51 @@ def test_navigation_responsive_breakpoints(page: Page) -> None:
             pytest.fail("Lost authentication during navigation responsive breakpoints test")
 
 
+# ===============================================================================
+# HEALTH CHECK TESTS
+# ===============================================================================
+
+
+def test_portal_health_check(page: Page) -> None:
+    """
+    Test the portal health/status endpoint at /status/.
+
+    Validates:
+    - GET /status/ returns a 200 response
+    - Page contains health or status information
+    """
+    print("🧪 Testing portal health check endpoint")
+
+    with ComprehensivePageMonitor(page, "portal health check",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=False,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+
+        print("  🏥 Requesting /status/ endpoint...")
+        response = page.goto(f"{BASE_URL}/status/")
+        page.wait_for_load_state("networkidle")
+
+        # Verify we got a 200 and stayed on /status/
+        assert response is not None, "Response should not be None"
+        assert response.status == 200, f"Expected 200 from /status/, got: {response.status}"
+        assert "/status/" in page.url, f"Expected to stay on /status/, got: {page.url}"
+        print(f"    ✅ /status/ responded with HTTP {response.status}")
+
+        # Verify page has some health/status content
+        page_text: str = page.text_content("body") or ""
+        page_text_lower: str = page_text.lower()
+        has_status_content: bool = any(
+            keyword in page_text_lower
+            for keyword in ["ok", "healthy", "status", "running", "operational", "version"]
+        )
+        assert has_status_content, f"Expected health/status keywords in page content, got: {page_text[:200]}"
+        print("    ✅ Health check page contains status information")
+
+        print("  ✅ Portal health check test completed")
+
+
 # Remove old configuration - will be centralized in conftest.py

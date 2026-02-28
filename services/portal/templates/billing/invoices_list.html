@@ -23,23 +23,30 @@
             <p class="text-slate-400">{% trans "View your invoices and proformas" %}</p>
           </div>
         </div>
-        <div class="grid grid-cols-4 gap-6">
-          <div class="text-center">
-            <p class="text-2xl font-bold text-white">0</p>
-            <p class="text-xs text-slate-400">{% trans 'Pending Quotes' %}</p>
+        <div class="flex items-center gap-6">
+          <div class="grid grid-cols-4 gap-6">
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">0</p>
+              <p class="text-xs text-slate-400">{% trans 'Pending Quotes' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">{{ pagination.total_items }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Total Documents' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">--</p>
+              <p class="text-xs text-slate-400">{% trans 'Pending' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">--</p>
+              <p class="text-xs text-slate-400">{% trans 'Total Spent' %}</p>
+            </div>
           </div>
-          <div class="text-center">
-            <p class="text-2xl font-bold text-white">{{ pagination.total_items }}</p>
-            <p class="text-xs text-slate-400">{% trans 'Total Documents' %}</p>
-          </div>
-          <div class="text-center">
-            <p class="text-2xl font-bold text-white">--</p>
-            <p class="text-xs text-slate-400">{% trans 'Pending' %}</p>
-          </div>
-          <div class="text-center">
-            <p class="text-2xl font-bold text-white">--</p>
-            <p class="text-xs text-slate-400">{% trans 'Total Spent' %}</p>
-          </div>
+          <button type="button" id="sync-invoices-btn" hx-post="{% url 'billing:sync_invoices' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-swap="none" hx-indicator="#sync-spinner" class="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-sm text-slate-300 hover:bg-slate-600 hover:text-white transition-colors" title="{% trans 'Sync invoices from platform' %}">
+            <svg id="sync-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            <span id="sync-spinner" class="htmx-indicator"><svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg></span>
+            {% trans 'Sync' %}
+          </button>
         </div>
       </div>
     </div>
@@ -75,6 +82,13 @@
           <p class="text-lg font-bold text-white">--</p>
           <p class="text-xs text-slate-400">{% trans 'Spent' %}</p>
         </div>
+      </div>
+      <!-- Mobile Sync Button -->
+      <div class="mt-3 flex justify-end">
+        <button type="button" hx-post="{% url 'billing:sync_invoices' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-swap="none" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-xs text-slate-300 hover:bg-slate-600 hover:text-white transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          {% trans 'Sync' %}
+        </button>
       </div>
     </div>
   </div>

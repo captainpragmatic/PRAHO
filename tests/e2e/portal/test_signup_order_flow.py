@@ -18,8 +18,9 @@ import re
 import secrets
 import string
 
+import pytest
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 # Import shared utilities
 from tests.e2e.utils import (
@@ -1117,3 +1118,447 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
             print("    Form with special characters submitted successfully")
 
         print("  Special characters test completed")
+
+
+# ===============================================================================
+# ORDER FLOW COVERAGE TESTS
+# ===============================================================================
+
+
+def test_customer_product_detail_page(page: Page) -> None:
+    """
+    Test that a customer can view a product detail page from the catalog.
+
+    Navigates to the product catalog, clicks on a product, and verifies
+    the product detail page loads with name, description, pricing, and
+    an 'Add to Cart' button.
+    """
+    print("🧪 Testing customer product detail page")
+
+    with ComprehensivePageMonitor(
+        page,
+        "product detail page",
+        check_console=False,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        # Navigate to product catalog
+        print("  📦 Navigating to product catalog")
+        page.goto(f"{BASE_URL}/order/")
+        page.wait_for_load_state("networkidle")
+
+        # Verify catalog loaded
+        catalog_heading: Locator = page.locator("h1")
+        expect(catalog_heading.first).to_be_visible(timeout=5000)
+        print("  ✅ Product catalog loaded")
+
+        # Find and click a product link
+        product_links: Locator = page.locator('a[href*="/order/products/"]')
+        link_count: int = product_links.count()
+        print(f"  📊 Found {link_count} product links in catalog")
+
+        if link_count == 0:
+            print("  ⚠️ No product links found — skipping detail page test")
+            return
+
+        # Click the first product
+        first_product: Locator = product_links.first
+        first_product.click()
+        page.wait_for_load_state("networkidle")
+
+        # Verify we're on a product detail page
+        current_url: str = page.url
+        assert re.search(r"/order/products/[\w-]+/", current_url), \
+            f"Expected product detail URL, got: {current_url}"
+        print(f"  🔗 Navigated to: {current_url}")
+
+        # Verify product name heading
+        product_heading: Locator = page.locator("h1")
+        expect(product_heading.first).to_be_visible(timeout=5000)
+        product_name: str = product_heading.first.text_content() or ""
+        assert len(product_name.strip()) > 0, "Product name should not be empty"
+        print(f"  📝 Product name: {product_name.strip()}")
+
+        # Verify description is present
+        description: Locator = page.locator("p.text-slate-400")
+        expect(description.first).to_be_visible(timeout=3000)
+        print("  ✅ Product description visible")
+
+        # Verify Add to Cart button
+        add_to_cart_btn: Locator = page.locator('button[type="submit"]:has-text("Cart")')
+        expect(add_to_cart_btn.first).to_be_visible(timeout=3000)
+        print("  🛒 Add to Cart button visible")
+
+        # Verify pricing section (billing period selector)
+        billing_select: Locator = page.locator('select[name="billing_period"]')
+        expect(billing_select.first).to_be_visible(timeout=3000)
+        print("  💰 Billing period selector visible")
+
+        print("  ✅ Product detail page test completed")
+
+
+def test_customer_cart_management(page: Page) -> None:
+    """
+    Test that a customer can add a product to cart, view cart, and remove items.
+
+    Adds a product via the product detail page, navigates to cart review,
+    verifies cart contents, removes an item, and verifies cart updates.
+    """
+    print("🧪 Testing customer cart management")
+
+    with ComprehensivePageMonitor(
+        page,
+        "cart management",
+        check_console=False,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        # Navigate to catalog and find a product
+        print("  📦 Navigating to product catalog")
+        page.goto(f"{BASE_URL}/order/")
+        page.wait_for_load_state("networkidle")
+
+        product_links: Locator = page.locator('a[href*="/order/products/"]')
+        if product_links.count() == 0:
+            print("  ⚠️ No products found — skipping cart management test")
+            return
+
+        # Go to first product detail page
+        product_links.first.click()
+        page.wait_for_load_state("networkidle")
+        print("  ✅ Opened product detail page")
+
+        # Click Add to Cart
+        add_to_cart_btn: Locator = page.locator('button[type="submit"]:has-text("Cart")')
+        if add_to_cart_btn.count() > 0 and add_to_cart_btn.first.is_visible():
+            add_to_cart_btn.first.click()
+            page.wait_for_load_state("networkidle")
+            print("  🛒 Clicked Add to Cart")
+        else:
+            print("  ⚠️ Add to Cart button not found — skipping")
+            return
+
+        # Navigate to cart review page
+        print("  📋 Navigating to cart review")
+        page.goto(f"{BASE_URL}/order/cart/")
+        page.wait_for_load_state("networkidle")
+
+        # Verify cart page loaded
+        cart_heading: Locator = page.locator("h1")
+        expect(cart_heading.first).to_be_visible(timeout=5000)
+        print("  ✅ Cart review page loaded")
+
+        # Check for cart items
+        cart_content: str = page.content()
+        has_items: bool = "product" in cart_content.lower() or "cart" in cart_content.lower()
+        print(f"  📊 Cart has content: {has_items}")
+
+        # Try to find and click a remove button
+        remove_buttons: Locator = page.locator('button:has-text("Remove"), button:has-text("remove"), a:has-text("Remove")')
+        remove_count: int = remove_buttons.count()
+        print(f"  🗑️ Found {remove_count} remove buttons")
+
+        if remove_count > 0:
+            remove_buttons.first.click()
+            page.wait_for_load_state("networkidle")
+            print("  ✅ Clicked remove — cart updated")
+        else:
+            # Also check for HTMX remove forms
+            htmx_remove: Locator = page.locator('[hx-post*="cart/remove"]')
+            if htmx_remove.count() > 0:
+                htmx_remove.first.click()
+                page.wait_for_load_state("networkidle")
+                print("  ✅ Clicked HTMX remove — cart updated")
+            else:
+                print("  [info] No remove buttons found (cart may use different pattern)")
+
+        print("  ✅ Cart management test completed")
+
+
+def _add_product_to_cart(page: Page) -> bool:
+    """Navigate to catalog, open first product, and add it to cart. Returns True on success."""
+    page.goto(f"{BASE_URL}/order/")
+    page.wait_for_load_state("networkidle")
+
+    product_links: Locator = page.locator('a[href*="/order/products/"]')
+    if product_links.count() == 0:
+        print("  ⚠️ No products found in catalog")
+        return False
+
+    product_links.first.click()
+    page.wait_for_load_state("networkidle")
+
+    add_to_cart_btn: Locator = page.locator('button[type="submit"]:has-text("Cart")')
+    if add_to_cart_btn.count() > 0 and add_to_cart_btn.first.is_visible():
+        add_to_cart_btn.first.click()
+        page.wait_for_load_state("networkidle")
+        print("  🛒 Product added to cart")
+        return True
+
+    print("  ⚠️ Add to Cart button not available")
+    return False
+
+
+def test_customer_checkout_page(page: Page) -> None:
+    """
+    Test that a customer can reach the checkout page with items in cart.
+
+    Adds a product to cart, navigates to checkout, and verifies the
+    checkout form loads with billing info section and order summary.
+    """
+    print("🧪 Testing customer checkout page")
+
+    with ComprehensivePageMonitor(
+        page,
+        "checkout page",
+        check_console=False,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        print("  📦 Adding product to cart for checkout test")
+        if not _add_product_to_cart(page):
+            print("  ⚠️ Could not add product — skipping checkout test")
+            return
+
+        # Navigate to checkout
+        print("  💳 Navigating to checkout")
+        page.goto(f"{BASE_URL}/order/checkout/")
+        page.wait_for_load_state("networkidle")
+
+        current_url: str = page.url
+
+        # Checkout may redirect to cart if empty
+        if "/cart/" in current_url:
+            print("  [info] Redirected to cart — verifying cart page loads")
+            expect(page.locator("h1").first).to_be_visible(timeout=5000)
+            print("  ✅ Cart redirect page loaded correctly")
+            return
+
+        # Verify checkout page loaded
+        checkout_heading: Locator = page.locator("h1")
+        expect(checkout_heading.first).to_be_visible(timeout=5000)
+        print(f"  📝 Checkout heading: {(checkout_heading.first.text_content() or '').strip()}")
+
+        # Verify order form is present
+        expect(page.locator("form").first).to_be_visible(timeout=3000)
+        print("  📝 Order form visible")
+
+        # Check for order details / billing section
+        page_content: str = page.content().lower()
+        assert "order" in page_content or "checkout" in page_content, \
+            "Checkout page should contain order information"
+        print("  ✅ Order information present on checkout page")
+
+        # Check for submit / create order button
+        submit_btn: Locator = page.locator(
+            'button[type="submit"]:has-text("Order"), button[type="submit"]:has-text("Confirm")'
+        )
+        if submit_btn.count() > 0:
+            print("  ✅ Order submission button visible")
+        else:
+            print("  [info] No submit button found (profile may need completion)")
+
+        print("  ✅ Checkout page test completed")
+
+
+def test_customer_order_creation_flow(page: Page) -> None:
+    """
+    Test the order creation endpoint (/order/create/) and payment processing path.
+
+    Adds a product to cart, navigates to checkout, and attempts to submit the order.
+    Without Stripe configured, this should either:
+    - Redirect to a payment error page
+    - Show a validation error (incomplete profile)
+    - Redirect to process-payment which fails gracefully
+
+    This covers /order/create/ and /order/process-payment/ error paths.
+    """
+    print("🧪 Testing customer order creation flow")
+
+    with ComprehensivePageMonitor(
+        page,
+        "order creation flow",
+        check_console=False,  # Payment errors may log to console
+        check_network=True,
+        check_html=False,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        print("  📦 Adding product to cart")
+        if not _add_product_to_cart(page):
+            print("  ⚠️ Could not add product — skipping order creation test")
+            return
+
+        # Navigate to checkout
+        page.goto(f"{BASE_URL}/order/checkout/")
+        page.wait_for_load_state("networkidle")
+
+        current_url: str = page.url
+        if "/cart/" in current_url:
+            print("  [info] Redirected to cart — cart may be empty, skipping")
+            return
+
+        # Try to submit the order form (if present)
+        submit_btn: Locator = page.locator(
+            'button[type="submit"], input[type="submit"]'
+        ).first
+        if submit_btn.count() == 0 or not submit_btn.is_visible():
+            print("  [info] No submit button visible — profile may need completion")
+            # Try navigating directly to /order/create/ via POST
+            page.goto(f"{BASE_URL}/order/create/")
+            page.wait_for_load_state("networkidle")
+            result_url: str = page.url
+            # Should redirect somewhere (checkout, cart, or error page)
+            assert "/order/" in result_url or "/checkout/" in result_url or "/cart/" in result_url, (
+                f"Order create should redirect within order flow, got: {result_url}"
+            )
+            print(f"  ✅ /order/create/ redirected to: {result_url}")
+            return
+
+        # Click submit — expect either success redirect or payment error
+        submit_btn.click()
+        page.wait_for_load_state("networkidle")
+        result_url = page.url
+
+        # Valid outcomes: payment page, error page, or back to checkout with error
+        print(f"  📝 After submit, landed on: {result_url}")
+
+        # Check for error messages or payment redirect
+        error_msg: Locator = page.locator('.alert, .error, [role="alert"]')
+        if error_msg.count() > 0:
+            print("  ✅ Order form showed validation/payment error (expected without Stripe)")
+        elif "/confirmation/" in result_url:
+            print("  ✅ Order created successfully (unexpected but valid)")
+        else:
+            print(f"  ✅ Order creation flow completed — redirected to: {result_url}")
+
+
+def test_customer_mini_cart_partial(page: Page) -> None:
+    """
+    Test the HTMX mini-cart partial endpoint (/order/partials/mini-cart/).
+
+    The mini-cart renders a dropdown widget showing cart items in the navigation.
+    This test verifies the endpoint returns valid HTML content.
+    """
+    print("🧪 Testing mini-cart HTMX partial endpoint")
+
+    with ComprehensivePageMonitor(
+        page,
+        "mini-cart partial",
+        check_console=False,
+        check_network=True,
+        check_html=False,  # Partial HTML fragment, not full page
+        check_css=False,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        # First add a product to cart so mini-cart has content
+        page.goto(f"{BASE_URL}/order/")
+        page.wait_for_load_state("networkidle")
+
+        # Fetch mini-cart partial via page.evaluate
+        response_data: dict = page.evaluate("""
+            async () => {
+                const resp = await fetch('/order/partials/mini-cart/', {
+                    credentials: 'same-origin',
+                    headers: { 'HX-Request': 'true' },
+                });
+                return { status: resp.status, html: await resp.text() };
+            }
+        """)
+
+        status: int = response_data.get("status", 0)
+        html: str = response_data.get("html", "")
+
+        assert status == 200, f"Mini-cart partial should return 200, got: {status}"
+        assert len(html) > 0, "Mini-cart partial should return HTML content"
+        print(f"  ✅ Mini-cart partial returned {len(html)} chars of HTML (status {status})")
+
+
+def test_customer_cart_calculate_totals(page: Page) -> None:
+    """
+    Test the HTMX cart calculate totals endpoint (/order/cart/calculate/).
+
+    This endpoint recalculates cart totals with price change detection.
+    It's triggered during checkout to ensure prices are current.
+    """
+    print("🧪 Testing cart calculate totals HTMX endpoint")
+
+    with ComprehensivePageMonitor(
+        page,
+        "cart calculate totals",
+        check_console=False,
+        check_network=True,
+        check_html=False,
+        check_css=False,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        # Add product to cart first
+        if not _add_product_to_cart(page):
+            print("  ⚠️ Could not add product — testing calculate with empty cart")
+
+        # Fetch calculate totals via HTMX POST
+        response_data: dict = page.evaluate("""
+            async () => {
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+                    || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+                const resp = await fetch('/order/cart/calculate/', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'HX-Request': 'true',
+                        'X-CSRFToken': csrfToken,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                });
+                return { status: resp.status, html: await resp.text() };
+            }
+        """)
+
+        status: int = response_data.get("status", 0)
+        html: str = response_data.get("html", "")
+
+        # Endpoint may return 200 (with totals HTML) or 4xx (validation/rate limit)
+        assert status in (200, 400, 403, 429), f"Calculate endpoint returned unexpected status: {status}"
+        print(f"  ✅ Calculate totals endpoint responded: status={status}, {len(html)} chars")

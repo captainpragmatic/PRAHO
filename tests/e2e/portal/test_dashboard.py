@@ -12,7 +12,7 @@ Uses shared utilities from tests.e2e.utils for consistency.
 
 import pytest
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page
+from playwright.sync_api import Locator, Page, expect
 
 # Import shared utilities
 from tests.e2e.utils import (
@@ -347,6 +347,68 @@ def test_dashboard_mobile_specific_features(page: Page) -> None:
 
         except AuthenticationError:
             pytest.fail("Lost authentication during dashboard mobile features test")
+
+
+def test_customer_dashboard_account_page(page: Page) -> None:
+    """
+    Test that a customer can navigate to the account overview page.
+
+    Logs in as customer, navigates to /dashboard/account/, and verifies
+    the account overview page loads with relevant account information.
+    """
+    print("🧪 Testing customer dashboard account page")
+
+    with ComprehensivePageMonitor(
+        page,
+        "dashboard account page",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        try:
+            require_authentication(page)
+
+            # Navigate to account overview
+            print("  👤 Navigating to account overview")
+            page.goto(f"{BASE_URL}/dashboard/account/")
+            page.wait_for_load_state("networkidle")
+
+            current_url: str = page.url
+
+            # Check if we were redirected to login (session expired)
+            if "/login/" in current_url:
+                pytest.fail("Redirected to login — authentication lost")
+
+            # Verify account page loaded (could be a 200 or redirect to dashboard)
+            if "/dashboard/" in current_url:
+                heading: Locator = page.locator("h1, h2")
+                expect(heading.first).to_be_visible(timeout=5000)
+                heading_text: str = heading.first.text_content() or ""
+                print(f"  📝 Page heading: {heading_text.strip()}")
+
+                # Verify page has meaningful content
+                page_content: str = page.content().lower()
+                has_account_content: bool = any(
+                    keyword in page_content
+                    for keyword in ["account", "cont", "email", "customer", "client", "dashboard"]
+                )
+                assert has_account_content, "Account page should display account-related content"
+                print("  ✅ Account overview page has relevant content")
+            else:
+                print(f"  [info] Redirected to: {current_url}")
+
+            print("  ✅ Dashboard account page test completed")
+
+        except AuthenticationError:
+            pytest.fail("Lost authentication during dashboard account page test")
 
 
 # Remove old configuration - will be centralized in conftest.py
