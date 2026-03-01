@@ -2,7 +2,7 @@
 
 > **Pre-release software (v0.20.0-alpha)** - Under active development. Not yet recommended for production use.
 
-[![Version](https://img.shields.io/badge/version-0.19.0--alpha-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.20.0--alpha-orange.svg)](CHANGELOG.md)
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![PostgreSQL 16+](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)

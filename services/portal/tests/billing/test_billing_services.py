@@ -252,7 +252,7 @@ class SubscriptionClientTests(unittest.TestCase):
         result = client.get_payment_methods(customer_id='42', user_id='7')
 
         self.assertTrue(result['success'])
-        mock_get.assert_called_once_with('payment-methods/42/', user_id='7')
+        mock_get.assert_called_once_with('payment-methods/42/', user_id=7)
 
     @patch('apps.api_client.services.PlatformAPIClient.post_billing')
     def test_process_refund_calls_correct_endpoint(self, mock_post):
