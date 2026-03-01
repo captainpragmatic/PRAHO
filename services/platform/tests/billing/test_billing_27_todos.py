@@ -66,9 +66,9 @@ class PaymentRetryServiceTests(TestCase):
         self.assertTrue(result.is_ok())
         mock_attempt_cls.objects.create.assert_called_once()
 
-    @patch("apps.billing.models.Payment")
-    def test_retry_payment_not_found(self, mock_payment_cls):
-        mock_payment_cls.objects.select_related.return_value.get.side_effect = Payment.DoesNotExist
+    @patch("apps.billing.payment_models.Payment.objects")
+    def test_retry_payment_not_found(self, mock_objects):
+        mock_objects.select_related.return_value.get.side_effect = Payment.DoesNotExist
         result = PaymentRetryService.retry_payment("bad-id")
         self.assertTrue(result.is_err())
 
@@ -91,9 +91,9 @@ class EFacturaServiceTests(TestCase):
         result = EFacturaService.submit_invoice("inv-id")
         self.assertTrue(result.is_ok())
 
-    @patch("apps.billing.models.Invoice")
-    def test_submit_not_found(self, mock_invoice_cls):
-        mock_invoice_cls.objects.get.side_effect = Invoice.DoesNotExist
+    @patch("apps.billing.invoice_models.Invoice.objects")
+    def test_submit_not_found(self, mock_objects):
+        mock_objects.get.side_effect = Invoice.DoesNotExist
         result = EFacturaService.submit_invoice("bad-id")
         self.assertTrue(result.is_err())
 
@@ -132,9 +132,9 @@ class ProformaConversionServiceTests(TestCase):
         result = ProformaConversionService.convert_to_invoice("999999")
         self.assertTrue(result.is_err())
 
-    @patch("apps.billing.models.ProformaInvoice")
-    def test_conversion_not_found(self, mock_cls):
-        mock_cls.objects.select_related.return_value.get.side_effect = ProformaInvoice.DoesNotExist
+    @patch("apps.billing.proforma_models.ProformaInvoice.objects")
+    def test_conversion_not_found(self, mock_objects):
+        mock_objects.select_related.return_value.get.side_effect = ProformaInvoice.DoesNotExist
         self.assertTrue(ProformaConversionService.convert_to_invoice("x").is_err())
 
     @patch("apps.billing.models.ProformaInvoice")
