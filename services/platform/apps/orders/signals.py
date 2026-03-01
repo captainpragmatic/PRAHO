@@ -319,14 +319,16 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
             "unit_price_cents": instance.unit_price_cents,
         }
 
-        OrdersAuditService.log_order_item_event(  # type: ignore[call-arg]
-            event_type=event_type,
-            order_item=instance,
-            user=None,  # System event
-            context=AuditContext(actor_type="system"),
-            old_values=old_values,
-            new_values=new_values,
-            description=f"Order item {'added to' if created else 'updated in'} {instance.order.order_number}",
+        OrdersAuditService.log_order_item_event(
+            BusinessEventData(
+                event_type=event_type,
+                business_object=instance,
+                user=None,
+                context=AuditContext(actor_type="system"),
+                old_values=old_values,
+                new_values=new_values,
+                description=f"Order item {'added to' if created else 'updated in'} {instance.order.order_number}",
+            )
         )
 
     except Exception as e:
