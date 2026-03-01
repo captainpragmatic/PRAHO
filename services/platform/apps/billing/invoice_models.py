@@ -6,6 +6,7 @@ Romanian compliant invoice model with address snapshots and immutable ledger.
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -270,7 +271,16 @@ class Invoice(models.Model):
 
     def is_overdue(self) -> bool:
         """Check if invoice is overdue"""
-        return self.due_at is not None and timezone.now() > self.due_at and self.status == "issued"
+        if self.due_at is None or self.status != "issued":
+            return False
+        now = timezone.now()
+        due: date | datetime = self.due_at
+        # Handle date vs datetime mismatch (fixtures may store date objects)
+        if not isinstance(due, datetime):
+            due = datetime.combine(due, datetime.min.time(), tzinfo=now.tzinfo)
+        elif timezone.is_naive(due):
+            due = timezone.make_aware(due)
+        return now > due
 
     def get_remaining_amount(self) -> int:
         """Calculate remaining unpaid amount in cents.
@@ -309,8 +319,7 @@ class Invoice(models.Model):
             self.mark_as_paid()
         elif remaining < self.total_cents:
             logger.info(
-                f"💰 [Invoice] {self.number} partially paid: "
-                f"{self.total_cents - remaining}/{self.total_cents} cents"
+                f"💰 [Invoice] {self.number} partially paid: {self.total_cents - remaining}/{self.total_cents} cents"
             )
 
 
