@@ -10,7 +10,7 @@ repos:
   # ===============================================================================
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
         exclude: ^migrations/.*\.py$
@@ -36,7 +36,7 @@ repos:
   # Focus: Performance, Security, Type Hints
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.8
+    rev: v0.15.0
     hooks:
       # Auto-formatting (safe fixes only)
       - id: ruff-format

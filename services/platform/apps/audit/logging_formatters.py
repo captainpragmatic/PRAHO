@@ -278,6 +278,7 @@ class SIEMJSONFormatter(logging.Formatter):
             "customer_id",
             "hostname",
             "environment",
+            "taskName",
         }
 
         extra = {
