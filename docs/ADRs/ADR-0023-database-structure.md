@@ -1,4 +1,4 @@
-# Complete Database Schema - Hosting Provider Billing & Support System
+# ADR-0023: Complete Database Schema - Hosting Provider Billing & Support System
 
 ## Overview
 PostgreSQL schema for a comprehensive hosting provider platform supporting billing, provisioning, support, and automation. Designed for Romanian/EU compliance with e-Factura, GDPR, and VAT requirements.

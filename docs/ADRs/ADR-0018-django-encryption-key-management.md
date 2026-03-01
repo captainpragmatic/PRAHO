@@ -1,4 +1,4 @@
-# ADR-001: DJANGO_ENCRYPTION_KEY Management for 2FA Security
+# ADR-0018: DJANGO_ENCRYPTION_KEY Management for 2FA Security
 
 ## Status
 **Accepted** - December 2024

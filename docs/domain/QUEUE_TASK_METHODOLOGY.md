@@ -3,7 +3,7 @@
 **Status:** Active
 **Version:** 1.0
 **Last Updated:** 2025-09-02
-**Related ADR:** [ADR-003: Async Task Processing Architecture](./ADR-003-async-task-processing-architecture.md)
+**Related ADR:** [ADR-0020: Async Task Processing Architecture](../ADRs/ADR-0020-async-task-processing-architecture.md)
 
 ## Overview
 

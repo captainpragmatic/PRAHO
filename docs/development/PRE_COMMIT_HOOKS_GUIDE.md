@@ -272,9 +272,9 @@ make pre-commit
 
 ## 📚 Further Reading
 
-- [ADR-0003: Comprehensive Type Safety Implementation](adrs/ADR-0003-comprehensive-type-safety-implementation.md)
+- [ADR-0003: Comprehensive Type Safety Implementation](../ADRs/ADR-0003-comprehensive-type-safety-implementation.md)
 - [Gradual Typing Configuration](GRADUAL_TYPING_CONFIGURATION.md)
-- [Strategic Linting Framework](adrs/ADR-0002-strategic-linting-framework.md)
+- [Strategic Linting Framework](../ADRs/ADR-0002-strategic-linting-framework.md)
 - [Pre-commit Documentation](https://pre-commit.com/)
 
 ## 💡 Best Practices

@@ -253,7 +253,7 @@ scripts/type_coverage_report.py --min-coverage=85
 - [MyPy Documentation - Django Support](https://mypy.readthedocs.io/en/stable/cheat_sheet_py3.html)
 - [Ruff Annotation Rules (ANN)](https://docs.astral.sh/ruff/rules/#flake8-annotations-ann)
 - [Romanian Business Validation Standards](https://static.anaf.ro/static/10/Anaf/AsistentaContribuabili_r/CUI_doc.htm)
-- [TYPING.md - Implementation Details](../TYPING.md)
+- [Gradual Typing Configuration](../development/GRADUAL_TYPING_CONFIGURATION.md)
 - [ADR-0002 - Strategic Linting Framework](ADR-0002-strategic-linting-framework.md)
 
 ---

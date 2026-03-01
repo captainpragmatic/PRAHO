@@ -1,4 +1,4 @@
-# ADR-003: Async Task Processing Architecture
+# ADR-0020: Async Task Processing Architecture
 
 **Status:** Accepted
 **Date:** 2025-09-02
@@ -166,5 +166,5 @@ Q_CLUSTER = {
 ## References
 
 - [Django-Q2 Documentation](https://django-q2.readthedocs.io/)
-- [PRAHO Architecture Overview](./ARCHITECTURE.md)
+- [PRAHO Architecture Overview](../architecture/ARCHITECTURE.md)
 - Industry analysis of WHMCS, Blesta, HostBill task processing patterns

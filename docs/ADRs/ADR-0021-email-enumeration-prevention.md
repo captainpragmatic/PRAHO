@@ -1,4 +1,4 @@
-# ADR-003: Email Enumeration Prevention
+# ADR-0021: Email Enumeration Prevention
 
 **Status:** Implemented ✅
 **Date:** 2025-01-08

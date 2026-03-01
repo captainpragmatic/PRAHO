@@ -189,7 +189,7 @@ grep -r "ROMANIAN_VAT_RATE" apps/
 
 ## References
 
-- [PRAHO Platform Architecture](../ARCHITECTURE.md)
+- [PRAHO Platform Architecture](../architecture/ARCHITECTURE.md)
 - [Romanian Business Validators](../../apps/common/validators.py)
 - [Django Apps Common Pattern](../../apps/common/)
 - [PLR2004 Magic Values Documentation](https://docs.astral.sh/ruff/rules/magic-value-comparison/)

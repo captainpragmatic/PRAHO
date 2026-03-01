@@ -432,10 +432,9 @@ print(f'Encryption test: {test == decrypted}')
 
 ## 📚 Related Documentation
 
-- [ADR-001: DJANGO_ENCRYPTION_KEY Management](./adrs/ADR-001-django-encryption-key-management.md)
-- [Security Architecture Overview](./SECURITY.md)
-- [Production Deployment Guide](./DEPLOYMENT.md)
-- [GDPR Compliance Documentation](./GDPR.md)
+- [ADR-0018: DJANGO_ENCRYPTION_KEY Management](../ADRs/ADR-0018-django-encryption-key-management.md)
+- [Security Configuration](SECURITY_CONFIGURATION.md)
+- [Production Deployment Guide](../deployment/DEPLOYMENT.md)
 
 ---
 

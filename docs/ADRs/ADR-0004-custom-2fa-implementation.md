@@ -1,4 +1,4 @@
-# ADR-004: Custom 2FA Implementation vs django-otp
+# ADR-0004: Custom 2FA Implementation vs django-otp
 
 ## Status
 ✅ **Accepted** - 2024-08-24

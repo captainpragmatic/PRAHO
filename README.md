@@ -213,7 +213,7 @@ PRAHO is built for Romanian hosting providers with **full EU VAT support**:
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment scenarios
 - **[Linting Guide](docs/LINTING_GUIDE.md)** - Code quality framework
 - **[Changelog](CHANGELOG.md)** - Version history (SemVer)
-- **[ADRs](docs/adrs/)** - Architecture decision records
+- **[ADRs](docs/ADRs/)** - Architecture decision records
 
 ## Contributing
 

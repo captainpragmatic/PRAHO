@@ -149,7 +149,7 @@ make lint-fix            # Safe auto-fixes only
 
 - [Ruff Performance Benchmarks](https://github.com/astral-sh/ruff)
 - [Django Linting Best Practices](https://docs.djangoproject.com/en/5.0/topics/testing/tools/)
-- [PRAHO Platform Coding Standards](../ARCHITECTURE.md)
+- [PRAHO Platform Coding Standards](../architecture/ARCHITECTURE.md)
 - [Romanian Business Code Requirements](../../apps/common/validators.py)
 
 ---

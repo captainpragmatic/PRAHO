@@ -1,4 +1,4 @@
-# ADR-004: Store Monetary Amounts in Cents
+# ADR-0025: Store Monetary Amounts in Cents
 
 ## Status
 

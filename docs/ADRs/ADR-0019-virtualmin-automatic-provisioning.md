@@ -1,4 +1,4 @@
-# ADR-001: VirtualMin Automatic Provisioning System
+# ADR-0019: VirtualMin Automatic Provisioning System
 
 ## Status
 **Status:** Accepted
@@ -371,9 +371,9 @@ New Features:
 ## References
 
 - [Django-Q2 Documentation](https://django-q2.readthedocs.io/)
-- [PRAHO Service Lifecycle Documentation](../service-lifecycle.md)
-- [VirtualMin API Integration Guide](../virtualmin-integration.md)
-- [Romanian Hosting Compliance Requirements](../compliance/romanian-hosting.md)
+- PRAHO Service Lifecycle Documentation (planned)
+- VirtualMin API Integration Guide (planned)
+- Romanian Hosting Compliance Requirements (planned)
 
 ---
 

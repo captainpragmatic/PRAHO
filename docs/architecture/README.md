@@ -164,6 +164,6 @@ These diagrams track the architecture version in `docs/ARCHITECTURE.md`. Current
 
 ## Related Documentation
 
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - Detailed written architecture guide
-- [DEPLOYMENT.md](../DEPLOYMENT.md) - Production deployment instructions
-- [ADRs](../adrs/) - Architecture decision records
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Detailed written architecture guide
+- [DEPLOYMENT.md](../deployment/DEPLOYMENT.md) - Production deployment instructions
+- [ADRs](../ADRs/) - Architecture decision records

@@ -307,7 +307,7 @@ def main() -> int:
     if has_failures:
         if not args.json:
             print(f"\n❌ Test suppression lint failed (threshold: {args.fail_on})")
-            print("   See ADR-0014: docs/adrs/ADR-0014-no-test-suppression-policy.md")
+            print("   See ADR-0014: docs/ADRs/ADR-0014-no-test-suppression-policy.md")
         return 1
 
     if not args.json:

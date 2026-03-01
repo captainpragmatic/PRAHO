@@ -1,4 +1,4 @@
-# User Model Design: is_staff vs admin_role (UPDATED)
+# ADR-0024: User Model Design: is_staff vs admin_role
 
 ## **🚨 Current Issue: Confusing Field Names**
 

@@ -1,4 +1,4 @@
-# ADR-001: Project Structure - Enhanced Option A with Strategic Seams
+# ADR-0022: Project Structure - Enhanced Option A with Strategic Seams
 
 **Status:** ✅ Accepted
 **Date:** 2025-08-15
