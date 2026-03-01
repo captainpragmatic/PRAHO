@@ -4,7 +4,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.20.0--alpha-orange.svg)](CHANGELOG.md)
 [![Django 5.2](https://img.shields.io/badge/Django-5.2-green.svg)](https://www.djangoproject.com/)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
 [![PostgreSQL 16+](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
 [![HTMX](https://img.shields.io/badge/HTMX-2.0-blue.svg)](https://htmx.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.1-blue.svg)](https://tailwindcss.com/)
@@ -62,7 +62,7 @@ services/
 
 ### Prerequisites
 
-- **Python 3.11+**
+- **Python 3.13+**
 - **[uv](https://docs.astral.sh/uv/)** - Python package manager (used for workspace management)
 - **PostgreSQL 16+** (production) or SQLite (development)
 - **Git**
@@ -174,7 +174,7 @@ See `.env.example` for the complete list with documentation.
 
 ## Tech Stack
 
-- **Backend**: Django 5.2, Python 3.11+
+- **Backend**: Django 5.2, Python 3.13+
 - **Database**: PostgreSQL 16+ (production), SQLite (development)
 - **Frontend**: Tailwind CSS + HTMX + Alpine.js (zero-runtime JavaScript)
 - **Package Management**: [uv](https://docs.astral.sh/uv/) (workspace)

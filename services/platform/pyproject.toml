@@ -12,7 +12,7 @@ build-backend = "hatchling.build"
 name = "praho-platform-service"
 version = "0.20.0"
 description = "PRAHO Platform Service - Admin platform with database access"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 authors = [
     {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
 ]

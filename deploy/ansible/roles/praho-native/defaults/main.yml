@@ -11,7 +11,7 @@ praho_git_repo: "https://github.com/your-org/praho.git"
 praho_git_branch: master
 
 # Python
-python_version: "3.11"
+python_version: "3.13"
 
 # Gunicorn
 gunicorn_workers_platform: 2

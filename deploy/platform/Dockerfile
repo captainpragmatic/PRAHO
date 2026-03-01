@@ -3,7 +3,7 @@
 # ===============================================================================
 # Full Django platform with database access, all business logic
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
