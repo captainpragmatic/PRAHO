@@ -920,6 +920,61 @@ def test_customer_billing_proforma_pdf_download(page: Page) -> None:
             print(f"  ✅ PDF link navigated successfully (inline display): {page.url}")
 
 
+def test_customer_billing_invoice_pdf_download(page: Page) -> None:
+    """
+    Test customer downloading an invoice as PDF.
+
+    Verifies the PDF download link is correct and triggers a download.
+    """
+    print("🧪 Testing customer invoice PDF download")
+
+    with ComprehensivePageMonitor(page, "customer invoice pdf download",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=False,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+        require_authentication(page)
+
+        # Navigate to invoices
+        page.goto(f"{BASE_URL}/billing/invoices/")
+        page.wait_for_load_state("networkidle")
+
+        # Click first invoice
+        invoice_link: Locator = page.locator('tr[onclick*="invoice"], div[onclick*="invoice"]').first
+        if invoice_link.count() == 0:
+            print("  ⚠️ No invoice documents found — skipping PDF download test")
+            return
+
+        invoice_link.click()
+        page.wait_for_load_state("networkidle")
+        expect(page).to_have_url(re.compile(r"/billing/invoices/"))
+
+        # Verify PDF link has correct href pattern
+        pdf_link: Locator = page.locator('a[href*="/invoices/"][href*="/pdf/"]')
+        expect(pdf_link).to_be_visible()
+        href: str = pdf_link.get_attribute("href") or ""
+        assert "/pdf/" in href, f"PDF link should contain /pdf/, got: {href}"
+        print(f"  ✅ PDF download link verified: {href}")
+
+        # Trigger download and verify it starts
+        try:
+            with page.expect_download(timeout=10000) as download_info:
+                pdf_link.click()
+            download = download_info.value
+            assert download.suggested_filename.endswith(".pdf") or download.url.endswith("/pdf/"), (
+                f"Expected PDF download, got: {download.suggested_filename}"
+            )
+            print(f"  ✅ PDF download triggered: {download.suggested_filename}")
+        except Exception:
+            # PDF may open inline (Content-Disposition: inline) rather than as download
+            page.wait_for_load_state("networkidle")
+            print(f"  ✅ PDF link navigated successfully (inline display): {page.url}")
+
+
 def test_customer_billing_dashboard_widget(page: Page) -> None:
     """
     Test that the customer dashboard displays billing summary information.

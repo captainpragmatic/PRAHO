@@ -571,7 +571,7 @@ def customer_proforma_detail_api(request: HttpRequest, customer: Customer, profo
 @api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer: Customer) -> Response:
+def invoice_pdf_export(request: HttpRequest, customer: Customer, invoice_number: str) -> Response:
     """
     📄 Export Invoice as PDF
 
@@ -626,7 +626,7 @@ def invoice_pdf_export(request: HttpRequest, invoice_number: str, customer: Cust
 @api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def proforma_pdf_export(request: HttpRequest, proforma_number: str, customer: Customer) -> Response:
+def proforma_pdf_export(request: HttpRequest, customer: Customer, proforma_number: str) -> Response:
     """
     📄 Export Proforma as PDF
 
