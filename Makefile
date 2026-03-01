@@ -640,9 +640,9 @@ build-css: check-css-tooling
 	echo "🎨 Building Tailwind CSS assets for all services..."; \
 	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
 	echo "🏗️  Building Portal CSS..."; \
-	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify && \
+	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify 2>&1 | grep -v -E 'warning|all.*vars|Unexpected token|ring-inset|[│┆]|^$$' && \
 	echo "🏗️  Building Platform CSS..." && \
-	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify && \
+	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify 2>&1 | grep -v -E 'warning|all.*vars|Unexpected token|ring-inset|[│┆]|^$$' && \
 	echo "✅ CSS build complete!"
 
 watch-css: check-css-tooling
