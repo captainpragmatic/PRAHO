@@ -5,6 +5,7 @@
 **Date:** 2025-09-04
 **Decision Makers:** PRAHO Development Team
 **Stakeholders:** Operations Team, Customer Support, Romanian Hosting Partners
+**Related:** ADR-0020 (Async Task Processing Architecture — Django-Q2 selection rationale)
 
 ## Context
 
@@ -146,7 +147,8 @@ service = models.OneToOneField(Service, related_name="virtualmin_account")
 ### Core Architecture Decisions
 
 #### 1. Async Provisioning with Django-Q2
-**Implementation**: Service status change to "active" triggers async provisioning signal
+**Implementation**: Service status change to "active" triggers async provisioning signal.
+Async task processing uses Django-Q2 with database backend — see [ADR-0020](ADR-0020-async-task-processing-architecture.md) for the full rationale and configuration.
 
 ```python
 @receiver(post_save, sender=Service)
@@ -370,6 +372,7 @@ New Features:
 
 ## References
 
+- [ADR-0020: Async Task Processing Architecture](ADR-0020-async-task-processing-architecture.md)
 - [Django-Q2 Documentation](https://django-q2.readthedocs.io/)
 - PRAHO Service Lifecycle Documentation (planned)
 - VirtualMin API Integration Guide (planned)

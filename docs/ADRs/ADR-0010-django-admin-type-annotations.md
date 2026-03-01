@@ -2,6 +2,7 @@
 
 ## Status
 **Accepted** - 2025-08-28
+**Related:** ADR-0009 (Pragmatic MyPy Strategy)
 
 ## Context
 

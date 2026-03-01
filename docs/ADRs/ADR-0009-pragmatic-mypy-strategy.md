@@ -2,7 +2,8 @@
 
 **Date:** 2025-08-27
 **Status:** Accepted
-**Supersedes:** ADR-0008 (MyPy Removal)
+**Supersedes:** ADR-0008 (MyPy Removal), ADR-0003 (typing strategy decisions only)
+**Related:** ADR-0010 (Django Admin Type Annotations)
 
 ## Context
 

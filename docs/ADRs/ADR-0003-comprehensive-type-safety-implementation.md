@@ -1,10 +1,10 @@
 # ADR-0003: Comprehensive Type Safety Implementation for PRAHO Platform
 
-**Status:** Accepted
+**Status:** Partially Superseded (typing strategy superseded by ADR-0009; Romanian business types remain valid)
 **Date:** 2025-08-25
 **Authors:** Development Team
 **Supersedes:** N/A
-**Related:** ADR-0002 (Strategic Linting Framework)
+**Related:** ADR-0002 (Strategic Linting Framework), ADR-0009 (Pragmatic MyPy Strategy)
 
 ## Context
 
@@ -19,7 +19,7 @@ PRAHO Platform, a comprehensive hosting provider management system for Romanian 
 
 ### **Business Requirements**
 1. **Romanian Compliance**: Type-safe validation for CUI, VAT numbers, phone formats
-2. **Financial Accuracy**: Precise money calculations with Romanian 19% VAT
+2. **Financial Accuracy**: Precise money calculations with Romanian 21% VAT
 3. **Developer Experience**: Enhanced AI/LLM code comprehension for faster development
 4. **Maintainability**: Reduced runtime errors through compile-time type checking
 5. **Platform Stability**: Type safety for Django views, models, and business logic
@@ -74,9 +74,9 @@ class Money:
     amount: int  # Stored in cents/bani
     currency: str = 'RON'
 
-# Constants
-ROMANIAN_VAT_RATE = 0.19  # 19% standard VAT
-ROMANIAN_VAT_RATE_PERCENT = 19
+# NOTE: VAT rates are dynamic — use TaxService.get_vat_rate() instead of constants.
+# See ADR-0015 (Configuration Resolution Order).
+# As of Aug 2025, Romanian standard VAT rate is 21%.
 ```
 
 **Django Integration Types:**
@@ -101,7 +101,7 @@ class RomanianComplianceError(BusinessError): ...
 **Eliminated Duplicate Validation Logic:**
 - ✅ Phone validation: `apps/common/validators.py` → delegates to `types.validate_romanian_phone`
 - ✅ CUI validation: Consolidated Romanian business ID validation
-- ✅ VAT calculation: Centralized 19% Romanian VAT with precision handling
+- ✅ VAT calculation: Centralized Romanian VAT via TaxService (21% as of Aug 2025, see ADR-0015)
 - ✅ JSON responses: Standardized `json_success()` and `json_error()` usage
 
 ### **Tool Configuration**
@@ -109,7 +109,7 @@ class RomanianComplianceError(BusinessError): ...
 **MyPy Configuration (`pyproject.toml`):**
 ```toml
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 plugins = ["mypy_django_plugin.main"]
 
@@ -162,7 +162,7 @@ ignore = []  # No type annotation exceptions
 
 **Romanian Business Compliance:**
 - Centralized validation for CUI, VAT, phone numbers
-- Type-safe Romanian 19% VAT calculations with precision
+- Type-safe Romanian 21% VAT calculations with precision
 - Consistent business error handling across the platform
 
 **Developer Experience:**

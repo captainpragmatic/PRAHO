@@ -11,7 +11,7 @@ PRAHO Platform handles financial transactions for Romanian hosting providers, in
 ### Romanian Business Requirements
 
 - Support for multiple currencies (RON, EUR, USD)
-- VAT calculations (19% standard rate in Romania)
+- VAT calculations (21% standard rate in Romania as of Aug 2025)
 - Integration with Romanian e-Factura system
 - Payment processing through Stripe and bank transfers
 - Financial reporting and auditing compliance
@@ -35,8 +35,8 @@ PRAHO Platform handles financial transactions for Romanian hosting providers, in
 -- Invoice amounts stored in cents
 CREATE TABLE invoice (
     subtotal_cents BIGINT NOT NULL,  -- 11900 = 119.00 EUR
-    tax_cents BIGINT NOT NULL,       -- 2261 = 22.61 EUR
-    total_cents BIGINT NOT NULL,     -- 14161 = 141.61 EUR
+    tax_cents BIGINT NOT NULL,       -- 2499 = 24.99 EUR (21% VAT)
+    total_cents BIGINT NOT NULL,     -- 14399 = 143.99 EUR
     currency_id VARCHAR(3) NOT NULL  -- 'EUR', 'RON', 'USD'
 );
 
@@ -89,7 +89,7 @@ class Invoice(models.Model):
 ### Romanian Specific Benefits
 
 - **e-Factura compliance**: Exact amounts without rounding errors
-- **VAT calculations**: Precise 19% VAT computation (amount * 19 / 100)
+- **VAT calculations**: Precise 21% VAT computation (amount * 21 / 100)
 - **Bank integration**: Romanian banks expect precise amounts
 - **Audit trail**: Exact monetary tracking for Romanian tax compliance
 
@@ -125,8 +125,8 @@ class Invoice(models.Model):
 # Service costs 119.00 EUR
 invoice = Invoice.objects.create(
     subtotal_cents=11900,  # 119.00 EUR in cents
-    tax_cents=2261,        # 19% VAT = 22.61 EUR
-    total_cents=14161,     # Total = 141.61 EUR
+    tax_cents=2499,        # 21% VAT = 24.99 EUR
+    total_cents=14399,     # Total = 143.99 EUR
     currency_id='EUR'
 )
 ```
@@ -135,11 +135,11 @@ invoice = Invoice.objects.create(
 ```django
 <!-- Romanian currency formatting -->
 {{ invoice.total_cents|cents_to_currency|romanian_currency:'EUR' }}
-<!-- Output: 141,61 EUR -->
+<!-- Output: 143,99 EUR -->
 
 <!-- Simple conversion -->
 {{ invoice.total_cents|cents_to_currency }}
-<!-- Output: 141.61 -->
+<!-- Output: 143.99 -->
 ```
 
 ### API Responses
@@ -147,13 +147,13 @@ invoice = Invoice.objects.create(
 {
   "invoice_id": 123,
   "subtotal_cents": 11900,
-  "tax_cents": 2261,
-  "total_cents": 14161,
+  "tax_cents": 2499,
+  "total_cents": 14399,
   "currency": "EUR",
   "display": {
     "subtotal": "119,00 EUR",
-    "tax": "22,61 EUR",
-    "total": "141,61 EUR"
+    "tax": "24,99 EUR",
+    "total": "143,99 EUR"
   }
 }
 ```

@@ -1,504 +1,244 @@
 # PRAHO Platform - Dependency Analysis Report
 
-**Generated:** December 27, 2025
-**Version:** 0.19.1
+**Generated:** March 1, 2026
+**Version:** 0.20.0
 
 ---
 
 ## Executive Summary
 
-This document provides a comprehensive analysis of the PRAHO Platform's dependency structure, identifying circular dependencies, tight coupling violations, and opportunities for architectural improvements through dependency inversion and interface extraction.
-
-### Key Findings
+Fresh analysis of inter-app dependencies across 17 platform apps (416 Python files). Compared to the v0.16.0 report (14 apps, 10 circular pairs), the codebase has grown by 3 apps (`api`, `infrastructure`, `promotions`) and circular dependencies have increased to 14 pairs.
 
 | Category | Count | Severity |
 |----------|-------|----------|
-| Circular Dependencies | 10 pairs | 🔴 Critical |
-| Tight Coupling Violations | 6 modules | 🟠 High |
-| Classes Needing Interfaces | 12 classes | 🟡 Medium |
-| Dependency Injection Opportunities | 8 services | 🟡 Medium |
+| Platform apps | 17 | - |
+| Python files | 416 | - |
+| Circular dependency pairs | 14 | Critical |
+| Apps with fan-out >= 7 | 5 | High |
+| `common` outbound domain imports | 7 apps | High |
 
 ---
 
-## 1. Codebase Structure Overview
+## 1. App Inventory
 
-### Platform Architecture
-
-```
-services/platform/
-├── config/                   # Django project configuration
-│   └── settings/             # Environment-specific settings
-└── apps/                     # Django applications (14 total)
-    ├── audit/                # Audit logging, GDPR compliance
-    ├── billing/              # Invoicing, payments, refunds, VAT
-    ├── common/               # Shared utilities (OVER-COUPLED)
-    ├── customers/            # Customer management, profiles
-    ├── domains/              # Domain registration
-    ├── integrations/         # Webhook handling, Stripe
-    ├── notifications/        # Email templates, logging
-    ├── orders/               # Order management
-    ├── products/             # Product catalog
-    ├── provisioning/         # Virtualmin, server management
-    ├── settings/             # System configuration
-    ├── tickets/              # Support tickets
-    ├── ui/                   # UI components, widgets
-    └── users/                # Authentication, MFA
-```
+| App | Files | Purpose |
+|-----|-------|---------|
+| `api` | 40 | Centralized REST API layer (DRF) |
+| `audit` | 23 | Immutable audit trails, GDPR compliance |
+| `billing` | 61 | Romanian VAT invoicing, payments, e-Factura, subscriptions |
+| `common` | 49 | Shared utilities, validators, decorators, types |
+| `customers` | 25 | Customer orgs, profiles (tax, billing, address) |
+| `domains` | 16 | Multi-registrar domain management (.ro, international) |
+| `infrastructure` | 25 | Server management, Ansible, Terraform, SSH keys |
+| `integrations` | 16 | Webhook handling (Stripe, Virtualmin) |
+| `notifications` | 18 | Bilingual email templates (RO/EN) |
+| `orders` | 24 | Order lifecycle management |
+| `products` | 10 | Product catalog, multi-currency pricing |
+| `promotions` | 10 | Discount codes, promotional campaigns |
+| `provisioning` | 45 | Virtualmin integration, hosting service lifecycle |
+| `settings` | 20 | System configuration key-value store |
+| `tickets` | 12 | Support tickets with SLA tracking |
+| `ui` | 9 | Shared UI components, template tags |
+| `users` | 13 | Email-based auth, 2FA (TOTP), staff roles |
 
 ---
 
-## 2. Circular Dependencies (10 Pairs)
+## 2. Dependency Matrix
 
-### 🔴 Critical Circular Dependencies
+Each row shows what an app imports from (fan-out) and how many apps import it (fan-in).
 
-#### 2.1 `common` ↔ Multiple Apps (6 Cycles)
+| App | Fan-Out | Fan-In | Imports From |
+|-----|---------|--------|-------------|
+| `api` | 9 | 1 | audit, billing, common, customers, orders, products, provisioning, tickets, users |
+| `audit` | 3 | 13 | common, tickets, users |
+| `billing` | 7 | 7 | audit, common, customers, orders, tickets, ui, users |
+| `common` | 7 | 15 | billing, customers, orders, products, provisioning, tickets, users |
+| `customers` | 7 | 8 | audit, billing, common, provisioning, settings, tickets, users |
+| `domains` | 7 | 0 | audit, billing, common, customers, orders, settings, users |
+| `infrastructure` | 3 | 0 | audit, common, settings |
+| `integrations` | 4 | 0 | audit, billing, common, customers |
+| `notifications` | 2 | 0 | common, settings |
+| `orders` | 8 | 4 | audit, billing, common, customers, products, provisioning, tickets, users |
+| `products` | 3 | 3 | audit, billing, common |
+| `promotions` | 2 | 0 | audit, settings |
+| `provisioning` | 7 | 4 | api, audit, common, customers, settings, ui, users |
+| `settings` | 2 | 8 | audit, common |
+| `tickets` | 4 | 6 | audit, common, settings, users |
+| `ui` | 1 | 2 | common |
+| `users` | 4 | 9 | audit, common, customers, settings |
 
-**Root Cause:** The `common` module was designed as a utility library but has accumulated business logic that imports from domain modules.
+**Leaf apps** (fan-in = 0, safe to modify): `domains`, `infrastructure`, `integrations`, `notifications`, `promotions`.
 
-| Cycle | Files Involved | Root Cause |
-|-------|---------------|------------|
-| `common` ↔ `billing` | `common/utils.py:184` imports `Invoice` model | Business logic (invoice numbering) in utility module |
-| `common` ↔ `customers` | `common/validators.py:33-35` imports Customer models | Validation logic coupled to domain models |
-| `common` ↔ `users` | `common/decorators.py:19` imports `User` model | Security decorators need user model |
-| `common` ↔ `orders` | `common/utils.py` imports order tasks | Task scheduling in utility module |
-| `common` ↔ `provisioning` | `common/utils.py` imports virtualmin models | Cross-domain business logic |
-| `common` ↔ `tickets` | `common/utils.py` imports ticket models | Cross-domain business logic |
-
-**Current State (`common/utils.py:184`):**
-```python
-def generate_invoice_number(year: int | None = None) -> str:
-    from apps.billing.models import Invoice  # CIRCULAR IMPORT
-    # ... business logic
-```
-
-**Current State (`common/validators.py:33-35`):**
-```python
-from apps.customers.customer_models import Customer
-from apps.customers.profile_models import CustomerTaxProfile
-from apps.users.models import CustomerMembership, User  # CIRCULAR IMPORTS
-```
-
-#### 2.2 `billing` ↔ `orders`
-
-**Root Cause:** Bidirectional dependency between billing and order management.
-
-| Direction | Import Location | Purpose |
-|-----------|----------------|---------|
-| `orders` → `billing` | `orders/services.py:13` | Uses `Currency` model for order creation |
-| `billing` → `orders` | `billing/invoice_service.py` | Creates invoices from orders |
-
-#### 2.3 `users` ↔ `customers`
-
-**Root Cause:** User model directly imports Customer for relationship, and Customer references User.
-
-| Direction | Import Location | Purpose |
-|-----------|----------------|---------|
-| `users` → `customers` | `users/models.py:29` | User has `customers` M2M field |
-| `customers` → `users` | `customer_models.py:19` | TYPE_CHECKING import, FK references |
-
-**Current State (`users/models.py:29`):**
-```python
-from apps.customers.models import Customer  # Direct import for M2M relationship
-```
-
-#### 2.4 `audit` ↔ `users`
-
-**Root Cause:** Audit service logs user actions, users module logs to audit.
-
-#### 2.5 `audit` ↔ `tickets`
-
-**Root Cause:** Ticket changes create audit entries, audit references ticket models.
+**Hub apps** (fan-in >= 8): `common` (15), `audit` (13), `users` (9), `settings` (8), `customers` (8).
 
 ---
 
-## 3. Dependency Injection Opportunities
+## 3. Circular Dependencies (14 Pairs)
 
-### 3.1 Services That Should Use Dependency Injection
+### 3.1 `common` Cycles (6 pairs) -- Most Critical
 
-| Service | Current Implementation | Recommended Pattern |
-|---------|----------------------|---------------------|
-| `VirtualminProvisioningService` | Creates `VirtualminGateway` internally | Inject `IGateway` interface |
-| `InvoiceService` | Directly queries `Currency`, `InvoiceSequence` | Inject repository interfaces |
-| `OrderService` | Creates models directly | Inject `IOrderRepository` |
-| `RefundService` | Direct model access | Inject `IRefundRepository` |
-| `CustomerService` | Direct model queries | Inject `ICustomerRepository` |
-| `AuditService` | Static logging function | Inject `IAuditLogger` interface |
-| `VirtualminBackupService` | Creates gateway internally | Inject `IBackupGateway` |
-| `EmailService` | Direct SMTP/template access | Inject `IEmailSender` |
+The `common` module imports from 7 domain apps, creating cycles with all of them since nearly every app imports `common`.
 
-### 3.2 Recommended DI Pattern
+| Cycle | Root Cause | Key Files |
+|-------|-----------|-----------|
+| `common` <-> `billing` | Dashboard + sample data generators import Invoice/Currency models | `common/views.py:14-15`, `common/management/commands/generate_sample_data.py` |
+| `common` <-> `customers` | Validators import Customer/CustomerTaxProfile directly | `common/validators.py:33-34` |
+| `common` <-> `users` | Decorators + validators import User model | `common/decorators.py:18`, `common/validators.py:35` |
+| `common` <-> `orders` | Sample data generator imports Order models | `common/management/commands/generate_sample_data.py:21` |
+| `common` <-> `products` | Sample data generator imports Product models | `common/management/commands/generate_sample_data.py:22` |
+| `common` <-> `provisioning` | Dashboard + credential vault + sample data import Service/Server models | `common/views.py:17`, `common/management/commands/setup_credential_vault.py` |
+| `common` <-> `tickets` | Dashboard imports Ticket model | `common/views.py:18` |
 
-**Before (`provisioning/virtualmin_service.py:61-86`):**
-```python
-class VirtualminProvisioningService:
-    def __init__(self, server: VirtualminServer | None = None):
-        self.server = server
-        self._gateway: VirtualminGateway | None = None  # Created internally
+### 3.2 Domain-Level Cycles (8 pairs)
 
-    def _get_gateway(self, server: VirtualminServer | None = None) -> VirtualminGateway:
-        # Gateway created on demand - tight coupling
-        config = VirtualminConfig(server=target_server, ...)
-        self._gateway = VirtualminGateway(config)  # Concrete dependency
-        return self._gateway
-```
-
-**After (with DI):**
-```python
-from abc import ABC, abstractmethod
-
-class IVirtualminGateway(ABC):
-    @abstractmethod
-    def call(self, command: str, params: dict) -> Result[VirtualminResponse, str]: ...
-
-    @abstractmethod
-    def test_connection(self) -> Result[dict[str, Any], str]: ...
-
-class VirtualminProvisioningService:
-    def __init__(
-        self,
-        gateway_factory: Callable[[VirtualminServer], IVirtualminGateway],
-        server: VirtualminServer | None = None
-    ):
-        self.server = server
-        self._gateway_factory = gateway_factory  # Injected factory
-        self._gateway: IVirtualminGateway | None = None
-```
+| Cycle | Direction A | Direction B |
+|-------|-----------|-----------|
+| `billing` <-> `customers` | billing imports customer models for invoicing | customers imports billing models for balance calculation (`profile_models.py:136`) |
+| `billing` <-> `orders` | billing imports order data for invoice generation | orders imports billing for Currency model |
+| `customers` <-> `users` | customers imports User model across 8+ files | users imports Customer model for memberships |
+| `customers` <-> `provisioning` | customers views/signals import Service model | provisioning views import Customer model |
+| `audit` <-> `users` | audit needs user context for log entries | users imports audit for security logging |
+| `audit` <-> `tickets` | audit references ticket models | tickets imports audit for change tracking |
+| `api` <-> `provisioning` | api imports provisioning for API endpoints | provisioning imports api (unexpected reverse dep) |
 
 ---
 
-## 4. Classes Needing Interfaces/Abstractions
+## 4. Tight Coupling Analysis
 
-### 4.1 Concrete Classes That Should Be Abstracted
+### 4.1 `common` -- God Module Problem
 
-| Current Class | Proposed Interface | Location | Reason |
-|--------------|-------------------|----------|--------|
-| `VirtualminGateway` | `IHostingGateway` | `provisioning/virtualmin_gateway.py` | Allow mock testing, support other panels |
-| `VirtualminBackupService` | `IBackupService` | `provisioning/virtualmin_backup_service.py` | Abstract backup operations |
-| `InvoiceService` | `IInvoiceService` | `billing/services.py` | Enable invoice generation mocking |
-| `RefundService` | `IRefundService` | `billing/refund_service.py` | Decouple refund logic |
-| `CustomerService` | `ICustomerRepository` | `customers/customer_service.py` | Repository pattern |
-| `OrderService` | `IOrderService` | `orders/services.py` | Decouple order creation |
-| `AuditService` | `IAuditLogger` | `audit/services.py` | Cross-cutting concern |
-| `SecureInputValidator` | `IInputValidator` | `common/validators.py` | Allow validation customization |
-| `EmailService` | `IEmailSender` | `notifications/services.py` | Mock email in tests |
-| `StripeWebhookHandler` | `IPaymentWebhookHandler` | `integrations/webhooks/stripe.py` | Support multiple payment providers |
-| `Currency` (queries) | `ICurrencyRepository` | `billing/models.py` | Abstract data access |
-| `User` (queries) | `IUserRepository` | `users/models.py` | Abstract user operations |
+`common` (49 files) violates the utility module contract by importing from 7 domain apps. The primary offenders:
 
-### 4.2 Recommended Interface Definitions
+| File | Imports From | Why It's Wrong |
+|------|-------------|---------------|
+| `common/views.py` | billing, customers, provisioning, tickets | Dashboard aggregation queries belong in a dashboard app or service |
+| `common/validators.py` | customers, users | Domain-specific validation belongs in the domain app |
+| `common/decorators.py` | users | Auth decorators should use `get_user_model()` or live in `users` |
+| `common/management/commands/generate_sample_data.py` | 7 apps | Data seeding command imports every domain model |
+| `common/management/commands/setup_scheduled_tasks.py` | orders, provisioning, users | Task setup imports from domain apps |
 
-**Location: `apps/common/interfaces.py` (NEW FILE)**
+### 4.2 Files With Most Cross-App Imports
 
-```python
-from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
-from apps.common.types import Result
+| File | Cross-App Imports | Concern |
+|------|------------------|---------|
+| `billing/views.py` | 11 | View layer directly queries multiple domain models |
+| `users/services.py` | 10 | User service has tendrils into many domains |
+| `orders/views.py` | 10 | Order views import from many apps |
+| `generate_sample_data.py` | 9 | Management command; acceptable for data seeding |
+| `infrastructure/deployment_service.py` | 8 | Orchestration service; inherently cross-cutting |
+| `customers/customer_views.py` | 8 | Views pull from billing, provisioning, tickets, users |
 
-T = TypeVar('T')
-E = TypeVar('E')
+### 4.3 Cross-Boundary Model Imports
 
-class IRepository(ABC, Generic[T]):
-    """Base repository interface"""
+60+ direct model imports cross app boundaries. The worst patterns:
 
-    @abstractmethod
-    def get_by_id(self, id: Any) -> Result[T | None, str]: ...
+- **`customers/`** imports models from `billing`, `orders`, `provisioning`, `tickets`, `users` (in views, services, signals)
+- **`billing/views.py`** imports from `customers`, `orders`, `products`, `users`
+- **`common/views.py`** imports 5 domain models for dashboard stats
 
-    @abstractmethod
-    def save(self, entity: T) -> Result[T, str]: ...
+These should go through service-layer calls or repository interfaces, not direct model access.
 
-    @abstractmethod
-    def delete(self, entity: T) -> Result[bool, str]: ...
+---
 
-class IAuditLogger(ABC):
-    """Audit logging interface"""
+## 5. Dependency Graph
 
-    @abstractmethod
-    def log_security_event(
-        self,
-        event_type: str,
-        details: dict[str, Any],
-        request_ip: str | None = None
-    ) -> None: ...
+```
+                          ┌────────────┐
+                          │   common   │◄─────── 15 apps depend on this
+                          │ (49 files) │
+                          └─────┬──────┘
+       ┌──────────────────┬─────┴─────┬──────────────────┐
+       │                  │           │                  │
+       ▼                  ▼           ▼                  ▼
+ ┌──────────┐      ┌──────────┐ ┌─────────┐      ┌──────────┐
+ │  audit   │◄─────│  users   │◄┤customers│◄────►│ billing  │
+ │(13 fan-in│      │(9 fan-in)│ │(8 fan-in│      │(7 fan-in)│
+ └────┬─────┘      └──────────┘ └────┬────┘      └────┬─────┘
+      │                              │                 │
+      │                              ▼                 ▼
+      │                        ┌──────────┐      ┌──────────┐
+      │                        │provisioning│     │  orders  │
+      │                        │ (45 files)│     │ (24 files)│
+      │                        └──────────┘      └──────────┘
+      │
+      ▼
+ ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+ │ settings │  │ tickets  │  │    ui    │  │ products │
+ │(8 fan-in)│  │(6 fan-in)│  │(2 fan-in)│  │(3 fan-in)│
+ └──────────┘  └──────────┘  └──────────┘  └──────────┘
 
-class IHostingGateway(ABC):
-    """Hosting panel gateway interface"""
+ Leaf apps (no dependents):
+ ┌──────────┐ ┌──────────────┐ ┌──────────────┐ ┌───────────────┐ ┌────────────┐
+ │ domains  │ │infrastructure│ │ integrations │ │ notifications │ │ promotions │
+ └──────────┘ └──────────────┘ └──────────────┘ └───────────────┘ └────────────┘
 
-    @abstractmethod
-    def create_domain(self, domain: str, username: str, password: str) -> Result[dict, str]: ...
-
-    @abstractmethod
-    def delete_domain(self, domain: str) -> Result[bool, str]: ...
-
-    @abstractmethod
-    def suspend_domain(self, domain: str, reason: str) -> Result[bool, str]: ...
-
-    @abstractmethod
-    def get_domain_info(self, domain: str) -> Result[dict, str]: ...
+ ◄───► = circular dependency (14 pairs total)
 ```
 
 ---
 
-## 5. Tight Coupling Violations
+## 6. Change Since v0.16.0
 
-### 5.1 Separation of Concerns Violations
+| Metric | v0.16.0 | v0.20.0 | Delta |
+|--------|---------|---------|-------|
+| Apps | 14 | 17 | +3 (`api`, `infrastructure`, `promotions`) |
+| Circular pairs | 10 | 14 | +4 |
+| `common` fan-in | 13 | 15 | +2 |
+| `common` outbound deps | 6 | 7 | +1 (`products`) |
+| Largest app (files) | provisioning (36) | billing (61) | billing grew significantly |
+| Leaf apps | 3 | 5 | +2 (infrastructure, promotions) |
 
-#### 5.1.1 `common` Module - Most Severe
-
-**Problem:** The `common` module violates the Single Responsibility Principle and has become a "god module" that knows about all other modules.
-
-| File | Violation | Imported From |
-|------|-----------|---------------|
-| `common/utils.py` | Invoice number generation | `billing.models` |
-| `common/validators.py` | Customer validation | `customers.models`, `users.models` |
-| `common/decorators.py` | Role-based security | `users.models` |
-| `common/views.py` | Dashboard data | Multiple modules |
-
-**Impact:**
-- 13 out of 14 apps depend on `common`
-- 6 circular dependencies originate from `common`
-- Cannot modify `common` without potentially breaking all apps
-
-#### 5.1.2 `billing` ↔ `orders` Cross-Dependency
-
-**Problem:** Billing and orders are tightly coupled through direct imports.
-
-```
-orders/services.py:13  →  from apps.billing.models import Currency
-billing/services.py    →  Imports order data for invoice creation
-```
-
-**Violation:** Order management should not depend on billing implementation details.
-
-#### 5.1.3 `provisioning` Module Size
-
-**Problem:** The `provisioning` module has 36 files - too large for a single module.
-
-**Suggested Split:**
-```
-provisioning/           # Current (36 files)
-├── core/               # Base models, services
-├── virtualmin/         # Virtualmin-specific
-├── backups/            # Backup management
-└── disaster_recovery/  # DR operations
-```
-
-### 5.2 Layer Violations
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    PRESENTATION LAYER                        │
-│  views.py files, forms.py, template tags                     │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ ✅ OK
-┌───────────────────────────▼─────────────────────────────────┐
-│                    APPLICATION LAYER                         │
-│  services.py files, tasks.py                                 │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ ❌ VIOLATION: services directly
-                            │    import from other services
-┌───────────────────────────▼─────────────────────────────────┐
-│                      DOMAIN LAYER                            │
-│  models.py files, business logic                             │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ ❌ VIOLATION: models import
-                            │    from other domain models
-┌───────────────────────────▼─────────────────────────────────┐
-│                   INFRASTRUCTURE LAYER                       │
-│  gateways, external APIs, database                           │
-└─────────────────────────────────────────────────────────────┘
-```
+New circular pairs: `api <-> provisioning`, `common <-> products`, `billing <-> customers`, `customers <-> provisioning`.
 
 ---
 
-## 6. Dependency Graphs
+## 7. Refactoring Recommendations
 
-### 6.1 Current State (Problematic)
+### Priority 1: Clean Up `common` (Break 6+ Cycles)
 
-```
-                           ┌─────────────┐
-                           │   common    │◄──────────────────┐
-                           │  (25 files) │                   │
-                           └──────┬──────┘                   │
-          ┌────────────────────┬──┴──┬────────────────────┐  │
-          │                    │     │                    │  │
-          ▼                    ▼     ▼                    ▼  │
-    ┌──────────┐         ┌─────────┐ ┌──────────┐   ┌───────┐│
-    │  users   │◄───────►│customers│ │  billing │◄──┤ audit ││
-    │(11 files)│         │(19files)│ │(22 files)│   │(10 f.)││
-    └────┬─────┘         └────┬────┘ └────┬─────┘   └───┬───┘│
-         │                    │           │             │    │
-         │                    │           ▼             │    │
-         │                    │     ┌──────────┐        │    │
-         │                    │     │  orders  │◄───────┤    │
-         │                    │     │(13 files)│        │    │
-         │                    │     └────┬─────┘        │    │
-         │                    │          │              │    │
-         │         ┌──────────┴──────────┴──────────────┘    │
-         │         │                                          │
-         ▼         ▼                                          │
-    ┌──────────────────┐      ┌─────────────┐                │
-    │   provisioning   │◄────►│   tickets   │────────────────┘
-    │   (36 files)     │      │  (9 files)  │
-    └──────────────────┘      └─────────────┘
-         │
-         ▼
-    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-    │  products   │    │   domains   │    │integrations │
-    │  (7 files)  │    │ (13 files)  │    │ (13 files)  │
-    └─────────────┘    └─────────────┘    └─────────────┘
+| Action | Impact | Effort |
+|--------|--------|--------|
+| Move `common/views.py` dashboard logic to a dedicated `dashboard` app or into each domain's service | Breaks 4 cycles | 1-2 days |
+| Move `common/validators.py` customer/user validation into `customers/validators.py` | Breaks 2 cycles | 1 day |
+| Change `common/decorators.py` to use `get_user_model()` instead of direct User import | Breaks 1 cycle | 0.5 day |
+| Move `generate_sample_data` command to a `dev_tools` app or use lazy imports | Breaks 5 cycles (mgmt commands) | 1 day |
 
-Legend:
-  ─────► One-way dependency
-  ◄────► Circular dependency (PROBLEM)
-```
+### Priority 2: Break Domain Cycles
 
-### 6.2 Ideal State (Proposed)
+| Action | Impact | Effort |
+|--------|--------|--------|
+| `customers/profile_models.py:136` -- Replace direct Invoice import with a service call for balance calculation | Breaks `billing <-> customers` | 0.5 day |
+| Replace direct Currency model import in `orders/` with a billing service method | Breaks `billing <-> orders` | 0.5 day |
+| Use `TYPE_CHECKING` + string annotations for FK references between `users` and `customers` | Breaks `customers <-> users` at model level | 1 day |
+| Investigate `provisioning -> api` import (unexpected direction) | Breaks `api <-> provisioning` | 0.5 day |
 
-```
-                    ┌─────────────────────────────────────┐
-                    │           INTERFACE LAYER            │
-                    │  IRepository, IAuditLogger, etc.     │
-                    └─────────────────┬───────────────────┘
-                                      │
-        ┌─────────────────────────────┼─────────────────────────────┐
-        │                             │                             │
-        ▼                             ▼                             ▼
-┌───────────────┐            ┌───────────────┐            ┌───────────────┐
-│    DOMAIN     │            │    DOMAIN     │            │    DOMAIN     │
-│   customers   │            │    billing    │            │    orders     │
-│   (models)    │            │   (models)    │            │   (models)    │
-└───────┬───────┘            └───────┬───────┘            └───────┬───────┘
-        │                             │                             │
-        ▼                             ▼                             ▼
-┌───────────────┐            ┌───────────────┐            ┌───────────────┐
-│  APPLICATION  │            │  APPLICATION  │            │  APPLICATION  │
-│CustomerService│───────────►│InvoiceService │◄───────────│ OrderService  │
-│ (interfaces)  │            │ (interfaces)  │            │ (interfaces)  │
-└───────────────┘            └───────────────┘            └───────────────┘
-        │                             │                             │
-        └─────────────────────────────┼─────────────────────────────┘
-                                      │
-                                      ▼
-                    ┌─────────────────────────────────────┐
-                    │        INFRASTRUCTURE LAYER          │
-                    │  Repositories, Gateways, External    │
-                    └─────────────────────────────────────┘
+### Priority 3: Reduce View-Layer Coupling
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         SHARED KERNEL (New common)                       │
-│  - Pure utilities (no domain imports)                                    │
-│  - Type definitions (Result, Ok, Err)                                    │
-│  - Constants                                                             │
-│  - Abstract interfaces                                                   │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+High-import view files (`billing/views.py`: 11, `orders/views.py`: 10) should delegate to service methods that return DTOs/dicts instead of importing models from 5+ apps. This also makes future Portal API proxying cleaner.
+
+### Priority 4: Interface Extraction (Medium-Term)
+
+Services that are imported across 3+ app boundaries should expose abstract interfaces:
+
+| Service | Imported By | Recommended Interface |
+|---------|-----------|----------------------|
+| `AuditService` | 13 apps | `IAuditLogger` in `common/interfaces.py` |
+| `User` model queries | 9 apps | `IUserRepository` |
+| `Customer` model queries | 8 apps | `ICustomerRepository` |
+| `VirtualminGateway` | provisioning internal | `IHostingGateway` (for panel abstraction) |
 
 ---
 
-## 7. Recommended Refactoring Roadmap
+## 8. Success Metrics
 
-### Phase 1: Break `common` Circular Dependencies (Priority: Critical)
-
-| Task | Effort | Impact |
-|------|--------|--------|
-| Move `generate_invoice_number()` to `billing/utils.py` | 1 day | Breaks 1 cycle |
-| Move customer validation to `customers/validators.py` | 1 day | Breaks 1 cycle |
-| Create `common/interfaces.py` for abstract types | 2 days | Foundation |
-| Move security decorators to use TYPE_CHECKING | 1 day | Breaks 1 cycle |
-
-### Phase 2: Introduce Interface Layer (Priority: High)
-
-| Task | Effort | Impact |
-|------|--------|--------|
-| Define `IRepository` base interface | 1 day | Pattern foundation |
-| Create `IAuditLogger` interface | 1 day | Decouples audit |
-| Create `IHostingGateway` interface | 2 days | Decouples provisioning |
-| Update services to accept interfaces | 3 days | Enables DI |
-
-### Phase 3: Implement Dependency Injection (Priority: Medium)
-
-| Task | Effort | Impact |
-|------|--------|--------|
-| Create DI container/factory module | 2 days | Central composition |
-| Refactor `VirtualminProvisioningService` | 2 days | Testability |
-| Refactor `InvoiceService` | 1 day | Testability |
-| Refactor `OrderService` | 1 day | Testability |
-
-### Phase 4: Split Large Modules (Priority: Medium)
-
-| Task | Effort | Impact |
-|------|--------|--------|
-| Split `provisioning` into sub-packages | 3 days | Maintainability |
-| Extract `common` pure utilities | 2 days | Clean architecture |
+| Metric | Current (v0.20.0) | Target |
+|--------|-------------------|--------|
+| Circular dependency pairs | 14 | 0 |
+| `common` outbound domain imports | 7 apps | 0 apps |
+| Files with 8+ cross-app imports | 6 | 0 |
+| Services with DI / interfaces | 0% | Core services (billing, provisioning, audit) |
+| View files importing 5+ app models | 4 | 0 (use service layer) |
 
 ---
 
-## 8. Immediate Actions Checklist
-
-### Quick Wins (< 1 day each)
-
-- [ ] Use `TYPE_CHECKING` for User import in `common/decorators.py`
-- [ ] Move `generate_invoice_number()` from `common/utils.py` to `billing/`
-- [ ] Use string references in ForeignKey definitions where possible
-- [ ] Document import conventions in CONTRIBUTING.md
-
-### Short-term (1-2 weeks)
-
-- [ ] Create `common/interfaces.py` with abstract base classes
-- [ ] Refactor `common/validators.py` to use interface-based validation
-- [ ] Implement `IRepository` pattern for `Customer`, `Order`, `Invoice`
-
-### Medium-term (1-2 months)
-
-- [ ] Full DI implementation for all services
-- [ ] Split `provisioning` module into sub-packages
-- [ ] Achieve zero circular dependencies
-
----
-
-## 9. Metrics for Success
-
-| Metric | Current | Target |
-|--------|---------|--------|
-| Circular Dependencies | 10 | 0 |
-| `common` module imports | 6 domain modules | 0 domain modules |
-| Services with DI | 0% | 100% |
-| Test coverage with mocks | Limited | Full isolation |
-| Modules > 20 files | 2 (common, provisioning) | 0 |
-
----
-
-## Appendix A: Full Dependency Matrix
-
-| Module | Depends On | Depended By | Circular With |
-|--------|-----------|-------------|---------------|
-| `audit` | common, tickets, users | 10 apps | users, tickets |
-| `billing` | audit, common, customers, orders, tickets, ui, users | 5 apps | orders, common |
-| `common` | billing, customers, orders, provisioning, tickets, users | 13 apps | 6 modules |
-| `customers` | audit, common, users | 7 apps | common, users |
-| `domains` | audit, billing, common, customers, orders, settings, users | 0 (leaf) | - |
-| `integrations` | audit, billing, common, customers | 0 (leaf) | - |
-| `notifications` | common, settings | 0 (leaf) | - |
-| `orders` | audit, billing, common, customers, products, tickets, users | 3 apps | billing, common |
-| `products` | audit, billing, common | 1 (orders) | - |
-| `provisioning` | audit, common, customers, settings, ui, users | 1 (common) | common |
-| `settings` | audit, common | 3 apps | - |
-| `tickets` | audit, common, users | 4 apps | audit, common |
-| `ui` | common | 2 apps | - |
-| `users` | audit, common, customers | 8 apps | audit, common, customers |
-
----
-
-## Appendix B: Files with Most Cross-Module Imports
-
-| File | Module Imports | Recommendation |
-|------|----------------|----------------|
-| `common/validators.py` | 5 modules | Extract to domain-specific validators |
-| `billing/views.py` | 6 modules | Use service layer, not direct models |
-| `orders/views.py` | 6 modules | Use service layer, not direct models |
-| `common/utils.py` | 4 modules | Split into pure utils + domain helpers |
-| `provisioning/virtualmin_service.py` | 4 modules | Use dependency injection |
-
----
-
-*This analysis was generated to guide architectural improvements for the PRAHO Platform. Implementation should be prioritized based on business needs and development capacity.*
+*Generated from static import analysis of `services/platform/apps/`. Does not account for runtime dynamic imports or test-only dependencies.*

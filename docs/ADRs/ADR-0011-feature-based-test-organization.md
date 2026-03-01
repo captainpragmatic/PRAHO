@@ -145,4 +145,5 @@ This structure maintains all existing test functionality while improving organiz
 - [Django Testing Documentation](https://docs.djangoproject.com/en/5.2/topics/testing/)
 - [pytest Organization Best Practices](https://pytest-with-eric.com/pytest-best-practices/pytest-organize-tests/)
 - ADR-0002: Strategic Linting Framework (testing quality standards)
+- ADR-0012: Internal App Organization (same feature-based pattern for source files)
 - PRAHO Platform Architecture (business domain boundaries)

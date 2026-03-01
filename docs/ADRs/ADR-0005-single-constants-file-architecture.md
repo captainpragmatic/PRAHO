@@ -27,7 +27,7 @@ We decided to implement a **single centralized constants file** at `apps/common/
 **Rationale:**
 - ✅ **Extends Proven Pattern**: Consistent with existing `apps/common/` utilities (types.py, validators.py, utils.py)
 - ✅ **O(1) Maintenance**: Romanian VAT rate changes require single-file update across 4+ apps
-- ✅ **Strategic Seams Alignment**: Supports ADR-0001 enhanced architecture with clear separation of concerns
+- ✅ **Strategic Seams Alignment**: Supports ADR-0022 enhanced architecture with clear separation of concerns
 - ✅ **Zero Circular Import Risk**: `common/` app has no dependencies on other apps
 - ✅ **Business Rules Documentation**: Acts as self-documenting source of truth for Romanian compliance
 

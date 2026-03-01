@@ -5,11 +5,9 @@
 ## Architecture
 
 - [PRAHO Platform Architecture](architecture/ARCHITECTURE.md) -- Core two-service split, strategic seams pattern, app-level design
-- [App Separation Architecture](architecture/app-separation.md) -- Platform vs Portal design and isolation rules
 - [Architecture Diagrams](architecture/README.md) -- Mermaid-based visual diagrams (system overview, data flow, deployment, ERD)
 - [Dependency Analysis Report](architecture/DEPENDENCY_ANALYSIS.md) -- App coupling metrics and circular dependency analysis
-- [Codebase Archaeology Report](architecture/CODEBASE_ARCHAEOLOGY.md) -- Evolution across 3 architectural eras
-- [Architecture Changelog](architecture/CHANGELOG.md) -- History of architecture documentation changes
+- [Codebase Archaeology Report](architecture/CODEBASE_ARCHAEOLOGY.md) -- Evolution across 3 architectural eras (through v0.19.1)
 
 ## Architecture Decision Records
 

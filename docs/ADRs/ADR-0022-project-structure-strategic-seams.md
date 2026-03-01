@@ -1,9 +1,14 @@
 # ADR-0022: Project Structure - Enhanced Option A with Strategic Seams
 
-**Status:** ✅ Accepted
+**Status:** Superseded (historical reference)
 **Date:** 2025-08-15
 **Authors:** Development Team
 **Reviewers:** Technical Lead
+
+> **⚠️ Note (March 2026):** This ADR describes PRAHO's original single-service monolith structure
+> from August 2025. The project has since migrated to a **two-service architecture**
+> (Platform `:8700` + Portal `:8701`) running **Django 5.2** on **Python 3.13**.
+> See `CLAUDE.md` for the current architecture. Retained as historical context.
 
 ## Context
 
@@ -279,11 +284,11 @@ Migrate to Option B when **any 2** apply:
 
 ### Technology Decisions
 
-- **Python 3.11+** with strict typing
-- **Django 4.2 LTS** for stability
+- **Python 3.13+** with strict typing
+- **Django 5.2** for stability
 - **HTMX** for interactivity without SPA complexity
 - **Tailwind CSS** with design tokens for portability
-- **RQ + Redis** for background jobs
+- **Django-Q2 + PostgreSQL** for background jobs
 - **PostgreSQL** for production database
 
 ### Security Measures

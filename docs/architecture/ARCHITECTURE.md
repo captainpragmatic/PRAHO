@@ -1,13 +1,15 @@
 # PRAHO Platform Architecture
 
-**Version:** 1.1.0
-**Last Updated:** February 21, 2026
+**Version:** 1.2.0
+**Last Updated:** March 1, 2026
 **Status:** ✅ Services Architecture Complete
 
 > **Note**: Architecture diagrams available in `docs/architecture/` (Mermaid format):
 > - `system-overview.mmd` - High-level service boundaries and data flow
 > - `data-flow.mmd` - Sequence diagram showing Portal ↔ Platform communication
 > - `deployment.mmd` - Docker network topology and security isolation
+> - `app-dependencies.mmd` - Inter-app dependency graph (17 platform apps, 4 tiers)
+> - `entity-relationships.mmd` - Database ER diagram (~20 core entities)
 
 ## 🏗️ Architecture Overview
 
@@ -40,8 +42,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  │  │  ├─ ui/                # Templates & UI components
 │  │  │  └─ ... (17 total)     # See ls services/platform/apps/
 │  │  ├─ config/               # Django configuration
-│  │  ├─ manage.py             # Django management
-│  │  └─ requirements.txt      # Platform dependencies
+│  │  └─ manage.py             # Django management
 │  └─ portal/                  # 🌐 Customer API service (stateless, session-only DB)
 │     ├─ apps/                 # 9 Django apps (API proxies, no business models)
 │     │  ├─ api_client/        # HMAC authentication client
@@ -58,11 +59,7 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  └─ docker-compose.dev.yml   # Development services
 ├─ tests/                      # 🧪 Cross-service testing
 │  └─ integration/             # Integration tests for service communication
-├─ requirements/               # 📦 Platform service dependencies
-│  ├─ base.txt                 # Core Django dependencies
-│  ├─ dev.txt                  # Development tools
-│  └─ prod.txt                 # Production optimizations
-└─ Makefile                    # �️ Service management commands
+└─ Makefile                    # ⚙️ Service management commands
 
 ---
 
@@ -274,8 +271,8 @@ volumes:
 
 ### Local Development
 ```bash
-# Start all services
-make dev-all
+# Start both services
+make dev
 
 # Or start individually
 make dev-platform    # Platform on :8700 (full Django)
@@ -313,7 +310,7 @@ make fixtures         # Load sample data via platform
 
 ### Service Communication
 - **Internal APIs**: <10ms latency between services in Docker network
-- **Authentication**: JWT tokens or API keys for service-to-service
+- **Authentication**: HMAC-signed headers (SHA-256) for service-to-service
 - **Rate Limiting**: Per-service and per-customer limits
 
 ### Health Monitoring

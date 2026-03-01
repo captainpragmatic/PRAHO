@@ -1,5 +1,13 @@
 # ADR-0024: User Model Design: is_staff vs admin_role
 
+**Status:** Superseded (not implemented)
+**Date:** 2025 (undated)
+**Authors:** Development Team
+
+> **⚠️ Note (March 2026):** This was an early proposal to rename `system_role` → `admin_role`.
+> Neither name was adopted. The actual User model field is **`staff_role`**
+> (see `services/platform/apps/users/models.py`). Retained as historical context.
+
 ## **🚨 Current Issue: Confusing Field Names**
 
 ### **Problem Analysis:**

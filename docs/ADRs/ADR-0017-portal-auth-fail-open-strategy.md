@@ -4,7 +4,7 @@
 **Date:** 2026-02-28
 **Authors:** Development Team
 **Supersedes:** N/A
-**Related:** ADR-004 (Custom 2FA Implementation), ADR-001 (Encryption Key Management), ADR-003 (Email Enumeration Prevention)
+**Related:** ADR-0004 (Custom 2FA Implementation), ADR-0018 (Django Encryption Key Management), ADR-0021 (Email Enumeration Prevention)
 
 ## Context
 

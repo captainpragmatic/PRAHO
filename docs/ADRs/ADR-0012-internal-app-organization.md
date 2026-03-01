@@ -762,7 +762,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -960,6 +960,6 @@ def assess_migration_performance():
 - Better separation of concerns (business logic in services)
 
 ## Related Decisions
-- [ADR-0011: Feature-Based Test Organization](ADR-0011-feature-based-test-organization.md)
+- [ADR-0011: Feature-Based Test Organization](ADR-0011-feature-based-test-organization.md) (same feature-based pattern for test files)
 - Builds on existing Django app structure decisions
 - Prepares for potential microservices transition if needed

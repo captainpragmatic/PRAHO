@@ -63,7 +63,7 @@ uv workspaces provide:
 #### 4. Python Version Management
 
 uv handles Python installation:
-- `.python-version` file specifies project Python version (3.11)
+- `.python-version` file specifies project Python version (3.13)
 - `uv python install` downloads and manages Python automatically
 - No more pyenv, asdf, or manual Python installation required
 
@@ -115,7 +115,7 @@ We chose the "Best" option: full workspace implementation.
 PRAHO/
 ├── pyproject.toml          # Workspace root with dependencies and groups
 ├── uv.lock                  # Single lockfile for all services
-├── .python-version          # Python 3.11
+├── .python-version          # Python 3.13
 ├── services/
 │   ├── platform/
 │   │   └── pyproject.toml  # Platform service package
@@ -149,7 +149,7 @@ uv sync --group portal --group dev
 1. **pyproject.toml (root):** Added dependencies, dependency-groups, and [tool.uv.workspace]
 2. **services/platform/pyproject.toml:** New workspace member config
 3. **services/portal/pyproject.toml:** New workspace member config
-4. **.python-version:** New file specifying Python 3.11
+4. **.python-version:** New file specifying Python 3.13
 5. **Makefile:** Updated to use `uv run` and `uv sync`
 6. **.github/workflows/*.yml:** Updated to use `astral-sh/setup-uv@v4`
 

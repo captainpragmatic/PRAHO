@@ -1,5 +1,16 @@
 # ADR-0023: Complete Database Schema - Hosting Provider Billing & Support System
 
+**Status:** Historical Reference
+**Date:** 2025 (pre-implementation)
+**Authors:** Development Team
+
+> **⚠️ Note (March 2026):** This schema was the initial design target before implementation.
+> Actual Django ORM models have diverged in several places — for example, order statuses
+> use `draft/pending/processing/completed/refunded` (not `pending/accepted/declined/needs_info`),
+> and the Product model uses `slug`/`product_type` (no `sku` column in ORM).
+> For the current schema, see `models.py` files under `services/platform/apps/`.
+> For architecture overview, see `docs/architecture/`.
+
 ## Overview
 PostgreSQL schema for a comprehensive hosting provider platform supporting billing, provisioning, support, and automation. Designed for Romanian/EU compliance with e-Factura, GDPR, and VAT requirements.
 
