@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.20.0] - 2026-03-01
+
 ### Added
 - **e-Factura integration**: Real ANAF API submission (`submit_invoice`), status polling (`check_status`), and XML download (`download_xml`) via `EFacturaClient`; simulated fallback in DEBUG mode when credentials are not configured
 - **Payment gateway**: `create_customer`, `charge`, and `create_subscription` methods on `BasePaymentGateway` and `StripeGateway`; `PaymentService.process_subscription_payment` orchestrates gateway customer creation, Stripe charge, and subscription record persistence
