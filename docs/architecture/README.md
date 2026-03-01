@@ -6,7 +6,7 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 
 ### 1. System Overview
 
-**File**: `system-overview.mmd`
+**File**: `diagrams/system-overview.mmd`
 
 **Purpose**: High-level view of all services, databases, and external integrations.
 
@@ -22,7 +22,7 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 
 ### 2. Data Flow
 
-**File**: `data-flow.mmd`
+**File**: `diagrams/data-flow.mmd`
 
 **Purpose**: Sequence diagram showing Portal ↔ Platform communication patterns.
 
@@ -38,7 +38,7 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 
 ### 3. Deployment Architecture
 
-**File**: `deployment.mmd`
+**File**: `diagrams/deployment.mmd`
 
 **Purpose**: Docker network topology and container layout.
 
@@ -54,7 +54,7 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 
 ### 4. App Dependencies
 
-**File**: `app-dependencies.mmd`
+**File**: `diagrams/app-dependencies.mmd`
 
 **Purpose**: Inter-app dependency graph showing how the 17 platform apps relate to each other.
 
@@ -69,7 +69,7 @@ This directory contains Mermaid diagrams documenting the PRAHO platform architec
 
 ### 5. Entity Relationships
 
-**File**: `entity-relationships.mmd`
+**File**: `diagrams/entity-relationships.mmd`
 
 **Purpose**: Database ER diagram showing core entities, key fields, and cardinality.
 
@@ -117,7 +117,7 @@ npm install -g @mermaid-js/mermaid-cli
 Render to PNG:
 
 ```bash
-mmdc -i system-overview.mmd -o system-overview.png
+mmdc -i diagrams/system-overview.mmd -o diagrams/system-overview.png
 ```
 
 ### Option 5: Generate PNGs (API-based)
@@ -125,7 +125,7 @@ mmdc -i system-overview.mmd -o system-overview.png
 Generate PNG images locally using [mermaid.ink](https://mermaid.ink) API (PNGs are gitignored):
 
 ```bash
-cd docs/architecture
+cd docs/architecture/diagrams
 
 # Regenerate all diagrams
 for diagram in *.mmd; do

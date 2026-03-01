@@ -5,11 +5,11 @@
 **Status:** ✅ Services Architecture Complete
 
 > **Note**: Architecture diagrams available in `docs/architecture/` (Mermaid format):
-> - `system-overview.mmd` - High-level service boundaries and data flow
-> - `data-flow.mmd` - Sequence diagram showing Portal ↔ Platform communication
-> - `deployment.mmd` - Docker network topology and security isolation
-> - `app-dependencies.mmd` - Inter-app dependency graph (17 platform apps, 4 tiers)
-> - `entity-relationships.mmd` - Database ER diagram (~20 core entities)
+> - `diagrams/system-overview.mmd` - High-level service boundaries and data flow
+> - `diagrams/data-flow.mmd` - Sequence diagram showing Portal ↔ Platform communication
+> - `diagrams/deployment.mmd` - Docker network topology and security isolation
+> - `diagrams/app-dependencies.mmd` - Inter-app dependency graph (17 platform apps, 4 tiers)
+> - `diagrams/entity-relationships.mmd` - Database ER diagram (~20 core entities)
 
 ## 🏗️ Architecture Overview
 

@@ -1,14 +1,14 @@
 # PRAHO Codebase Archaeology Report
 
-**Analysis Date:** 2025-12-27
+**Analysis Date:** March 1, 2026
 **Author:** PRAHO Development Team
-**Project Version:** 0.19.1 (Alpha)
+**Project Version:** 0.20.0 (Alpha)
 
 ---
 
 ## Executive Summary
 
-This archaeological analysis reveals a codebase undergoing rapid, intentional evolution over approximately 4 months (August 2025 - December 2025). The PRAHO platform shows evidence of at least **three distinct development eras** with clear architectural migrations, abandoned experiments, and cultural artifacts that reveal the team's evolving philosophy.
+This archaeological analysis reveals a codebase undergoing rapid, intentional evolution over approximately 7 months (August 2025 - March 2026). The PRAHO platform shows evidence of at least **four distinct development eras** with clear architectural migrations, abandoned experiments, and cultural artifacts that reveal the team's evolving philosophy.
 
 ---
 
@@ -77,6 +77,37 @@ This archaeological analysis reveals a codebase undergoing rapid, intentional ev
    - Rust-inspired `Ok()/Err()` pattern introduced
    - Multiple implementations coexist (proper `result` library vs. local `Result` class)
    - `virtualmin_auth_manager.py` has local Result implementation (line 24-60)
+
+---
+
+### Era 4: "Business Logic Maturity & Portal Buildout" (January - March 2026)
+**Evidence:** CHANGELOG, commit history, new ADRs
+
+**Major Events:**
+1. **VAT Architecture Consolidation** (v0.14.0-v0.15.0, Feb 2026)
+   - Eliminated all hardcoded `ROMANIAN_VAT_RATE` constants from business logic
+   - Centralized to `TaxService` with cache → DB → settings → defaults cascade (ADR-0015)
+   - Per-customer VAT overrides via `CustomerTaxProfile`
+
+2. **Billing System Implementation** (v0.19.0-v0.20.0, Feb-Mar 2026)
+   - 27 TODO stubs implemented in billing app (commit c341d403)
+   - Subscription service, payment processing, credit ledger
+   - RefundService integration with orders completed
+
+3. **Portal Service Buildout** (v0.18.0-v0.20.0, Feb 2026)
+   - E2E test suite for portal checkout flow
+   - Portal auth fail-open strategy documented (ADR-0017)
+   - HMAC-signed inter-service communication hardened
+
+4. **Security Hardening Sprint** (v0.19.1, Feb 28 2026)
+   - P1-P3 security audit findings addressed (commit 879e04e2)
+   - Race conditions in webhook/refund processing fixed
+   - Template injection and exception leak prevention
+
+5. **Documentation Restructuring** (v0.20.0, Mar 2026)
+   - docs/ reorganized into 7 domain folders
+   - 25 ADRs consolidated with consistent naming
+   - Fresh dependency analysis generated
 
 ---
 
@@ -181,17 +212,12 @@ def export_data(request: HttpRequest) -> HttpResponse:
 # from .paypal import PayPalWebhookProcessor  # TODO: Implement
 ```
 
-### 3. RefundService in Orders
-**Location:** `apps/orders/views.py:31, 594-601`
+### 3. RefundService in Orders — RESOLVED
+**Location:** `apps/orders/views.py`
 
-```python
-# TODO: RefundService implementation pending
-...
-# TODO: RefundService implementation pending - temporarily comment out refund functionality
-return json_error("Refund functionality temporarily disabled - RefundService implementation pending")
-```
+**Original State:** RefundService integration was pending with TODO stubs returning error messages ("Refund functionality temporarily disabled").
 
-**Note:** RefundService exists in billing app but integration with orders is incomplete.
+**Resolution:** RefundService was fully implemented in v0.20.0 (commit c341d403). The `orders/views.py` now properly imports and uses `RefundService.refund_order()`. The 27 billing TODO stubs were completed in the same release, including the refund pipeline.
 
 ---
 
@@ -321,34 +347,23 @@ def log_event(event_data: AuditEventData, context: AuditContext) -> AuditEvent:
 - **Session:** Redis → Database/Cookie
 - **Admin:** Django Admin → Custom HTMX interfaces
 - **Testing:** pytest → Django test runner (CI only)
+- **Package Manager:** pip/requirements.txt → uv workspace (ADR-0013)
+- **VAT Handling:** Hardcoded constants → TaxService cascade (ADR-0015)
 
 ---
 
 ## Architecture Decision Records (ADRs)
 
-14 ADRs document key decisions:
+25 ADRs (ADR-0001 through ADR-0025) document key decisions.
 
-| ADR | Topic | Date |
-|-----|-------|------|
-| 0001 | Django encryption key management | - |
-| 0002 | Strategic linting framework | - |
-| 0003 | Comprehensive type safety | - |
-| 0005 | Single constants file architecture | - |
-| 0006 | Security warning configuration | - |
-| 0007 | Function-level cross-app imports | - |
-| 0009 | Pragmatic mypy strategy | - |
-| 0010 | Django admin type annotations | - |
-| 0011 | Feature-based test organization | - |
-| **0012** | **Internal app organization** | 2025-01-02 |
-| 001 | Virtualmin automatic provisioning | - |
-| 004 | Custom 2FA implementation | - |
+See [ADR Index](../ADRs/README.md) for the complete list of 25 architecture decision records.
 
 ---
 
 ## Conclusions
 
 ### Development Velocity
-- ~100 commits in 4 months
+- ~100 commits in 7 months
 - Major architectural changes every 2-3 weeks
 - Active refactoring alongside feature development
 
