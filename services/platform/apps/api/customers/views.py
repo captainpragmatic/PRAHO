@@ -19,6 +19,7 @@ from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import require_customer_authentication
 from apps.customers.models import Customer
+from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
 
 from .serializers import (
@@ -152,10 +153,13 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
         if not queryset.filter(id=customer_id).exists():
             return Response({"error": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
-        # TODO: Implement actual service management
-        # For now, return empty services list
+        services = (
+            Service.objects.filter(customer_id=customer_id)
+            .select_related("service_plan")
+            .values("id", "service_name", "status", "domain", "service_plan__name", "created_at")
+        )
         logger.info(f"🔗 [API] Customer services requested for customer {customer_id}")
-        return Response([])  # Empty list for now
+        return Response(list(services))
 
 
 # ===============================================================================

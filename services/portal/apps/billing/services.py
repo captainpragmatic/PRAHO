@@ -276,7 +276,7 @@ class InvoiceViewService:
                 logger.error(f"🔥 [Payment Methods API] Failed to fetch: {response}")
                 return []
 
-            methods = response.get("payment_methods", [])
+            methods: list[dict[str, Any]] = response.get("payment_methods", [])
             logger.info(f"✅ [Payment Methods API] Retrieved {len(methods)} methods for customer {customer_id}")
             return methods
 

@@ -19,7 +19,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.efactura.b2c import B2CDetector, CNPValidator
@@ -27,6 +27,7 @@ from apps.billing.efactura.quota import ANAFQuotaTracker, QuotaEndpoint
 from apps.billing.efactura.settings import EFacturaSettings, VATCategory, VATRateConfig
 from apps.billing.efactura.token_storage import OAuthToken, TokenStorageService
 from apps.billing.efactura.xsd_validator import CanonicalXMLGenerator, XSDValidator
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class XMLInjectionTestCase(TestCase):
@@ -226,6 +227,7 @@ class TokenSecurityTestCase(TestCase):
         self.assertIsNone(token)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class RateLimitBypassTestCase(TestCase):
     """Test rate limit bypass attempts."""
 
@@ -400,8 +402,9 @@ class B2CSecurityTestCase(TestCase):
         self.assertEqual(result.customer_name, "<script>alert('xss')</script>")
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class ConcurrencyTestCase(TestCase):
-    """Test concurrent access scenarios."""
+    """Test concurrent access scenarios — needs real cache for quota counting."""
 
     def setUp(self):
         cache.clear()

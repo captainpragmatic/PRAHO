@@ -4,7 +4,7 @@
 
 import logging
 
-from django.db.models import Prefetch, Q
+from django.db.models import Avg, Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.utils import timezone
 from rest_framework import status
@@ -512,13 +512,26 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
         pending_tickets = tickets_qs.filter(status="pending").count()
         resolved_tickets = tickets_qs.filter(status__in=["resolved", "closed"]).count()
 
-        # Calculate average response time (for tickets with first response)
-        # TODO: SQLite doesn't support Avg() on datetime fields - implement manual calculation later
-        average_response_time_hours = 0.0
+        # Calculate average response time via Python (SQLite can't Avg() on datetime)
+        staff_replied_tickets = tickets_qs.filter(comments__comment_type="support").distinct()[:100]
+        response_deltas: list[float] = []
+        for ticket in staff_replied_tickets:
+            first_staff_comment = (
+                TicketComment.objects.filter(ticket=ticket, comment_type="support")
+                .order_by("created_at")
+                .values_list("created_at", flat=True)
+                .first()
+            )
+            if first_staff_comment:
+                delta_hours = (first_staff_comment - ticket.created_at).total_seconds() / 3600
+                response_deltas.append(delta_hours)
+        average_response_time_hours = sum(response_deltas) / len(response_deltas) if response_deltas else 0.0
 
-        # Calculate satisfaction rating - temporarily disabled for SQLite compatibility
-        # TODO: Re-enable when SQLite aggregation issues are resolved
-        satisfaction_rating = 0.0
+        # Calculate average satisfaction rating (numeric field works fine on SQLite)
+        satisfaction_result = tickets_qs.exclude(satisfaction_rating__isnull=True).aggregate(
+            avg_rating=Avg("satisfaction_rating")
+        )
+        satisfaction_rating = satisfaction_result["avg_rating"] or 0.0
 
         # Get recent tickets (last 5)
         recent_tickets = (

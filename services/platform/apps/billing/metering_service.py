@@ -954,13 +954,29 @@ class UsageAlertService:
         # Send email notification
         if threshold.notify_customer:
             try:
-                # TODO: Implement actual email sending
-                # For now, just log
-                logger.info(
-                    f"Would send usage alert email to {alert.customer.primary_email}: "
-                    f"{threshold.meter.display_name} at {alert.usage_value}"
+                from apps.notifications.services import EmailService  # noqa: PLC0415
+
+                email_result = EmailService.send_template_email(
+                    template_key="usage_alert",
+                    recipient=alert.customer.primary_email,
+                    context={
+                        "customer_name": alert.customer.name or alert.customer.primary_email,
+                        "meter_name": threshold.meter.display_name,
+                        "usage_value": str(alert.usage_value),
+                        "threshold_value": str(threshold.threshold_value),
+                        "threshold_type": threshold.threshold_type,
+                        "usage_percentage": f"{alert.usage_percentage:.0f}%" if alert.usage_percentage else "N/A",
+                    },
                 )
-                alert.mark_sent("email")
+                if email_result.success:
+                    alert.mark_sent("email")
+                    logger.info(
+                        f"📧 [Alert] Sent usage alert to {alert.customer.primary_email}: "
+                        f"{threshold.meter.display_name} at {alert.usage_value}"
+                    )
+                else:
+                    alert.mark_failed(email_result.error or "Email send failed")
+                    return Result.err(f"Failed to send notification: {email_result.error}")
             except Exception as e:
                 alert.mark_failed(str(e))
                 return Result.err(f"Failed to send notification: {e}")

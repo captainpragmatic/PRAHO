@@ -30,6 +30,7 @@ from apps.audit.file_integrity_service import (
     FileSeverity,
     FIMConfig,
 )
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class FileMetadataTests(TestCase):
@@ -131,6 +132,7 @@ class FIMConfigTests(TestCase):
         self.assertEqual(config.include_patterns, ["*.txt"])
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class FileIntegrityMonitoringServiceTests(TestCase):
     """Tests for FileIntegrityMonitoringService."""
 
@@ -354,9 +356,9 @@ class IntegrityTasksTests(TestCase):
         self, mock_verify: MagicMock
     ) -> None:
         """Test that task calls integrity service."""
+        from apps.audit.models import AuditIntegrityCheck
         from apps.audit.tasks import run_integrity_check
         from apps.common.types import Ok
-        from apps.audit.models import AuditIntegrityCheck
 
         # Mock successful check
         mock_check = MagicMock(spec=AuditIntegrityCheck)
@@ -381,9 +383,9 @@ class IntegrityTasksTests(TestCase):
         self, mock_verify: MagicMock
     ) -> None:
         """Test that 'all' check type runs multiple checks."""
+        from apps.audit.models import AuditIntegrityCheck
         from apps.audit.tasks import run_integrity_check
         from apps.common.types import Ok
-        from apps.audit.models import AuditIntegrityCheck
 
         mock_check = MagicMock(spec=AuditIntegrityCheck)
         mock_check.status = "healthy"

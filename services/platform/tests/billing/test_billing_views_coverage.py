@@ -1430,12 +1430,13 @@ class ApiProcessRefundTest(BillingViewsTestBase):
     def _post_json(self, url, data):
         return self.client.post(url, json.dumps(data), content_type="application/json")
 
-    def test_process_refund_not_implemented(self):
+    def test_process_refund_invalid_payment_id(self):
+        """Refund with invalid payment ID format returns 400"""
         response = self._post_json(
             "/billing/process-refund/",
             {"payment_id": "pay_123", "amount_cents": 1000, "reason": "Test"},
         )
-        self.assertEqual(response.status_code, 501)
+        self.assertEqual(response.status_code, 400)
 
     def test_process_refund_missing_payment_id(self):
         response = self._post_json(

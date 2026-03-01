@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 
+# Payment methods that support gateway refunds — add new gateways here
+GATEWAY_PAYMENT_METHODS: frozenset[str] = frozenset({"stripe"})
+
+
 class PaymentIntentResult(TypedDict):
     """Result from payment intent creation"""
 
@@ -42,6 +46,16 @@ class SubscriptionResult(TypedDict):
     success: bool
     subscription_id: str | None
     status: str | None
+    error: str | None
+
+
+class RefundResult(TypedDict):
+    """Result from payment refund"""
+
+    success: bool
+    refund_id: str | None
+    amount_refunded_cents: int
+    status: str
     error: str | None
 
 
@@ -130,6 +144,25 @@ class BasePaymentGateway(ABC):
 
         Returns:
             True if cancelled successfully
+        """
+
+    @abstractmethod
+    def refund_payment(
+        self,
+        gateway_txn_id: str,
+        amount_cents: int | None = None,
+        reason: str = "requested_by_customer",
+    ) -> RefundResult:
+        """
+        Refund a payment via the gateway.
+
+        Args:
+            gateway_txn_id: Gateway transaction/payment intent ID
+            amount_cents: Amount to refund in cents (None = full refund)
+            reason: Refund reason code
+
+        Returns:
+            RefundResult with success status and refund details
         """
 
     @abstractmethod

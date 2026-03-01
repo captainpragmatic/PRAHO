@@ -17,11 +17,10 @@ This file serves as a re-export hub following ADR-0012 feature-based organizatio
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 # Re-export all services from feature files
-# TODO: RefundService implementation pending - temporarily comment out
-# TODO: Add RefundService imports when implemented
 # ===============================================================================
 # RESULT PATTERN FOR REFUND OPERATIONS
 # ===============================================================================
@@ -195,41 +194,184 @@ class InvoiceService:
             return Result.err(f"Failed to create invoice from order: {e!s}")
 
 
-# Missing services that need to be created/imported
+_services_logger = logging.getLogger(__name__)
+
+
 class PaymentRetryService:
-    """Placeholder for payment retry functionality"""
+    """Schedule payment retries using dunning policies."""
 
     @staticmethod
     def retry_payment(payment_id: str) -> Result[bool, str]:
-        # TODO: Implement payment retry logic
+        """Find customer's retry policy and schedule a PaymentRetryAttempt."""
+        from django.utils import timezone as tz  # noqa: PLC0415
+
+        from apps.billing.models import Payment  # noqa: PLC0415
+        from apps.billing.payment_models import PaymentRetryAttempt, PaymentRetryPolicy  # noqa: PLC0415
+
+        try:
+            payment = Payment.objects.select_related("customer").get(id=payment_id)
+        except Payment.DoesNotExist:
+            return Result.err(f"Payment not found: {payment_id}")
+
+        if payment.status == "succeeded":
+            return Result.ok(True)  # Already succeeded
+
+        # Find applicable retry policy (customer-specific or default)
+        policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
+        if not policy:
+            _services_logger.warning(f"⚠️ [Retry] No active retry policy for payment {payment_id}")
+            return Result.err("No retry policy configured")
+
+        # Check if max attempts reached
+        existing_attempts = PaymentRetryAttempt.objects.filter(payment=payment).count()
+        if existing_attempts >= policy.max_attempts:
+            return Result.err(f"Max retry attempts ({policy.max_attempts}) reached")
+
+        # Schedule next retry
+        next_retry_date = policy.get_next_retry_date(tz.now(), existing_attempts)
+        if not next_retry_date:
+            return Result.err("No more retry dates available")
+
+        PaymentRetryAttempt.objects.create(
+            payment=payment,
+            policy=policy,
+            attempt_number=existing_attempts + 1,
+            scheduled_at=next_retry_date,
+            status="pending",
+        )
+        _services_logger.info(
+            f"✅ [Retry] Scheduled retry #{existing_attempts + 1} for payment {payment_id} at {next_retry_date}"
+        )
         return Result.ok(True)
 
 
 class EFacturaService:
-    """Placeholder for e-Factura integration"""
+    """Delegate to real EFacturaSubmissionService."""
 
     @staticmethod
     def submit_invoice(invoice_id: str) -> Result[bool, str]:
-        # TODO: Implement e-Factura submission
-        return Result.ok(True)
+        """Submit invoice to ANAF e-Factura via EFacturaSubmissionService."""
+        from apps.billing.efactura_service import EFacturaSubmissionService  # noqa: PLC0415
+        from apps.billing.models import Invoice as InvoiceModel  # noqa: PLC0415
+
+        try:
+            invoice = InvoiceModel.objects.get(id=invoice_id)
+        except InvoiceModel.DoesNotExist:
+            return Result.err(f"Invoice not found: {invoice_id}")
+
+        service = EFacturaSubmissionService()
+        result = service.submit_invoice(invoice)
+        if result.success:
+            _services_logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number}")
+            return Result.ok(True)
+        return Result.err(result.message or "e-Factura submission failed")
 
 
 class InvoiceNumberingService:
-    """Placeholder for invoice numbering"""
+    """Generate sequential invoice numbers using InvoiceSequence."""
 
     @staticmethod
-    def get_next_number() -> str:
-        # TODO: Implement proper numbering
-        return "INV-001"
+    def get_next_number(prefix: str = "INV", scope: str = "default") -> str:
+        """Get next invoice number from atomic sequence."""
+        sequence, _ = InvoiceSequence.objects.get_or_create(scope=scope)
+        return sequence.get_next_number(prefix)
 
 
 class ProformaConversionService:
-    """Placeholder for proforma to invoice conversion"""
+    """Convert proforma invoices to real invoices."""
 
     @staticmethod
-    def convert_to_invoice(proforma_id: str) -> Result[bool, str]:
-        # TODO: Implement conversion logic
-        return Result.ok(True)
+    def convert_to_invoice(proforma_id: str) -> Result[Any, str]:
+        """Convert a proforma to a real invoice with tax recalculation."""
+        from django.db import transaction  # noqa: PLC0415
+        from django.utils import timezone as tz  # noqa: PLC0415
+
+        from apps.billing.models import ProformaInvoice  # noqa: PLC0415
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
+
+        try:
+            proforma = ProformaInvoice.objects.select_related("customer", "currency").get(id=proforma_id)
+        except ProformaInvoice.DoesNotExist:
+            return Result.err(f"Proforma not found: {proforma_id}")
+
+        if proforma.status not in ("draft", "issued"):
+            return Result.err(f"Proforma {proforma.number} cannot be converted (status: {proforma.status})")
+
+        try:
+            with transaction.atomic():
+                # Get invoice sequence
+                sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
+                currency = proforma.currency
+
+                if not currency:
+                    from apps.billing.currency_models import Currency as CurrencyModel  # noqa: PLC0415
+
+                    currency, _ = CurrencyModel.objects.get_or_create(
+                        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
+                    )
+
+                # Recalculate tax
+                vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
+                subtotal_cents = proforma.subtotal_cents or 0
+                tax_cents = int(Decimal(subtotal_cents) * vat_rate)
+                total_cents = subtotal_cents + tax_cents
+
+                invoice = Invoice.objects.create(
+                    customer=proforma.customer,
+                    number=sequence.get_next_number("INV"),
+                    currency=currency,
+                    subtotal_cents=subtotal_cents,
+                    tax_cents=tax_cents,
+                    total_cents=total_cents,
+                    status="issued",
+                    issued_at=tz.now(),
+                    bill_to_name=proforma.bill_to_name or "",
+                    bill_to_email=proforma.bill_to_email or "",
+                    bill_to_tax_id=getattr(proforma, "bill_to_tax_id", "") or "",
+                    bill_to_address1=getattr(proforma, "bill_to_address1", "") or "",
+                    bill_to_city=getattr(proforma, "bill_to_city", "") or "",
+                    bill_to_country=getattr(proforma, "bill_to_country", "RO") or "RO",
+                    meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
+                )
+
+                # Copy line items
+                for line in proforma.lines.all():
+                    InvoiceLine.objects.create(
+                        invoice=invoice,
+                        kind="service",
+                        description=line.description,
+                        quantity=line.quantity,
+                        unit_price_cents=line.unit_price_cents,
+                        line_total_cents=line.line_total_cents,
+                    )
+
+                # Update proforma status
+                proforma.status = "converted"
+                proforma.meta = {
+                    **(proforma.meta or {}),
+                    "invoice_id": str(invoice.id),
+                    "invoice_number": invoice.number,
+                }
+                proforma.save(update_fields=["status", "meta"])
+
+                log_security_event(
+                    event_type="proforma_converted_to_invoice",
+                    details={
+                        "proforma_id": str(proforma.id),
+                        "proforma_number": proforma.number,
+                        "invoice_id": str(invoice.id),
+                        "invoice_number": invoice.number,
+                        "total_cents": total_cents,
+                        "critical_financial_operation": True,
+                    },
+                )
+
+                _services_logger.info(f"✅ [Conversion] Proforma {proforma.number} → Invoice {invoice.number}")
+                return Result.ok(invoice)
+
+        except Exception as e:
+            _services_logger.error(f"🔥 [Conversion] Failed to convert proforma {proforma_id}: {e}")
+            return Result.err(f"Conversion failed: {e!s}")
 
 
 # Expose all services in __all__ for explicit imports

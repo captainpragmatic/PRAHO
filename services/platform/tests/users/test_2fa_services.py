@@ -18,21 +18,15 @@ from unittest.mock import patch
 import pyotp
 from django.contrib.auth import get_user_model
 
-from apps.common.request_ip import get_safe_client_ip
 from django.contrib.sessions.backends.db import SessionStore
-
-from apps.common.request_ip import get_safe_client_ip
 from django.core.cache import cache
-
-from apps.common.request_ip import get_safe_client_ip
-from django.test import RequestFactory, TestCase
-
-from apps.common.request_ip import get_safe_client_ip
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
-from apps.common.request_ip import get_safe_client_ip
+from config.settings.test import LOCMEM_TEST_CACHE
 
 from apps.audit.models import AuditEvent
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,
@@ -151,6 +145,7 @@ class WebAuthnCredentialModelTestCase(TestCase):
         )
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class TOTPServiceTestCase(TestCase):
     """🔐 Test TOTP (Time-based One-Time Password) service"""
 
@@ -442,10 +437,12 @@ class WebAuthnServiceTestCase(TestCase):
         self.assertFalse(result)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class MFAServiceTestCase(TestCase):
     """🔐 Test main MFA service orchestration"""
 
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(
             email='test@example.com',
             password='testpass123',
@@ -747,6 +744,7 @@ class MFAServiceTestCase(TestCase):
         self.assertIn('backup_codes', methods)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class MFASecurityTestCase(TestCase):
     """🔐 Test MFA security scenarios and edge cases"""
 
@@ -898,6 +896,7 @@ class MFASecurityTestCase(TestCase):
 
 
 # Integration test for full MFA workflow
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class MFAIntegrationTestCase(TestCase):
     """🔐 Test complete MFA workflows"""
 

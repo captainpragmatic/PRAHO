@@ -1646,12 +1646,23 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
 
                 efactura_doc = getattr(invoice, "efactura_document", None)
                 if efactura_doc and efactura_doc.status == EFacturaStatus.ACCEPTED.value:
-                    # TODO: Generate credit note for refund (requires credit note builder)
-                    # For now, log that a credit note should be generated
-                    logger.info(
-                        f"🏛️ [e-Factura] Invoice {invoice.number} was refunded - "
-                        f"credit note should be generated for e-Factura compliance"
-                    )
+                    # Generate credit note XML via UBLCreditNoteBuilder
+                    try:
+                        from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder
+
+                        builder = UBLCreditNoteBuilder(invoice, original_invoice=invoice)
+                        credit_note_xml = builder.build()
+
+                        # Store as EFacturaDocument for later submission
+                        EFacturaDocument.objects.create(
+                            invoice=invoice,
+                            document_type="credit_note",
+                            xml_content=credit_note_xml,
+                            status=EFacturaStatus.DRAFT.value,
+                        )
+                        logger.info(f"✅ [e-Factura] Credit note generated for refunded invoice {invoice.number}")
+                    except Exception as cn_err:
+                        logger.error(f"🔥 [e-Factura] Failed to generate credit note for {invoice.number}: {cn_err}")
 
                     # Log compliance event
                     compliance_request = ComplianceEventRequest(

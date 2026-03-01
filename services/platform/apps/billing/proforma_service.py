@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.utils.translation import gettext as _t
+
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -24,20 +26,37 @@ logger = logging.getLogger(__name__)
 
 
 def generate_proforma_pdf(proforma: Any) -> bytes:  # ProformaInvoice type would create circular import
-    """Generate PDF for a proforma invoice"""
+    """Generate PDF for a proforma invoice using the ReportLab generator."""
     logger.info(f"📄 [PDF] Generating PDF for proforma {proforma.number}")
-    # TODO: Implement actual PDF generation
-    return b"Mock PDF content for proforma"
+    from apps.billing.pdf_generators import generate_proforma_pdf as _generate_pdf  # noqa: PLC0415
+
+    return _generate_pdf(proforma)
 
 
 def send_proforma_email(
     proforma: Any, recipient_email: str | None = None
 ) -> bool:  # ProformaInvoice type would create circular import
-    """Send proforma invoice via email"""
+    """Send proforma invoice via email with PDF attachment."""
+    from apps.notifications.services import EmailService  # noqa: PLC0415
+
     email = recipient_email or proforma.customer.primary_email
     logger.info(f"📧 [Email] Sending proforma {proforma.number} to {email}")
-    # TODO: Implement actual email sending
-    return True
+    try:
+        pdf_bytes = generate_proforma_pdf(proforma)
+        email_result = EmailService.send_email(
+            to=email,
+            subject=_t("Proforma Invoice %(number)s") % {"number": proforma.number},
+            body_text=_t("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
+            attachments=[(f"proforma_{proforma.number}.pdf", pdf_bytes, "application/pdf")],
+        )
+        if not email_result.success:
+            logger.error(f"🔥 [Email] Proforma {proforma.number} send failed: {email_result.error}")
+            return False
+        logger.info(f"✅ [Email] Proforma {proforma.number} sent to {email}")
+        return True
+    except Exception as exc:
+        logger.error(f"🔥 [Email] Failed to send proforma {proforma.number}: {exc}")
+        return False
 
 
 # ===============================================================================

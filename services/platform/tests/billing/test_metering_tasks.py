@@ -54,8 +54,8 @@ class UpdateAggregationForEventTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -189,8 +189,8 @@ class BillingCycleTasksTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -262,8 +262,8 @@ class RatePendingAggregationsTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -372,8 +372,8 @@ class AlertTasksTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -464,8 +464,8 @@ class StripeSyncTasksTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",

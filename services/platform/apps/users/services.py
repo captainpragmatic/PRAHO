@@ -29,6 +29,7 @@ from apps.common.constants import (
     MIN_RESPONSE_TIME_SECONDS,
 )
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.ro_counties import detect_county
 from apps.common.security_decorators import secure_invitation_system, secure_user_registration
 from apps.common.types import (
     CUIString,
@@ -246,7 +247,7 @@ class SecureUserRegistrationService:
                 address_line1=customer_data.get("billing_address", ""),  # Sanitized
                 city=customer_data.get("billing_city", ""),  # Sanitized
                 postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
-                county="",  # TODO: Auto-detect from city
+                county=detect_county(customer_data.get("billing_city", "")),
                 country="România",
                 is_current=True,
             )

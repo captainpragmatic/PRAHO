@@ -77,7 +77,7 @@ class ScanStats(TypedDict):
     rejection_reasons: dict[str, int]
 
 
-class FileSecurityScanner:
+class TicketAttachmentSecurityScanner:
     """
     🔒 Comprehensive file security scanner for ticket attachments
 
@@ -138,7 +138,7 @@ class FileSecurityScanner:
             if not self._validate_file_content(uploaded_file):
                 return self._reject_file("Suspicious content patterns detected", filename)
 
-            # TODO: Step 7: Optional: integrate ClamAV scanning behind a feature flag
+            # Future: ClamAV scanning (requires clamd daemon)
 
             # File passed all security checks
             logger.info(f"✅ [Ticket Security] File security scan passed: {filename}")

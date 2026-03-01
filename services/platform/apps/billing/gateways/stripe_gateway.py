@@ -14,6 +14,7 @@ from .base import (
     PaymentConfirmResult,
     PaymentGatewayFactory,
     PaymentIntentResult,
+    RefundResult,
     SubscriptionResult,
 )
 
@@ -237,6 +238,51 @@ class StripeGateway(BasePaymentGateway):
         except Exception as e:
             self.logger.error(f"🔥 Unexpected error creating subscription: {e}")
             return SubscriptionResult(success=False, subscription_id=None, status=None, error=f"Unexpected error: {e}")
+
+    def refund_payment(
+        self,
+        gateway_txn_id: str,
+        amount_cents: int | None = None,
+        reason: str = "requested_by_customer",
+    ) -> RefundResult:
+        """
+        Create a Stripe Refund for a PaymentIntent.
+
+        Args:
+            gateway_txn_id: Stripe PaymentIntent ID (pi_...)
+            amount_cents: Partial refund amount (None = full refund)
+            reason: Stripe reason code (requested_by_customer, duplicate, fraudulent)
+
+        Returns:
+            RefundResult with refund details
+        """
+        try:
+            params: dict[str, Any] = {"payment_intent": gateway_txn_id, "reason": reason}
+            if amount_cents is not None:
+                params["amount"] = amount_cents
+
+            refund = self._stripe.Refund.create(**params)
+
+            self.logger.info(
+                f"✅ Stripe refund {refund.id} for {gateway_txn_id}: " f"{refund.amount} cents, status={refund.status}"
+            )
+
+            return RefundResult(
+                success=refund.status in ("succeeded", "pending"),
+                refund_id=refund.id,
+                amount_refunded_cents=refund.amount,
+                status=refund.status,
+                error=None,
+            )
+
+        except self._stripe.error.StripeError as e:
+            self.logger.error(f"🔥 Stripe refund failed for {gateway_txn_id}: {e}")
+            return RefundResult(success=False, refund_id=None, amount_refunded_cents=0, status="error", error=str(e))
+        except Exception as e:
+            self.logger.error(f"🔥 Unexpected refund error for {gateway_txn_id}: {e}")
+            return RefundResult(
+                success=False, refund_id=None, amount_refunded_cents=0, status="error", error=f"Unexpected error: {e}"
+            )
 
     def cancel_subscription(self, subscription_id: str) -> bool:
         """

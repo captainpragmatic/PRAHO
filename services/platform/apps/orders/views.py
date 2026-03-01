@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q, QuerySet
@@ -27,11 +28,11 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
 from apps.billing.models import Currency
-
-# TODO: RefundService implementation pending
+from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
+from apps.common.validators import log_security_event
 from apps.customers.models import Customer
 from apps.products.models import Product
 from apps.tickets.models import SupportCategory, Ticket
@@ -773,8 +774,38 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         return redirect("orders:order_detail", pk=pk)
 
     if request.method == "POST":
-        # TODO: Implement order editing form processing
-        messages.info(request, _("Order editing form processing will be implemented next."))
+        # Determine which fields to process
+        if editable_fields == ["*"]:
+            valid_field_names = {f.name for f in Order._meta.get_fields() if hasattr(f, "column")}
+            fields_to_update = [k for k in request.POST if k in valid_field_names]
+        else:
+            fields_to_update = [k for k in request.POST if k in editable_fields]
+
+        updated_fields: list[str] = []
+        for field_name in fields_to_update:
+            value = request.POST.get(field_name)
+            setattr(order, field_name, value)
+            updated_fields.append(field_name)
+
+        if updated_fields:
+            try:
+                order.full_clean()
+            except ValidationError as e:
+                for field, errors in e.message_dict.items():
+                    for error in errors:
+                        messages.error(request, f"❌ {field}: {error}")
+                return redirect("orders:order_edit", pk=pk)
+
+            order.save(update_fields=updated_fields)
+            log_security_event(
+                event_type="order_edit",
+                details={"order": order.order_number, "fields": updated_fields},
+                user_email=getattr(request.user, "email", None),
+            )
+            messages.success(request, _("✅ Order updated successfully."))
+        else:
+            messages.info(request, _("No changes were made."))
+
         return redirect("orders:order_detail", pk=pk)
 
     context = {
@@ -862,14 +893,41 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return redirect("orders:order_detail", pk=pk)
 
 
-# TODO: RefundService implementation pending - temporarily comment out refund functionality
 @staff_required_strict
 @require_POST
 def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
-    💰 Refund an order (bidirectional with invoice refunds) - TEMPORARILY DISABLED
+    💰 Refund an order (bidirectional with invoice refunds)
     """
-    return json_error("Refund functionality temporarily disabled - RefundService implementation pending")
+    order = get_object_or_404(Order, id=pk)
+
+    if not isinstance(request.user, User) or not request.user.can_access_customer(order.customer):
+        return json_error("Access denied")
+
+    refund_data: RefundData = {
+        "refund_type": request.POST.get("refund_type", "full"),
+        "reason": request.POST.get("reason", ""),
+    }
+    amount_cents = request.POST.get("amount_cents")
+    if amount_cents:
+        refund_data["amount_cents"] = int(amount_cents)
+    else:
+        refund_data["amount_cents"] = order.total_cents
+
+    refund_data["user_id"] = str(request.user.id)
+    refund_data["user_email"] = request.user.email
+
+    result = RefundService.refund_order(str(order.id), refund_data)
+
+    if result.is_ok():
+        log_security_event(
+            event_type="order_refund",
+            details={"order": order.order_number, "refund_type": refund_data.get("refund_type")},
+            user_email=getattr(request.user, "email", None),
+        )
+        return json_success("Refund processed successfully")
+    else:
+        return json_error(result.error)
 
 
 @login_required

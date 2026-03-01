@@ -728,21 +728,21 @@ class PlatformAPIClient:
             # Restore original base URL
             self.base_url = original_base
 
-    def get_invoices(self, customer_id: str, user_id: str) -> list:
+    def get_invoices(self, customer_id: str, user_id: str) -> dict[str, Any]:
         """Get invoices for a customer."""
-        return self.get_billing(f"invoices/{customer_id}/", user_id=user_id)
+        return self.get_billing(f"invoices/{customer_id}/", user_id=int(user_id))
 
-    def get_invoice_detail(self, invoice_id: int, user_id: str) -> dict:
+    def get_invoice_detail(self, invoice_id: int, user_id: str) -> dict[str, Any]:
         """Get invoice detail."""
-        return self.get_billing(f"invoices/detail/{invoice_id}/", user_id=user_id)
+        return self.get_billing(f"invoices/detail/{invoice_id}/", user_id=int(user_id))
 
     def get_invoice_pdf(self, invoice_id: int, user_id: str) -> bytes:
         """Download invoice PDF."""
         return self._make_binary_request("POST", f"/api/billing/invoices/{invoice_id}/pdf/", data={"user_id": user_id})
 
-    def get_payment_methods(self, customer_id: str, user_id: str) -> list:
+    def get_payment_methods(self, customer_id: str, user_id: str) -> dict[str, Any]:
         """Get payment methods for a customer."""
-        return self.get_billing(f"payment-methods/{customer_id}/", user_id=user_id)
+        return self.get_billing(f"payment-methods/{customer_id}/", user_id=int(user_id))
 
     def process_refund(  # noqa: PLR0913
         self,
@@ -752,7 +752,7 @@ class PlatformAPIClient:
         reason: str = "",
         user_id: str = "",
         refund_type: str = "full",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Process a refund for an invoice or order."""
         data: dict[str, Any] = {"reason": reason, "user_id": user_id, "refund_type": refund_type}
         if invoice_id:
@@ -763,11 +763,11 @@ class PlatformAPIClient:
             data["amount_cents"] = amount_cents
         return self.post_billing("process-refund/", data=data)
 
-    def get_subscriptions(self, customer_id: str, user_id: str) -> list:
+    def get_subscriptions(self, customer_id: str, user_id: str) -> dict[str, Any]:
         """Get subscriptions for a customer."""
-        return self.get_billing(f"subscriptions/{customer_id}/", user_id=user_id)
+        return self.get_billing(f"subscriptions/{customer_id}/", user_id=int(user_id))
 
-    def cancel_subscription(self, subscription_id: int, reason: str = "", user_id: str = "") -> dict:
+    def cancel_subscription(self, subscription_id: int, reason: str = "", user_id: str = "") -> dict[str, Any]:
         """Cancel a subscription."""
         return self.post_billing(
             f"subscriptions/{subscription_id}/cancel/",
@@ -780,7 +780,7 @@ class PlatformAPIClient:
         price_id: str,
         billing_cycle: str = "monthly",
         user_id: int | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Create a subscription for a customer."""
         return self.post_billing(
             "create-subscription/",

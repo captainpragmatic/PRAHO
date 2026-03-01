@@ -242,9 +242,12 @@ class ProformaInvoice(models.Model):
         )
 
     def convert_to_invoice(self) -> None:
-        """Convert this proforma to an actual invoice"""
-        # Will implement this method in business logic
-        # Explicit pass for clarity
+        """Convert this proforma to an actual invoice via ProformaConversionService."""
+        from apps.billing.services import ProformaConversionService  # noqa: PLC0415
+
+        result = ProformaConversionService.convert_to_invoice(str(self.id))
+        if result.is_err():
+            raise ValueError(f"Conversion failed: {result.unwrap_err()}")
 
 
 class ProformaLine(models.Model):

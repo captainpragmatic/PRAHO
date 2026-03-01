@@ -386,7 +386,7 @@ class Command(BaseCommand):
             "node_deployment.default_region": "Region code like fsn1 (Hetzner Falkenstein), nyc1, etc.",
             "node_deployment.default_environment": "Use prd for production, stg for staging, dev for development.",
             "node_deployment.backup_enabled": "Recommended. Configures daily Virtualmin backups on new nodes.",
-            "node_deployment.backup_storage": "Local: disk on node. S3: external (requires S3 bucket, TODO).",
+            "node_deployment.backup_storage": "Local: disk on node. S3: external (requires S3 bucket configuration).",
             "node_deployment.backup_retention_days": "Older backups are automatically deleted.",
             "node_deployment.backup_schedule": "Cron format. Default: 0 2 * * * (daily at 2 AM).",
             "node_deployment.timeout_terraform_apply": "Increase for slow networks. Default 10 minutes.",

@@ -349,9 +349,27 @@ class PaymentService:
             # Get payment gateway
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
 
-            # TODO: Get or create gateway customer ID
-            # For now, using PRAHO customer ID as placeholder
-            gateway_customer_id = f"cus_praho_{customer_id}"
+            # Get or create Stripe customer ID from customer meta
+            customer_meta = customer.meta if hasattr(customer, "meta") and customer.meta else {}
+            gateway_customer_id = customer_meta.get("stripe_customer_id", "")
+            if not gateway_customer_id:
+                # Create Stripe customer via gateway
+                try:
+                    stripe_gateway = PaymentGatewayFactory.create_gateway(gateway)
+                    if hasattr(stripe_gateway, "_stripe"):
+                        stripe_customer = stripe_gateway._stripe.Customer.create(
+                            email=customer.primary_email or "",
+                            name=customer.name or "",
+                            metadata={"praho_customer_id": str(customer.id)},
+                        )
+                        gateway_customer_id = stripe_customer.id
+                        # Store for future use; cast to Any to satisfy mypy for dynamic JSONField
+                        customer_any: Any = customer
+                        customer_any.meta = {**customer_meta, "stripe_customer_id": gateway_customer_id}
+                        customer.save(update_fields=["meta"])
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not create Stripe customer: {e}")
+                    gateway_customer_id = f"cus_praho_{customer_id}"
 
             # Prepare metadata
             subscription_metadata = {
@@ -367,8 +385,26 @@ class PaymentService:
             )
 
             if result.get("success", False):
-                # TODO: Create subscription record in database
+                # Create local Subscription record linked to gateway subscription
                 subscription_id = result.get("subscription_id", "unknown")
+                try:
+                    from apps.billing.subscription_service import SubscriptionService  # noqa: PLC0415
+
+                    latest_sub = customer.subscriptions.first() if customer.subscriptions.exists() else None
+                    if latest_sub is not None:
+                        sub_result = SubscriptionService.create_subscription(
+                            customer=customer,
+                            product=latest_sub.product,
+                            data={
+                                "billing_cycle": "monthly",
+                                "payment_method_id": price_id,
+                                "metadata": {"gateway_subscription_id": subscription_id, "gateway": gateway},
+                            },
+                        )
+                        if sub_result.is_err():
+                            logger.warning(f"⚠️ Could not create local subscription record: {sub_result.unwrap_err()}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not create local subscription record: {e}")
                 logger.info(f"✅ Created subscription {subscription_id} " f"for customer {customer.name}")
 
                 log_security_event(
@@ -462,7 +498,22 @@ class PaymentService:
                     },
                 )
 
-                # TODO: Trigger order completion workflow
+                # Trigger order completion workflow
+                order_id = (payment.meta or {}).get("order_id")
+                if order_id:
+                    try:
+                        order = Order.objects.get(id=order_id)
+                        if order.status in ("pending", "processing"):
+                            order.status = "completed"
+                            order.save(update_fields=["status"])
+                            logger.info(f"✅ Order {order.order_number} completed after payment")
+                            # Send confirmation email
+                            from apps.notifications.services import EmailService  # noqa: PLC0415
+
+                            EmailService.send_invoice_paid(payment.invoice) if payment.invoice else None
+                    except Order.DoesNotExist:
+                        logger.warning(f"⚠️ Order {order_id} not found for payment completion")
+
                 return True, f"Payment {payment.id} succeeded"
 
             elif event_type == "payment_intent.payment_failed":
@@ -485,7 +536,13 @@ class PaymentService:
                     },
                 )
 
-                # TODO: Trigger payment retry/dunning process
+                # Trigger dunning process for the invoice
+                if payment.invoice:
+                    from apps.billing.tasks import start_dunning_process_async  # noqa: PLC0415
+
+                    start_dunning_process_async(str(payment.invoice.id))
+                    logger.info(f"⚠️ [Dunning] Triggered for invoice {payment.invoice.number}")
+
                 return True, f"Payment {payment.id} failed: {failure_reason}"
 
             return True, f"Handled payment_intent event: {event_type}"
@@ -547,10 +604,14 @@ class PaymentService:
         results: dict[str, Any] = {"processed": 0, "succeeded": 0, "failed": 0, "suspended": 0, "errors": []}
 
         try:
-            # TODO: Query active subscriptions that need billing
-            # TODO: Process each subscription
-            # TODO: Handle failed payments according to dunning rules
-            # TODO: Update service statuses
+            # Delegate to RecurringBillingService which has the real implementation
+            from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
+
+            billing_result = RecurringBillingService.run_billing_cycle()
+            results["processed"] = billing_result["subscriptions_processed"]
+            results["succeeded"] = billing_result["payments_succeeded"]
+            results["failed"] = billing_result["payments_failed"]
+            results["errors"] = billing_result["errors"]
 
             logger.info(f"✅ Recurring billing completed: {results}")
             return results

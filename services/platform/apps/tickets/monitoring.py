@@ -201,11 +201,7 @@ class SecurityEventTracker:
             60 * 60 * 24,
         )  # Keep alerts for 24 hours
 
-        # TODO: Integration points for external monitoring
-        # - Send to SIEM system
-        # - Trigger Slack/email notifications
-        # - Update security dashboard
-        # - Create incident tickets
+        # External monitoring (SIEM, Slack) deferred to post-alpha
 
     def _count_cache_events(self, event_type: str, cutoff_time: datetime) -> int:
         """Count cached security events within time window"""

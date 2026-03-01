@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TransactionTestCase
 from django.utils import timezone
@@ -49,8 +49,8 @@ class MeteringServiceTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -309,8 +309,8 @@ class RatingEngineTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -537,8 +537,8 @@ class GraduatedPricingTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up graduated pricing test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -641,8 +641,8 @@ class UsageInvoiceServiceTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -784,8 +784,8 @@ class BillingCycleManagerTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -905,8 +905,8 @@ class UsageAlertServiceTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -1048,9 +1048,11 @@ class UsageAlertServiceTestCase(TransactionTestCase):
         )
         self.assertEqual(len(alerts2), 0)
 
+    @patch("apps.notifications.services.EmailService.send_template_email")
     @patch("apps.billing.metering_service.logger")
-    def test_send_alert_notification(self, mock_logger):
+    def test_send_alert_notification(self, mock_logger, mock_send_email):
         """Test sending alert notification."""
+        mock_send_email.return_value = MagicMock(success=True, error=None)
         threshold = UsageThreshold.objects.create(
             meter=self.meter,
             threshold_type="percentage",

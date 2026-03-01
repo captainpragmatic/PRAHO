@@ -256,6 +256,12 @@ test-platform:
 	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --parallel --keepdb
 	@echo "✅ Platform tests completed successfully!"
 
+test-file:
+	@echo "🧪 [Platform] Running specific test: $(FILE)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_PLATFORM_MANAGE) test $(FILE) --settings=config.settings.test --verbosity=2
+	@echo "✅ Test completed!"
+
 test-platform-pytest:
 	@echo "🧪 [Platform] Testing with pytest (database cache)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

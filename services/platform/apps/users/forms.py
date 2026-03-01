@@ -673,4 +673,4 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
             raise ValidationError(_("Registration failed: %(error)s") % {"error": result.unwrap_err()})
 
         user, _customer = result.unwrap()
-        return user
+        return cast(User, user)

@@ -3,9 +3,6 @@ Test settings for PRAHO Platform
 Fast, isolated testing environment.
 """
 
-import os
-import sys
-
 from .base import *
 
 # ===============================================================================
@@ -62,8 +59,16 @@ DATABASES = {
 
 CACHES = {
     "default": {
+        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+    }
+}
+
+# For tests that explicitly test cache behavior (rate limiting, quota tracking, etc.)
+# Usage: @override_settings(CACHES=LOCMEM_TEST_CACHE)
+LOCMEM_TEST_CACHE = {
+    "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "test-cache",
+        "LOCATION": "test-cache-isolated",
     }
 }
 
@@ -220,22 +225,10 @@ DISABLE_AUDIT_SIGNALS = False
 DISABLE_ACCOUNT_LOCKOUT = False
 
 # ===============================================================================
-# TEST RUNNER (Fix parallel test runner pickling issues)
+# TEST DATABASE CONFIGURATION
 # ===============================================================================
 
-# Fix multiprocessing pickling errors with Django admin template functions
-# that can't be serialized across processes in the parallel test runner.
-#
-# Usage:
-#   python manage.py test --parallel 1  # Force single process
-#   DJANGO_SETTINGS_MODULE=config.settings.test python manage.py test  # Uses this config
-
-# Force single-process test execution to avoid multiprocessing pickling errors
-if "test" in sys.argv or ("pytest" in sys.argv[0] if sys.argv else False):
-    # Set environment variable to force serial execution
-    os.environ.setdefault("DJANGO_TEST_PROCESSES", "1")
-
-# Configure test database for single process (faster for in-memory)
+# Configure test database (faster for in-memory)
 DATABASES["default"]["TEST"] = {
     "NAME": ":memory:",
     "SERIALIZE": False,

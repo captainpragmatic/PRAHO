@@ -1046,11 +1046,14 @@ class RecurringBillingServiceBillingCycleTestCase(TestCase):
         self.assertGreaterEqual(result["invoices_created"], 1)
         self.assertEqual(result["payments_attempted"], 0)
 
+    @patch("apps.billing.payment_service.PaymentService.confirm_payment", return_value={"success": True, "status": "succeeded"})
+    @patch("apps.billing.payment_service.PaymentService.create_payment_intent_direct", return_value={"success": True, "payment_intent_id": "pi_test"})
     @patch("apps.billing.subscription_service.log_security_event")
     @patch("apps.billing.subscription_models.log_security_event")
     @patch("apps.common.tax_service.TaxService.get_vat_rate", return_value=Decimal("0.21"))
     def test_run_billing_cycle_with_payment_method(
-        self, mock_vat: MagicMock, mock_model_log: MagicMock, mock_log: MagicMock
+        self, mock_vat: MagicMock, mock_model_log: MagicMock, mock_log: MagicMock,
+        mock_create_intent: MagicMock, mock_confirm: MagicMock,
     ) -> None:
         """Subscription with payment method attempts payment."""
         sub = make_subscription(
@@ -1063,7 +1066,6 @@ class RecurringBillingServiceBillingCycleTestCase(TestCase):
 
         result = RecurringBillingService.run_billing_cycle()
         self.assertGreaterEqual(result["payments_attempted"], 1)
-        # _process_payment returns Ok(True) by default (stub implementation)
         self.assertGreaterEqual(result["payments_succeeded"], 1)
 
     @patch("apps.billing.subscription_service.log_security_event")

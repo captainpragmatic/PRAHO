@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **e-Factura integration**: Real ANAF API submission (`submit_invoice`), status polling (`check_status`), and XML download (`download_xml`) via `EFacturaClient`; simulated fallback in DEBUG mode when credentials are not configured
+- **Payment gateway**: `create_customer`, `charge`, and `create_subscription` methods on `BasePaymentGateway` and `StripeGateway`; `PaymentService.process_subscription_payment` orchestrates gateway customer creation, Stripe charge, and subscription record persistence
+- **Subscription billing cycle**: `PaymentService.run_billing_cycle` queries active subscriptions due for billing, processes each payment, applies dunning rules for failures, and updates service statuses
+- **Refund processing**: `RefundService.process_refund` calls gateway refund, records the transaction, and updates invoice/order status; wired into `invoice_refund` and `api_process_refund` views
+- **Invoice payment tracking**: `Invoice.record_payment` updates `paid_cents`, `status`, and `paid_at`; status transitions enforced (`draft→sent→partial→paid`)
+- **Proforma PDF & email**: `ProformaService.generate_pdf` renders via WeasyPrint; `send_proforma_email` dispatches bilingual notification with PDF attachment
+- **Credit note generation**: `billing.signals` generates a credit note `Invoice` (kind=`credit_note`) when an order refund signal fires
+- **Invoice numbering**: Sequential `BillingService.get_next_invoice_number` with `YYYYMMDD-NNNN` format
+- **Proforma→Invoice conversion**: `BillingService.convert_proforma_to_invoice` copies lines and marks proforma as converted
+- **Payment retry & dunning**: `BillingService.retry_failed_payment` with exponential backoff; `tasks.process_dunning` escalates through `warn → retry → suspend → cancel` stages
+- **Billing tasks**: `submit_invoice_to_efactura`, `send_payment_reminders`, `cancel_payment_reminders`, `validate_vat_number` (ANAF/VIES), `process_auto_payments` (Stripe auto-charge)
+- **Metering alerts**: `UsageAlertService._send_alert_email` sends real notification via `EmailService`
+- **Order editing**: `order_edit` view processes form POST with line-item updates
+- **Customer services API**: `customer_services` endpoint returns actual `Service` queryset
+- **Ticket stats API**: Manual average response time calculation (replaces broken SQLite `Avg` on datetime) and satisfaction rating aggregation
+
+### Changed
+- **Test isolation**: Switch default test cache from `LocMemCache` to `DummyCache`; add `LOCMEM_TEST_CACHE` constant for tests that explicitly exercise cache behavior, applied via `@override_settings` to ~18 test classes across 13 files
+- **TransactionTestCase fixtures**: Replace `Currency.objects.create()` with `get_or_create()` in 4 TransactionTestCase files (21 occurrences) to prevent `IntegrityError` under `--parallel`
+- **Cost service singleton**: Reset `_instance` in `tearDown` where `CostService` is tested as a singleton to prevent state leakage between parallel workers
+- **Test settings**: Remove stale `DJANGO_TEST_PROCESSES=1` override that prevented parallel execution; clean up unused imports in `config/settings/test.py`
+- **Makefile**: Add `make test-file FILE=<dotted.path>` target for running a single test module
+- **Pre-commit**: Disable `check-executables-have-shebangs` in Docker (VirtioFS marks all files +x); fix i18n linter `exclude` pattern to correctly skip `tests/` and `scripts/` directories
 
 ---
 

@@ -48,6 +48,7 @@ from apps.audit.siem_integration import (
 from apps.audit.siem_integration import (
     SIEMSeverity as IntegrationSIEMSeverity,
 )
+from config.settings.test import LOCMEM_TEST_CACHE
 
 # =============================================================================
 # HELPERS
@@ -585,10 +586,14 @@ class TestSIEMTransport(TestCase):
 # =============================================================================
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class TestHashChainManager(TestCase):
+    """Needs real cache — HashChainManager stores hash chain state in cache."""
+
     def setUp(self):
         from django.core.cache import cache  # noqa: PLC0415
-        cache.delete(HashChainManager.CACHE_KEY)
+
+        cache.clear()
 
     def test_initial_state(self):
         mgr = HashChainManager(secret_key="test-secret")

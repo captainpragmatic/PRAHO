@@ -786,8 +786,9 @@ class EFacturaXMLGeneratorTest(TestCase):
 
 
 @override_settings(**COMPANY_SETTINGS)
+@override_settings(DEBUG=True)
 class EFacturaSubmissionServiceTest(TestCase):
-    """Tests for EFacturaSubmissionService."""
+    """Tests for EFacturaSubmissionService (run with DEBUG=True for simulation mode)."""
 
     def setUp(self) -> None:
         self.service = EFacturaSubmissionService()
@@ -893,7 +894,7 @@ class EFacturaSubmissionServiceTest(TestCase):
 
     def test_download_response_error_message(self) -> None:
         result = self.service.download_response("SOME_DOWNLOAD_ID")
-        self.assertIn("not yet implemented", result.error.lower())
+        self.assertIn("not configured", result.error.lower())
 
     def test_download_response_different_ids_all_fail(self) -> None:
         for download_id in ["ID1", "ID2", "ID3"]:

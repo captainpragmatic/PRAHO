@@ -896,20 +896,49 @@ class RecurringBillingService:
 
     @staticmethod
     def _process_payment(subscription: Subscription, invoice: Invoice) -> Result[bool, str]:
-        """
-        Process payment for an invoice.
+        """Process payment for a subscription invoice via Stripe."""
+        from apps.billing.payment_service import PaymentService  # noqa: PLC0415
 
-        TODO: Implement actual Stripe payment processing.
-        """
-        # Placeholder - actual implementation would use Stripe API
+        if not subscription.payment_method_id:
+            return Err("No payment method on file")
+
         logger.info(
-            f"💳 [Payment] Would process payment for invoice {invoice.number} "
-            f"using payment method {subscription.payment_method_id}"
+            f"💳 [Payment] Processing payment for invoice {invoice.number} "
+            f"via payment method {subscription.payment_method_id}"
         )
 
-        # For now, return success to allow testing
-        # In production, this would call Stripe or other payment gateway
-        return Ok(True)
+        try:
+            # Create payment intent for the invoice amount
+            result = PaymentService.create_payment_intent_direct(
+                order_id=str(invoice.id),
+                amount_cents=invoice.total_cents,
+                currency=invoice.currency.code if invoice.currency else "RON",
+                customer_id=str(subscription.customer_id),
+                order_number=invoice.number,
+                gateway="stripe",
+                metadata={
+                    "subscription_id": str(subscription.id),
+                    "invoice_id": str(invoice.id),
+                    "recurring": True,
+                },
+            )
+
+            if not result.get("success"):
+                return Err(f"Payment intent creation failed: {result.get('error', 'unknown')}")
+
+            # Confirm the payment
+            payment_intent_id = result.get("payment_intent_id", "")
+            confirm = PaymentService.confirm_payment(payment_intent_id, gateway="stripe")
+
+            if confirm.get("success") and confirm.get("status") == "succeeded":
+                logger.info(f"✅ [Payment] Invoice {invoice.number} paid successfully")
+                return Ok(True)
+
+            return Err(f"Payment confirmation failed: {confirm.get('error', confirm.get('status', 'unknown'))}")
+
+        except Exception as e:
+            logger.error(f"🔥 [Payment] Error processing payment for {invoice.number}: {e}")
+            return Err(str(e))
 
     @staticmethod
     def handle_expired_trials() -> int:

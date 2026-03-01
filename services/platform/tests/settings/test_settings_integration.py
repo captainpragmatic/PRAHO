@@ -23,6 +23,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from apps.settings.services import SettingsService
+from apps.tickets.monitoring import SecurityEventTracker
+from apps.tickets.security import TicketAttachmentSecurityScanner
 
 
 # ── Tickets ───────────────────────────────────────────────────────────────────
@@ -33,38 +35,32 @@ class TicketsSettingsIntegration(TestCase):
 
     def test_file_size_default(self) -> None:
         """No DB record -> _validate_file_size() uses 2MB default."""
-        from apps.tickets.security import FileSecurityScanner
-
-        scanner = FileSecurityScanner()
+        scanner = TicketAttachmentSecurityScanner()
         uploaded = SimpleUploadedFile("test.txt", b"x" * 100)
         # Under 2 MB → should pass
         self.assertTrue(scanner._validate_file_size(uploaded))
 
     def test_file_size_override(self) -> None:
         """DB set to 50 bytes -> _validate_file_size() rejects larger files."""
-        from apps.tickets.security import FileSecurityScanner
-
         SettingsService.update_setting(
             key="tickets.max_file_size_bytes",
             value=50,
             reason="integration test: tiny file limit",
         )
 
-        scanner = FileSecurityScanner()
+        scanner = TicketAttachmentSecurityScanner()
         uploaded = SimpleUploadedFile("test.txt", b"x" * 100)  # 100 bytes > 50
         self.assertFalse(scanner._validate_file_size(uploaded))
 
     def test_allowed_extensions_override(self) -> None:
         """DB set to ['.pdf'] -> only PDF extension passes validation."""
-        from apps.tickets.security import FileSecurityScanner
-
         SettingsService.update_setting(
             key="tickets.allowed_file_extensions",
             value=[".pdf"],
             reason="integration test: PDF only",
         )
 
-        scanner = FileSecurityScanner()
+        scanner = TicketAttachmentSecurityScanner()
         # .pdf should pass
         self.assertTrue(scanner._validate_file_extension("report.pdf"))
         # .txt should fail
@@ -72,7 +68,6 @@ class TicketsSettingsIntegration(TestCase):
 
     def test_security_alert_threshold_override(self) -> None:
         """DB set to 3 -> SecurityEventTracker.alert_threshold returns 3."""
-        from apps.tickets.monitoring import SecurityEventTracker
 
         SettingsService.update_setting(
             key="tickets.security_alert_threshold",

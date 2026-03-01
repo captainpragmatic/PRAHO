@@ -42,6 +42,7 @@ from apps.orders.vat_rules import (
     OrderVATCalculator,
     VATScenario,
 )
+from config.settings.test import LOCMEM_TEST_CACHE
 
 # ===============================================================================
 # SECTION 1: TEMPORAL VAT RATE VALIDITY (TaxRule model)
@@ -139,6 +140,7 @@ class TaxRuleTemporalValidityTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class TaxServiceCascadeTests(TestCase):
     """Test TaxService 4-tier resolution: cache → DB → settings → defaults.
 
@@ -1086,6 +1088,7 @@ class CrossCalculatorConsistencyTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class TaxRuleCacheSignalTests(TestCase):
     """Test that TaxRule save/delete signals invalidate TaxService cache."""
 

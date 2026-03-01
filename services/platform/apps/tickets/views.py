@@ -26,6 +26,7 @@ from apps.settings.services import SettingsService
 from apps.users.models import User
 
 from .models import Ticket, TicketAttachment, TicketComment
+from .security import TicketAttachmentSecurityScanner
 from .services import TicketStatusService
 
 logger = logging.getLogger(__name__)
@@ -310,12 +311,11 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
             messages.warning(request, f"❌ File type not allowed for {uploaded_file.name}.")
             continue
 
-        # TODO: Implement proper file security measures:
-        #   1. Encrypt files at rest using AES-256 encryption
-        #   2. Add virus scanning with ClamAV integration
-        #   3. Store files outside web-accessible directory
-        #   4. Implement secure file serving with access controls
-        #   5. Add file content validation beyond MIME type checking
+        scanner = TicketAttachmentSecurityScanner()
+        is_safe, scan_msg = scanner.scan_uploaded_file(uploaded_file)
+        if not is_safe:
+            messages.warning(request, f"❌ {scan_msg}")
+            continue
 
         # Create attachment with proper null handling
         file_size = uploaded_file.size or 0  # Default to 0 if None

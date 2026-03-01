@@ -15,13 +15,14 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.efactura.token_storage import (
     OAuthToken,
     TokenStorageService,
 )
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class OAuthTokenModelTestCase(TestCase):
@@ -430,8 +431,9 @@ class OAuthTokenEncryptionTestCase(TestCase):
         self.assertFalse(token._is_encrypted("test-token"))
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class TokenStorageServiceTestCase(TestCase):
-    """Test TokenStorageService."""
+    """Test TokenStorageService — needs real cache for token caching behavior."""
 
     def setUp(self):
         cache.clear()

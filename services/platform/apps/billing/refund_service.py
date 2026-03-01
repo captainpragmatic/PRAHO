@@ -105,6 +105,9 @@ class RefundData(TypedDict, total=False):
     reason: str
     reference: str
     refund_type: str
+    notes: str
+    user_id: str
+    user_email: str
 
 
 class RefundEligibility(TypedDict, total=False):
@@ -1142,18 +1145,10 @@ class RefundService:
             if not payment:
                 return Result.err("No successful payments found to refund")
 
-            # Update payment status to indicate refund
-            if hasattr(payment, "status"):
-                refund_type = refund_data.get("refund_type", "partial") if refund_data else "partial"
-                if refund_amount_cents and hasattr(payment, "amount_cents"):
-                    # Determine refund type based on amount
-                    refund_type = "full" if refund_amount_cents >= payment.amount_cents else "partial"
-
-                if refund_type == "full":
-                    payment.status = "refunded"
-                else:
-                    payment.status = "partially_refunded"
-                payment.save()
+            # Determine refund type for status update (used after gateway succeeds)
+            refund_type = refund_data.get("refund_type", "partial") if refund_data else "partial"
+            if refund_amount_cents and hasattr(payment, "amount_cents"):
+                refund_type = "full" if refund_amount_cents >= payment.amount_cents else "partial"
 
             # Log payment gateway refund attempt
             log_security_event(
@@ -1169,21 +1164,89 @@ class RefundService:
                 },
             )
 
-            # TODO: Implement actual gateway refund calls here
-            # For now, return success for local testing
-            return Result.ok(
-                {
-                    "gateway_refund": "simulated_success",
-                    "payment_status_updated": True,
-                    "total_refunded_cents": refund_amount_cents
-                    or (refund_data.get("amount_cents", 0) if refund_data else 0),
-                    "payments_refunded": 1 if payment else 0,
-                }
-            )
+            # GATEWAY-FIRST: call gateway before updating local state to prevent accounting drift
+            effective_amount = refund_amount_cents or (refund_data.get("amount_cents", 0) if refund_data else 0)
+            gateway_result = RefundService._execute_gateway_refund(payment, refund_amount_cents, effective_amount)
+
+            # Only update local payment status AFTER gateway succeeds (or for non-gateway payments)
+            if gateway_result.is_ok() and hasattr(payment, "status"):
+                payment.status = "refunded" if refund_type == "full" else "partially_refunded"
+                payment.save()
+
+            return gateway_result
 
         except Exception:
             # SECURITY: Don't expose internal error details
             return Result.err("Failed to process payment refund")
+
+    @staticmethod
+    def _execute_gateway_refund(
+        payment: Any, refund_amount_cents: int | None, effective_amount: int
+    ) -> Result[dict[str, Any], str]:
+        """Execute refund via payment gateway or return local success for non-gateway payments."""
+        from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS  # noqa: PLC0415
+
+        payment_method = getattr(payment, "payment_method", "")
+        gateway_txn_id = getattr(payment, "gateway_txn_id", "")
+
+        # Gateway payment method without a transaction ID is a data integrity issue
+        if payment_method in GATEWAY_PAYMENT_METHODS and not gateway_txn_id:
+            log_security_event(
+                event_type="payment_gateway_refund_failed",
+                details={
+                    "payment_id": str(payment.id) if hasattr(payment, "id") else "unknown",
+                    "payment_method": payment_method,
+                    "error": "Gateway payment missing gateway_txn_id",
+                },
+            )
+            return Result.err(f"Cannot refund {payment_method} payment: missing gateway transaction ID")
+
+        has_gateway = payment_method in GATEWAY_PAYMENT_METHODS and bool(gateway_txn_id)
+
+        if not has_gateway:
+            # Non-gateway payments (bank, cash) — succeed locally, manual reconciliation
+            return Result.ok(
+                {
+                    "gateway_refund": "not_applicable",
+                    "payment_status_updated": True,
+                    "total_refunded_cents": effective_amount,
+                    "payments_refunded": 1 if payment else 0,
+                }
+            )
+
+        from apps.billing.gateways.base import PaymentGatewayFactory  # noqa: PLC0415
+
+        gateway = PaymentGatewayFactory.create_gateway(payment.payment_method)
+        refund_result = gateway.refund_payment(
+            gateway_txn_id=payment.gateway_txn_id,
+            amount_cents=refund_amount_cents,
+        )
+        if not refund_result["success"]:
+            log_security_event(
+                event_type="payment_gateway_refund_failed",
+                details={
+                    "payment_id": str(payment.id),
+                    "gateway_txn_id": payment.gateway_txn_id,
+                    "error": refund_result["error"],
+                },
+            )
+            return Result.err(f"Gateway refund failed: {refund_result['error']}")
+
+        # Persist refund ID for audit trail (validate format)
+        refund_id = refund_result["refund_id"] or ""
+        if refund_id:
+            payment.meta = {**(payment.meta or {}), "refund_id": str(refund_id)[:255]}
+            payment.save(update_fields=["meta"])
+
+        return Result.ok(
+            {
+                "gateway_refund": "success",
+                "refund_id": refund_result["refund_id"],
+                "payment_status_updated": True,
+                "total_refunded_cents": refund_result["amount_refunded_cents"],
+                "payments_refunded": 1,
+            }
+        )
 
 
 class RefundQueryService:

@@ -8,9 +8,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.billing.metering_service import UsageAlertService
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 def _make_alert(customer_id="test-customer-123"):
@@ -51,8 +52,12 @@ class SuspendActionTestCase(TestCase):
         mock_suspend.assert_called_once_with(customer_id=alert.customer.id, reason="usage_exceeded")
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class BlockNewActionTestCase(TestCase):
     """Test block_new action sets cache flag."""
+
+    def setUp(self):
+        cache.clear()
 
     @patch("apps.billing.metering_service.AuditService")
     def test_block_new_sets_cache_flag(self, mock_audit):
@@ -83,8 +88,12 @@ class WarnActionTestCase(TestCase):
         self.assertIsNone(cache.get(cache_key))
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class EnforcementAuditLoggingTestCase(TestCase):
     """Test that enforcement actions log audit events."""
+
+    def setUp(self):
+        cache.clear()
 
     @patch("apps.billing.metering_service.AuditService")
     @patch("apps.provisioning.provisioning_service.ProvisioningService.suspend_services_for_customer")

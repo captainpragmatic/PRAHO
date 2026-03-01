@@ -14,7 +14,7 @@ Tests cover:
 from unittest.mock import Mock, patch
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.billing.efactura.quota import (
     ANAFQuotaTracker,
@@ -22,6 +22,7 @@ from apps.billing.efactura.quota import (
     QuotaExceededError,
     QuotaStatus,
 )
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class QuotaEndpointTestCase(TestCase):
@@ -173,12 +174,12 @@ class QuotaStatusTestCase(TestCase):
         self.assertIn("usage_percent", data)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class ANAFQuotaTrackerTestCase(TestCase):
     """Test ANAFQuotaTracker class."""
 
     def setUp(self):
         self.tracker = ANAFQuotaTracker()
-        # Clear cache before each test
         cache.clear()
 
     def test_tracker_initialization(self):
@@ -351,6 +352,7 @@ class ANAFQuotaTrackerTestCase(TestCase):
             )
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class ANAFQuotaTrackerDecoratorTestCase(TestCase):
     """Test rate limiting decorator."""
 
@@ -399,6 +401,7 @@ class ANAFQuotaTrackerDecoratorTestCase(TestCase):
         self.assertEqual(usage, 1)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class ANAFQuotaTrackerEdgeCasesTestCase(TestCase):
     """Test edge cases and error conditions."""
 

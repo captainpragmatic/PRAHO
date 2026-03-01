@@ -369,8 +369,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             }
 
             # Send notification to Portal
-            # TODO: In production, this should use a proper HTTP client or message queue
-            # For now, we'll use a simple HTTP request
             self._send_portal_webhook(notification_data)
 
             logger.info(f"✅ Notified Portal of payment success for order {order_id}")

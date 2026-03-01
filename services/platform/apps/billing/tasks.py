@@ -58,9 +58,17 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        # TODO: Implement actual e-Factura submission
-        # For now, just log the action
-        logger.info(f"🏛️ [e-Factura] Would submit invoice {invoice.number} to ANAF")
+        # Submit via real EFacturaSubmissionService
+        from apps.billing.efactura_service import EFacturaSubmissionService  # noqa: PLC0415
+
+        service = EFacturaSubmissionService()
+        submission_result = service.submit_invoice(invoice)
+        if not submission_result.success:
+            logger.error(f"🔥 [e-Factura] Submission failed for {invoice.number}: {submission_result.message}")
+        else:
+            logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number} to ANAF")
+            invoice.meta = {**(invoice.meta or {}), "efactura_submitted": True}
+            invoice.save(update_fields=["meta"])
 
         # Log the submission attempt
         AuditService.log_simple_event(
@@ -116,9 +124,36 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
                 "message": "No reminders needed for non-pending invoice",
             }
 
-        # TODO: Implement actual reminder scheduling
-        # For now, just log the action
-        logger.info(f"📅 [Reminders] Would schedule reminders for invoice {invoice.number}")
+        # Schedule 3 reminders: 7 days before, 1 day before, on due date
+        from datetime import timedelta  # noqa: PLC0415
+
+        if not invoice.due_date:
+            logger.info(f"📅 [Reminders] No due date for invoice {invoice.number}, skipping reminders")
+            return {"success": True, "invoice_id": str(invoice.id), "message": "No due date set"}
+
+        reminder_offsets = [
+            ("7_days_before", timedelta(days=-7)),
+            ("1_day_before", timedelta(days=-1)),
+            ("on_due_date", timedelta(days=0)),
+        ]
+        scheduled_count = 0
+        for label, offset in reminder_offsets:
+            reminder_date = (
+                timezone.make_aware(timezone.datetime.combine(invoice.due_date + offset, timezone.datetime.min.time()))
+                if not isinstance(invoice.due_date + offset, timezone.datetime)
+                else invoice.due_date + offset
+            )
+            if reminder_date > timezone.now():
+                task_name = f"payment_reminder_{invoice.id}_{label}"
+                async_task(
+                    "apps.billing.tasks._send_payment_reminder",
+                    str(invoice.id),
+                    task_name=task_name,
+                    schedule=reminder_date,
+                    timeout=TASK_SOFT_TIME_LIMIT,
+                )
+                scheduled_count += 1
+        logger.info(f"📅 [Reminders] Scheduled {scheduled_count} reminders for invoice {invoice.number}")
 
         # Log the scheduling
         AuditService.log_simple_event(
@@ -167,9 +202,12 @@ def cancel_payment_reminders(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        # TODO: Implement actual reminder cancellation
-        # For now, just log the action
-        logger.info(f"🚫 [Reminders] Would cancel reminders for invoice {invoice.number}")
+        # Cancel scheduled django-q tasks for this invoice
+        from django_q.models import Schedule  # noqa: PLC0415
+
+        cancelled = Schedule.objects.filter(name__startswith=f"payment_reminder_{invoice.id}_").delete()
+        cancelled_count = cancelled[0] if cancelled else 0
+        logger.info(f"🚫 [Reminders] Cancelled {cancelled_count} reminders for invoice {invoice.number}")
 
         # Log the cancellation
         AuditService.log_simple_event(
@@ -225,9 +263,31 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
                 "message": "No dunning needed for non-overdue invoice",
             }
 
-        # TODO: Implement actual dunning process
-        # For now, just log the action
-        logger.info(f"⚠️ [Dunning] Would start dunning process for invoice {invoice.number}")
+        # Find customer's retry policy and create first retry attempt
+        from apps.billing.payment_models import PaymentRetryAttempt, PaymentRetryPolicy  # noqa: PLC0415
+        from apps.notifications.services import EmailService  # noqa: PLC0415
+
+        # Send dunning email
+        EmailService.send_payment_reminder(invoice)
+
+        # Schedule payment retry if there's a payment method on file
+        payments = invoice.payments.filter(status="failed").order_by("-created_at")
+        if payments.exists():
+            payment = payments.first()
+            policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
+            if policy:
+                next_date = policy.get_next_retry_date(timezone.now(), 0)
+                if next_date:
+                    PaymentRetryAttempt.objects.create(
+                        payment=payment,
+                        policy=policy,
+                        attempt_number=1,
+                        scheduled_at=next_date,
+                        status="pending",
+                    )
+                    logger.info(f"⚠️ [Dunning] Scheduled retry for invoice {invoice.number} at {next_date}")
+        else:
+            logger.info(f"⚠️ [Dunning] No failed payments for invoice {invoice.number}, email-only dunning")
 
         # Log the dunning start
         AuditService.log_simple_event(
@@ -282,9 +342,35 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             logger.info(f"🏛️ [VAT] No VAT number to validate for tax profile {tax_profile_id}")
             return {"success": True, "tax_profile_id": str(tax_profile.id), "message": "No VAT number to validate"}
 
-        # TODO: Implement actual VAT validation with ANAF/VIES
-        # For now, just log the action
-        logger.info(f"🏛️ [VAT] Would validate VAT number {tax_profile.vat_number}")
+        # Validate using CUI validator and store result in VATValidation
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+        from apps.common.types import validate_romanian_cui  # noqa: PLC0415
+
+        vat_number = tax_profile.vat_number
+        is_valid = False
+        validation_msg = ""
+
+        # Strip RO prefix for CUI validation
+        cui_number = vat_number.replace("RO", "").strip() if vat_number.startswith("RO") else vat_number
+        cui_result = validate_romanian_cui(cui_number)
+        if hasattr(cui_result, "is_ok") and cui_result.is_ok():
+            is_valid = True
+            validation_msg = "CUI format valid"
+        else:
+            validation_msg = f"CUI validation failed: {getattr(cui_result, 'error', 'invalid format')}"
+
+        # Store validation result
+        VATValidation.objects.update_or_create(
+            vat_number=vat_number,
+            defaults={
+                "country_code": "RO",
+                "full_vat_number": f"RO{cui_number}" if not vat_number.startswith("RO") else vat_number,
+                "is_valid": is_valid,
+                "validation_source": "manual",
+                "response_data": {"message": validation_msg},
+            },
+        )
+        logger.info(f"🏛️ [VAT] Validated {vat_number}: {'✅ valid' if is_valid else '❌ invalid'}")
 
         # Log the validation attempt
         AuditService.log_simple_event(
@@ -336,9 +422,29 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
                 "message": "No auto-payment needed for non-pending invoice",
             }
 
-        # TODO: Implement actual auto-payment processing
-        # For now, just log the action
-        logger.info(f"💳 [AutoPay] Would process auto-payment for invoice {invoice.number}")
+        # Process payment using customer's stored payment method
+        from apps.billing.payment_service import PaymentService  # noqa: PLC0415
+
+        result = (
+            PaymentService.create_payment_intent(
+                order_id=str(invoice.meta.get("order_id", "")),
+                gateway="stripe",
+                metadata={"invoice_id": str(invoice.id), "auto_payment": True},
+            )
+            if invoice.meta and invoice.meta.get("order_id")
+            else None
+        )
+
+        if result and result.get("success"):
+            payment_intent_id = result.get("payment_intent_id", "")
+            confirm = PaymentService.confirm_payment(payment_intent_id, gateway="stripe")
+            if confirm.get("success") and confirm.get("status") == "succeeded":
+                logger.info(f"💳 [AutoPay] Payment succeeded for invoice {invoice.number}")
+                invoice.update_status_from_payments()
+            else:
+                logger.warning(f"⚠️ [AutoPay] Payment confirmation pending for invoice {invoice.number}")
+        else:
+            logger.info(f"💳 [AutoPay] No order linked or payment failed for invoice {invoice.number}")
 
         # Log the auto-payment attempt
         AuditService.log_simple_event(
@@ -369,6 +475,25 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
         return {"success": False, "error": error_msg}
     except Exception as e:
         logger.exception(f"💥 [AutoPay] Error processing auto-payment for invoice {invoice_id}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def _send_payment_reminder(invoice_id: str) -> dict[str, Any]:
+    """Send a single payment reminder email for an invoice."""
+    try:
+        invoice = Invoice.objects.get(id=invoice_id)
+        from apps.notifications.services import EmailService  # noqa: PLC0415
+
+        result = EmailService.send_payment_reminder(invoice)
+        if result.success:
+            logger.info(f"📧 [Reminder] Sent payment reminder for invoice {invoice.number}")
+        else:
+            logger.warning(f"⚠️ [Reminder] Failed to send reminder for {invoice.number}: {result.error}")
+        return {"success": result.success, "invoice_id": str(invoice.id)}
+    except Invoice.DoesNotExist:
+        return {"success": False, "error": f"Invoice {invoice_id} not found"}
+    except Exception as e:
+        logger.exception(f"💥 [Reminder] Error sending reminder for {invoice_id}: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -620,6 +745,20 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def _schedule_next_retry(retry: Any, retry_model: Any) -> None:
+    """Schedule the next retry attempt if the policy allows more attempts."""
+    if retry.policy and retry.attempt_number < retry.policy.max_attempts:
+        next_retry_date = retry.policy.get_next_retry_date(timezone.now(), retry.attempt_number)
+        if next_retry_date:
+            retry_model.objects.create(
+                payment=retry.payment,
+                policy=retry.policy,
+                attempt_number=retry.attempt_number + 1,
+                scheduled_at=next_retry_date,
+                status="pending",
+            )
+
+
 def run_payment_collection() -> dict[str, Any]:
     """
     Run payment collection for failed payments.
@@ -662,15 +801,19 @@ def run_payment_collection() -> dict[str, Any]:
                 retry.executed_at = timezone.now()
                 retry.save(update_fields=["status", "executed_at"])
 
-                # Attempt payment
-                # TODO: Implement actual payment processing via Stripe
-                logger.info(
-                    f"💳 [Collection] Would retry payment {retry.payment_id} " f"(attempt {retry.attempt_number})"
-                )
+                # Attempt payment via Stripe gateway
+                from apps.billing.payment_service import PaymentService  # noqa: PLC0415
 
-                # For now, simulate success/failure
-                # In production, this would call the payment gateway
-                success = False  # Placeholder
+                logger.info(f"💳 [Collection] Retrying payment {retry.payment_id} (attempt {retry.attempt_number})")
+
+                # Re-attempt payment using stored gateway transaction ID
+                success = False
+                if retry.payment.gateway_txn_id:
+                    confirm_result = PaymentService.confirm_payment(
+                        retry.payment.gateway_txn_id,
+                        gateway=retry.payment.payment_method or "stripe",
+                    )
+                    success = confirm_result.get("success", False) and confirm_result.get("status") == "succeeded"
 
                 if success:
                     retry.status = "success"
@@ -685,18 +828,7 @@ def run_payment_collection() -> dict[str, Any]:
                     retry.status = "failed"
                     retry.failure_reason = "Payment declined"
                     failed += 1
-
-                    # Schedule next retry if applicable
-                    if retry.policy and retry.attempt_number < retry.policy.max_attempts:
-                        next_retry_date = retry.policy.get_next_retry_date(timezone.now(), retry.attempt_number)
-                        if next_retry_date:
-                            PaymentRetryAttempt.objects.create(
-                                payment=retry.payment,
-                                policy=retry.policy,
-                                attempt_number=retry.attempt_number + 1,
-                                scheduled_at=next_retry_date,
-                                status="pending",
-                            )
+                    _schedule_next_retry(retry, PaymentRetryAttempt)
 
                 retry.save()
 

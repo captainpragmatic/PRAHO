@@ -1073,7 +1073,7 @@ class TestProcessPaymentRefundIfExists(TestCase):
         assert r is None
 
     def test_order_with_payments(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe")
+        payment = MagicMock(id=1, status="succeeded", payment_method="bank_transfer", gateway_txn_id="")
         order = MagicMock()
         order.payments.first.return_value = payment
         r = RefundService._process_payment_refund_if_exists(order, None, {"refund_type": "full"})
@@ -1442,15 +1442,30 @@ class TestProcessPaymentRefund(TestCase):
         assert r.is_err()
         assert "No successful payments" in r.unwrap_err()
 
+    @staticmethod
+    def _mock_gateway_success(refund_id: str = "re_mock", amount: int = 10000):
+        """Return a patch context for PaymentGatewayFactory that returns a successful gateway."""
+        mock_gw = MagicMock()
+        mock_gw.refund_payment.return_value = {
+            "success": True,
+            "refund_id": refund_id,
+            "amount_refunded_cents": amount,
+            "status": "succeeded",
+            "error": None,
+        }
+        return patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gw)
+
     def test_payment_full_refund(self):
         payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
-        r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
+        with self._mock_gateway_success():
+            r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
         assert r.is_ok()
         assert payment.status == "refunded"
 
     def test_payment_partial_refund(self):
         payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
-        r = RefundService._process_payment_refund(payment, {"refund_type": "partial"})
+        with self._mock_gateway_success():
+            r = RefundService._process_payment_refund(payment, {"refund_type": "partial"})
         assert r.is_ok()
         assert payment.status == "partially_refunded"
 
@@ -1458,25 +1473,29 @@ class TestProcessPaymentRefund(TestCase):
         payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
         order = MagicMock()
         order.payments.first.return_value = payment
-        r = RefundService._process_payment_refund(None, {"refund_type": "full"}, order=order)
+        with self._mock_gateway_success():
+            r = RefundService._process_payment_refund(None, {"refund_type": "full"}, order=order)
         assert r.is_ok()
 
     def test_payment_from_kwargs_invoice(self):
         payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
         invoice = MagicMock()
         invoice.payments.first.return_value = payment
-        r = RefundService._process_payment_refund(None, None, invoice=invoice)
+        with self._mock_gateway_success():
+            r = RefundService._process_payment_refund(None, None, invoice=invoice)
         assert r.is_ok()
 
     def test_refund_amount_cents_kwarg_full(self):
         payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
-        r = RefundService._process_payment_refund(payment, None, refund_amount_cents=10000)
+        with self._mock_gateway_success():
+            r = RefundService._process_payment_refund(payment, None, refund_amount_cents=10000)
         assert r.is_ok()
         assert payment.status == "refunded"
 
     def test_refund_amount_cents_kwarg_partial(self):
         payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
-        r = RefundService._process_payment_refund(payment, None, refund_amount_cents=5000)
+        with self._mock_gateway_success(amount=5000):
+            r = RefundService._process_payment_refund(payment, None, refund_amount_cents=5000)
         assert r.is_ok()
         assert payment.status == "partially_refunded"
 

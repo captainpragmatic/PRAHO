@@ -294,10 +294,8 @@ class BillingCycleBoundaryTestCase(TestCase):
             primary_email="test@example.com",
             status="active",
         )
-        self.currency = Currency.objects.create(
-            code="RON",
-            symbol="lei",
-            decimals=2,
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.product = Product.objects.create(
             slug="test-plan-bc",
@@ -403,10 +401,8 @@ class StripeSyncFailureTestCase(TestCase):
             primary_email="test@example.com",
             status="active",
         )
-        self.currency = Currency.objects.create(
-            code="RON",
-            symbol="lei",
-            decimals=2,
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.product = Product.objects.create(
             slug="test-plan-stripe",
@@ -481,10 +477,8 @@ class UsageAlertRedTeamTestCase(TestCase):
             primary_email="test@example.com",
             status="active",
         )
-        self.currency = Currency.objects.create(
-            code="RON",
-            symbol="lei",
-            decimals=2,
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.product = Product.objects.create(
             slug="test-plan-alert",
@@ -658,10 +652,8 @@ class AggregationConsistencyTestCase(TransactionTestCase):
             primary_email="test@example.com",
             status="active",
         )
-        self.currency = Currency.objects.create(
-            code="RON",
-            symbol="lei",
-            decimals=2,
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
         self.product = Product.objects.create(
             slug="test-plan-aggcons",

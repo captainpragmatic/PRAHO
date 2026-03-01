@@ -35,3 +35,6 @@ services/platform/apps/billing/currency_models.py:I18N005
 services/platform/apps/billing/payment_models.py:I18N005
 services/platform/apps/billing/subscription_models.py:I18N005
 services/platform/apps/billing/tax_models.py:I18N005
+
+# Django LANGUAGES setting tuples — standard Django pattern, not choices
+services/platform/config/settings/base.py:I18N005

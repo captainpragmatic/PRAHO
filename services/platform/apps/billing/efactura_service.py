@@ -584,31 +584,67 @@ class EFacturaSubmissionService:
         # Calculate XML hash for verification
         xml_hash = hashlib.sha256(xml_content.encode("utf-8")).hexdigest()
 
-        # TODO: Implement actual ANAF API submission
-        # For now, return a placeholder result
-        logger.info(f"🏛️ [e-Factura] Would submit invoice {invoice.number} to ANAF")
-        logger.debug(f"🏛️ [e-Factura] XML hash: {xml_hash}")
+        # Submit to ANAF via EFacturaClient (if configured)
+        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError, EFacturaConfig  # noqa: PLC0415
 
-        # Placeholder - in production, this would:
-        # 1. Get OAuth2 token from ANAF
-        # 2. POST the XML to /upload endpoint
-        # 3. Parse response for upload_index
-        # 4. Poll /status endpoint for final status
+        config = EFacturaConfig.from_settings()
+        if not config.is_valid():
+            # Only simulate in DEBUG mode; in production, missing config is a hard failure
+            if getattr(settings, "DEBUG", False):
+                logger.warning("⚠️ [e-Factura] Not configured (DEBUG) — returning simulated result")
+                mock_efactura_id = f"EFRO-{invoice.number}-{uuid.uuid4().hex[:8].upper()}"
+                return EFacturaSubmissionResult(
+                    success=True,
+                    efactura_id=mock_efactura_id,
+                    upload_index=f"UI{uuid.uuid4().hex[:12].upper()}",
+                    status=EFacturaStatus.SUBMITTED,
+                    message="Invoice submitted to e-Factura (simulated — not configured)",
+                    xml_content=xml_content,
+                    response_data={"xml_hash": xml_hash, "simulated": True},
+                )
+            logger.error("🔥 [e-Factura] Not configured — cannot submit in production")
+            return EFacturaSubmissionResult(
+                success=False,
+                status=EFacturaStatus.ERROR,
+                message="e-Factura not configured — submission blocked",
+                errors=["e-Factura credentials are not configured"],
+                xml_content=xml_content,
+                response_data={"xml_hash": xml_hash},
+            )
 
-        # For development, generate a mock e-Factura ID
-        mock_efactura_id = f"EFRO-{invoice.number}-{uuid.uuid4().hex[:8].upper()}"
+        logger.info(f"🏛️ [e-Factura] Submitting invoice {invoice.number} to ANAF")
+        try:
+            client = EFacturaClient(config)
+            upload_resp = client.upload_invoice(xml_content)
+        except EFacturaClientError as exc:
+            logger.error(f"🔥 [e-Factura] Client error submitting {invoice.number}: {exc}")
+            return EFacturaSubmissionResult(
+                success=False,
+                status=EFacturaStatus.ERROR,
+                message=f"e-Factura client error: {exc}",
+                errors=[str(exc)],
+                xml_content=xml_content,
+                response_data={"xml_hash": xml_hash},
+            )
 
+        if not upload_resp.success:
+            return EFacturaSubmissionResult(
+                success=False,
+                status=EFacturaStatus.ERROR,
+                message=f"ANAF upload failed: {upload_resp.message}",
+                errors=upload_resp.errors,
+                xml_content=xml_content,
+                response_data={"xml_hash": xml_hash, "raw": upload_resp.raw_response},
+            )
+
+        logger.info(f"✅ [e-Factura] Invoice {invoice.number} uploaded, index={upload_resp.upload_index}")
         return EFacturaSubmissionResult(
             success=True,
-            efactura_id=mock_efactura_id,
-            upload_index=f"UI{uuid.uuid4().hex[:12].upper()}",
+            upload_index=upload_resp.upload_index,
             status=EFacturaStatus.SUBMITTED,
-            message="Invoice submitted to e-Factura (simulated)",
+            message="Invoice submitted to e-Factura",
             xml_content=xml_content,
-            response_data={
-                "xml_hash": xml_hash,
-                "simulated": True,
-            },
+            response_data={"xml_hash": xml_hash, "raw": upload_resp.raw_response},
         )
 
     def check_status(self, upload_index: str) -> EFacturaSubmissionResult:
@@ -621,14 +657,54 @@ class EFacturaSubmissionService:
         Returns:
             EFacturaSubmissionResult with current status
         """
-        # TODO: Implement actual status polling
-        logger.info(f"🏛️ [e-Factura] Would check status for upload index: {upload_index}")
+        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError, EFacturaConfig  # noqa: PLC0415
+
+        config = EFacturaConfig.from_settings()
+        if not config.is_valid():
+            if getattr(settings, "DEBUG", False):
+                logger.warning("⚠️ [e-Factura] Not configured (DEBUG) — returning simulated status")
+                return EFacturaSubmissionResult(
+                    success=True,
+                    upload_index=upload_index,
+                    status=EFacturaStatus.ACCEPTED,
+                    message="Status check successful (simulated — not configured)",
+                )
+            logger.error("🔥 [e-Factura] Not configured — cannot check status in production")
+            return EFacturaSubmissionResult(
+                success=False,
+                upload_index=upload_index,
+                status=EFacturaStatus.ERROR,
+                message="e-Factura not configured — status check blocked",
+                errors=["e-Factura credentials are not configured"],
+            )
+
+        logger.info(f"🏛️ [e-Factura] Checking status for upload index: {upload_index}")
+        try:
+            client = EFacturaClient(config)
+            status_resp = client.get_upload_status(upload_index)
+        except EFacturaClientError as exc:
+            logger.error(f"🔥 [e-Factura] Client error checking status for {upload_index}: {exc}")
+            return EFacturaSubmissionResult(
+                success=False,
+                upload_index=upload_index,
+                status=EFacturaStatus.ERROR,
+                message=f"e-Factura client error: {exc}",
+                errors=[str(exc)],
+            )
+
+        if status_resp.is_accepted:
+            efactura_status = EFacturaStatus.ACCEPTED
+        elif status_resp.is_rejected:
+            efactura_status = EFacturaStatus.REJECTED
+        else:
+            efactura_status = EFacturaStatus.PROCESSING
 
         return EFacturaSubmissionResult(
             success=True,
             upload_index=upload_index,
-            status=EFacturaStatus.ACCEPTED,
-            message="Status check successful (simulated)",
+            status=efactura_status,
+            message=f"Status: {status_resp.status}",
+            response_data=status_resp.raw_response,
         )
 
     def download_response(self, download_id: str) -> Result[bytes, str]:
@@ -641,10 +717,26 @@ class EFacturaSubmissionService:
         Returns:
             Result with PDF/XML bytes or error
         """
-        # TODO: Implement actual download
-        logger.info(f"🏛️ [e-Factura] Would download response: {download_id}")
+        from apps.billing.efactura.client import EFacturaConfig  # noqa: PLC0415
 
-        return Err("Download not yet implemented")
+        config = EFacturaConfig.from_settings()
+        if not config.is_valid():
+            logger.warning("⚠️ [e-Factura] Not configured — cannot download")
+            return Err("e-Factura not configured")
+
+        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError  # noqa: PLC0415
+
+        logger.info(f"🏛️ [e-Factura] Downloading response: {download_id}")
+        try:
+            client = EFacturaClient(config)
+            content = client.download_response(download_id)
+            return Ok(content)
+        except EFacturaClientError as exc:
+            logger.error(f"🔥 [e-Factura] Client error downloading {download_id}: {exc}")
+            return Err(f"e-Factura client error: {exc}")
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.error(f"🔥 [e-Factura] Download failed for {download_id}: {exc}")
+            return Err("Download failed — check logs for details")
 
 
 # ===============================================================================

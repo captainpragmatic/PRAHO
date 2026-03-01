@@ -159,8 +159,8 @@ class UsageEventModelTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -274,8 +274,8 @@ class SubscriptionModelTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -390,8 +390,8 @@ class BillingCycleModelTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -514,8 +514,8 @@ class UsageAggregationModelTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -623,8 +623,8 @@ class PricingTierModelTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.meter = UsageMeter.objects.create(
@@ -737,8 +737,8 @@ class UsageThresholdAndAlertTestCase(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency = Currency.objects.create(
-            code="RON", symbol="lei", decimals=2
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(

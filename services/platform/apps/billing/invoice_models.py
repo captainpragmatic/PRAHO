@@ -273,8 +273,17 @@ class Invoice(models.Model):
         return self.due_at is not None and timezone.now() > self.due_at and self.status == "issued"
 
     def get_remaining_amount(self) -> int:
-        """Calculate remaining unpaid amount in cents"""
-        paid_amount = self.payments.filter(status="succeeded").aggregate(total=models.Sum("amount_cents"))["total"] or 0
+        """Calculate remaining unpaid amount in cents.
+
+        Includes both 'succeeded' and 'partially_refunded' payments because
+        partially-refunded payments still represent collected money.
+        """
+        paid_amount = (
+            self.payments.filter(status__in=["succeeded", "partially_refunded"]).aggregate(
+                total=models.Sum("amount_cents")
+            )["total"]
+            or 0
+        )
         return max(0, self.total_cents - paid_amount)
 
     def mark_as_paid(self) -> None:
@@ -285,18 +294,24 @@ class Invoice(models.Model):
 
     @property
     def amount_due(self) -> int:
-        """Calculate remaining amount due after payments"""
-        # TODO: Implement actual payment tracking
-        # For now, assume unpaid invoices have full amount due
+        """Calculate remaining amount due after succeeded payments."""
         if self.status == "paid":
-            return 0
-        return self.total_cents
+            return 0  # Fast path: skip DB aggregate for paid invoices
+        return self.get_remaining_amount()
 
     def update_status_from_payments(self) -> None:
-        """Update invoice status based on associated payments"""
-        # TODO: Implement payment-based status update logic
-        if self.amount_due <= 0:
+        """Update invoice status based on associated payments."""
+        if self.status in ("paid", "void", "refunded"):
+            return  # Terminal states — do not touch
+
+        remaining = self.amount_due
+        if remaining <= 0:
             self.mark_as_paid()
+        elif remaining < self.total_cents:
+            logger.info(
+                f"💰 [Invoice] {self.number} partially paid: "
+                f"{self.total_cents - remaining}/{self.total_cents} cents"
+            )
 
 
 class InvoiceLine(models.Model):

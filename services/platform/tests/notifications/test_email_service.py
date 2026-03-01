@@ -15,6 +15,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.core import mail
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -34,6 +35,7 @@ from apps.notifications.services import (
     render_template_safely,
     validate_template_context,
 )
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class EmailServiceBasicTests(TestCase):
@@ -287,8 +289,12 @@ class EmailSuppressionModelTests(TestCase):
         self.assertTrue(EmailSuppression.is_suppressed("TEST@EXAMPLE.COM"))
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class EmailRateLimitTests(TestCase):
-    """Test email rate limiting."""
+    """Test email rate limiting — needs real cache for rate limit counters."""
+
+    def setUp(self):
+        cache.clear()
 
     def test_check_rate_limit_allows(self):
         """Test rate limit allows when under limit."""

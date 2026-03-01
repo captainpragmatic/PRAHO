@@ -22,6 +22,8 @@ from django.core.cache import cache
 from django.http import HttpRequest
 from django.test import TestCase, override_settings
 
+from config.settings.test import LOCMEM_TEST_CACHE
+
 
 class TimingSafeTokenTests(TestCase):
     """Test timing-safe token comparison for unsubscribe."""
@@ -131,8 +133,9 @@ class SSRFProtectionTests(TestCase):
                 mock_get.assert_not_called()
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class RateLimiterAtomicTests(TestCase):
-    """Test rate limiter atomic operations."""
+    """Test rate limiter atomic operations — needs real cache for atomic increment testing."""
 
     def setUp(self):
         """Clear cache before each test."""

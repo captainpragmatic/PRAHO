@@ -62,13 +62,10 @@ from .models import (
     ProformaLine,
     ProformaSequence,
 )
+from .payment_service import PaymentService
+from .services import log_security_event
 
 logger = logging.getLogger(__name__)
-from .payment_service import PaymentService  # noqa: E402
-from .services import (  # noqa: E402
-    log_security_event,
-    # TODO: Add RefundService imports when implemented
-)
 
 # Customer access function removed - platform is staff-only
 _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
@@ -1209,12 +1206,20 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if request.method == "POST":
-        # TODO: Implement email sending with Romanian template
-        messages.success(
-            request,
-            _("✅ Proforma #{proforma_number} has been sent successfully!").format(proforma_number=proforma.number),
-        )
-        return JsonResponse({"success": True})
+        from apps.billing.proforma_service import send_proforma_email  # noqa: PLC0415
+
+        email_sent = send_proforma_email(proforma)
+        if email_sent:
+            proforma.status = "sent"
+            proforma.save(update_fields=["status"])
+            messages.success(
+                request,
+                _("✅ Proforma #{proforma_number} has been sent successfully!").format(proforma_number=proforma.number),
+            )
+            return JsonResponse({"success": True})
+        else:
+            messages.error(request, _("❌ Failed to send proforma email."))
+            return JsonResponse({"error": "Failed to send email"}, status=500)
 
     return JsonResponse({"error": "Invalid method"}, status=405)
 
@@ -1279,15 +1284,25 @@ def invoice_send(request: HttpRequest, pk: int) -> HttpResponse:
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if request.method == "POST":
-        # TODO: Implement email sending with Romanian template
-        # Keep invoice as issued (don't need to change status just for sending)
-        invoice.sent_at = timezone.now()
-        invoice.save()
+        from apps.billing.invoice_service import send_invoice_email  # noqa: PLC0415
+        from apps.notifications.services import EmailService  # noqa: PLC0415
 
-        messages.success(
-            request, _("✅ Invoice #{invoice_number} has been sent successfully!").format(invoice_number=invoice.number)
-        )
-        return JsonResponse({"success": True})
+        # Send via both the direct email and template-based notification
+        email_sent = send_invoice_email(invoice)
+        EmailService.send_invoice_created(invoice)
+
+        invoice.sent_at = timezone.now()
+        invoice.save(update_fields=["sent_at"])
+
+        if email_sent:
+            messages.success(
+                request,
+                _("✅ Invoice #{invoice_number} has been sent successfully!").format(invoice_number=invoice.number),
+            )
+            return JsonResponse({"success": True})
+        else:
+            messages.warning(request, _("⚠️ Invoice saved but email delivery may have failed."))
+            return JsonResponse({"success": True, "warning": "Email delivery uncertain"})
 
     return JsonResponse({"error": "Invalid method"}, status=405)
 
@@ -1304,21 +1319,18 @@ def generate_e_factura(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("❌ You do not have permission to generate e-Invoice for this invoice."))
         return redirect("billing:invoice_detail", pk=pk)
 
-    # TODO: Implement e-Factura XML generation according to Romanian standards
-    # This is a critical feature for Romanian businesses
+    # Generate real UBL e-Factura XML using existing generator
+    from apps.billing.invoice_service import generate_e_factura_xml  # noqa: PLC0415
+
+    try:
+        xml_content = generate_e_factura_xml(invoice)
+    except Exception as e:
+        logger.error(f"🔥 [e-Factura] XML generation failed for {invoice.number}: {e}")
+        messages.error(request, _("❌ Failed to generate e-Factura XML: {error}").format(error=str(e)))
+        return redirect("billing:invoice_detail", pk=pk)
 
     response = HttpResponse(content_type="application/xml")
     response["Content-Disposition"] = f'attachment; filename="e_factura_{invoice.number}.xml"'
-
-    # Placeholder XML
-    xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
-    <ID>{invoice.number}</ID>
-    <IssueDate>{invoice.created_at.date()}</IssueDate>
-    <DocumentCurrencyCode>RON</DocumentCurrencyCode>
-    <!-- Full e-Factura implementation needed -->
-</Invoice>"""
-
     response.write(xml_content.encode("utf-8"))
     return response
 
@@ -1501,16 +1513,30 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         if refund_type_str == "partial":
             try:
                 refund_amount = Decimal(refund_amount_str)
-                if refund_amount <= 0:
-                    return json_error("Refund amount must be greater than 0")
+                valid = refund_amount > 0
             except (ValueError, TypeError):
-                return json_error("Invalid refund amount")
+                valid = False
+            if not valid:
+                return json_error("Invalid or non-positive refund amount")
 
-        # TODO: RefundService implementation pending
-        # When implemented, create refund_data dict with:
-        # refund_type, amount_cents, refund_reason, refund_notes, request.user, etc.
-        # and call RefundService.refund_invoice(invoice.id, refund_data)
-        return json_error("Refund functionality temporarily disabled - RefundService implementation pending")
+        from apps.billing.refund_service import RefundData, RefundService  # noqa: PLC0415
+
+        # Build refund data for RefundService
+        amount_cents = int(Decimal(refund_amount_str) * 100) if refund_type_str == "partial" else invoice.total_cents
+        refund_data: RefundData = {
+            "refund_type": refund_type_str,
+            "amount_cents": amount_cents,
+            "reason": refund_reason_str,
+            "notes": refund_notes,
+            "user_id": str(request.user.id),
+            "user_email": request.user.email,
+        }
+
+        result = RefundService.refund_invoice(invoice.id, refund_data)
+        if result.is_ok():
+            refund_result = result.unwrap()
+            return JsonResponse({"success": True, "refund_id": str(refund_result.refund_id)})
+        return json_error(result.unwrap_err())
 
     except Exception as e:
         logger.exception(f"Failed to process invoice refund: {e}")
@@ -1854,10 +1880,38 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
         if not payment_id:
             return JsonResponse({"success": False, "error": "payment_id is required"}, status=400)
 
-        # TODO: Implement refund processing via PaymentService
+        from apps.billing.refund_service import RefundData, RefundService  # noqa: PLC0415
 
-        logger.info(f"📝 API: Refund request for payment {payment_id} - not yet implemented")
-        return JsonResponse({"success": False, "error": "Refund processing not yet implemented"}, status=501)
+        # Look up payment and validate it has a linked invoice
+        try:
+            payment = Payment.objects.filter(id=payment_id).select_related("invoice").first()
+        except (ValueError, TypeError):
+            payment = None
+        lookup_error = None if payment is not None else f"Payment {payment_id} not found"
+        if lookup_error or not getattr(payment, "invoice", None):
+            msg = lookup_error or "Payment has no linked invoice"
+            return JsonResponse({"success": False, "error": msg}, status=400)
+
+        amount_cents = data.get("amount_cents")
+        reason = data.get("reason", "API refund request")
+
+        assert payment is not None  # narrowing: guaranteed by lookup_error check above
+        payment_invoice = payment.invoice
+        assert payment_invoice is not None  # narrowing: guaranteed by linked-invoice check above
+        refund_data: RefundData = {
+            "refund_type": "partial" if amount_cents else "full",
+            "amount_cents": amount_cents or payment.amount_cents,
+            "reason": reason,
+            "notes": f"API refund for payment {payment_id}",
+        }
+
+        result = RefundService.refund_invoice(payment_invoice.id, refund_data)
+        if result.is_ok():
+            refund_result = result.unwrap()
+            logger.info(f"✅ API: Refund processed for payment {payment_id}")
+            return JsonResponse({"success": True, "refund_id": str(refund_result.refund_id)})
+        logger.warning(f"⚠️ API: Refund failed for payment {payment_id}: {result.unwrap_err()}")
+        return JsonResponse({"success": False, "error": result.unwrap_err()}, status=400)
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)

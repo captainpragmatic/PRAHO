@@ -1020,7 +1020,9 @@ class TestUsageAlertServiceNotification(TransactionTestCase):
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
 
-    def test_send_alert_success(self):
+    @patch("apps.notifications.services.EmailService.send_template_email")
+    def test_send_alert_success(self, mock_send_email):
+        mock_send_email.return_value = MagicMock(success=True, error=None)
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
             meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),

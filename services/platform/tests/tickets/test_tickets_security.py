@@ -20,7 +20,9 @@ from unittest.mock import Mock, patch
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import HttpResponse
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
+
+from config.settings.test import LOCMEM_TEST_CACHE
 from django.urls import reverse
 from django.utils import timezone
 
@@ -28,7 +30,7 @@ from apps.customers.models import Customer
 from apps.tickets.models import Ticket, TicketAttachment, TicketComment, SupportCategory
 from apps.tickets.monitoring import SecurityEventTracker, security_tracker
 from apps.tickets.security import (
-    FileSecurityScanner,
+    TicketAttachmentSecurityScanner,
     FileSecurityError,
     generate_secure_filename,
     get_secure_upload_path,
@@ -38,11 +40,11 @@ from apps.tickets.security import (
 from apps.users.models import User, CustomerMembership
 
 
-class FileSecurityScannerTest(TestCase):
+class TicketAttachmentSecurityScannerTest(TestCase):
     """🔒 Test comprehensive file security scanning"""
 
     def setUp(self):
-        self.scanner = FileSecurityScanner()
+        self.scanner = TicketAttachmentSecurityScanner()
 
     def test_valid_pdf_file_passes_scan(self):
         """✅ Valid PDF file should pass all security checks"""
@@ -241,8 +243,9 @@ class TicketNumberSecurityTest(TestCase):
         self.assertNotEqual(ticket1.ticket_number, ticket2.ticket_number)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class RateLimitingSecurityTest(TestCase):
-    """🔒 Test rate limiting security on ticket operations"""
+    """🔒 Test rate limiting security on ticket operations — needs real cache for rate limit counters."""
 
     @classmethod
     def setUpClass(cls):
@@ -479,6 +482,7 @@ class FileAccessControlTest(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class SecurityMonitoringTest(TestCase):
     """🔍 Test security monitoring and alerting system"""
 

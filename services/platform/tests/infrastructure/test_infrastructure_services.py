@@ -28,6 +28,7 @@ from apps.infrastructure.models import (
     NodeSize,
     PanelType,
 )
+import apps.infrastructure.cost_service as _cost_service_module
 from apps.infrastructure.cost_service import (
     CostSummary,
     CostTrackingService,
@@ -117,6 +118,10 @@ class CostTrackingServiceTests(TestCase):
         self.panel = infra["panel"]
         self.service = CostTrackingService()
         self._deployment_counter = 0
+
+    def tearDown(self):
+        super().tearDown()
+        _cost_service_module._cost_service = None
 
     def create_deployment(self, **kwargs):
         """Helper to create deployments"""
