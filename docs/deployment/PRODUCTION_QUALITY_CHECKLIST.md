@@ -54,7 +54,7 @@ This document analyzes the PRAHO platform against production-grade quality crite
 4. **Financial Precision**
    - All amounts stored in cents (`BigIntegerField`)
    - Multi-currency support (RON, EUR, USD)
-   - VAT calculations at 19% Romanian standard rate
+   - Dynamic VAT rate via `TaxService.get_vat_rate()` (currently 21% Romanian standard rate)
 
 #### Provisioning System (`apps/provisioning/`)
 

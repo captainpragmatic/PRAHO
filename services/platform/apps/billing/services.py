@@ -163,6 +163,7 @@ class InvoiceService:
                 )
 
                 # Create invoice lines from order items
+                vat_rate_percent = TaxService.get_vat_rate("RO", as_decimal=False)
                 for item in order.items.all():
                     InvoiceLine.objects.create(  # type: ignore[misc]
                         invoice=invoice,
@@ -170,7 +171,7 @@ class InvoiceService:
                         quantity=item.quantity,
                         unit_price_cents=item.unit_price_cents,
                         total_cents=item.total_cents,
-                        tax_rate_percent=19,  # Romanian VAT rate
+                        tax_rate_percent=vat_rate_percent,
                         meta={"order_item_id": str(item.id)},
                     )
 
