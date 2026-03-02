@@ -1,343 +1,36 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
-{% block title %}{% trans "My Services" %}{% endblock %}
+{% block title %}{% trans 'My Services' %} - PRAHO Portal{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-  <!-- Page Header -->
-  <div class="mb-8">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold text-white">🌐 {% trans 'My Services' %}</h1>
-        <p class="mt-2 text-slate-400">{% trans 'Manage your hosting services and resources' %}</p>
-      </div>
+<div class="space-y-6">
+  {# Shared Header Card #}
+  {% include "components/list_page_header.html" with list_icon_bg="bg-green-600" list_icon_svg_path="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" list_title=page_title list_title_mobile=page_title_mobile list_subtitle=page_subtitle list_stats=header_stats list_action_include="services/partials/header_action.html" %}
 
-      <!-- Order Service Button -->
-      <div class="hidden sm:block">
-        {% load ui_components %}
-        {% trans "🛒 Order New Service" as bt1 %}{% button bt1 variant="success" size="lg" href="/order/" icon="plus" class="shadow-lg hover:shadow-xl transition-shadow" %}
-      </div>
-    </div>
-
-    <!-- Mobile Order Button -->
-    <div class="sm:hidden mt-4">
-      {% trans "🛒 Order Service" as bt2 %}{% button bt2 variant="success" size="md" href="/order/" icon="plus" class="w-full" %}
-    </div>
+  {# Messages #}
+  {% if messages %}
+  <div class="space-y-2">
+    {% for message in messages %}
+    {% alert message variant=message.tags dismissible=True %}
+    {% endfor %}
   </div>
+  {% endif %}
 
-  <!-- Status Filter Tabs -->
-  <div class="mb-6">
-    <div class="border-b border-slate-700">
-      <!-- Desktop Navigation -->
-      <nav class="-mb-px hidden sm:flex space-x-8">
-        <a href="{% url 'services:list' %}"
-           class="{% if not status_filter %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          📊 {% trans 'All Services' %}
-        </a>
+  {# Shared Filters with Tabs (status) + Search #}
+  {% url 'services:search_api' as services_search_url %}
+  {% include "components/list_page_filters.html" with filter_search_url=services_search_url filter_content_id="services-content" filter_skeleton_id="services-skeleton" filter_search_value=search_query filter_search_placeholder=search_placeholder filter_tabs=filter_tabs filter_active_tab=status_filter filter_tab_param="status" %}
 
-        <a href="{% url 'services:list' %}?status=active"
-           class="{% if status_filter == 'active' %}border-green-500 text-green-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ✅ {% trans 'Active' %}
-        </a>
+  {# Services List Container #}
+  <div id="services-container" class="relative">
+    {# Shared Skeleton Loader #}
+    {% include "components/list_page_skeleton.html" with skeleton_id="services-skeleton" skeleton_cols=5 skeleton_rows=6 %}
 
-        <a href="{% url 'services:list' %}?status=suspended"
-           class="{% if status_filter == 'suspended' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ⏸️ {% trans 'Suspended' %}
-        </a>
-
-        <a href="{% url 'services:list' %}?status=pending"
-           class="{% if status_filter == 'pending' %}border-yellow-500 text-yellow-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ⏳ {% trans 'Pending' %}
-        </a>
-
-        <a href="{% url 'services:list' %}?status=cancelled"
-           class="{% if status_filter == 'cancelled' %}border-slate-500 text-slate-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ❌ {% trans 'Cancelled' %}
-        </a>
-      </nav>
-
-      <!-- Mobile Navigation - Scrollable -->
-      <div class="sm:hidden -mb-px overflow-x-auto">
-        <nav class="flex space-x-6 min-w-max">
-          <a href="{% url 'services:list' %}"
-             class="{% if not status_filter %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-            📊 {% trans 'All Services' %}
-          </a>
-
-          <a href="{% url 'services:list' %}?status=active"
-             class="{% if status_filter == 'active' %}border-green-500 text-green-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-            ✅ {% trans 'Active' %}
-          </a>
-
-          <a href="{% url 'services:list' %}?status=suspended"
-             class="{% if status_filter == 'suspended' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-            ⏸️ {% trans 'Suspended' %}
-          </a>
-
-          <a href="{% url 'services:list' %}?status=pending"
-             class="{% if status_filter == 'pending' %}border-yellow-500 text-yellow-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-            ⏳ {% trans 'Pending' %}
-          </a>
-
-          <a href="{% url 'services:list' %}?status=cancelled"
-             class="{% if status_filter == 'cancelled' %}border-slate-500 text-slate-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-            ❌ {% trans 'Cancelled' %}
-          </a>
-        </nav>
-      </div>
+    {# Content (swapped by HTMX) #}
+    <div id="services-content">
+      {% include 'services/partials/services_table.html' %}
     </div>
-  </div>
-
-  <!-- Services Table -->
-  <div class="bg-slate-800 rounded-lg overflow-hidden">
-    <!-- Services Count Header -->
-    <div class="px-4 sm:px-6 py-4 border-b border-slate-700">
-      <!-- Desktop Layout -->
-      <div class="hidden sm:flex items-center justify-between">
-        <div class="flex items-center space-x-4">
-          <h3 class="text-lg font-medium text-white">📦 {% trans 'My Services' %}</h3>
-
-          <!-- Service Count Badge -->
-          <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
-            {% if total_count == 1 %}
-              1 {% trans 'service' %}
-            {% else %}
-              {{ total_count }} {% trans 'services' %}
-            {% endif %}
-          </div>
-
-          {% if status_filter %}
-          <div class="bg-purple-600/20 text-purple-400 px-3 py-1 rounded-full text-sm">
-            {% trans 'Filter:' %} {{ status_filter|title }}
-          </div>
-          {% endif %}
-        </div>
-
-        <!-- Quick Stats -->
-        <div class="flex items-center space-x-4 text-sm">
-          <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% else %}text-blue-400{% endif %}">
-            {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'cancelled' %}❌{% else %}📊{% endif %}
-            {{ active_count }}
-            {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'cancelled' %}{% trans 'cancelled' %}{% else %}{% trans 'services' %}{% endif %}
-          </div>
-          <div class="text-slate-400">
-            📊 {% if status_filter %}{{ summary.total_services }}{% else %}{{ total_count }}{% endif %} {% trans 'total' %}
-          </div>
-        </div>
-      </div>
-
-      <!-- Mobile Layout -->
-      <div class="sm:hidden">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-lg font-medium text-white">📦 {% trans 'My Services' %}</h3>
-          <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
-            {% if total_count == 1 %}
-              1 {% trans 'service' %}
-            {% else %}
-              {{ total_count }} {% trans 'services' %}
-            {% endif %}
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-3 text-sm">
-            <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% else %}text-blue-400{% endif %}">
-              {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'cancelled' %}❌{% else %}📊{% endif %}
-              {{ active_count }}
-              {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'cancelled' %}{% trans 'cancelled' %}{% else %}{% trans 'services' %}{% endif %}
-            </div>
-            <div class="text-slate-400">📊 {% if status_filter %}{{ summary.total_services }}{% else %}{{ total_count }}{% endif %} {% trans 'total' %}</div>
-          </div>
-
-          {% if status_filter %}
-          <div class="bg-purple-600/20 text-purple-400 px-2 py-1 rounded-full text-xs">
-            {{ status_filter|title }}
-          </div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-
-    <!-- Desktop Table View -->
-    {% if services %}
-    <div class="hidden sm:block overflow-x-auto">
-      <table class="min-w-full divide-y divide-slate-700">
-        <thead class="bg-slate-700">
-          <tr>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Service Name' %}
-            </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Plan' %}
-            </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Price' %}
-            </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Status' %}
-            </th>
-            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Next Billing' %}
-            </th>
-          </tr>
-        </thead>
-        <tbody class="bg-slate-800 divide-y divide-slate-700">
-          {% for service in services %}
-          <tr class="hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}'">
-            <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
-              {% if service.domain %}
-              <div class="text-sm text-slate-400">{{ service.domain }}</div>
-              {% endif %}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-              {% if service.status == 'active' %}
-              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                {% trans 'Active' %}
-              </span>
-              {% elif service.status == 'suspended' %}
-              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                {% trans 'Suspended' %}
-              </span>
-              {% elif service.status == 'pending' %}
-              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                {% trans 'Pending' %}
-              </span>
-              {% elif service.status == 'cancelled' %}
-              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                {% trans 'Cancelled' %}
-              </span>
-              {% else %}
-              <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                {{ service.status|title }}
-              </span>
-              {% endif %}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-              {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Mobile Card View -->
-    <div class="sm:hidden divide-y divide-slate-700">
-      {% for service in services %}
-      <div class="p-4 hover:bg-slate-750 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}'">
-        <div class="flex items-start justify-between mb-3">
-          <div class="flex-1">
-            <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
-            {% if service.domain %}
-            <div class="text-xs text-slate-400 mt-1">{{ service.domain }}</div>
-            {% endif %}
-          </div>
-          <div class="ml-3">
-            {% if service.status == 'active' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-              {% trans 'Active' %}
-            </span>
-            {% elif service.status == 'suspended' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-              {% trans 'Suspended' %}
-            </span>
-            {% elif service.status == 'pending' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-              {% trans 'Pending' %}
-            </span>
-            {% elif service.status == 'cancelled' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-              {% trans 'Cancelled' %}
-            </span>
-            {% else %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-              {{ service.status|title }}
-            </span>
-            {% endif %}
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Plan' %}</div>
-            <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
-          </div>
-          <div>
-            <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
-            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Next Billing' %}</div>
-            <div class="text-sm text-slate-300">{{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}</div>
-          </div>
-          <div class="flex items-center text-blue-400">
-            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-            </svg>
-            <span class="text-sm">{% trans 'View Details' %}</span>
-          </div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <!-- Empty State -->
-    <div class="text-center py-12">
-      <div class="text-slate-400 text-lg mb-4">
-        {% if status_filter %}
-          📋 {% trans 'No services found for the selected filter' %}
-        {% else %}
-          📦 {% trans 'No services yet' %}
-        {% endif %}
-      </div>
-      {% if not status_filter %}
-      <p class="text-slate-500 mb-6">
-        {% trans 'Contact our sales team to get started with hosting services.' %}
-      </p>
-      {% endif %}
-    </div>
-    {% endif %}
-
-    <!-- Pagination -->
-    {% if has_next or has_previous %}
-    <div class="bg-slate-700 px-4 sm:px-6 py-3 border-t border-slate-600">
-      <div class="flex items-center justify-between">
-        <!-- Page Info -->
-        <div class="text-sm text-slate-400">
-          {% trans 'Page' %} {{ current_page }}
-        </div>
-
-        <!-- Navigation Controls -->
-        <div class="flex space-x-1">
-          {% if has_previous %}
-          <a href="?page={{ previous_page }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-             class="bg-slate-600 hover:bg-slate-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm transition-colors">
-            {% trans 'Previous' %}
-          </a>
-          {% endif %}
-
-          {% if has_next %}
-          <a href="?page={{ next_page }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-             class="bg-slate-600 hover:bg-slate-500 text-white px-2 sm:px-3 py-1 rounded text-xs sm:text-sm transition-colors">
-            {% trans 'Next' %}
-          </a>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-    {% endif %}
   </div>
 </div>
-
 {% endblock %}

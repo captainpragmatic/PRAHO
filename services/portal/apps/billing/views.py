@@ -13,10 +13,120 @@ from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.common.decorators import log_access_attempt, require_billing_access
+from apps.common.pagination import PaginatorData, build_pagination_params
 
 from .services import BillingDataSyncService, InvoiceViewService
 
+# Tab configuration for document type filtering
+INVOICE_DOC_TYPE_TABS = [
+    {"value": "all", "label": _("All Documents"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {"value": "invoice", "label": _("Invoices"), "border_class": "border-green-500", "text_class": "text-green-400"},
+    {
+        "value": "proforma",
+        "label": _("Proformas"),
+        "border_class": "border-purple-500",
+        "text_class": "text-purple-400",
+    },
+]
+
+INVOICE_STATUS_CHOICES = [
+    ("", _("All Statuses")),
+    ("draft", _("Draft")),
+    ("issued", _("Issued")),
+    ("sent", _("Sent")),
+    ("accepted", _("Accepted")),
+    ("paid", _("Paid")),
+    ("overdue", _("Overdue")),
+    ("expired", _("Expired")),
+    ("void", _("Void")),
+    ("refunded", _("Refunded")),
+]
+
+ALLOWED_STATUSES = {"draft", "issued", "paid", "overdue", "void", "refunded", "sent", "accepted", "expired"}
+
 logger = logging.getLogger(__name__)
+
+
+def _fetch_filtered_documents(  # noqa: PLR0913
+    customer_id: int,
+    user_id: int,
+    doc_type: str = "all",
+    status_filter: str = "",
+    search_query: str = "",
+    force_sync: bool = False,
+) -> list[Any]:
+    """Fetch and filter billing documents from platform API."""
+    invoice_service = InvoiceViewService()
+    documents: list[Any] = []
+
+    if doc_type in ["all", "invoice"]:
+        invoices = invoice_service.get_customer_invoices(
+            customer_id=customer_id, user_id=user_id, force_sync=force_sync
+        )
+        for inv in invoices:
+            inv.document_type = "invoice"
+        documents.extend(invoices)
+
+    if doc_type in ["all", "proforma"]:
+        proformas = invoice_service.get_customer_proformas(
+            customer_id=customer_id, user_id=user_id, force_sync=force_sync
+        )
+        for pro in proformas:
+            pro.document_type = "proforma"
+        documents.extend(proformas)
+
+    if status_filter and status_filter in ALLOWED_STATUSES:
+        documents = [doc for doc in documents if doc.status == status_filter]
+
+    if search_query:
+        query_lower = search_query.lower()
+        documents = [
+            doc
+            for doc in documents
+            if query_lower in str(getattr(doc, "number", "")).lower()
+            or query_lower in str(getattr(doc, "status", "")).lower()
+            or query_lower in str(getattr(doc, "document_type", "")).lower()
+            or query_lower in str(getattr(doc, "total_cents", "")).lower()
+            or query_lower in str(getattr(doc, "description", "")).lower()
+            or query_lower in str(getattr(doc, "notes", "")).lower()
+            or query_lower in str(getattr(doc, "additional_info", "")).lower()
+            or query_lower in str(getattr(doc, "customer_name", "")).lower()
+            or query_lower in str(getattr(doc, "customer_email", "")).lower()
+            or any(query_lower in str(getattr(line, "description", "")).lower() for line in getattr(doc, "lines", []))
+        ]
+
+    documents.sort(key=lambda x: x.created_at, reverse=True)
+    return documents
+
+
+def _invoices_base_context(  # noqa: PLR0913
+    doc_type: str = "all",
+    status_filter: str = "",
+    search_query: str = "",
+    total_documents: int = 0,
+    invoice_count: int = 0,
+    proforma_count: int = 0,
+    unpaid_count: int = 0,
+) -> dict[str, Any]:
+    """Build shared context for both list view and search endpoint."""
+    return {
+        "doc_type": doc_type,
+        "status_filter": status_filter,
+        "search_query": search_query,
+        "status_choices": INVOICE_STATUS_CHOICES,
+        # Shared header component data
+        "page_title": _("My Billing Documents"),
+        "page_title_mobile": _("Billing"),
+        "page_subtitle": _("View your invoices and proformas"),
+        "search_placeholder": _("Search by type, number, amount, status, date, services…"),
+        "header_stats": [
+            {"value": str(invoice_count), "label": _("Invoices"), "color": "text-white"},
+            {"value": str(proforma_count), "label": _("Proformas"), "color": "text-white"},
+            {"value": str(unpaid_count), "label": _("Unpaid"), "color": "text-amber-400"},
+            {"value": str(total_documents), "label": _("Total"), "color": "text-slate-400"},
+        ],
+        "filter_tabs": INVOICE_DOC_TYPE_TABS,
+    }
 
 
 # ===============================================================================
@@ -29,89 +139,77 @@ logger = logging.getLogger(__name__)
 @log_access_attempt
 def invoices_list_view(request: HttpRequest) -> HttpResponse:
     """
-    🔒 Customer Billing Documents List View
+    Customer Billing Documents List View.
 
     GET /billing/invoices/
-
-    Displays paginated list of customer's invoices and proformas with filtering options.
-    Integrates with platform API for real-time data. Requires billing access.
     """
-    # Customer ID is available from decorator via request.current_customer_id
     customer_id = getattr(request, "current_customer_id", None)
 
     try:
-        invoice_service = InvoiceViewService()
-
-        # Get filter parameters
         status_filter = request.GET.get("status", "")
         doc_type = request.GET.get("type", "all")
+        search_query = request.GET.get("q", "").strip()
         force_sync = request.GET.get("sync") == "true"
 
-        # Get both invoices and proformas from service
-        documents: list[Any] = []
-        user_id = int(request.user.id)  # type: ignore[union-attr, arg-type]
-        cid = int(customer_id)  # type: ignore[arg-type]
-
-        if doc_type in ["all", "invoice"]:
-            invoices = invoice_service.get_customer_invoices(customer_id=cid, user_id=user_id, force_sync=force_sync)
-            # Add document type to each invoice
-            for invoice in invoices:
-                invoice.document_type = "invoice"
-            documents.extend(invoices)
-
-        if doc_type in ["all", "proforma"]:
-            proformas = invoice_service.get_customer_proformas(customer_id=cid, user_id=user_id, force_sync=force_sync)
-            # Add document type to each proforma
-            for proforma in proformas:
-                proforma.document_type = "proforma"
-            documents.extend(proformas)
-
-        # Apply status filter if provided
-        if status_filter and (
-            status_filter in ["draft", "issued", "paid", "overdue", "void", "refunded"]
-            or status_filter in ["sent", "accepted", "expired"]
-        ):
-            documents = [doc for doc in documents if doc.status == status_filter]
-
-        # Sort documents by creation date (newest first)
-        documents.sort(key=lambda x: x.created_at, reverse=True)
-
-        # Simple pagination (could be enhanced)
         try:
             page = max(1, int(request.GET.get("page", 1)))
         except (ValueError, TypeError):
             page = 1
-        per_page = 20
-        total_documents = len(documents)
-        start_index = (page - 1) * per_page
-        end_index = start_index + per_page
 
-        paginated_documents = documents[start_index:end_index]
-        total_pages = (total_documents + per_page - 1) // per_page
+        assert request.user.is_authenticated, "require_billing_access should enforce auth"
+        assert customer_id is not None, "require_billing_access should set customer_id"
+        user_id = int(request.user.pk)
+        cid = int(customer_id)
+
+        # Fetch ALL documents (unfiltered by type) for stats, then apply type filter
+        all_documents = _fetch_filtered_documents(
+            customer_id=cid,
+            user_id=user_id,
+            doc_type="all",
+            status_filter="",
+            search_query="",
+            force_sync=force_sync,
+        )
+        invoice_count = sum(1 for d in all_documents if getattr(d, "document_type", "") == "invoice")
+        proforma_count = sum(1 for d in all_documents if getattr(d, "document_type", "") == "proforma")
+        unpaid_statuses = {"draft", "issued", "sent", "overdue", "pending"}
+        unpaid_count = sum(
+            1
+            for d in all_documents
+            if getattr(d, "document_type", "") == "invoice" and getattr(d, "status", "") in unpaid_statuses
+        )
+
+        # Now fetch with actual filters for display
+        documents = _fetch_filtered_documents(
+            customer_id=cid,
+            user_id=user_id,
+            doc_type=doc_type,
+            status_filter=status_filter,
+            search_query=search_query,
+            force_sync=False,
+        )
+
+        total_documents = len(documents)
+        per_page = 20
+        start = (page - 1) * per_page
+        paginated = documents[start : start + per_page]
+
+        paginator_data = PaginatorData(total_count=total_documents, current_page=page, page_size=per_page)
+        pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
 
         context = {
-            "invoices": paginated_documents,  # Keep template compatibility by using 'invoices'
-            "status_filter": status_filter,
-            "doc_type": doc_type,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "has_previous": page > 1,
-                "has_next": page < total_pages,
-                "total_items": total_documents,
-            },
-            "status_choices": [
-                ("", _("All Statuses")),
-                ("draft", _("Draft")),
-                ("issued", _("Issued")),
-                ("sent", _("Sent")),
-                ("accepted", _("Accepted")),
-                ("paid", _("Paid")),
-                ("overdue", _("Overdue")),
-                ("expired", _("Expired")),
-                ("void", _("Void")),
-                ("refunded", _("Refunded")),
-            ],
+            "invoices": paginated,
+            "paginator_data": paginator_data,
+            "pagination_params": pagination_params,
+            **_invoices_base_context(
+                doc_type,
+                status_filter,
+                search_query,
+                len(all_documents),
+                invoice_count=invoice_count,
+                proforma_count=proforma_count,
+                unpaid_count=unpaid_count,
+            ),
         }
 
         logger.info(f"✅ [Portal Billing] Invoice list displayed for customer {customer_id}")
@@ -120,7 +218,79 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.error(f"🔥 [Portal Billing] Invoice list error for customer {customer_id}: {e}")
         messages.error(request, _("Unable to load invoices. Please try again."))
-        return render(request, "billing/invoices_list.html", {"invoices": [], "error": True})
+        context = {
+            "invoices": [],
+            "error": True,
+            "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
+            "pagination_params": "",
+            **_invoices_base_context(),
+        }
+        return render(request, "billing/invoices_list.html", context)
+
+
+# ===============================================================================
+# INVOICE SEARCH API (HTMX) 🔍
+# ===============================================================================
+
+
+@require_http_methods(["GET"])
+def invoices_search_api(request: HttpRequest) -> HttpResponse:
+    """
+    HTMX search endpoint for live invoice filtering.
+    Returns filtered invoices table partial.
+    """
+    customer_id = (
+        getattr(request, "current_customer_id", None)
+        or getattr(request, "customer_id", None)
+        or request.session.get("customer_id")
+    )
+    user_id = getattr(request, "user_id", None) or request.session.get("user_id")
+    if not customer_id or not user_id:
+        return redirect("/login/")
+
+    search_query = request.GET.get("q", "").strip()
+    status_filter = request.GET.get("status", "")
+    doc_type = request.GET.get("type", "all")
+
+    try:
+        documents = _fetch_filtered_documents(
+            customer_id=int(customer_id),
+            user_id=int(user_id),
+            doc_type=doc_type,
+            status_filter=status_filter,
+            search_query=search_query,
+        )
+
+        total_documents = len(documents)
+        per_page = 20
+        paginated = documents[:per_page]
+
+        paginator_data = PaginatorData(total_count=total_documents, current_page=1, page_size=per_page)
+        pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
+
+        return render(
+            request,
+            "billing/partials/invoices_table.html",
+            {
+                "invoices": paginated,
+                "paginator_data": paginator_data,
+                "pagination_params": pagination_params,
+                "status_choices": INVOICE_STATUS_CHOICES,
+                "status_filter": status_filter,
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"🔥 [Portal Billing] Invoice search error for customer {customer_id}: {e}")
+        return render(
+            request,
+            "billing/partials/invoices_table.html",
+            {
+                "invoices": [],
+                "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
+                "pagination_params": "",
+            },
+        )
 
 
 # ===============================================================================

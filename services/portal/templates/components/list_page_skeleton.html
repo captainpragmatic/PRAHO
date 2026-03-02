@@ -1,0 +1,86 @@
+{% comment %}
+===============================================================================
+💀 LIST PAGE SKELETON LOADER - PRAHO Portal
+===============================================================================
+Generic skeleton loader shown during HTMX requests.
+
+Usage:
+{% include "components/list_page_skeleton.html" with
+    skeleton_id="tickets-skeleton"
+    skeleton_cols=4
+    skeleton_rows=6
+    skeleton_has_avatar=True
+%}
+
+Required:
+- skeleton_id: Element ID (referenced by hx-indicator)
+
+Optional:
+- skeleton_cols: Number of header columns (default: 4)
+- skeleton_rows: Number of body rows (default: 6)
+- skeleton_has_avatar: Show avatar circle in rows (default: False)
+===============================================================================
+{% endcomment %}
+
+<div id="{{ skeleton_id }}" class="htmx-indicator absolute inset-0 z-10 bg-slate-900">
+  {# Desktop Skeleton #}
+  <div class="hidden md:block w-full h-full">
+    <div class="w-full bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden h-full">
+      <div class="animate-pulse h-full">
+        <div class="bg-slate-800 px-6 py-3">
+          <div class="grid grid-cols-{{ skeleton_cols|default:4 }} gap-4">
+            {% for i in "1234567890" %}
+              {% if forloop.counter <= skeleton_cols|default:4 %}
+                <div class="h-4 bg-slate-600 rounded"></div>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+        <div class="divide-y divide-slate-700">
+          {% for i in "1234567890" %}
+            {% if forloop.counter <= skeleton_rows|default:6 %}
+            <div class="px-6 py-4 flex items-center space-x-4">
+              {% if skeleton_has_avatar %}
+              <div class="flex-shrink-0">
+                <div class="h-10 w-10 bg-slate-600 rounded-full"></div>
+              </div>
+              {% endif %}
+              <div class="flex-1 space-y-2">
+                <div class="h-4 bg-slate-600 rounded w-3/4"></div>
+                <div class="h-3 bg-slate-700 rounded w-1/2"></div>
+              </div>
+              <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+              <div class="h-4 w-20 bg-slate-700 rounded"></div>
+            </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# Mobile Skeleton #}
+  <div class="md:hidden w-full h-full">
+    <div class="w-full bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden h-full">
+      <div class="animate-pulse divide-y divide-slate-700">
+        {% for i in "1234567890" %}
+          {% if forloop.counter <= skeleton_rows|default:6 %}
+          <div class="min-h-[72px] flex flex-col justify-center p-4">
+            <div class="flex items-center justify-between mb-2">
+              <div class="h-4 bg-slate-600 rounded w-24"></div>
+              <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+            </div>
+            <div class="mb-2">
+              <div class="h-4 bg-slate-600 rounded w-full mb-1"></div>
+              <div class="h-4 bg-slate-700 rounded w-3/4"></div>
+            </div>
+            <div class="flex items-center justify-between text-sm">
+              <div class="h-3 w-16 bg-slate-700 rounded"></div>
+            </div>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>

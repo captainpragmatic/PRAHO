@@ -9,81 +9,106 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 
+from apps.common.pagination import PaginatorData, build_pagination_params
+
 from .services import PlatformAPIError, services_api
 
 logger = logging.getLogger(__name__)
+
+# Tab configuration for service status filtering
+SERVICE_STATUS_TABS = [
+    {"value": "", "label": _("All Services"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {"value": "active", "label": _("Active"), "border_class": "border-green-500", "text_class": "text-green-400"},
+    {"value": "suspended", "label": _("Suspended"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {"value": "pending", "label": _("Pending"), "border_class": "border-yellow-500", "text_class": "text-yellow-400"},
+    {"value": "cancelled", "label": _("Cancelled"), "border_class": "border-red-500", "text_class": "text-red-400"},
+]
+
+
+def _filter_services_by_query(services: list[dict], query: str) -> list[dict]:
+    """Client-side search filtering across all visible and detail fields."""
+    query_lower = query.lower()
+    return [
+        s
+        for s in services
+        if query_lower in str(s.get("service_name", "")).lower()
+        or query_lower in str(s.get("domain", "")).lower()
+        or query_lower in str(s.get("service_plan_name", "")).lower()
+        or query_lower in str(s.get("service_plan_type_display", "")).lower()
+        or query_lower in str(s.get("status", "")).lower()
+        or query_lower in str(s.get("monthly_price", "")).lower()
+        or query_lower in str(s.get("server_ip", "")).lower()
+        or query_lower in str(s.get("server_name", "")).lower()
+        or query_lower in str(s.get("username", "")).lower()
+        or query_lower in str(s.get("next_billing_date", "")).lower()
+        or query_lower in str(s.get("created_at", "")).lower()
+        or query_lower in str(s.get("billing_cycle", "")).lower()
+    ]
+
+
+def _services_base_context(
+    status_filter: str = "",
+    search_query: str = "",
+    active_count: int = 0,
+    total_count: int = 0,
+) -> dict:
+    """Build shared context for services list and search views."""
+    return {
+        "status_filter": status_filter,
+        "search_query": search_query,
+        "page_title": _("My Services"),
+        "page_title_mobile": _("Services"),
+        "page_subtitle": _("Manage your hosting services and resources"),
+        "search_placeholder": _("Search by name, domain, plan, status, price, IP, server…"),
+        "header_stats": [
+            {"value": str(active_count), "label": _("Active"), "color": "text-green-400"},
+            {"value": str(total_count), "label": _("Total"), "color": "text-white"},
+        ],
+        "filter_tabs": SERVICE_STATUS_TABS,
+    }
 
 
 def service_list(request: HttpRequest) -> HttpResponse:
     """
     Customer services list view - shows only customer's hosting services.
-    Supports filtering by status and service type.
+    Supports filtering by status and search.
     """
-    # Check authentication via Django session
     customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
     user_id = request.session.get("user_id")
     if not customer_id or not user_id:
         return redirect("/login/")
 
-    # Get filter parameters
     status_filter = request.GET.get("status", "")
-    service_type_filter = request.GET.get("service_type", "")
+    search_query = request.GET.get("q", "").strip()
     try:
         page = int(request.GET.get("page", 1))
     except (ValueError, TypeError):
         page = 1
 
     try:
-        # Get services from platform API
         response = services_api.get_customer_services(
-            customer_id=customer_id, user_id=user_id, page=page, status=status_filter, service_type=service_type_filter
+            customer_id=customer_id, user_id=user_id, page=page, status=status_filter
         )
 
         services = response.get("results", [])
         total_count = response.get("count", 0)
 
-        # Get summary for header stats - use filtered count for display
-        summary = services_api.get_services_summary(customer_id, user_id)
+        # Client-side search filtering across all visible and detail fields
+        if search_query:
+            services = _filter_services_by_query(services, search_query)
+            total_count = len(services)
 
-        # For filtered views, show filtered count as "active" count in header
-        if status_filter:
-            # When filtering, show filtered count instead of active count
-            active_count = total_count
-            display_status = status_filter
-        else:
-            # For "All Services", show actual active count
-            active_count = summary.get("active_services", 0)
-            display_status = "active"
+        summary = services_api.get_services_summary(customer_id, user_id)
+        active_count = summary.get("active_services", 0)
+
+        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=20)
+        pagination_params = build_pagination_params(status=status_filter, q=search_query)
 
         context = {
             "services": services,
-            "total_count": total_count,
-            "active_count": active_count,
-            "display_status": display_status,
-            "status_filter": status_filter,
-            "service_type_filter": service_type_filter,
-            "page": page,
-            "summary": summary,
-            # Pagination info from API
-            "has_next": response.get("next") is not None,
-            "has_previous": response.get("previous") is not None,
-            "current_page": page,
-            # Filter options for UI
-            "status_options": [
-                ("", _("All Services")),
-                ("active", _("Active")),
-                ("suspended", _("Suspended")),
-                ("pending", _("Pending")),
-                ("cancelled", _("Cancelled")),
-            ],
-            "service_type_options": [
-                ("", _("All Types")),
-                ("shared_hosting", _("Shared Hosting")),
-                ("vps", _("VPS")),
-                ("dedicated", _("Dedicated Server")),
-                ("cloud", _("Cloud Hosting")),
-                ("email", _("Email Services")),
-            ],
+            "paginator_data": paginator_data,
+            "pagination_params": pagination_params,
+            **_services_base_context(status_filter, search_query, active_count, summary.get("total_services", 0)),
         }
 
         logger.info(f"✅ [Services View] Loaded {len(services)} services for customer {customer_id}")
@@ -93,15 +118,64 @@ def service_list(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Unable to load hosting services. Please try again later."))
         context = {
             "services": [],
-            "total_count": 0,
-            "active_count": 0,
-            "display_status": "active",
-            "status_filter": status_filter,
-            "service_type_filter": service_type_filter,
             "error": True,
+            "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
+            "pagination_params": "",
+            **_services_base_context(status_filter, search_query),
         }
 
     return render(request, "services/service_list.html", context)
+
+
+def service_search_api(request: HttpRequest) -> HttpResponse:
+    """
+    HTMX search endpoint for live service filtering.
+    Returns filtered services table partial.
+    """
+    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
+    user_id = request.session.get("user_id")
+    if not customer_id or not user_id:
+        return redirect("/login/")
+
+    search_query = request.GET.get("q", "").strip()
+    status_filter = request.GET.get("status", "")
+
+    try:
+        response = services_api.get_customer_services(
+            customer_id=customer_id, user_id=user_id, page=1, status=status_filter
+        )
+
+        services = response.get("results", [])
+        total_count = response.get("count", 0)
+
+        if search_query:
+            services = _filter_services_by_query(services, search_query)
+            total_count = len(services)
+
+        paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=20)
+        pagination_params = build_pagination_params(status=status_filter, q=search_query)
+
+        return render(
+            request,
+            "services/partials/services_table.html",
+            {
+                "services": services,
+                "paginator_data": paginator_data,
+                "pagination_params": pagination_params,
+            },
+        )
+
+    except PlatformAPIError as e:
+        logger.error(f"🔥 [Services View] Error searching services for customer {customer_id}: {e}")
+        return render(
+            request,
+            "services/partials/services_table.html",
+            {
+                "services": [],
+                "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
+                "pagination_params": "",
+            },
+        )
 
 
 def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:

@@ -68,7 +68,7 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
         print("    ✅ Customer can access their services page")
 
         # Check main heading is visible
-        services_heading = page.locator('h1:has-text("Services"), h1:has-text("Servicii")')
+        services_heading = page.locator('h1:has-text("Services"), h1:has-text("Servicii")').first
         assert services_heading.is_visible(), "Services heading should be visible to customers"
         print("    ✅ Services page displays correctly for customer")
 
@@ -79,7 +79,10 @@ def test_customer_can_view_own_services_but_not_manage(page: Page) -> None:
         else:
             print("    [i] No order button found")
         # Verify customer CANNOT access management actions (edit, delete, suspend)
-        mgmt_actions = page.locator('a:has-text("Edit"), a:has-text("Delete"), button:has-text("Suspend")')
+        # Use href-based selectors to avoid matching tab labels like "Suspended"
+        mgmt_actions = page.locator(
+            'a[href*="/edit/"], a[href*="/delete/"], a[href*="/suspend/"], a[href*="/activate/"]'
+        )
         assert mgmt_actions.count() == 0, "Management actions should be hidden from customers"
         print("    ✅ Management actions correctly hidden from customers")
 

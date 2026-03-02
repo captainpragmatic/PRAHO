@@ -57,13 +57,16 @@ def test_customer_service_detail_view(page: Page) -> None:
     """
     print("🔍 Testing customer service detail view")
 
-    with ComprehensivePageMonitor(page, "customer service detail view",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer service detail view",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
@@ -84,9 +87,7 @@ def test_customer_service_detail_view(page: Page) -> None:
 
         # Verify we are on a service detail page
         current_url: str = page.url
-        assert re.search(r"/services/\d+/", current_url), (
-            f"Expected service detail URL pattern, got: {current_url}"
-        )
+        assert re.search(r"/services/\d+/", current_url), f"Expected service detail URL pattern, got: {current_url}"
         print(f"    ✅ Navigated to service detail: {current_url}")
 
         # Verify service header with name
@@ -97,8 +98,7 @@ def test_customer_service_detail_view(page: Page) -> None:
 
         # Verify status badge is present (Active, Suspended, Pending, etc.)
         status_badge: Locator = page.locator(
-            "span:has-text('Active'), span:has-text('Suspended'), "
-            "span:has-text('Pending'), span:has-text('Cancelled')"
+            "span:has-text('Active'), span:has-text('Suspended'), span:has-text('Pending'), span:has-text('Cancelled')"
         )
         assert status_badge.count() > 0, "Status badge should be visible on service detail"
         print("    ✅ Status badge displayed")
@@ -129,7 +129,7 @@ def test_customer_service_detail_view(page: Page) -> None:
             print("    ✅ Billing tab present")
 
         # Verify monthly cost is displayed
-        monthly_cost: Locator = page.locator('text=/RON/')
+        monthly_cost: Locator = page.locator("text=/RON/")
         if monthly_cost.count() > 0:
             print("    ✅ Monthly cost (RON) displayed")
 
@@ -145,13 +145,16 @@ def test_customer_service_plans_page(page: Page) -> None:
     """
     print("📦 Testing customer service plans page")
 
-    with ComprehensivePageMonitor(page, "customer service plans page",
-                                 check_console=False,  # Template may be missing
-                                 check_network=False,   # API may return errors
-                                 check_html=False,      # Template may not exist
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer service plans page",
+        check_console=False,  # Template may be missing
+        check_network=False,  # API may return errors
+        check_html=False,  # Template may not exist
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
@@ -177,16 +180,14 @@ def test_customer_service_plans_page(page: Page) -> None:
 
             # Check for plan type filter if present
             type_filter: Locator = page.locator(
-                'a:has-text("Shared Hosting"), a:has-text("VPS"), '
-                'select, button:has-text("All Plan Types")'
+                'a:has-text("Shared Hosting"), a:has-text("VPS"), select, button:has-text("All Plan Types")'
             )
             if type_filter.count() > 0:
                 print("    ✅ Plan type filter available")
 
             # Verify no plan management buttons (customer view only)
             mgmt_buttons: Locator = page.locator(
-                'a:has-text("Create Plan"), a:has-text("Edit Plan"), '
-                'button:has-text("Delete")'
+                'a:has-text("Create Plan"), a:has-text("Edit Plan"), button:has-text("Delete")'
             )
             assert mgmt_buttons.count() == 0, "Plan management buttons should be hidden from customers"
             print("    ✅ No plan management buttons visible (correct for customer)")
@@ -206,13 +207,16 @@ def test_customer_service_request_action(page: Page) -> None:
     """
     print("⚡ Testing customer service request action form")
 
-    with ComprehensivePageMonitor(page, "customer service request action",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer service request action",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
@@ -281,8 +285,7 @@ def test_customer_service_request_action(page: Page) -> None:
 
         # Verify cancel/back link
         cancel_link: Locator = page.locator(
-            f'a[href*="/services/{service_id}/"], a:has-text("Cancel"), '
-            'a:has-text("Back to Service Details")'
+            f'a[href*="/services/{service_id}/"], a:has-text("Cancel"), a:has-text("Back to Service Details")'
         )
         if cancel_link.count() > 0:
             print("    ✅ Cancel/back link present")
@@ -300,7 +303,7 @@ def _verify_suspend_reason_required(page: Page) -> None:
         return
     suspend_label.click()
     page.wait_for_timeout(300)
-    reason_required: Locator = page.locator('#reason-required')
+    reason_required: Locator = page.locator("#reason-required")
     if reason_required.count() > 0 and reason_required.is_visible():
         print("    ✅ Reason required indicator shown for suspend action")
 
@@ -314,13 +317,16 @@ def test_customer_service_usage_chart(page: Page) -> None:
     """
     print("📊 Testing customer service usage chart / statistics")
 
-    with ComprehensivePageMonitor(page, "customer service usage chart",
-                                 check_console=False,  # Alpine.js may log warnings
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer service usage chart",
+        check_console=False,  # Alpine.js may log warnings
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
@@ -355,22 +361,24 @@ def test_customer_service_usage_chart(page: Page) -> None:
             print("    ✅ Usage section revealed after tab click")
 
         # Check for disk usage display
-        disk_usage: Locator = page.locator('text=/Disk|Storage|GB/')
+        disk_usage: Locator = page.locator("text=/Disk|Storage|GB/")
         if disk_usage.count() > 0:
             print("    ✅ Disk usage information displayed")
 
         # Check for bandwidth usage display
-        bandwidth_usage: Locator = page.locator('text=/Bandwidth|Transfer/')
+        bandwidth_usage: Locator = page.locator("text=/Bandwidth|Transfer/")
         if bandwidth_usage.count() > 0:
             print("    ✅ Bandwidth usage information displayed")
 
         # Check for progress bars (usage percentage visualization)
-        progress_bars: Locator = page.locator('[class*="bg-blue-500"][class*="rounded-full"], [class*="bg-green-500"][class*="rounded-full"]')
+        progress_bars: Locator = page.locator(
+            '[class*="bg-blue-500"][class*="rounded-full"], [class*="bg-green-500"][class*="rounded-full"]'
+        )
         if progress_bars.count() > 0:
             print(f"    ✅ Found {progress_bars.count()} usage progress bar(s)")
 
         # Check for percentage display
-        percentage_text: Locator = page.locator('text=/\\d+(\\.\\d+)?%/')
+        percentage_text: Locator = page.locator("text=/\\d+(\\.\\d+)?%/")
         if percentage_text.count() > 0:
             print("    ✅ Usage percentages displayed")
 
@@ -393,13 +401,16 @@ def test_customer_services_dashboard_widget(page: Page) -> None:
     """
     print("🏠 Testing customer services dashboard widget")
 
-    with ComprehensivePageMonitor(page, "customer services dashboard widget",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer services dashboard widget",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
@@ -417,9 +428,7 @@ def test_customer_services_dashboard_widget(page: Page) -> None:
             print("    ✅ 'My Services' stat card found on dashboard")
 
             # Check for the count value next to it
-            services_count: Locator = page.locator(
-                'div:has(> div p:has-text("My Services")) p.text-2xl'
-            )
+            services_count: Locator = page.locator('div:has(> div p:has-text("My Services")) p.text-2xl')
             if services_count.count() > 0:
                 count_text: str = services_count.first.inner_text().strip()
                 print(f"    ✅ Active services count displayed: {count_text}")
@@ -455,13 +464,16 @@ def test_customer_services_mobile_responsiveness(page: Page) -> None:
     """
     print("📱 Testing customer services mobile responsiveness")
 
-    with ComprehensivePageMonitor(page, "customer services mobile responsiveness",
-                                 check_console=True,
-                                 check_network=True,
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer services mobile responsiveness",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         ensure_fresh_session(page)
         assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
 
@@ -470,27 +482,26 @@ def test_customer_services_mobile_responsiveness(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Run standard mobile test
-        with MobileTestContext(page, 'mobile_medium') as mobile:
+        with MobileTestContext(page, "mobile_medium") as mobile:
             print("    📱 Testing services list on mobile viewport")
 
             run_standard_mobile_test(page, mobile, context_label="services list")
 
-            # Verify mobile card view is shown (sm:hidden means mobile cards visible)
-            mobile_cards: Locator = page.locator('.sm\\:hidden div[onclick]')
-            desktop_table: Locator = page.locator('.hidden.sm\\:block table')
+            # Verify mobile card view is shown (md:hidden means mobile cards visible)
+            mobile_cards: Locator = page.locator(".md\\:hidden div[onclick]")
+            desktop_table: Locator = page.locator(".hidden.md\\:block table")
 
             # On mobile, the desktop table should be hidden
             if desktop_table.count() > 0:
                 expect(desktop_table.first).to_be_hidden()
                 print("      ✅ Desktop table hidden on mobile")
 
-            # Verify mobile-specific elements
-            mobile_order_btn: Locator = page.locator('.sm\\:hidden a[href*="/order/"]')
-            if mobile_order_btn.count() > 0:
-                print("      ✅ Mobile order button visible")
+            # Verify mobile cards are visible
+            if mobile_cards.count() > 0:
+                print(f"      ✅ {mobile_cards.count()} mobile service cards visible")
 
             # Verify scrollable mobile navigation tabs
-            mobile_nav: Locator = page.locator('.sm\\:hidden nav')
+            mobile_nav: Locator = page.locator('.sm\\:hidden nav[role="tablist"]')
             if mobile_nav.count() > 0:
                 print("      ✅ Mobile scrollable navigation tabs present")
 
@@ -508,13 +519,16 @@ def test_customer_services_access_control(page: Page) -> None:  # noqa: PLR0915
     """
     print("🔐 Testing cross-customer services access control")
 
-    with ComprehensivePageMonitor(page, "customer services access control",
-                                 check_console=False,  # Expect access denied / 404
-                                 check_network=False,   # May have error status codes
-                                 check_html=True,
-                                 check_css=True,
-                                 check_accessibility=False,
-                                 allow_accessibility_skip=True):
+    with ComprehensivePageMonitor(
+        page,
+        "customer services access control",
+        check_console=False,  # Expect access denied / 404
+        check_network=False,  # May have error status codes
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
         # Step 1: Login as customer1 and find a service ID
         print("  👤 Step 1: Login as customer1 to find a service ID")
         ensure_fresh_session(page)
@@ -559,15 +573,12 @@ def test_customer_services_access_control(page: Page) -> None:  # noqa: PLR0915
         is_404: bool = page.locator('h1:has-text("404")').count() > 0
         is_redirected: bool = f"/services/{service_id}/" not in current_url
         has_error_msg: bool = (
-            "not found" in page_content
-            or "access denied" in page_content
-            or "permission" in page_content
+            "not found" in page_content or "access denied" in page_content or "permission" in page_content
         )
 
         access_denied: bool = is_404 or is_redirected or has_error_msg
         assert access_denied, (
-            f"SECURITY ISSUE: Customer2 can access Customer1's service {service_id}. "
-            f"URL: {current_url}"
+            f"SECURITY ISSUE: Customer2 can access Customer1's service {service_id}. URL: {current_url}"
         )
 
         if is_404:
@@ -595,3 +606,187 @@ def test_customer_services_access_control(page: Page) -> None:  # noqa: PLR0915
         print("    ✅ Request-action also blocked for cross-customer access")
 
         print("  🛡️ Cross-customer access control validated successfully")
+
+
+# ===============================================================================
+# LIST PAGE STRUCTURE, FILTERING, SEARCH, AND PAGINATION TESTS
+# ===============================================================================
+
+
+def test_services_list_page_structure(page: Page) -> None:
+    """Test services list renders with shared header, tabs, search, and table."""
+    print("📋 Testing services list page structure")
+
+    with ComprehensivePageMonitor(
+        page,
+        "services list page structure",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/services/")
+        page.wait_for_load_state("networkidle")
+
+        # Shared header component: page title
+        heading: Locator = page.locator('h1:has-text("Services"), h1:has-text("Servicii")').first
+        expect(heading).to_be_visible()
+        print("    ✅ Page heading visible")
+
+        # Header stats (Active, Total)
+        stats: Locator = page.locator(".text-2xl.font-bold")
+        if stats.count() >= 2:
+            print(f"    ✅ Header stats displayed: {stats.count()} values")
+
+        # Tab navigation (All / Active / Suspended / Pending / Cancelled)
+        tabs: Locator = page.locator("button[role='tab']")
+        assert tabs.count() >= 4, f"Expected >= 4 tabs, got {tabs.count()}"
+        print(f"    ✅ {tabs.count()} filter tabs present")
+
+        # Search input
+        search_input: Locator = page.locator("#list-filter-search")
+        expect(search_input).to_be_visible()
+        print("    ✅ Search input visible")
+
+        # Table or empty state
+        table: Locator = page.locator("table")
+        empty_state: Locator = page.locator("text=/No services found/")
+        assert table.count() > 0 or empty_state.count() > 0, "Should show data table or empty state"
+        print("    ✅ Content area rendered")
+
+        print("  ✅ Services list page structure validated")
+
+
+def test_services_tab_filtering(page: Page) -> None:
+    """Test status tab switching filters via HTMX without page reload."""
+    print("🔀 Testing services tab filtering")
+
+    with ComprehensivePageMonitor(
+        page,
+        "services tab filtering",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/services/")
+        page.wait_for_load_state("networkidle")
+
+        # Click "Active" tab
+        active_tab: Locator = page.locator(
+            "button[role='tab']:has-text('Active'), button[role='tab']:has-text('Activ')"
+        ).first
+        if active_tab.count() > 0:
+            active_tab.click()
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(300)
+
+            hidden_tab: Locator = page.locator("#list-filter-active-tab")
+            tab_value: str = hidden_tab.input_value()
+            assert tab_value == "active", f"Expected 'active' tab value, got: {tab_value}"
+            print("    ✅ Active tab clicked, hidden input updated")
+
+        # Click "All" to reset
+        all_tab: Locator = page.locator(
+            "button[role='tab']:has-text('All'), button[role='tab']:has-text('Toate')"
+        ).first
+        if all_tab.count() > 0:
+            all_tab.click()
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(300)
+            print("    ✅ All tab clicked, filter reset")
+
+        print("  ✅ Services tab filtering validated")
+
+
+def test_services_search(page: Page) -> None:
+    """Test live search filters services via HTMX."""
+    print("🔍 Testing services search")
+
+    with ComprehensivePageMonitor(
+        page,
+        "services search",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/services/")
+        page.wait_for_load_state("networkidle")
+
+        search_input: Locator = page.locator("#list-filter-search")
+        expect(search_input).to_be_visible()
+
+        rows_before: int = page.locator("tbody tr").count()
+
+        # Type using press_sequentially to trigger keyup events (HTMX listens for keyup)
+        search_input.click()
+        search_input.press_sequentially("ZZZZNONEXISTENT999", delay=50)
+        page.wait_for_timeout(2000)
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(500)
+
+        rows_after: int = page.locator("tbody tr").count()
+        empty_state: Locator = page.locator("text=/No services found/")
+
+        if rows_before > 0:
+            assert rows_after < rows_before or empty_state.count() > 0, (
+                f"Search with non-matching term should reduce results ({rows_before} → {rows_after})"
+            )
+            print(f"    ✅ Search filtered: {rows_before} → {rows_after}")
+
+        # Clear search
+        search_input.fill("")
+        search_input.dispatch_event("keyup")
+        page.wait_for_timeout(1500)
+        page.wait_for_load_state("networkidle")
+        print("    ✅ Search cleared")
+
+        print("  ✅ Services search validated")
+
+
+def test_services_pagination(page: Page) -> None:
+    """Test shared pagination component on services list."""
+    print("📄 Testing services pagination")
+
+    with ComprehensivePageMonitor(
+        page,
+        "services pagination",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+    ):
+        ensure_fresh_session(page)
+        assert login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
+
+        page.goto(f"{BASE_URL}/services/")
+        page.wait_for_load_state("networkidle")
+
+        pagination: Locator = page.locator("nav[aria-label*='Pagination'], nav[aria-label*='pagination']")
+        if pagination.count() == 0:
+            print("    [i] No pagination (too few services)")
+            return
+
+        pagination_text: Locator = page.locator("text=/\\d+-\\d+ of \\d+/")
+        if pagination_text.count() > 0:
+            print(f"    ✅ Pagination: {pagination_text.first.inner_text()}")
+
+        print("  ✅ Services pagination validated")

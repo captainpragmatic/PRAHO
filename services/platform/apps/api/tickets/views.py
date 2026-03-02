@@ -109,6 +109,7 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
                 Q(title__icontains=search_query)
                 | Q(description__icontains=search_query)
                 | Q(ticket_number__icontains=search_query)
+                | Q(status__icontains=search_query)
             )
 
         # Get statistics before pagination (updated for new 4-status system)

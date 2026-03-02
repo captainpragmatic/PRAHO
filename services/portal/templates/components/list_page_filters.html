@@ -1,0 +1,136 @@
+{% comment %}
+===============================================================================
+🔍 LIST PAGE FILTERS COMPONENT - PRAHO Portal
+===============================================================================
+HTMX-wired filter bar with optional tabs, search input, and extra dropdowns.
+
+Usage:
+{% include "components/list_page_filters.html" with
+    filter_search_url="/tickets/search/"
+    filter_content_id="tickets-content"
+    filter_skeleton_id="tickets-skeleton"
+    filter_search_value=search_query
+    filter_search_placeholder="Search tickets…"
+    filter_tabs=filter_tabs
+    filter_active_tab=status_filter
+    filter_tab_param="status"
+    filter_extra_selects_include="billing/partials/invoice_extra_filters.html"
+%}
+
+Required:
+- filter_search_url: HTMX endpoint URL for search/filter
+- filter_content_id: ID of the HTMX swap target container
+- filter_skeleton_id: ID of the skeleton loader element
+
+Optional:
+- filter_search_value: Current search query value
+- filter_search_placeholder: Placeholder text (default: "Search…")
+- filter_tabs: List of {"value", "label", "border_class", "text_class"} dicts
+- filter_active_tab: Currently active tab value
+- filter_tab_param: Query param name for tabs (default: "status")
+- filter_extra_selects_include: Template path for additional dropdowns
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+
+<div class="space-y-4">
+
+  {# Tab Navigation (optional) #}
+  {% if filter_tabs %}
+  <div class="bg-slate-800/50 border border-slate-700 rounded-lg">
+    {# Desktop Tabs #}
+    <nav class="-mb-px hidden sm:flex space-x-1 px-4 pt-3 overflow-x-auto" role="tablist">
+      {% for tab in filter_tabs %}
+      <button type="button" role="tab" data-tab-value="{{ tab.value }}" data-tab-border="{{ tab.border_class }}" data-tab-text="{{ tab.text_class }}" aria-selected="{% if filter_active_tab == tab.value %}true{% else %}false{% endif %}" hx-get="{{ filter_search_url }}?{{ filter_tab_param|default:'status' }}={{ tab.value }}" hx-target="#{{ filter_content_id }}" hx-indicator="#{{ filter_skeleton_id }}" hx-include="#list-filter-search{% if filter_extra_selects_include %}, .list-filter-extra-select{% endif %}" class="list-filter-tab whitespace-nowrap border-b-2 py-2 px-3 text-sm font-medium transition-colors {% if filter_active_tab == tab.value %}{{ tab.border_class }} {{ tab.text_class }}{% else %}border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-600{% endif %}" onclick="switchTab(this)">
+        {{ tab.label }}
+      </button>
+      {% endfor %}
+    </nav>
+
+    {# Mobile Tabs (scrollable) #}
+    <nav class="sm:hidden overflow-x-auto px-3 pt-3 -mb-px" role="tablist">
+      <div class="flex space-x-1 min-w-max">
+        {% for tab in filter_tabs %}
+        <button type="button" role="tab" data-tab-value="{{ tab.value }}" data-tab-border="{{ tab.border_class }}" data-tab-text="{{ tab.text_class }}" aria-selected="{% if filter_active_tab == tab.value %}true{% else %}false{% endif %}" hx-get="{{ filter_search_url }}?{{ filter_tab_param|default:'status' }}={{ tab.value }}" hx-target="#{{ filter_content_id }}" hx-indicator="#{{ filter_skeleton_id }}" hx-include="#list-filter-search{% if filter_extra_selects_include %}, .list-filter-extra-select{% endif %}" class="list-filter-tab whitespace-nowrap border-b-2 py-2 px-3 text-sm font-medium transition-colors {% if filter_active_tab == tab.value %}{{ tab.border_class }} {{ tab.text_class }}{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %}" onclick="switchTab(this)">
+          {{ tab.label }}
+        </button>
+        {% endfor %}
+      </div>
+    </nav>
+
+    {# Search Bar + Extra Filters #}
+    <div class="p-4">
+      <div class="flex items-center space-x-4">
+        <div class="flex-1">
+          <label for="list-filter-search" class="sr-only">{% trans 'Search' %}</label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg class="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <input type="text" id="list-filter-search" name="q" value="{{ filter_search_value }}" autocomplete="off" hx-get="{{ filter_search_url }}" hx-target="#{{ filter_content_id }}" hx-trigger="keyup changed delay:600ms" hx-include="#list-filter-active-tab{% if filter_extra_selects_include %}, .list-filter-extra-select{% endif %}" hx-indicator="#{{ filter_skeleton_id }}" class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="{{ filter_search_placeholder|default:'Search…' }}">
+          </div>
+        </div>
+
+        {# Extra filter dropdowns injected per-page #}
+        {% if filter_extra_selects_include %}
+          {% include filter_extra_selects_include %}
+        {% endif %}
+      </div>
+    </div>
+
+    {# Hidden input tracking active tab for search hx-include #}
+    <input type="hidden" id="list-filter-active-tab" name="{{ filter_tab_param|default:'status' }}" value="{{ filter_active_tab }}">
+  </div>
+  {% else %}
+  {# No tabs — just search bar + filters #}
+  <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+    <div class="flex items-center space-x-4">
+      <div class="flex-1">
+        <label for="list-filter-search" class="sr-only">{% trans 'Search' %}</label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg class="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <input type="text" id="list-filter-search" name="q" value="{{ filter_search_value }}" autocomplete="off" hx-get="{{ filter_search_url }}" hx-target="#{{ filter_content_id }}" hx-trigger="keyup changed delay:600ms" hx-include="{% if filter_extra_selects_include %}.list-filter-extra-select{% endif %}" hx-indicator="#{{ filter_skeleton_id }}" class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="{{ filter_search_placeholder|default:'Search…' }}">
+        </div>
+      </div>
+
+      {% if filter_extra_selects_include %}
+        {% include filter_extra_selects_include %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+{% if filter_tabs %}
+<script>
+function switchTab(el) {
+  var borderClass = el.dataset.tabBorder;
+  var textClass = el.dataset.tabText;
+  var value = el.dataset.tabValue || '';
+  document.getElementById('list-filter-active-tab').value = value;
+  /* Reset all sibling tabs */
+  var tabs = document.querySelectorAll('.list-filter-tab');
+  for (var i = 0; i < tabs.length; i++) {
+    var t = tabs[i];
+    t.setAttribute('aria-selected', 'false');
+    /* Remove any active border/text color classes, restore inactive */
+    t.className = t.className.replace(/border-\w+-500/g, 'border-transparent').replace(/text-\w+-\d{3}/g, 'text-slate-400');
+  }
+  /* Activate clicked tab (both desktop and mobile instances share same data attrs) */
+  var allMatching = document.querySelectorAll('.list-filter-tab[data-tab-value="' + value + '"]');
+  for (var j = 0; j < allMatching.length; j++) {
+    var m = allMatching[j];
+    m.setAttribute('aria-selected', 'true');
+    m.className = m.className.replace('border-transparent', borderClass).replace('text-slate-400', textClass);
+  }
+}
+</script>
+{% endif %}

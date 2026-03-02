@@ -1,0 +1,100 @@
+{% comment %}
+===============================================================================
+📋 LIST PAGE HEADER COMPONENT - PRAHO Portal
+===============================================================================
+Shared header card for list pages (tickets, invoices, services).
+Provides: icon, title, subtitle, stats grid, optional action button.
+
+Usage:
+{% include "components/list_page_header.html" with
+    list_icon_bg="bg-blue-600"
+    list_icon_svg_path="M8 12h.01M12 12h.01..."
+    list_title="My Support Tickets"
+    list_title_mobile="Support Tickets"
+    list_subtitle="Get help with your hosting services"
+    list_stats=header_stats
+    list_action_include="tickets/partials/header_action.html"
+%}
+
+Required:
+- list_icon_bg: Tailwind bg class for icon container
+- list_icon_svg_path: SVG <path> d attribute
+- list_title: Page title (desktop)
+- list_subtitle: Subtitle text
+
+Optional:
+- list_title_mobile: Shorter mobile title (defaults to list_title)
+- list_stats: List of dicts [{"value": "5", "label": "Open", "color": "text-amber-400"}]
+- list_action_include: Template path for action button area
+===============================================================================
+{% endcomment %}
+
+{% load i18n %}
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+  {# Desktop Layout #}
+  <div class="hidden md:block p-6">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 {{ list_icon_bg }} rounded-lg flex items-center justify-center">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-white">{{ list_title }}</h1>
+          <p class="text-slate-400">{{ list_subtitle }}</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-6">
+        {% if list_stats %}
+        <div class="grid grid-cols-{{ list_stats|length }} gap-6">
+          {% for stat in list_stats %}
+          <div class="text-center">
+            <p class="text-2xl font-bold {{ stat.color|default:'text-white' }}">{{ stat.value|default:"0" }}</p>
+            <p class="text-xs text-slate-400">{{ stat.label }}</p>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if list_action_include %}
+        <div class="htmx-stable">
+          {% include list_action_include %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Mobile Layout #}
+  <div class="md:hidden p-4">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 {{ list_icon_bg }} rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-white">{{ list_title_mobile|default:list_title }}</h1>
+        </div>
+      </div>
+      {% if list_action_include %}
+      <div class="htmx-stable">
+        {% include list_action_include %}
+      </div>
+      {% endif %}
+    </div>
+
+    {% if list_stats %}
+    <div class="grid grid-cols-{{ list_stats|length }} gap-3">
+      {% for stat in list_stats %}
+      <div class="text-center py-2">
+        <p class="text-lg font-bold {{ stat.color|default:'text-white' }}">{{ stat.value|default:"0" }}</p>
+        <p class="text-xs text-slate-400">{{ stat.label }}</p>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>

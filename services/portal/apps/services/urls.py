@@ -11,6 +11,7 @@ app_name = "services"
 urlpatterns = [
     # Main service views
     path("", views.service_list, name="list"),
+    path("search/", views.service_search_api, name="search_api"),
     path("<int:service_id>/", views.service_detail, name="detail"),
     path("plans/", views.service_plans, name="plans"),
     # Service management

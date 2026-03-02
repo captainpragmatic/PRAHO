@@ -1070,13 +1070,14 @@ def test_customer_ticket_htmx_search(page: Page) -> None:
 
         # Test search input
         print("  🔍 Testing search input HTMX trigger...")
-        search_input: Locator = page.locator("input#search[name='q']")
+        search_input: Locator = page.locator("#list-filter-search")
         expect(search_input).to_be_visible()
 
-        # Type a search query — use a nonsense string to expect zero results
-        search_input.fill("zzz_nonexistent_query_zzz")
+        # Type using press_sequentially to trigger keyup (HTMX listens for keyup changed)
+        search_input.click()
+        search_input.press_sequentially("zzz_nonexistent_query_zzz", delay=50)
         # Wait for HTMX to fire (delay:600ms configured in template) and update content
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(2000)
         page.wait_for_load_state("networkidle")
 
         filtered_rows: Locator = page.locator(
@@ -1097,32 +1098,36 @@ def test_customer_ticket_htmx_search(page: Page) -> None:
         restored_count: int = restored_rows.count()
         print(f"    ✅ After clearing search: {restored_count} tickets (started with {initial_count})")
 
-        # Test status dropdown filter
-        print("  🏷️ Testing status dropdown filter...")
-        status_select: Locator = page.locator("select[name='status']")
-        expect(status_select).to_be_visible()
+        # Test status tab filtering (tabs replaced dropdown after ADR-0026)
+        print("  🏷️ Testing status tab filtering...")
+        closed_tab: Locator = page.locator(
+            "button[role='tab']:has-text('Closed'), button[role='tab']:has-text('Închis')"
+        ).first
+        if closed_tab.count() > 0:
+            closed_tab.click()
+            page.wait_for_timeout(1000)
+            page.wait_for_load_state("networkidle")
 
-        # Filter by 'closed' status
-        status_select.select_option("closed")
-        page.wait_for_timeout(800)
-        page.wait_for_load_state("networkidle")
+            closed_rows: Locator = page.locator(
+                "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
+            )
+            closed_count: int = closed_rows.count()
+            print(f"    ✅ Filtered by 'Closed' tab: {closed_count} tickets")
 
-        closed_rows: Locator = page.locator(
-            "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
-        )
-        closed_count: int = closed_rows.count()
-        print(f"    ✅ Filtered by 'closed' status: {closed_count} tickets")
+        # Reset to All tab
+        all_tab: Locator = page.locator(
+            "button[role='tab']:has-text('All'), button[role='tab']:has-text('Toate')"
+        ).first
+        if all_tab.count() > 0:
+            all_tab.click()
+            page.wait_for_timeout(1000)
+            page.wait_for_load_state("networkidle")
 
-        # Reset filter to all statuses
-        status_select.select_option("")
-        page.wait_for_timeout(800)
-        page.wait_for_load_state("networkidle")
-
-        reset_rows: Locator = page.locator(
-            "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
-        )
-        reset_count: int = reset_rows.count()
-        print(f"    ✅ Reset to all statuses: {reset_count} tickets")
+            reset_rows: Locator = page.locator(
+                "#tickets-content tr.hover\\:bg-slate-700\\/50, #tickets-content .cursor-pointer"
+            )
+            reset_count: int = reset_rows.count()
+            print(f"    ✅ Reset to All tab: {reset_count} tickets")
 
         print("  ✅ Customer ticket HTMX search testing completed")
 

@@ -12,7 +12,28 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
+from apps.common.pagination import PaginatorData, build_pagination_params
+
 from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, ticket_api
+
+# Tab configuration for ticket status filtering
+TICKET_STATUS_TABS = [
+    {"value": "", "label": _("All"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {"value": "open", "label": _("Open"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {
+        "value": "in_progress",
+        "label": _("In Progress"),
+        "border_class": "border-purple-500",
+        "text_class": "text-purple-400",
+    },
+    {
+        "value": "waiting_on_customer",
+        "label": _("Waiting on You"),
+        "border_class": "border-yellow-500",
+        "text_class": "text-yellow-400",
+    },
+    {"value": "closed", "label": _("Closed"), "border_class": "border-red-500", "text_class": "text-red-400"},
+]
 
 logger = logging.getLogger(__name__)
 
@@ -71,52 +92,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         summary = ticket_api.get_tickets_summary(customer_id, user_id)
         open_count = summary.get("open_tickets", 0)
 
-        # Calculate pagination variables
-        current_page = int(page) if page else 1
-        total_pages = (total_count + 24) // 25 if total_count > 0 else 1  # 25 items per page
-
-        # Calculate correct has_next and has_previous based on actual logic, not API response
-        has_previous = current_page > 1
-        has_next = current_page < total_pages
-
-        logger.info(
-            f"🐛 [Pagination Debug] page={page}, current_page={current_page}, total_count={total_count}, total_pages={total_pages}"
-        )
-        logger.info(f"🐛 [Pagination Debug] has_next={has_next}, has_previous={has_previous}")
-        logger.info(
-            f"🐛 [Pagination Debug] API response next={response.get('next')}, previous={response.get('previous')}"
-        )
-
-        # Create paginator data structure for platform component
-        paginator_data = type(
-            "PaginatorData",
-            (),
-            {
-                "has_previous": has_previous,
-                "has_next": has_next,
-                "previous_page_number": current_page - 1 if current_page > 1 else 1,
-                "next_page_number": current_page + 1,
-                "number": current_page,
-                "has_other_pages": total_pages > 1,
-                "start_index": (current_page - 1) * 25 + 1 if total_count > 0 else 0,
-                "end_index": min(current_page * 25, total_count),
-                "paginator": type(
-                    "Paginator",
-                    (),
-                    {"count": total_count, "num_pages": total_pages, "page_range": range(1, total_pages + 1)},
-                )(),
-            },
-        )()
-
-        # Build extra parameters for pagination URLs
-        params = []
-        if search_query:
-            params.append(f"&search={search_query}")
-        if status_filter:
-            params.append(f"&status={status_filter}")
-        if priority_filter:
-            params.append(f"&priority={priority_filter}")
-        pagination_params = "".join(params)
+        # Pagination via shared utility
+        paginator_data = PaginatorData(total_count=total_count, current_page=page, page_size=25)
+        pagination_params = build_pagination_params(search=search_query, status=status_filter, priority=priority_filter)
 
         context = {
             "tickets": tickets,
@@ -126,16 +104,19 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "priority_filter": priority_filter,
             "search_query": search_query,
             "page": page,
-            # Pagination info from API
-            "has_next": has_next,
-            "has_previous": has_previous,
-            "current_page": current_page,
-            "total_pages": total_pages,
-            "previous_page_number": current_page - 1 if current_page > 1 else 1,
-            "next_page_number": current_page + 1,
-            # Platform pagination component data
+            # Shared pagination component data
             "paginator_data": paginator_data,
             "pagination_params": pagination_params,
+            # Shared header component data
+            "page_title": _("My Support Tickets"),
+            "page_title_mobile": _("Support Tickets"),
+            "page_subtitle": _("Get help with your hosting services"),
+            "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
+            "header_stats": [
+                {"value": str(open_count), "label": _("Open Tickets"), "color": "text-amber-400"},
+                {"value": str(total_count), "label": _("Total Tickets"), "color": "text-white"},
+            ],
+            "filter_tabs": TICKET_STATUS_TABS,
         }
 
         logger.info(f"✅ [Tickets View] Loaded {len(tickets)} tickets for customer {customer_id}")
@@ -144,39 +125,27 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         logger.error(f"🔥 [Tickets View] Error loading tickets for customer {customer_id}: {e}")
         messages.error(request, _("Unable to load support tickets. Please try again later."))
         # Create empty paginator data for error state
-        paginator_data = type(
-            "PaginatorData",
-            (),
-            {
-                "has_previous": False,
-                "has_next": False,
-                "previous_page_number": 1,
-                "next_page_number": 1,
-                "number": 1,
-                "has_other_pages": False,
-                "start_index": 0,
-                "end_index": 0,
-                "paginator": type("Paginator", (), {"count": 0, "num_pages": 1, "page_range": range(1, 2)})(),
-            },
-        )()
+        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
 
         context = {
             "tickets": [],
             "total_count": 0,
             "open_count": 0,
             "status_filter": status_filter,
-            "priority_filter": priority_filter,
             "search_query": search_query,
-            "has_next": False,
-            "has_previous": False,
-            "current_page": 1,
-            "total_pages": 1,
-            "previous_page_number": 1,
-            "next_page_number": 1,
             "error": True,
-            # Platform pagination component data
             "paginator_data": paginator_data,
             "pagination_params": "",
+            # Shared template component data
+            "page_title": _("My Support Tickets"),
+            "page_title_mobile": _("Support Tickets"),
+            "page_subtitle": _("Get help with your hosting services"),
+            "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
+            "header_stats": [
+                {"value": "0", "label": _("Open Tickets"), "color": "text-amber-400"},
+                {"value": "0", "label": _("Total Tickets"), "color": "text-white"},
+            ],
+            "filter_tabs": TICKET_STATUS_TABS,
         }
 
     return render(request, "tickets/ticket_list.html", context)
@@ -435,58 +404,14 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         tickets = response.get("results", [])
         total_count = response.get("count", 0)
 
-        # Calculate pagination variables for search results
-        current_page = 1  # Search always returns page 1
-        total_pages = (total_count + 24) // 25 if total_count > 0 else 1  # 25 items per page
-
-        # Calculate correct has_next and has_previous based on actual logic
-        has_previous = current_page > 1
-        has_next = current_page < total_pages
-
-        # Create paginator data structure for platform component
-        paginator_data = type(
-            "PaginatorData",
-            (),
-            {
-                "has_previous": has_previous,
-                "has_next": has_next,
-                "previous_page_number": current_page - 1 if current_page > 1 else 1,
-                "next_page_number": current_page + 1,
-                "number": current_page,
-                "has_other_pages": total_pages > 1,
-                "start_index": (current_page - 1) * 25 + 1 if total_count > 0 else 0,
-                "end_index": min(current_page * 25, total_count),
-                "paginator": type(
-                    "Paginator",
-                    (),
-                    {"count": total_count, "num_pages": total_pages, "page_range": range(1, total_pages + 1)},
-                )(),
-            },
-        )()
-
-        # Build extra parameters for pagination URLs
-        params = []
-        if search_query:
-            params.append(f"&search={search_query}")
-        if status_filter:
-            params.append(f"&status={status_filter}")
-        if priority_filter:
-            params.append(f"&priority={priority_filter}")
-        pagination_params = "".join(params)
+        paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=25)
+        pagination_params = build_pagination_params(search=search_query, status=status_filter, priority=priority_filter)
 
         return render(
             request,
             "tickets/partials/tickets_table.html",
             {
                 "tickets": tickets,
-                "search_query": search_query,
-                "status_filter": status_filter,
-                "priority_filter": priority_filter,
-                "total_count": total_count,
-                "current_page": current_page,
-                "total_pages": total_pages,
-                "has_next": has_next,
-                "has_previous": has_previous,
                 "paginator_data": paginator_data,
                 "pagination_params": pagination_params,
             },
@@ -495,21 +420,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
     except PlatformAPIError as e:
         logger.error(f"🔥 [Tickets View] Error searching tickets for customer {customer_id}: {e}")
         # Create empty paginator data for error state
-        paginator_data = type(
-            "PaginatorData",
-            (),
-            {
-                "has_previous": False,
-                "has_next": False,
-                "previous_page_number": 1,
-                "next_page_number": 1,
-                "number": 1,
-                "has_other_pages": False,
-                "start_index": 0,
-                "end_index": 0,
-                "paginator": type("Paginator", (), {"count": 0, "num_pages": 1, "page_range": range(1, 2)})(),
-            },
-        )()
+        paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
 
         return render(
             request,

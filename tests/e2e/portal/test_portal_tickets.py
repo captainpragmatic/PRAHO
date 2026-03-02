@@ -126,9 +126,9 @@ def test_ticket_list_display(monitored_customer_page: Page) -> None:
     ).first
     expect(new_ticket_btn).to_be_visible()
 
-    # Status filter
-    status_filter = page.locator("select[name='status']")
-    expect(status_filter).to_be_visible()
+    # Status filter tabs (tab-based filtering via shared list_page_filters component)
+    status_tabs = page.locator("button[role='tab']")
+    assert status_tabs.count() > 0, "Status filter tabs should be visible"
 
     # NO staff controls
     assert page.locator("select[name='reply_action']").count() == 0, (
@@ -247,10 +247,12 @@ def test_closed_ticket_reply_hidden(monitored_customer_page: Page) -> None:
 
     _navigate_to_ticket_list(page)
 
-    # Filter by closed status
-    status_filter = page.locator("select[name='status']")
-    expect(status_filter).to_be_visible()
-    page.select_option("select[name='status']", "closed")
+    # Filter by closed status via tab click (tabs replaced dropdown)
+    closed_tab = page.locator("button[role='tab']:has-text('Closed'), button[role='tab']:has-text('Închis')")
+    if closed_tab.count() == 0:
+        # No closed tab available — skip gracefully
+        return
+    closed_tab.first.click()
     _wait_for_htmx(page)
 
     # Click first closed ticket

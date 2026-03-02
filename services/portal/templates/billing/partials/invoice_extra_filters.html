@@ -1,0 +1,8 @@
+{% load i18n %}
+<select name="status" class="list-filter-extra-select px-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-primary" hx-get="{{ filter_search_url }}" hx-target="#{{ filter_content_id }}" hx-trigger="change" hx-include="#list-filter-search, #list-filter-active-tab" hx-indicator="#{{ filter_skeleton_id }}">
+  {% for value, label in status_choices %}
+  <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>
+    {{ label }}
+  </option>
+  {% endfor %}
+</select>

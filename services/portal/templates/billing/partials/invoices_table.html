@@ -1,0 +1,160 @@
+{% load i18n %}
+{% load ui_components %}
+{% load formatting %}
+
+{% if invoices %}
+
+{# Desktop Table #}
+<div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-700">
+      <thead class="bg-slate-800">
+        <tr>
+          <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-28">
+            {% trans 'Type' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Number' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-slate-300 uppercase tracking-wider w-24">
+            {% trans 'Total' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-slate-300 uppercase tracking-wider w-32">
+            {% trans 'Status' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-24">
+            {% trans 'Date' %}
+          </th>
+        </tr>
+      </thead>
+      <tbody class="bg-slate-800/30 divide-y divide-slate-700">
+        {% for invoice in invoices %}
+        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
+          <td class="px-6 py-4 whitespace-nowrap text-center">
+            {% if invoice.document_type == 'proforma' %}
+              {% trans "📄 Proforma" as bt1 %}{% badge bt1 variant="primary" %}
+            {% else %}
+              {% trans "🧾 Invoice" as bt2 %}{% badge bt2 variant="success" %}
+            {% endif %}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <div class="text-sm font-medium text-white truncate font-mono">
+              {{ invoice.number }}
+            </div>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right font-mono">
+            {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-center">
+            {% if invoice.document_type == 'proforma' %}
+              {% if invoice.status == 'draft' %}
+                {% trans "📝 Draft" as bt3 %}{% badge bt3 variant="secondary" %}
+              {% elif invoice.status == 'sent' %}
+                {% trans "📧 Sent" as bt4 %}{% badge bt4 variant="primary" %}
+              {% elif invoice.status == 'accepted' %}
+                {% trans "✅ Accepted" as bt5 %}{% badge bt5 variant="success" %}
+              {% elif invoice.status == 'expired' %}
+                {% trans "❌ Expired" as bt6 %}{% badge bt6 variant="danger" %}
+              {% else %}
+                {% badge invoice.status_display variant="secondary" %}
+              {% endif %}
+            {% else %}
+              {% if invoice.status == 'paid' %}
+                {% trans "✅ Paid" as bt7 %}{% badge bt7 variant="success" %}
+              {% elif invoice.status == 'overdue' %}
+                {% trans "❌ Overdue" as bt8 %}{% badge bt8 variant="danger" %}
+              {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
+                {% trans "📧 Sent" as bt9 %}{% badge bt9 variant="primary" %}
+              {% elif invoice.status == 'pending' %}
+                {% trans "⏳ Pending" as bt10 %}{% badge bt10 variant="warning" %}
+              {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
+                {% trans "❌ Cancelled" as bt11 %}{% badge bt11 variant="danger" %}
+              {% elif invoice.status == 'refunded' %}
+                {% trans "↩️ Refunded" as bt12 %}{% badge bt12 variant="warning" %}
+              {% else %}
+                {% trans "📝 Draft" as bt13 %}{% badge bt13 variant="secondary" %}
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+            {{ invoice.created_at|date:"d.m.Y" }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# Mobile Card List #}
+<div class="md:hidden divide-y divide-slate-700">
+  {% for invoice in invoices %}
+  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center space-x-2">
+        {% if invoice.document_type == 'proforma' %}
+          {% trans "📄 Proforma" as bt14 %}{% badge bt14 variant="primary" %}
+        {% else %}
+          {% trans "🧾 Invoice" as bt15 %}{% badge bt15 variant="success" %}
+        {% endif %}
+        <span class="text-white font-medium text-sm font-mono truncate">{{ invoice.number }}</span>
+      </div>
+      <div class="text-right">
+        {% if invoice.document_type == 'proforma' %}
+          {% if invoice.status == 'draft' %}
+            {% trans "Draft" as bt16 %}{% badge bt16 variant="secondary" %}
+          {% elif invoice.status == 'sent' %}
+            {% trans "Sent" as bt17 %}{% badge bt17 variant="primary" %}
+          {% elif invoice.status == 'accepted' %}
+            {% trans "Accepted" as bt18 %}{% badge bt18 variant="success" %}
+          {% elif invoice.status == 'expired' %}
+            {% trans "Expired" as bt19 %}{% badge bt19 variant="danger" %}
+          {% else %}
+            {% badge invoice.status_display variant="secondary" %}
+          {% endif %}
+        {% else %}
+          {% if invoice.status == 'paid' %}
+            {% trans "Paid" as bt20 %}{% badge bt20 variant="success" %}
+          {% elif invoice.status == 'overdue' %}
+            {% trans "Overdue" as bt21 %}{% badge bt21 variant="danger" %}
+          {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
+            {% trans "Sent" as bt22 %}{% badge bt22 variant="primary" %}
+          {% elif invoice.status == 'pending' %}
+            {% trans "Pending" as bt23 %}{% badge bt23 variant="warning" %}
+          {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
+            {% trans "Cancelled" as bt24 %}{% badge bt24 variant="danger" %}
+          {% elif invoice.status == 'refunded' %}
+            {% trans "Refunded" as bt25 %}{% badge bt25 variant="warning" %}
+          {% else %}
+            {% trans "Draft" as bt26 %}{% badge bt26 variant="secondary" %}
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    <div class="flex items-center justify-between text-sm">
+      <span class="text-slate-400 font-mono">{{ invoice.created_at|date:"d.m.Y" }}</span>
+      <span class="text-white font-medium font-mono">{{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# Shared Pagination Component #}
+{% include 'components/pagination.html' with page_obj=paginator_data extra_params=pagination_params %}
+
+{% else %}
+{# Empty State #}
+<div class="bg-slate-800/50 border border-slate-700 rounded-lg">
+  <div class="text-center py-12 px-6">
+    <div class="mx-auto h-16 w-16 bg-slate-700 rounded-full flex items-center justify-center mb-4">
+      <svg class="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    </div>
+    <h3 class="text-lg font-medium text-white mb-2">{% trans 'No documents found' %}</h3>
+    <p class="text-slate-400 mb-6 max-w-sm mx-auto">
+      {% trans 'No billing documents available for your account.' %}
+    </p>
+  </div>
+</div>
+{% endif %}

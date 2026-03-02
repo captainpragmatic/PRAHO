@@ -1232,6 +1232,7 @@ class TestTicketsAuditService(TestCase):
         m.resolved_at = None
         m.satisfaction_rating = None
         m.satisfaction_comment = ""
+        m.closed_at = None
         m.is_escalated = False
         m.requires_customer_response = False
         m.customer = Mock()
@@ -1265,6 +1266,7 @@ class TestTicketsAuditService(TestCase):
 
     def test_log_ticket_closed_with_resolution(self):
         ticket = self._make_ticket(
+            closed_at=timezone.now(),
             resolved_at=timezone.now(),
             satisfaction_rating=5,
             satisfaction_comment="Great support",

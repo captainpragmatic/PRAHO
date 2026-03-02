@@ -1,0 +1,145 @@
+{% load i18n %}
+{% load ui_components %}
+
+{% if services %}
+
+{# Desktop Table #}
+<div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-700">
+      <thead class="bg-slate-800">
+        <tr>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Service Name' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+            {% trans 'Plan' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-28">
+            {% trans 'Price' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-28">
+            {% trans 'Status' %}
+          </th>
+          <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider w-32">
+            {% trans 'Next Billing' %}
+          </th>
+        </tr>
+      </thead>
+      <tbody class="bg-slate-800/30 divide-y divide-slate-700">
+        {% for service in services %}
+        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}';">
+          <td class="px-6 py-4 whitespace-nowrap">
+            <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
+            {% if service.domain %}
+            <div class="text-sm text-slate-400">{{ service.domain }}</div>
+            {% endif %}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            {% if service.status == 'active' %}
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                {% trans 'Active' %}
+              </span>
+            {% elif service.status == 'suspended' %}
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                {% trans 'Suspended' %}
+              </span>
+            {% elif service.status == 'pending' %}
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                {% trans 'Pending' %}
+              </span>
+            {% elif service.status == 'cancelled' %}
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                {% trans 'Cancelled' %}
+              </span>
+            {% else %}
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                {{ service.status|title }}
+              </span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+            {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# Mobile Card List #}
+<div class="md:hidden divide-y divide-slate-700">
+  {% for service in services %}
+  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}';">
+    <div class="flex items-start justify-between mb-3">
+      <div class="flex-1">
+        <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
+        {% if service.domain %}
+        <div class="text-xs text-slate-400 mt-1">{{ service.domain }}</div>
+        {% endif %}
+      </div>
+      <div class="ml-3">
+        {% if service.status == 'active' %}
+          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+            {% trans 'Active' %}
+          </span>
+        {% elif service.status == 'suspended' %}
+          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+            {% trans 'Suspended' %}
+          </span>
+        {% elif service.status == 'pending' %}
+          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+            {% trans 'Pending' %}
+          </span>
+        {% elif service.status == 'cancelled' %}
+          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+            {% trans 'Cancelled' %}
+          </span>
+        {% else %}
+          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+            {{ service.status|title }}
+          </span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Plan' %}</div>
+        <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
+        <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# Shared Pagination Component #}
+{% include 'components/pagination.html' with page_obj=paginator_data extra_params=pagination_params %}
+
+{% else %}
+{# Empty State #}
+<div class="bg-slate-800/50 border border-slate-700 rounded-lg">
+  <div class="text-center py-12 px-6">
+    <div class="mx-auto h-16 w-16 bg-slate-700 rounded-full flex items-center justify-center mb-4">
+      <svg class="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+      </svg>
+    </div>
+    <h3 class="text-lg font-medium text-white mb-2">{% trans 'No services found' %}</h3>
+    <p class="text-slate-400 mb-6 max-w-sm mx-auto">
+      {% trans 'Contact our sales team to get started with hosting services.' %}
+    </p>
+  </div>
+</div>
+{% endif %}

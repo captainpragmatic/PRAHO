@@ -69,6 +69,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
     service_plan_type = serializers.CharField(source="service_plan.plan_type", read_only=True)
     service_plan_type_display = serializers.CharField(source="service_plan.get_plan_type_display", read_only=True)
     server_name = serializers.CharField(source="server.name", read_only=True)
+    server_ip = serializers.CharField(source="server.primary_ip", read_only=True)
 
     # Status display
     status_display = serializers.CharField(source="get_status_display", read_only=True)
@@ -112,6 +113,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
             "service_plan_type",
             "service_plan_type_display",
             "server_name",
+            "server_ip",
             "auto_renew",
             "is_overdue",
             "days_until_expiry",

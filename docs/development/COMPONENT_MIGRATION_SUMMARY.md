@@ -2,123 +2,141 @@
 
 ## ✅ Templates Updated to Use UI Components
 
-This document summarizes the systematic migration of PRAHO Platform templates from raw HTML/Tailwind to the reusable component system.
+This document summarizes the systematic migration of PRAHO Portal templates from raw HTML/Tailwind to the reusable component system.
 
 ### 🔧 Components Used
 
-1. **Button Component** - Consistent styling and HTMX integration
-2. **Input Component** - Standardized form inputs with validation
-3. **Alert Component** - Flash message display
-4. **Table Component** - Data tables (ready for full implementation)
-5. **Modal Component** - Dialogs and overlays (ready for use)
+1. **Button Component** (`{% button %}`) - Consistent styling, variants, HTMX integration
+2. **Input Component** (`{% input %}`) - Standardized form inputs with validation
+3. **Alert Component** (`{% alert %}`) - Flash messages and notifications
+4. **Badge Component** (`{% badge %}`) - Status badges with variant colors
+5. **Table Component** (`{% table_enhanced %}`) - Data tables (Platform service)
+
+### 📄 Shared List Page Components (ADR-0026)
+
+Three reusable template includes provide consistent list page layout across Portal:
+
+1. **`components/list_page_header.html`** — Icon, title, subtitle, stats grid, action button
+2. **`components/list_page_filters.html`** — HTMX-wired tabs + search + optional dropdowns
+3. **`components/list_page_skeleton.html`** — Parameterized loading skeleton
+4. **`components/pagination.html`** — Shadcn-inspired pagination (ARIA, HTMX, ellipsis)
 
 ### 📄 Updated Templates
 
 #### 1. Base Template (`templates/base.html`)
-- ✅ Added component templatetags loading
-- ✅ Replaced flash messages with `{% alert %}` component
-- ✅ Updated logout button to use `{% button %}` component
-- ✅ Fixed JavaScript syntax error in translation
+- ✅ `{% load ui_components %}` loaded
+- ✅ Flash messages → `{% alert %}` component
+- ✅ Logout button → `{% button %}` component
 
-#### 2. Customer Management
-**templates/customers/list.html**
-- ✅ Added UI components loading
-- ✅ "New Customer" button → `{% button "New Customer" variant="primary" %}`
-- ✅ Search input → `{% input field_name="search" %}`
-- ✅ Search/Reset buttons → component system
-- ✅ Action buttons (View/Edit) → component system
-- ✅ Pagination buttons → component system
+#### 2. Customer Management (Platform)
+**`templates/customers/list.html`**
+- ✅ Buttons → `{% button %}`, Search → `{% input %}`, Pagination → component
 
-**templates/customers/detail.html**
-- ✅ Added UI components loading
-- ✅ "Edit Customer" button → `{% button "Edit Customer" variant="primary" %}`
+**`templates/customers/detail.html`**
+- ✅ Edit button → `{% button %}`
 
-#### 3. Billing Management
-**templates/billing/invoice_list.html**
-- ✅ Added UI components loading
-- ✅ "New Invoice" button → `{% button "New Invoice" variant="primary" %}`
-- ✅ Search input → `{% input field_name="search" %}`
-- ✅ Filter/Reset buttons → component system
-- ✅ Action buttons (View/Edit/PDF/Pay) → component system with HTMX
+#### 3. Billing / Invoices
+**Portal: `templates/billing/invoices_list.html`**
+- ✅ Refactored to shared list page components (header, filters, skeleton)
+- ✅ All buttons use `{% button %}`, alerts use `{% alert %}`
+- ✅ Status badges use `{% badge %}`
+- ✅ Pagination uses shared `components/pagination.html`
+
+**Portal: `templates/billing/partials/invoices_table.html`**
+- ✅ Status badges → `{% badge %}` with variants
+- ✅ Doc type badges → `{% badge %}`
+
+**Portal: `templates/billing/partials/header_action.html`**
+- ✅ Sync button → `{% button %}` with HTMX
+
+**Platform: `templates/billing/invoice_list.html`**
+- ✅ Buttons → `{% button %}`, Search → `{% input %}`
 
 #### 4. Dashboard
-**templates/dashboard.html**
-- ✅ Added UI components loading
-- ✅ Quick Actions grid → all buttons converted to component system
-- ✅ Staff actions: New Customer, New Invoice, New Ticket, New Service
-- ✅ Customer actions: New Ticket, View Invoices, My Services, My Profile
+**`templates/dashboard/dashboard.html`** (Portal)
+- ✅ `{% load ui_components %}` loaded
+- ✅ Quick action buttons → `{% button %}` component
 
 #### 5. User Authentication
-**templates/users/login.html**
-- ✅ Added UI components loading
-- ✅ Email/Password inputs → `{% input %}` components
-- ✅ Login button → `{% button "Login" variant="primary" size="lg" %}`
+**`templates/users/login.html`**
+- ✅ `{% load ui_components %}` loaded
+- ✅ Email/Password inputs → `{% input %}`
+- ✅ Login button → `{% button %}`
 
 #### 6. Ticket Management
-**templates/tickets/form.html**
-- ✅ Added UI components loading
-- ✅ Back button → `{% button "← Back to Tickets" variant="secondary" %}`
-- ✅ Subject input → `{% input field_name="subject" %}`
-- ✅ Form action buttons → Cancel/Create components
+**Portal: `templates/tickets/ticket_list.html`**
+- ✅ Refactored to shared list page components (header, filters, skeleton)
+- ✅ Alerts use `{% alert %}`
+
+**Portal: `templates/tickets/partials/header_action.html`**
+- ✅ New Ticket button → `{% button %}`
+
+**Portal/Platform: `templates/tickets/form.html`**
+- ✅ Inputs → `{% input %}`, Buttons → `{% button %}`
 
 #### 7. Service Management
-**templates/provisioning/service_list.html**
-- ✅ Added UI components loading
-- ✅ "New Service" button → `{% button "New Service" variant="primary" %}`
-- ✅ Filter/Reset buttons → component system
+**Portal: `templates/services/service_list.html`**
+- ✅ Refactored to shared list page components (header, filters, skeleton)
+- ✅ Alerts use `{% alert %}`
+
+**Portal: `templates/services/partials/services_table.html`**
+- ✅ Status badges inline (to be migrated to `{% badge %}` in future)
+
+**Portal: `templates/services/partials/header_action.html`**
+- ✅ Order Service button → `{% button %}`
+
+**Platform: `templates/provisioning/service_list.html`**
+- ✅ Buttons → `{% button %}`, Filters → component system
 
 ### 🎯 Component Usage Patterns
 
-#### Button Variants Used
+#### Button Variants
 ```django
 {% button "Text" variant="primary" %}      <!-- Blue primary actions -->
 {% button "Text" variant="secondary" %}    <!-- Gray secondary actions -->
 {% button "Text" variant="success" %}      <!-- Green success actions -->
-{% button "Text" variant="info" %}         <!-- Blue info actions -->
-{% button "Text" variant="warning" %}      <!-- Orange warning actions -->
 {% button "Text" variant="danger" %}       <!-- Red destructive actions -->
 ```
 
-#### Input Components Used
+#### Badge Variants
 ```django
-{% input field_name="search" placeholder="Search..." %}
-{% input field_name="email" field_type="email" required=True %}
-{% input field_name="password" field_type="password" required=True %}
+{% badge "Paid" variant="success" %}       <!-- Green status -->
+{% badge "Overdue" variant="danger" %}     <!-- Red status -->
+{% badge "Draft" variant="secondary" %}    <!-- Gray status -->
+{% badge "Sent" variant="primary" %}       <!-- Blue status -->
 ```
 
-#### Alert Components Used
-```django
-{% alert message.message variant=message.tags dismissible=True %}
-```
-
-#### HTMX Integration Examples
+#### HTMX Integration
 ```django
 {% button "Pay" variant="success" hx_post=pay_url hx_confirm="Mark as paid?" %}
-{% button "Filter" variant="primary" type="submit" %}
+{% button "Sync" variant="primary" hx_post=sync_url hx_indicator="#spinner" %}
 ```
 
 ### 🔄 Benefits Achieved
 
-1. **Consistency** - All buttons now have uniform styling and behavior
+1. **Consistency** - All buttons, badges, and inputs share uniform styling
 2. **Maintainability** - Centralized component logic in templatetags
-3. **HTMX Ready** - Built-in HTMX support for interactive features
-4. **Romanian Theming** - Consistent brand colors and styling
-5. **Accessibility** - Proper ARIA attributes and focus management
-6. **Loading States** - Built-in loading and disabled states
-
-### 🚀 Next Steps
-
-1. **Complete Migration** - Update remaining form templates
-2. **Table Component** - Implement full table component usage
-3. **Modal Integration** - Add modal dialogs for confirmations
-4. **Form Validation** - Integrate validation feedback with components
-5. **Advanced HTMX** - Add more interactive features
+3. **HTMX Ready** - Built-in HTMX attributes on components
+4. **Accessibility** - Proper ARIA attributes, focus management, screen reader labels
+5. **Dark Theme** - Consistent slate-800 dark theme across all list pages
+6. **Responsive** - Desktop tables + mobile cards on all list pages
 
 ### 🧪 Testing Status
 
-- ✅ Django check passed without errors
+- ✅ Django template compilation — no syntax errors
 - ✅ Static files collection successful
-- ✅ No template syntax errors found
 - ✅ All component templatetags loading correctly
+- ✅ E2E tests updated for new tab-based selectors
+- ✅ Shared pagination component tested across all 3 list pages
 
-The component migration is **70% complete** with all major templates now using the standardized component system!
+### 📊 Migration Progress
+
+The component migration is **~90% complete**. Remaining items:
+- `templates/users/profile.html` — form inputs could use `{% input %}`
+- `templates/orders/checkout.html` — buttons and alerts
+- `templates/services/partials/services_table.html` — inline status badges → `{% badge %}`
+
+### 📚 References
+
+- [ADR-0026: Portal Frontend Architecture](../../docs/ADRs/ADR-0026-portal-frontend-architecture.md)
+- [Clickable Data Table Guide](CLICKABLE_DATA_TABLE_GUIDE.md)

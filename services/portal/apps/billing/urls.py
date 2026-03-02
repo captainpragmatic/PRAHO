@@ -9,8 +9,9 @@ from . import views
 app_name = "billing"
 
 urlpatterns = [
-    # Invoice list and detail views
+    # Invoice list, search, and detail views
     path("invoices/", views.invoices_list_view, name="invoices_list"),
+    path("invoices/search/", views.invoices_search_api, name="invoices_search_api"),
     path("invoices/<str:invoice_number>/", views.invoice_detail_view, name="invoice_detail"),
     path("invoices/<str:invoice_number>/pdf/", views.invoice_pdf_export, name="invoice_pdf_export"),
     # Proforma detail views

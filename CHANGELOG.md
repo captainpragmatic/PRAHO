@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **Portal Frontend Architecture (ADR-0026)**: Unified list page design system for Tickets, Invoices, and Services portal pages
+- **Shared template components**: `list_page_header.html`, `list_page_filters.html`, `list_page_skeleton.html` — composable includes for consistent list page layout
+- **Shared pagination utility**: `apps.common.pagination.PaginatorData` and `build_pagination_params` replace ~20 lines of duplicated pagination math per view
+- **Invoices search endpoint**: `invoices_search_api` HTMX endpoint with live search by document number (was wired in UI but never processed by backend)
+- **Services search endpoint**: `service_search_api` HTMX endpoint with client-side search by service name/domain
+- **Tab-based filtering**: All 3 list pages use HTMX-powered tab navigation for primary filter dimension (status for tickets/services, doc type for invoices)
+- **Invoices E2E tests**: Comprehensive tests for tab filtering, search, status dropdown, pagination, click-through, and mobile responsiveness
+- **Services list E2E tests**: Tests for tab filtering, search, pagination, and page structure
+
+### Changed
+- **Tickets list page**: Refactored from ~202 lines of inline header/filters/skeleton to ~42 lines using shared includes; status filtering changed from dropdown to tabs
+- **Invoices list page**: Refactored from ~347 lines with form-based filters and broken search to ~42 lines using shared includes with HTMX live filtering
+- **Services list page**: Refactored from ~343 lines with `<a>` tab links (full page reloads) to ~42 lines using shared includes with HTMX tabs
+- **Portal E2E selectors**: Updated `test_portal_tickets.py` to use `button[role='tab']` instead of `select[name='status']`; updated `test_customer_services.py` mobile selectors from `sm:hidden` to `md:hidden`
+
+### Fixed
+- **Invoices search**: Search input on invoices page was never wired to backend — now filters by document number via HTMX
 
 ---
 
