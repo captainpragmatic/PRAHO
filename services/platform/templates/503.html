@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans 'Maintenance' %} - PragmaticHost{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center px-4 py-12">
+  <div class="max-w-lg mx-auto text-center">
+    <div class="mb-8">
+      <span class="text-6xl">🔧</span>
+    </div>
+    <h1 class="text-4xl font-bold text-white mb-4">
+      503 - {% trans 'Maintenance' %}
+    </h1>
+    <p class="text-xl text-slate-400 mb-6">
+      {% trans 'System is under maintenance. Please try again later.' %}
+    </p>
+  </div>
+</div>
+{% endblock %}
