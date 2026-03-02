@@ -41,7 +41,7 @@
     </div>
 
     <!-- Mobile Navigation Menu -->
-    <nav id="mobile-menu" class="hidden bg-gradient-to-b from-slate-900 to-slate-950 border-t border-slate-700/50 shadow-2xl">
+    <nav id="mobile-menu" inert class="hidden bg-gradient-to-b from-slate-900 to-slate-950 border-t border-slate-700/50 shadow-2xl">
         <div class="px-6 py-8 max-h-[calc(100vh-4rem)] overflow-y-auto">
             <!-- Main Navigation Section -->
             <div class="space-y-4 mb-10">
@@ -306,6 +306,7 @@ function toggleMobileMenu() {
         if (menu.classList.contains('hidden')) {
             // 📱 Opening menu
             menu.classList.remove('hidden');
+            menu.removeAttribute('inert');
             hamburger.classList.add('hidden');
             close.classList.remove('hidden');
             document.body.classList.add('mobile-menu-open');
@@ -313,6 +314,7 @@ function toggleMobileMenu() {
         } else {
             // 📱 Closing menu
             menu.classList.add('hidden');
+            menu.setAttribute('inert', '');
             hamburger.classList.remove('hidden');
             close.classList.add('hidden');
             document.body.classList.remove('mobile-menu-open');

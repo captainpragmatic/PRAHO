@@ -163,7 +163,7 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "ticket": ticket,
         "comments": comments,
-        "can_edit": ticket.status != "closed",
+        "can_edit": ticket.status != "closed" or user.is_staff_user,
         "is_waiting_on_customer": ticket.status == "waiting_on_customer",
         "customer_replied_recently": ticket.customer_replied_recently,
     }

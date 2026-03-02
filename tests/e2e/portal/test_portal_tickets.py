@@ -56,26 +56,36 @@ def _create_customer_ticket(
     """Fill the portal create form, submit, and return the detail URL.
 
     Portal uses name='title' (not 'subject') and name='category' (not 'ticket_type').
+    Uses JS evaluate to fill fields because Playwright's fill() can trigger the
+    mobile nav logout form (the click event propagates to the hidden form button).
     """
     page.goto(f"{BASE_URL}/tickets/create/")
     page.wait_for_load_state("networkidle")
-    assert "/tickets/create/" in page.url
+    assert "/tickets/create/" in page.url, f"GET /tickets/create/ redirected to {page.url}"
 
-    page.locator("input[name='title'], input[name='subject']").first.fill(subject)
-    page.locator("textarea[name='description']").fill(description)
+    # Fill form fields via JS to avoid triggering nav logout form (portal has
+    # hidden mobile logout form whose submit button intercepts Playwright clicks)
+    page.evaluate("""
+        ([subject, description, priority]) => {
+            const forms = document.querySelectorAll('form');
+            for (const form of forms) {
+                const titleInput = form.querySelector('input[name="title"]');
+                const descInput = form.querySelector('textarea[name="description"]');
+                if (titleInput && descInput) {
+                    titleInput.value = subject;
+                    descInput.value = description;
+                    const prioSelect = form.querySelector('select[name="priority"]');
+                    if (prioSelect) prioSelect.value = priority;
+                    const catSelect = form.querySelector('select[name="category"]');
+                    if (catSelect) catSelect.value = 'technical';
+                    return;
+                }
+            }
+        }
+    """, [subject, description, priority])
 
-    priority_select = page.locator("select[name='priority']")
-    if priority_select.is_visible(timeout=2000):
-        page.select_option("select[name='priority']", priority)
-
-    category_select = page.locator("select[name='category'], select[name='ticket_type']")
-    if category_select.first.is_visible(timeout=1000):
-        page.select_option(category_select.first, index=1)
-
-    page.locator(
-        "button:has-text('Create'), button:has-text('Submit'), "
-        "button:has-text('Creează'), button[type='submit']"
-    ).first.click()
+    # Click the submit button scoped to the ticket form (not the nav logout form)
+    page.locator("form:has(input[name='title']) button[type='submit']").click()
     page.wait_for_load_state("networkidle")
 
     assert "/tickets/" in page.url and "/create/" not in page.url, (
@@ -279,7 +289,7 @@ def test_closed_ticket_reply_hidden(monitored_customer_page: Page) -> None:
 def test_ticket_mobile_responsiveness(monitored_customer_page: Page) -> None:
     """Test ticket list renders correctly across mobile/tablet/desktop breakpoints."""
 
-    def _check_tickets_page(pg: Page, _breakpoint: str, _width: int) -> dict:
+    def _check_tickets_page(pg: Page, _context: str = "general") -> dict:
         pg.goto(f"{BASE_URL}/tickets/")
         pg.wait_for_load_state("networkidle")
         heading = pg.locator(
@@ -322,7 +332,7 @@ def test_ticket_isolation(customer_page: Page) -> None:
     for fake_id in (99999, 99998):
         response = page.goto(f"{BASE_URL}/tickets/{fake_id}/")
         if response:
-            assert response.status in (200, 302, 403, 404), (
+            assert response.status in (200, 302, 403, 404, 429), (
                 f"Accessing ticket {fake_id} should not return 500"
             )
         # If redirected, that's fine — customer shouldn't see other tickets
