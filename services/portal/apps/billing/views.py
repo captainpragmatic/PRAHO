@@ -158,7 +158,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
 
         assert request.user.is_authenticated, "require_billing_access should enforce auth"
         assert customer_id is not None, "require_billing_access should set customer_id"
-        user_id = int(request.user.pk)
+        user_id = int(request.user.id)
         cid = int(customer_id)
 
         # Fetch ALL documents (unfiltered by type) for stats, then apply type filter
