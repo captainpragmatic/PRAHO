@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-02-27 18:01+0200\n"
+"POT-Creation-Date: 2026-03-02 18:40+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,102 +18,227 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n==1?0:(((n%100>19)||((n%100==0)&&(n!=0)))?2:1));\n"
 
-#: apps/billing/views.py:101
+#: apps/billing/views.py:22
+msgid "All Documents"
+msgstr "Toate documentele"
+
+#: apps/billing/views.py:23 apps/billing/views.py:123
+msgid "Invoices"
+msgstr "Facturi"
+
+#: apps/billing/views.py:26 apps/billing/views.py:124
+#, fuzzy
+#| msgid "Proforma"
+msgid "Proformas"
+msgstr "Proformă"
+
+#: apps/billing/views.py:33
 msgid "All Statuses"
 msgstr "Toate stările"
 
-#: apps/billing/views.py:102 templates/billing/invoices_list.html:251
-#: templates/billing/invoices_list.html:275
+#: apps/billing/views.py:34 templates/billing/partials/invoices_table.html:105
+#: templates/billing/partials/invoices_table.html:129
 #: templates/dashboard/dashboard.html:115
 msgid "Draft"
 msgstr "Ciornă"
 
-#: apps/billing/views.py:103
+#: apps/billing/views.py:35
 msgid "Issued"
 msgstr "Emisă"
 
-#: apps/billing/views.py:104 templates/billing/invoices_list.html:253
-#: templates/billing/invoices_list.html:267
+#: apps/billing/views.py:36 templates/billing/partials/invoices_table.html:107
+#: templates/billing/partials/invoices_table.html:121
 msgid "Sent"
 msgstr "Trimisă"
 
-#: apps/billing/views.py:105 templates/billing/invoices_list.html:255
+#: apps/billing/views.py:37 templates/billing/partials/invoices_table.html:109
 msgid "Accepted"
 msgstr "Acceptată"
 
-#: apps/billing/views.py:106 templates/billing/invoices_list.html:263
+#: apps/billing/views.py:38 templates/billing/partials/invoices_table.html:117
 #: templates/dashboard/dashboard.html:111
 #: templates/services/service_detail.html:795
 msgid "Paid"
 msgstr "Plătită"
 
-#: apps/billing/views.py:107 templates/billing/invoices_list.html:265
+#: apps/billing/views.py:39 templates/billing/partials/invoices_table.html:119
 #: templates/dashboard/dashboard.html:113
 #: templates/services/service_detail.html:816
 msgid "Overdue"
 msgstr "Restantă"
 
-#: apps/billing/views.py:108 templates/billing/invoices_list.html:257
+#: apps/billing/views.py:40 templates/billing/partials/invoices_table.html:111
 msgid "Expired"
 msgstr "Expirată"
 
-#: apps/billing/views.py:109
+#: apps/billing/views.py:41
 msgid "Void"
 msgstr "Anulată"
 
-#: apps/billing/views.py:110 templates/billing/invoices_list.html:273
+#: apps/billing/views.py:42 templates/billing/partials/invoices_table.html:127
 msgid "Refunded"
 msgstr "Rambursată"
 
-#: apps/billing/views.py:119
+#: apps/billing/views.py:118
+msgid "My Billing Documents"
+msgstr "Documentele mele de facturare"
+
+#: apps/billing/views.py:119 templates/components/customer_selector.html:21
+#: templates/components/customer_selector.html:74
+#: templates/components/portal_mobile_header.html:75
+#: templates/services/service_detail.html:258
+#: templates/users/company_profile.html:24 templates/users/profile.html:264
+msgid "Billing"
+msgstr "Facturare"
+
+#: apps/billing/views.py:120
+msgid "View your invoices and proformas"
+msgstr "Vizualizează facturile și proformele tale"
+
+#: apps/billing/views.py:121
+msgid "Search by type, number, amount, status, date, services…"
+msgstr ""
+
+#: apps/billing/views.py:125
+msgid "Unpaid"
+msgstr ""
+
+#: apps/billing/views.py:126 apps/services/views.py:65
+#: templates/billing/invoice_detail.html:133
+#: templates/billing/partials/invoices_table.html:20
+#: templates/billing/proforma_detail.html:144
+#: templates/orders/checkout.html:254
+#: templates/orders/order_confirmation.html:116
+#: templates/orders/order_confirmation.html:199
+#: templates/orders/partials/cart_totals.html:32
+#: templates/services/service_detail.html:726
+msgid "Total"
+msgstr "Total"
+
+#: apps/billing/views.py:220
 msgid "Unable to load invoices. Please try again."
 msgstr "Nu s-au putut încărca facturile. Te rugăm să încerci din nou."
 
-#: apps/billing/views.py:164
+#: apps/billing/views.py:337
 msgid "Invoice not found or access denied."
 msgstr "Factura nu a fost găsită sau accesul este interzis."
 
-#: apps/billing/views.py:174
+#: apps/billing/views.py:347
 msgid "Unable to load invoice details. Please try again."
 msgstr "Nu s-au putut încărca detaliile facturii. Te rugăm să încerci din nou."
 
-#: apps/billing/views.py:257
-msgid "Successfully synced {len(synced_invoices)} invoices."
-msgstr "S-au sincronizat cu succes {len(synced_invoices)} facturi."
-
-#: apps/billing/views.py:269
+#: apps/billing/views.py:442
 msgid "Unable to sync invoices. Please try again."
 msgstr "Nu s-au putut sincroniza facturile. Te rugăm să încerci din nou."
 
-#: apps/billing/views.py:308 apps/billing/views.py:341
+#: apps/billing/views.py:481 apps/billing/views.py:514
 msgid "Unable to generate PDF. Please try again."
 msgstr "Nu s-a putut genera PDF-ul. Te rugăm să încerci din nou."
 
-#: apps/billing/views.py:376
+#: apps/billing/views.py:549
 msgid "Proforma not found or access denied."
 msgstr "Proforma nu a fost găsită sau accesul este interzis."
 
-#: apps/billing/views.py:393
+#: apps/billing/views.py:566
 msgid "Unable to load proforma details. Please try again."
 msgstr "Nu s-au putut încărca detaliile proformei. Te rugăm să încerci din nou."
 
-#: apps/common/decorators.py:147 apps/common/decorators.py:172
+#: apps/billing/views.py:644
+#, fuzzy
+#| msgid "Reply added successfully."
+msgid "Refund request submitted successfully."
+msgstr "Răspuns adăugat cu succes."
+
+#: apps/billing/views.py:649
+msgid "Unable to process refund request."
+msgstr ""
+
+#: apps/billing/views.py:656 templates/billing/invoice_detail.html:384
+#: templates/billing/invoice_detail.html:390
+#, fuzzy
+#| msgid "Unable to submit service request. Please try again later."
+msgid "Unable to process refund request. Please try again."
+msgstr "Nu s-a putut trimite cererea de serviciu. Vă rugăm să încercați din nou mai târziu."
+
+#: apps/common/account_health.py:80
+#, python-format
+msgid "You have %(count)d suspended service."
+msgid_plural "You have %(count)d suspended services."
+msgstr[0] "Aveți %(count)d serviciu suspendat."
+msgstr[1] "Aveți %(count)d servicii suspendate."
+msgstr[2] "Aveți %(count)d de servicii suspendate."
+
+#: apps/common/account_health.py:85
+msgid "View Services"
+msgstr "Vezi serviciile"
+
+#: apps/common/account_health.py:100
+#, python-format
+msgid "You have %(count)d overdue invoice."
+msgid_plural "You have %(count)d overdue invoices."
+msgstr[0] "Aveți %(count)d factură restantă."
+msgstr[1] "Aveți %(count)d facturi restante."
+msgstr[2] "Aveți %(count)d de facturi restante."
+
+#: apps/common/account_health.py:105 templates/dashboard/dashboard.html:212
+#: templates/services/service_detail.html:835
+msgid "View Invoices"
+msgstr "Vezi facturile"
+
+#: apps/common/account_health.py:120
+#, python-format
+msgid "%(count)d service is expiring soon."
+msgid_plural "%(count)d services are expiring soon."
+msgstr[0] "%(count)d serviciu expiră în curând."
+msgstr[1] "%(count)d servicii expiră în curând."
+msgstr[2] "%(count)d de servicii expiră în curând."
+
+#: apps/common/account_health.py:125
+msgid "View Renewals"
+msgstr "Vezi reînnoirile"
+
+#: apps/common/account_health.py:140
+#, python-format
+msgid "%(count)d ticket is waiting for your reply."
+msgid_plural "%(count)d tickets are waiting for your reply."
+msgstr[0] "%(count)d tichet așteaptă răspunsul dumneavoastră."
+msgstr[1] "%(count)d tichete așteaptă răspunsul dumneavoastră."
+msgstr[2] "%(count)d de tichete așteaptă răspunsul dumneavoastră."
+
+#: apps/common/account_health.py:145
+msgid "Reply"
+msgstr "Răspundeți"
+
+#: apps/common/account_health.py:182
+#, python-format
+msgid "%(first)s %(second)s"
+msgstr "%(first)s %(second)s"
+
+#: apps/common/account_health.py:189
+#, python-format
+msgid "and %(count)d more issue."
+msgid_plural "and %(count)d more issues."
+msgstr[0] "și %(count)d altă problemă."
+msgstr[1] "și %(count)d alte probleme."
+msgstr[2] "și %(count)d de alte probleme."
+
+#: apps/common/decorators.py:147 apps/common/decorators.py:174
 msgid "Autentificare necesară"
 msgstr "Autentificare necesară"
 
-#: apps/common/decorators.py:179 apps/common/decorators.py:180
+#: apps/common/decorators.py:181 apps/common/decorators.py:183
 msgid "Niciun client selectat"
 msgstr "Niciun client selectat"
 
-#: apps/common/decorators.py:191 apps/common/decorators.py:192
+#: apps/common/decorators.py:195 apps/common/decorators.py:197
 msgid "Acces interzis"
 msgstr "Acces interzis"
 
-#: apps/common/decorators.py:204 apps/common/decorators.py:205
+#: apps/common/decorators.py:210 apps/common/decorators.py:212
 msgid "Rol inexistent"
 msgstr "Rol inexistent"
 
-#: apps/common/decorators.py:214 apps/common/decorators.py:215
+#: apps/common/decorators.py:222 apps/common/decorators.py:224
 msgid "Permisiuni insuficiente"
 msgstr "Permisiuni insuficiente"
 
@@ -129,19 +254,19 @@ msgstr "Contul este temporar blocat din cauza prea multor încercări eșuate."
 msgid "Serviciul este temporar indisponibil. Vă rugăm încercați din nou."
 msgstr "Serviciul este temporar indisponibil. Vă rugăm încercați din nou."
 
-#: apps/common/rate_limiting.py:323
+#: apps/common/rate_limiting.py:325
 msgid "Prea multe cereri într-un interval scurt. Vă rugăm să încetiniți."
 msgstr "Prea multe cereri într-un interval scurt. Vă rugăm să încetiniți."
 
-#: apps/common/rate_limiting.py:337
+#: apps/common/rate_limiting.py:339
 msgid "Limită de cereri depășită. Vă rugăm să încercați din nou în 1 minut."
 msgstr "Limită de cereri depășită. Vă rugăm să încercați din nou în 1 minut."
 
-#: apps/dashboard/views.py:190
+#: apps/dashboard/views.py:191
 msgid "Could not load account information. Please try again later or contact support if the problem persists."
 msgstr "Nu s-a putut load account information. Please try again later or contact support if the problem persists."
 
-#: apps/dashboard/views.py:226
+#: apps/dashboard/views.py:227
 msgid "Could not load account information. Please try again later."
 msgstr "Nu s-a putut load account information. Please try again later."
 
@@ -262,16 +387,15 @@ msgstr "Pentru a plasa o comandă, trebuie să fiți autentificat."
 msgid "All Products"
 msgstr "Toate Produsele"
 
-#: apps/orders/views.py:117 apps/services/views.py:78
-#: apps/services/views.py:312
+#: apps/orders/views.py:117 apps/services/views.py:389
 msgid "Shared Hosting"
 msgstr "Găzduire partajată"
 
-#: apps/orders/views.py:118 apps/services/views.py:313
+#: apps/orders/views.py:118 apps/services/views.py:390
 msgid "VPS Hosting"
 msgstr "Găzduire VPS"
 
-#: apps/orders/views.py:119 apps/services/views.py:80
+#: apps/orders/views.py:119
 msgid "Dedicated Server"
 msgstr "Server dedicat"
 
@@ -300,7 +424,7 @@ msgid "Invalid price seal"
 msgstr "price seal invalid(ă)"
 
 #: apps/orders/views.py:244 apps/orders/views.py:347 apps/orders/views.py:412
-#: apps/orders/views.py:524
+#: apps/orders/views.py:526
 msgid "Prea multe operații. Vă rugăm încetiniți."
 msgstr "Prea multe operații. Vă rugăm încetiniți."
 
@@ -336,319 +460,384 @@ msgstr "Eroare la eliminarea din coș."
 msgid "Coșul dumneavoastră este gol."
 msgstr "Coșul dumneavoastră este gol."
 
-#: apps/orders/views.py:550
+#: apps/orders/views.py:552
 msgid "Authentication error. Please refresh the page."
 msgstr "Eroare de autentificare. Vă rugăm reîncărcați pagina."
 
-#: apps/orders/views.py:577
+#: apps/orders/views.py:581
 msgid "Eroare la calcularea totalurilor."
 msgstr "Eroare la calcularea totalurilor."
 
-#: apps/orders/views.py:591 apps/orders/views.py:891
+#: apps/orders/views.py:595 apps/orders/views.py:898
 msgid "Cannot proceed with empty cart."
 msgstr "Nu se poate proceed with empty cart."
 
-#: apps/orders/views.py:637 apps/orders/views.py:733
+#: apps/orders/views.py:643 apps/orders/views.py:739
 msgid "We need more information to complete your order."
 msgstr "Avem nevoie de mai multe informații pentru a finaliza comanda dvs."
 
-#: apps/orders/views.py:640
+#: apps/orders/views.py:646
 msgid "Error calculating order totals."
 msgstr "Eroare la calcularea totalurilor comenzii."
 
-#: apps/orders/views.py:681
+#: apps/orders/views.py:687
 msgid "Cannot create order with empty cart."
 msgstr "Nu se poate create order with empty cart."
 
-#: apps/orders/views.py:689
+#: apps/orders/views.py:695
 msgid "Cart version mismatch. Please refresh and try again."
 msgstr "Versiune coș incompatibilă. Vă rugăm reîncărcați și încercați din nou."
 
-#: apps/orders/views.py:737
+#: apps/orders/views.py:743
+#, python-brace-format
 msgid "Order validation failed: {}"
 msgstr "Validarea comenzii a eșuat: {}"
 
-#: apps/orders/views.py:823
+#: apps/orders/views.py:829
+#, python-brace-format
 msgid "Order #{} was created successfully and is ready for payment!"
 msgstr "Comanda #{} a fost creată cu succes și este gata pentru plată!"
 
-#: apps/orders/views.py:828
+#: apps/orders/views.py:834
+#, python-brace-format
 msgid "Order #{} was created successfully, but payment processing is temporarily unavailable."
 msgstr "Comanda #{} a fost creată cu succes, dar procesarea plății este temporar indisponibilă."
 
-#: apps/orders/views.py:835
+#: apps/orders/views.py:841
+#, python-brace-format
 msgid "Order #{} was created successfully! You can view it in your orders list."
 msgstr "Comanda #{} a fost creată cu succes! O puteți vizualiza în lista dumneavoastră de comenzi."
 
-#: apps/orders/views.py:852
+#: apps/orders/views.py:858
 msgid "Eroare la crearea comenzii. Vă rugăm încercați din nou."
 msgstr "Eroare la crearea comenzii. Vă rugăm încercați din nou."
 
-#: apps/orders/views.py:897
+#: apps/orders/views.py:904
 msgid "Cart was modified. Please review and try again."
 msgstr "Coșul a fost modificat. Vă rugăm verificați și încercați din nou."
 
-#: apps/orders/views.py:906
+#: apps/orders/views.py:913
 msgid "Order validation failed. Please check your information."
 msgstr "Validarea comenzii a eșuat. Vă rugăm verificați informațiile dumneavoastră."
 
-#: apps/orders/views.py:914
+#: apps/orders/views.py:921
 msgid "You must agree to the terms and conditions."
 msgstr "Trebuie să acceptați termenii și condițiile."
 
-#: apps/orders/views.py:981
+#: apps/orders/views.py:988
 msgid "Please complete your payment to activate your order."
 msgstr "Vă rugăm completați plata pentru a activa comanda dumneavoastră."
 
-#: apps/orders/views.py:985
+#: apps/orders/views.py:992
 msgid "Payment initialization failed. Please try again."
 msgstr "Inițializarea plății a eșuat. Vă rugăm să încercați din nou."
 
-#: apps/orders/views.py:990
+#: apps/orders/views.py:997
 msgid "Payment processing is temporarily unavailable."
 msgstr "Procesarea plăților este temporar indisponibilă."
 
-#: apps/orders/views.py:995
+#: apps/orders/views.py:1002
 msgid "Error processing payment. Please try again."
 msgstr "Eroare la procesarea plății. Vă rugăm să încercați din nou."
 
-#: apps/orders/views.py:1033
+#: apps/orders/views.py:1040
 msgid "Comanda nu a fost găsită."
 msgstr "Comanda nu a fost găsită."
 
-#: apps/orders/views.py:1068
+#: apps/orders/views.py:1075
 msgid "Eroare la încărcarea detaliilor comenzii."
 msgstr "Eroare la încărcarea detaliilor comenzii."
 
-#: apps/services/views.py:70 templates/services/service_list.html:36
-#: templates/services/service_list.html:65
+#: apps/services/views.py:20
 msgid "All Services"
 msgstr "Toate serviciile"
 
-#: apps/services/views.py:71 templates/dashboard/dashboard.html:71
+#: apps/services/views.py:21 apps/services/views.py:64
+#: templates/dashboard/dashboard.html:71
+#: templates/services/partials/services_table.html:47
+#: templates/services/partials/services_table.html:91
 #: templates/services/service_detail.html:70
 #: templates/services/service_detail.html:198
 #: templates/services/service_detail.html:556
 #: templates/services/service_detail.html:950
-#: templates/services/service_list.html:41
-#: templates/services/service_list.html:70
-#: templates/services/service_list.html:203
-#: templates/services/service_list.html:246
 #: templates/services/service_request_action.html:236
 #: templates/users/consent_history.html:35
 #: templates/users/privacy_dashboard.html:42 templates/users/profile.html:145
 msgid "Active"
 msgstr "Activ"
 
-#: apps/services/views.py:72 templates/services/service_detail.html:75
-#: templates/services/service_list.html:46
-#: templates/services/service_list.html:75
-#: templates/services/service_list.html:207
-#: templates/services/service_list.html:250
+#: apps/services/views.py:22 templates/services/partials/services_table.html:51
+#: templates/services/partials/services_table.html:95
+#: templates/services/service_detail.html:75
 #: templates/services/service_request_action.html:238
 msgid "Suspended"
 msgstr "Suspendat"
 
-#: apps/services/views.py:73 templates/billing/invoices_list.html:37
-#: templates/billing/invoices_list.html:72
-#: templates/billing/invoices_list.html:269
+#: apps/services/views.py:23 templates/billing/partials/invoices_table.html:123
 #: templates/dashboard/dashboard.html:117
+#: templates/services/partials/services_table.html:55
+#: templates/services/partials/services_table.html:99
 #: templates/services/service_detail.html:80
 #: templates/services/service_detail.html:561
 #: templates/services/service_detail.html:797
-#: templates/services/service_list.html:51
-#: templates/services/service_list.html:80
-#: templates/services/service_list.html:211
-#: templates/services/service_list.html:254
 #: templates/services/service_request_action.html:240
 msgid "Pending"
 msgstr "În așteptare"
 
-#: apps/services/views.py:74 templates/billing/invoices_list.html:271
-#: templates/services/service_list.html:56
-#: templates/services/service_list.html:85
-#: templates/services/service_list.html:215
-#: templates/services/service_list.html:258
+#: apps/services/views.py:24 templates/billing/partials/invoices_table.html:125
+#: templates/services/partials/services_table.html:59
+#: templates/services/partials/services_table.html:103
 msgid "Cancelled"
 msgstr "Anulat"
 
-#: apps/services/views.py:77
-msgid "All Types"
-msgstr "Toate tipurile"
+#: apps/services/views.py:59 templates/base.html:129
+#: templates/components/mobile_header.html:97
+#: templates/dashboard/dashboard.html:44 templates/dashboard/dashboard.html:215
+#: templates/services/service_list.html:5
+msgid "My Services"
+msgstr "Serviciile mele"
 
-#: apps/services/views.py:79
-msgid "VPS"
-msgstr "VPS"
+#: apps/services/views.py:60 templates/components/portal_mobile_header.html:93
+msgid "Services"
+msgstr "Servicii"
 
-#: apps/services/views.py:81 apps/services/views.py:315
-msgid "Cloud Hosting"
-msgstr "Găzduire în cloud"
+#: apps/services/views.py:61
+msgid "Manage your hosting services and resources"
+msgstr "Gestionează serviciile de hosting și resursele"
 
-#: apps/services/views.py:82 apps/services/views.py:316
-#: apps/tickets/views.py:307 apps/tickets/views.py:327
-msgid "Email Services"
-msgstr "Servicii de email"
+#: apps/services/views.py:62
+msgid "Search by name, domain, plan, status, price, IP, server…"
+msgstr ""
 
-#: apps/services/views.py:90
+#: apps/services/views.py:118
 msgid "Unable to load hosting services. Please try again later."
 msgstr "Nu s-au putut încărca serviciile de găzduire. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/services/views.py:139 apps/services/views.py:255
+#: apps/services/views.py:216 apps/services/views.py:332
 msgid "Service not found or access denied."
 msgstr "Serviciu negăsit sau acces refuzat."
 
-#: apps/services/views.py:195
+#: apps/services/views.py:272
 msgid "Invalid action requested."
 msgstr "action requested invalid(ă)."
 
-#: apps/services/views.py:199
+#: apps/services/views.py:276
 msgid "Reason is required for this request."
 msgstr "Motivul este obligatoriu pentru această cerere."
 
-#: apps/services/views.py:209
+#: apps/services/views.py:286
 msgid "Upgrade Request"
 msgstr "Cerere de upgrade"
 
-#: apps/services/views.py:210
+#: apps/services/views.py:287
 msgid "Downgrade Request"
 msgstr "Cerere de downgrade"
 
-#: apps/services/views.py:211
+#: apps/services/views.py:288
 msgid "Suspension Request"
 msgstr "Cerere de suspendare"
 
-#: apps/services/views.py:212
+#: apps/services/views.py:289
 msgid "Cancellation Request"
 msgstr "Cerere de anulare"
 
-#: apps/services/views.py:217
+#: apps/services/views.py:294
+#, python-brace-format
 msgid "{} submitted successfully. Request ID: #{}"
 msgstr "{} trimisă cu succes. ID-ul cererii: #{}"
 
-#: apps/services/views.py:230
+#: apps/services/views.py:307
 msgid "Unable to submit service request. Please try again later."
 msgstr "Nu s-a putut trimite cererea de serviciu. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/services/views.py:244
+#: apps/services/views.py:321
 msgid "Request Service Upgrade"
 msgstr "Solicita upgrade serviciu"
 
-#: apps/services/views.py:245
+#: apps/services/views.py:322
 msgid "Request Service Downgrade"
 msgstr "Solicita downgrade serviciu"
 
-#: apps/services/views.py:246
+#: apps/services/views.py:323
 msgid "Request Service Suspension"
 msgstr "Solicita suspendare serviciu"
 
-#: apps/services/views.py:247
+#: apps/services/views.py:324
 msgid "Request Service Cancellation"
 msgstr "Solicita anulare serviciu"
 
-#: apps/services/views.py:311
+#: apps/services/views.py:388
 msgid "All Plan Types"
 msgstr "Toate tipurile de planuri"
 
-#: apps/services/views.py:314
+#: apps/services/views.py:391
 msgid "Dedicated Servers"
 msgstr "Servere dedicate"
 
-#: apps/services/views.py:324
+#: apps/services/views.py:392
+msgid "Cloud Hosting"
+msgstr "Găzduire în cloud"
+
+#: apps/services/views.py:393 apps/tickets/views.py:279
+#: apps/tickets/views.py:299
+msgid "Email Services"
+msgstr "Servicii de email"
+
+#: apps/services/views.py:401
 msgid "Unable to load hosting plans. Please try again later."
 msgstr "Nu s-au putut încărca planurile de găzduire. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/tickets/views.py:142
+#: apps/tickets/views.py:21
+msgid "All"
+msgstr ""
+
+#: apps/tickets/views.py:22 templates/dashboard/dashboard.html:163
+#: templates/tickets/partials/status_and_comments.html:17
+#: templates/tickets/partials/tickets_table.html:62
+#: templates/tickets/partials/tickets_table.html:140
+msgid "Open"
+msgstr "Deschis"
+
+#: apps/tickets/views.py:25 templates/dashboard/dashboard.html:165
+#: templates/tickets/partials/status_and_comments.html:19
+#: templates/tickets/partials/tickets_table.html:66
+#: templates/tickets/partials/tickets_table.html:144
+msgid "In Progress"
+msgstr "În progres"
+
+#: apps/tickets/views.py:31 templates/dashboard/dashboard.html:167
+#: templates/tickets/partials/status_and_comments.html:21
+#: templates/tickets/partials/tickets_table.html:70
+#: templates/tickets/partials/tickets_table.html:148
+msgid "Waiting on You"
+msgstr "Așteaptă răspunsul tău"
+
+#: apps/tickets/views.py:35 templates/dashboard/dashboard.html:169
+#: templates/tickets/partials/status_and_comments.html:23
+#: templates/tickets/partials/tickets_table.html:74
+#: templates/tickets/partials/tickets_table.html:152
+msgid "Closed"
+msgstr "Închis"
+
+#: apps/tickets/views.py:111 apps/tickets/views.py:140
+#: templates/tickets/ticket_list.html:5
+msgid "My Support Tickets"
+msgstr "Tichetele mele de suport"
+
+#: apps/tickets/views.py:112 apps/tickets/views.py:141
+#: templates/users/data_export.html:56
+msgid "Support Tickets"
+msgstr "Tichete de suport"
+
+#: apps/tickets/views.py:113 apps/tickets/views.py:142
+msgid "Get help with your hosting services"
+msgstr "Obține ajutor cu serviciile de hosting"
+
+#: apps/tickets/views.py:114 apps/tickets/views.py:143
+msgid "Search by ticket number, subject, description, status, or date…"
+msgstr ""
+
+#: apps/tickets/views.py:116 apps/tickets/views.py:145
+msgid "Open Tickets"
+msgstr "Tichete deschise"
+
+#: apps/tickets/views.py:117 apps/tickets/views.py:146
+msgid "Total Tickets"
+msgstr "Total tichete"
+
+#: apps/tickets/views.py:126
 msgid "Unable to load support tickets. Please try again later."
 msgstr "Nu s-au putut încărca tichetele de suport. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/tickets/views.py:215
+#: apps/tickets/views.py:187
 msgid "Ticket not found or access denied."
 msgstr "Tichet negăsit sau acces refuzat."
 
-#: apps/tickets/views.py:241
+#: apps/tickets/views.py:213
 msgid "Title and description are required."
 msgstr "Titlul și descrierea sunt obligatorii."
 
-#: apps/tickets/views.py:268
+#: apps/tickets/views.py:240
+#, python-brace-format
 msgid "Support ticket created successfully. Ticket #{}."
 msgstr "Tichetul de suport a fost creat cu succes. Tichet #{}."
 
-#: apps/tickets/views.py:278
+#: apps/tickets/views.py:250
 msgid "Ticket created but unable to redirect to details. Please check your tickets list."
 msgstr "Tichetul a fost creat, dar nu am putut să vă redirecționez la detalii. Vă rugăm să verificați lista de tichete."
 
-#: apps/tickets/views.py:284
+#: apps/tickets/views.py:256
 msgid "Unable to create support ticket. Please try again later."
 msgstr "Nu s-a putut crea tichetul de suport. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/tickets/views.py:295 apps/tickets/views.py:315
+#: apps/tickets/views.py:267 apps/tickets/views.py:287
 #: templates/tickets/partials/status_and_comments.html:50
 #: templates/tickets/ticket_create.html:52
 #: templates/tickets/ticket_create.html:121
 msgid "Low"
 msgstr "Scăzut"
 
-#: apps/tickets/views.py:296 apps/tickets/views.py:316
+#: apps/tickets/views.py:268 apps/tickets/views.py:288
 #: templates/tickets/partials/status_and_comments.html:48
 #: templates/tickets/ticket_create.html:53
 #: templates/tickets/ticket_create.html:115
 msgid "Normal"
 msgstr "Normal"
 
-#: apps/tickets/views.py:297 apps/tickets/views.py:317
+#: apps/tickets/views.py:269 apps/tickets/views.py:289
 #: templates/tickets/partials/status_and_comments.html:46
 #: templates/tickets/ticket_create.html:54
 #: templates/tickets/ticket_create.html:109
 msgid "High"
 msgstr "Ridicat"
 
-#: apps/tickets/views.py:298 apps/tickets/views.py:318
+#: apps/tickets/views.py:270 apps/tickets/views.py:290
 #: templates/tickets/partials/status_and_comments.html:44
 msgid "Urgent"
 msgstr "Urgent"
 
-#: apps/tickets/views.py:299 apps/tickets/views.py:319
+#: apps/tickets/views.py:271 apps/tickets/views.py:291
 #: templates/tickets/partials/status_and_comments.html:42
 #: templates/tickets/ticket_create.html:55
 #: templates/tickets/ticket_create.html:103
 msgid "Critical"
 msgstr "Critic"
 
-#: apps/tickets/views.py:302 apps/tickets/views.py:322
+#: apps/tickets/views.py:274 apps/tickets/views.py:294
 msgid "General Support"
 msgstr "Suport General"
 
-#: apps/tickets/views.py:303 apps/tickets/views.py:323
+#: apps/tickets/views.py:275 apps/tickets/views.py:295
 msgid "Technical Issue"
 msgstr "Problemă Tehnică"
 
-#: apps/tickets/views.py:304 apps/tickets/views.py:324
+#: apps/tickets/views.py:276 apps/tickets/views.py:296
 msgid "Billing Question"
 msgstr "Întrebare de Facturare"
 
-#: apps/tickets/views.py:305 apps/tickets/views.py:325
+#: apps/tickets/views.py:277 apps/tickets/views.py:297
 #: templates/tickets/ticket_create.html:40
 msgid "Hosting Services"
 msgstr "Servicii de Găzduire"
 
-#: apps/tickets/views.py:306 apps/tickets/views.py:326
+#: apps/tickets/views.py:278 apps/tickets/views.py:298
 #: templates/tickets/ticket_create.html:41
 msgid "Domain Management"
 msgstr "Gestionarea Domeniilor"
 
-#: apps/tickets/views.py:349
+#: apps/tickets/views.py:321
 msgid "Reply text is required."
 msgstr "Reply text este obligatoriu."
 
-#: apps/tickets/views.py:393 apps/tickets/views.py:396
+#: apps/tickets/views.py:365 apps/tickets/views.py:368
 msgid "Reply added successfully."
 msgstr "Răspuns adăugat cu succes."
 
-#: apps/tickets/views.py:401
+#: apps/tickets/views.py:373
 msgid "Unable to add reply. Please try again later."
 msgstr "Nu se poate adăuga răspunsul. Vă rugăm să încercați din nou mai târziu."
 
-#: apps/tickets/views.py:514
+#: apps/tickets/views.py:430
 msgid "Search failed. Please try again."
 msgstr "Căutarea a eșuat. Vă rugăm să încercați din nou."
 
@@ -860,11 +1049,11 @@ msgstr "CNP este obligatoriu pentru persoane fizice."
 msgid "Preferred Language"
 msgstr "Limba Preferată"
 
-#: apps/users/forms.py:439
+#: apps/users/forms.py:439 config/settings/base.py:148
 msgid "Română"
 msgstr "Română"
 
-#: apps/users/forms.py:440
+#: apps/users/forms.py:440 config/settings/base.py:147
 msgid "English"
 msgstr "Engleză"
 
@@ -1238,314 +1427,322 @@ msgstr "Codul poștal românesc trebuie să conțină exact 6 cifre"
 msgid "Trade registry number is recommended when VAT number is provided"
 msgstr "Numărul din registrul comerțului este recomandat atunci când este furnizat numărul de TVA"
 
-#: apps/users/views.py:129
+#: apps/users/views.py:131
 msgid "Failed to initialize MFA setup. Please try again."
 msgstr "Eroare la initialize MFA setup. Please try again."
 
-#: apps/users/views.py:137 templates/users/mfa_management.html:149
+#: apps/users/views.py:139 templates/users/mfa_management.html:149
 #: templates/users/mfa_setup_totp.html:5 templates/users/mfa_setup_totp.html:12
 msgid "Set Up Authenticator App"
 msgstr "Configurați aplicația de autentificare"
 
-#: apps/users/views.py:144 apps/users/views.py:166 apps/users/views.py:898
-#: templates/orders/checkout.html:407
+#: apps/users/views.py:146 apps/users/views.py:168 apps/users/views.py:900
+#: templates/orders/checkout.html:410
 msgid "An error occurred. Please try again."
 msgstr "A apărut o eroare. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:150
+#: apps/users/views.py:152
 msgid "Please enter the verification code."
 msgstr "Introduceți the verification code."
 
-#: apps/users/views.py:157
+#: apps/users/views.py:159
 msgid "Two-factor authentication has been enabled successfully!"
 msgstr "Autentificarea cu doi factori a fost activată cu succes!"
 
-#: apps/users/views.py:161
+#: apps/users/views.py:163
 msgid "Invalid verification code. Please try again."
 msgstr "verification code. Please try again invalid(ă)."
 
-#: apps/users/views.py:261
+#: apps/users/views.py:263
 #, python-format
 msgid "Sign in confirmed, %(name)s!"
 msgstr "Autentificare confirmată, %(name)s!"
 
-#: apps/users/views.py:264 apps/users/views.py:267
+#: apps/users/views.py:266 apps/users/views.py:269
 msgid "Sign in confirmed!"
 msgstr "Autentificare confirmată!"
 
-#: apps/users/views.py:274
+#: apps/users/views.py:276
 msgid "Invalid email address or password. Please try again."
 msgstr "email address or password. Please try again invalid(ă)."
 
-#: apps/users/views.py:278 apps/users/views.py:609
+#: apps/users/views.py:280 apps/users/views.py:611
 msgid "Authentication service is temporarily unavailable. Please try again later."
 msgstr "Serviciul de autentificare este temporar indisponibil. Vă rugăm să încercați mai târziu."
 
-#: apps/users/views.py:282 apps/users/views.py:613
-#: templates/orders/order_confirmation.html:406
+#: apps/users/views.py:284 apps/users/views.py:615
+#: templates/orders/order_confirmation.html:407
 msgid "An unexpected error occurred. Please try again."
 msgstr "A apărut o eroare neașteptată. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:286
+#: apps/users/views.py:288
 msgid "Customer Login"
 msgstr "Logare client"
 
-#: apps/users/views.py:307
+#: apps/users/views.py:309
 msgid "You have been logged out successfully."
 msgstr "Ați fost deconectat cu succes."
 
-#: apps/users/views.py:361
+#: apps/users/views.py:363
 msgid "Registration successful! You can now login with your credentials."
 msgstr "Înregistrare realizată cu succes! Puteți acum să vă conectați cu datele dvs."
 
-#: apps/users/views.py:364
+#: apps/users/views.py:366
 msgid "Registration failed. Please check your information and try again."
 msgstr "Înregistrarea a eșuat. Vă rugăm să verificați informațiile și să încercați din nou."
 
-#: apps/users/views.py:368
+#: apps/users/views.py:370
 msgid "An unexpected error occurred during registration. Please try again."
 msgstr "A apărut o eroare neașteptată în timpul înregistrării. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:372
+#: apps/users/views.py:374
 msgid "Customer Registration"
 msgstr "Înregistrare client"
 
-#: apps/users/views.py:399
+#: apps/users/views.py:401
 msgid "Error loading profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:438
+#: apps/users/views.py:438 templates/users/profile.html:97
+msgid "Language"
+msgstr "Limbă"
+
+#: apps/users/views.py:440
 msgid "Profile and language updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:440
+#: apps/users/views.py:442
 msgid "Profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:444 apps/users/views.py:448
+#: apps/users/views.py:446 apps/users/views.py:450
 msgid "Error updating profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:508 templates/users/profile.html:5
+#: apps/users/views.py:510 templates/users/profile.html:5
 #: templates/users/profile.html:12
 msgid "Account Settings"
 msgstr "Setări Cont"
 
-#: apps/users/views.py:541
+#: apps/users/views.py:543
 msgid "If an account with that email exists, you will receive password reset instructions."
 msgstr "Dacă există un cont cu acel e-mail, veți primi instrucțiuni de resetare a parolei."
 
-#: apps/users/views.py:547
+#: apps/users/views.py:549
 msgid "Error processing password reset request. Please try again."
 msgstr "Eroare la procesarea cererii de resetare a parolei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:551
+#: apps/users/views.py:553
 msgid "Password Reset"
 msgstr "Resetare parolă"
 
-#: apps/users/views.py:590
+#: apps/users/views.py:592
 msgid "Current password is incorrect."
 msgstr "Parola actuală este incorectă."
 
-#: apps/users/views.py:599
+#: apps/users/views.py:601
 msgid "Password changed successfully!"
 msgstr "Parola a fost schimbată cu succes!"
 
-#: apps/users/views.py:605
+#: apps/users/views.py:607
 msgid "Error updating password. Please try again."
 msgstr "Eroare la actualizarea parolei. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:618 templates/users/change_password.html:4
+#: apps/users/views.py:620 templates/dashboard/account_overview.html:58
+#: templates/users/change_password.html:4
 #: templates/users/change_password.html:11
 #: templates/users/change_password.html:108 templates/users/profile.html:198
 msgid "Change Password"
 msgstr "Schimbați parola"
 
-#: apps/users/views.py:651 templates/users/privacy_dashboard.html:4
+#: apps/users/views.py:653 templates/users/privacy_dashboard.html:4
 #: templates/users/privacy_dashboard.html:11 templates/users/profile.html:498
 msgid "Privacy Dashboard"
 msgstr "Panoul de confidențialitate"
 
-#: apps/users/views.py:677
+#: apps/users/views.py:679
 msgid "Authentication required."
 msgstr "Autentificare obligatorie."
 
-#: apps/users/views.py:686
+#: apps/users/views.py:688
 msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
 msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
 
-#: apps/users/views.py:690
+#: apps/users/views.py:692
 msgid "Failed to create export request. Please try again."
 msgstr "Nu s-a putut genera PDF-ul. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:694
+#: apps/users/views.py:696
 msgid "Service temporarily unavailable. Please try again later."
 msgstr "Serviciu temporar indisponibil. Vă rugăm să încercați mai târziu."
 
-#: apps/users/views.py:697
+#: apps/users/views.py:699
 msgid "Error processing your data export request. Please try again."
 msgstr "Eroare la procesarea cererii dvs. de export de date. Vă rugăm să încercați din nou."
 
-#: apps/users/views.py:717 templates/users/data_export.html:4
+#: apps/users/views.py:719 templates/users/data_export.html:4
 #: templates/users/data_export.html:11
 #: templates/users/privacy_dashboard.html:82 templates/users/profile.html:511
 msgid "Export My Data"
 msgstr "Exportă datele mele"
 
-#: apps/users/views.py:765 templates/users/consent_history.html:4
+#: apps/users/views.py:767 templates/users/consent_history.html:4
 #: templates/users/consent_history.html:11
 #: templates/users/privacy_dashboard.html:95 templates/users/profile.html:524
 msgid "Consent History"
 msgstr "Istoricul consimțămintelor"
 
-#: apps/users/views.py:802
+#: apps/users/views.py:804
 msgid "Multi-Factor Authentication"
 msgstr "Autentificare multifactor"
 
-#: apps/users/views.py:853
+#: apps/users/views.py:855
 msgid "You need to enable 2FA first before accessing backup codes."
 msgstr "Trebuie să activați mai întâi autentificarea cu doi factori înainte de a accesa codurile de backup."
 
-#: apps/users/views.py:862
+#: apps/users/views.py:864
 msgid "Error loading backup codes."
 msgstr "Eroare la încărcarea codurilor de backup."
 
-#: apps/users/views.py:868 templates/users/mfa_backup_codes.html:5
+#: apps/users/views.py:870 templates/users/mfa_backup_codes.html:5
 #: templates/users/mfa_backup_codes.html:12
 #: templates/users/mfa_management.html:224
 msgid "Backup Codes"
 msgstr "Coduri de rezervă"
 
-#: apps/users/views.py:892
+#: apps/users/views.py:894
 msgid "Two-factor authentication has been disabled."
 msgstr "Autentificarea cu doi factori a fost dezactivată."
 
-#: apps/users/views.py:894
+#: apps/users/views.py:896
 msgid "Failed to disable 2FA. Please try again."
 msgstr "Eroare la disable 2FA. Please try again."
 
-#: apps/users/views.py:917
+#: apps/users/views.py:919
 msgid "Please select a customer to view profile."
 msgstr "Selectați a customer to view profile."
 
-#: apps/users/views.py:965
+#: apps/users/views.py:967
 msgid "Unable to load company profile data."
 msgstr "Eroare la încărcarea datelor profilului."
 
-#: apps/users/views.py:969
+#: apps/users/views.py:971
 msgid "Error loading company profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:972
+#: apps/users/views.py:974
 msgid "An unexpected error occurred."
 msgstr "A apărut o eroare neașteptată."
 
-#: apps/users/views.py:977 templates/users/company_profile.html:4
+#: apps/users/views.py:979 templates/users/company_profile.html:4
 #: templates/users/company_profile.html:12
 msgid "Company Profile"
 msgstr "Profilul meu"
 
-#: apps/users/views.py:1002
+#: apps/users/views.py:1004
 msgid "Please select a customer to edit profile."
 msgstr "Selectați a customer to edit profile."
 
-#: apps/users/views.py:1012
+#: apps/users/views.py:1014
 #, python-brace-format
 msgid "You don't have permission to edit this company profile. Your role: {role}"
 msgstr "Nu aveți permisiune să editați profilul acestei companii. Rolul dvs.: {role}"
 
-#: apps/users/views.py:1056
+#: apps/users/views.py:1058
 msgid "Unable to load current company data."
 msgstr "Nu s-au putut încărca facturile. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:1060
+#: apps/users/views.py:1062
 msgid "Error loading company data. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:1092
+#: apps/users/views.py:1094
 msgid "Company profile updated successfully!"
 msgstr "Profil actualizat cu succes!"
 
-#: apps/users/views.py:1107
+#: apps/users/views.py:1111
+#, python-brace-format
 msgid "Failed to update profile: {}"
 msgstr "Eroare la update profile: {}"
 
-#: apps/users/views.py:1111
+#: apps/users/views.py:1115
 msgid "Error updating company profile. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:1114
+#: apps/users/views.py:1118
 msgid "An unexpected error occurred while updating profile."
 msgstr "A apărut o eroare neașteptată la actualizarea profilului."
 
-#: apps/users/views.py:1116
+#: apps/users/views.py:1120
 msgid "Please correct the errors below."
 msgstr "Vă rugăm să corectați erorile de mai jos."
 
-#: apps/users/views.py:1121 templates/users/company_profile.html:50
+#: apps/users/views.py:1125 templates/users/company_profile.html:50
 #: templates/users/company_profile_edit.html:4
 #: templates/users/company_profile_edit.html:12
 msgid "Edit Company Profile"
 msgstr "Profilul meu"
 
-#: apps/users/views.py:1151
+#: apps/users/views.py:1155
 msgid "Please select a valid customer."
 msgstr "Selectați a valid customer."
 
-#: apps/users/views.py:1171
+#: apps/users/views.py:1178
 msgid "Customer access verification failed. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:1180
+#: apps/users/views.py:1187
 msgid "You don't have access to this customer."
 msgstr "Nu aveți acces la acest client."
 
-#: apps/users/views.py:1193
+#: apps/users/views.py:1200
 msgid "Unable to verify customer access. Please try again."
 msgstr "Nu s-au putut sincroniza facturile. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:1226 templates/components/customer_selector.html:20
+#: apps/users/views.py:1233 templates/components/customer_selector.html:20
 #: templates/components/customer_selector.html:73
 #: templates/users/company_profile.html:23 templates/users/profile.html:263
 msgid "Owner"
 msgstr "Proprietar"
 
-#: apps/users/views.py:1227
+#: apps/users/views.py:1234
 msgid "Administrator"
 msgstr "Administrator"
 
-#: apps/users/views.py:1228
+#: apps/users/views.py:1235
 msgid "Billing Manager"
 msgstr "Facturare"
 
-#: apps/users/views.py:1229
+#: apps/users/views.py:1236
 msgid "Technical Manager"
 msgstr "Probleme tehnice"
 
-#: apps/users/views.py:1230 templates/components/customer_selector.html:23
+#: apps/users/views.py:1237 templates/components/customer_selector.html:23
 #: templates/components/customer_selector.html:76
 #: templates/users/company_profile.html:26 templates/users/profile.html:266
 msgid "Viewer"
 msgstr "Vizualizator"
 
-#: apps/users/views.py:1234
+#: apps/users/views.py:1241
 #, python-brace-format
 msgid "Switched to {customer} ({role})"
 msgstr "Trecut la {customer} ({role})"
 
-#: apps/users/views.py:1303
+#: apps/users/views.py:1312
+#, python-brace-format
 msgid "Company '{}' created successfully! You are now the owner."
 msgstr "Compania '{}' a fost creată cu succes! Sunteți acum proprietarul."
 
-#: apps/users/views.py:1321
+#: apps/users/views.py:1330
+#, python-brace-format
 msgid "Failed to create company: {}"
 msgstr "Eroare la create company: {}"
 
-#: apps/users/views.py:1325
+#: apps/users/views.py:1334
 msgid "Error creating company. Please try again."
 msgstr "Eroare la actualizarea profilului. Te rugăm să încerci din nou."
 
-#: apps/users/views.py:1329 templates/users/create_company.html:4
+#: apps/users/views.py:1338 templates/users/create_company.html:4
 #: templates/users/create_company.html:312 templates/users/profile.html:377
 msgid "Create Company"
 msgstr "Creat la"
@@ -1618,7 +1815,7 @@ msgstr "Dacă problema persistă, vă rugăm contactați echipa noastră de supo
 msgid "PRAHO Customer Portal - Manage your hosting services"
 msgstr "PRAHO Portal Client - Gestionați serviciile dvs. de găzduire"
 
-#: templates/base.html:116 templates/billing/invoice_not_found.html:53
+#: templates/base.html:117 templates/billing/invoice_not_found.html:53
 #: templates/billing/proforma_not_found.html:53
 #: templates/components/mobile_header.html:61
 #: templates/components/portal_mobile_header.html:57
@@ -1626,50 +1823,40 @@ msgstr "PRAHO Portal Client - Gestionați serviciile dvs. de găzduire"
 msgid "Dashboard"
 msgstr "Tablou de Bord"
 
-#: templates/base.html:122 templates/billing/invoices_list.html:6
+#: templates/base.html:123 templates/billing/invoices_list.html:5
 #: templates/components/mobile_header.html:79
 msgid "My Invoices"
 msgstr "Facturile mele"
 
-#: templates/base.html:128 templates/components/mobile_header.html:97
-#: templates/dashboard/dashboard.html:44 templates/dashboard/dashboard.html:215
-#: templates/services/service_list.html:4
-#: templates/services/service_list.html:12
-#: templates/services/service_list.html:99
-#: templates/services/service_list.html:133
-msgid "My Services"
-msgstr "Serviciile mele"
-
-#: templates/base.html:134 templates/components/mobile_header.html:115
+#: templates/base.html:135 templates/components/mobile_header.html:115
 msgid "My Tickets"
 msgstr "Tichetele mele"
 
-#: templates/base.html:143
+#: templates/base.html:144
 msgid "Profile"
 msgstr "Profil"
 
-#: templates/base.html:170
+#: templates/base.html:176
 msgid "PRAHO Really Automates Hosting Operations"
 msgstr "PRAHO automatizează cu adevărat operații de găzduire"
 
-#: templates/base.html:177
+#: templates/base.html:183
 msgid "Version"
 msgstr "Versiune"
 
-#: templates/base.html:180 templates/components/cookie_consent_banner.html:133
+#: templates/base.html:186 templates/components/cookie_consent_banner.html:133
 #: templates/legal/cookie_policy.html:4 templates/legal/cookie_policy.html:11
 #: templates/users/privacy_dashboard.html:123
 msgid "Cookie Policy"
 msgstr "Politica de cookie-uri"
 
-#: templates/base.html:182 templates/components/cookie_consent_banner.html:59
+#: templates/base.html:188 templates/components/cookie_consent_banner.html:59
 #: templates/users/privacy_dashboard.html:113
 msgid "Cookie Preferences"
 msgstr "Preferințe"
 
 #: templates/billing/invoice_detail.html:6
 #: templates/billing/invoice_detail.html:14
-#: templates/billing/invoices_list.html:243
 #: templates/dashboard/dashboard.html:106
 msgid "Invoice"
 msgstr "Factură"
@@ -1699,12 +1886,11 @@ msgid "Customer"
 msgstr "Client"
 
 #: templates/billing/invoice_detail.html:58
-#: templates/billing/invoices_list.html:110
-#: templates/billing/invoices_list.html:162
+#: templates/billing/partials/invoices_table.html:23
+#: templates/services/partials/services_table.html:22
 #: templates/services/service_detail.html:296
 #: templates/services/service_detail.html:815
 #: templates/services/service_detail.html:820
-#: templates/services/service_list.html:178
 #: templates/services/service_request_action.html:233
 #: templates/tickets/partials/status_and_comments.html:14
 #: templates/tickets/partials/tickets_table.html:19
@@ -1744,7 +1930,7 @@ msgid "Description"
 msgstr "Descriere"
 
 #: templates/billing/invoice_detail.html:124
-#: templates/billing/invoices_list.html:153
+#: templates/billing/partials/invoices_table.html:14
 msgid "Type"
 msgstr "Tip"
 
@@ -1757,19 +1943,6 @@ msgstr "Cantitate"
 #: templates/billing/proforma_detail.html:138
 msgid "Unit Price"
 msgstr "Preț unitar"
-
-#: templates/billing/invoice_detail.html:133
-#: templates/billing/invoices_list.html:68
-#: templates/billing/invoices_list.html:159
-#: templates/billing/proforma_detail.html:144
-#: templates/orders/checkout.html:254
-#: templates/orders/order_confirmation.html:116
-#: templates/orders/order_confirmation.html:199
-#: templates/orders/partials/cart_totals.html:32
-#: templates/services/service_detail.html:726
-#: templates/tickets/ticket_list.html:80
-msgid "Total"
-msgstr "Total"
 
 #: templates/billing/invoice_detail.html:159
 #: templates/billing/invoice_detail.html:220
@@ -1878,7 +2051,9 @@ msgid "What happens next?"
 msgstr "Ce se întâmplă mai departe?"
 
 #: templates/billing/invoice_detail.html:307
-msgid "We will create a support ticket for your refund request and our billing team will review it within 1-2 business days."
+#, fuzzy
+#| msgid "We will create a support ticket for your refund request and our billing team will review it within 1-2 business days."
+msgid "Your refund request will be submitted for processing. Our billing team will review and confirm within 1-2 business days."
 msgstr "Vom crea un tichet de suport pentru cererea dvs. de rambursare și echipa noastră de facturare o va examina în termen de 1-2 zile lucrătoare."
 
 #: templates/billing/invoice_detail.html:317 templates/components/modal.html:76
@@ -1892,7 +2067,8 @@ msgid "Cancel"
 msgstr "Anulează"
 
 #: templates/billing/invoice_detail.html:321
-#: templates/billing/invoice_detail.html:367
+#: templates/billing/invoice_detail.html:386
+#: templates/billing/invoice_detail.html:392
 #: templates/services/service_request_action.html:197
 #: templates/services/service_request_action.html:259
 msgid "Submit Request"
@@ -1902,17 +2078,21 @@ msgstr "Trimiteți cererea"
 msgid "Please fill in all required fields."
 msgstr "Completați toate câmpurile obligatorii."
 
-#: templates/billing/invoice_detail.html:352
-msgid "Submit refund request? We will create a support ticket and contact you."
-msgstr "Trimiteți cerere de rambursare? Vom crea un tichet de suport și vă vom contacta."
+#: templates/billing/invoice_detail.html:351
+#, fuzzy
+#| msgid "Submit a refund request for this invoice. Our billing team will review your request and contact you."
+msgid "Submit refund request? Our billing team will review your request."
+msgstr "Trimiteți o cerere de rambursare pentru această factură. Echipa noastră de facturare va revizui solicitarea dvs. și vă va contacta."
 
-#: templates/billing/invoice_detail.html:359
+#: templates/billing/invoice_detail.html:358
 msgid "Submitting..."
 msgstr "Se trimite..."
 
-#: templates/billing/invoice_detail.html:362
-msgid "Refund request feature coming soon! Please contact support directly."
-msgstr "Funcția de cerere de rambursare va fi disponibilă în curând! Contactați direct echipa de suport."
+#: templates/billing/invoice_detail.html:380
+#, fuzzy
+#| msgid "Data export request submitted successfully. You will receive an email with download instructions within 48 hours."
+msgid "Refund request submitted successfully! Our billing team will review it shortly."
+msgstr "Cererea de export de date a fost trimisă cu succes. Veți primi un e-mail cu instrucțiuni de descărcare în termen de 48 de ore."
 
 #: templates/billing/invoice_not_found.html:5
 #: templates/billing/invoice_not_found.html:13
@@ -1942,179 +2122,88 @@ msgstr "Factura solicitată nu a putut fi găsită sau nu aveți\\"
 msgid "An error occurred while loading the invoice. Please try again or contact support if the problem persists."
 msgstr "A apărut o eroare în timp ce loading the invoice. Please try again or contact support if the problem persists."
 
-#: templates/billing/invoices_list.html:22
-msgid "My Billing Documents"
-msgstr "Documentele mele de facturare"
+#: templates/billing/partials/header_action.html:2
+msgid "Sync invoices from platform"
+msgstr ""
 
-#: templates/billing/invoices_list.html:23
-msgid "View your invoices and proformas"
-msgstr "Vizualizează facturile și proformele tale"
+#: templates/billing/partials/header_action.html:5
+msgid "Sync"
+msgstr ""
 
-#: templates/billing/invoices_list.html:29
-msgid "Pending Quotes"
-msgstr "Oferte în așteptare"
-
-#: templates/billing/invoices_list.html:33
-msgid "Total Documents"
-msgstr "Vezi toate documentele"
-
-#: templates/billing/invoices_list.html:41
-msgid "Total Spent"
-msgstr "Total cheltuit"
-
-#: templates/billing/invoices_list.html:56
-msgid "Billing Documents"
-msgstr "Vezi toate documentele"
-
-#: templates/billing/invoices_list.html:64
-msgid "Quotes"
-msgstr "Oferte"
-
-#: templates/billing/invoices_list.html:76
-msgid "Spent"
-msgstr "Cheltuit"
-
-#: templates/billing/invoices_list.html:88
-#: templates/tickets/ticket_list.html:101
-#: templates/tickets/ticket_list.html:116
-msgid "Search"
-msgstr "Căutare"
-
-#: templates/billing/invoices_list.html:91
-msgid "Document number..."
-msgstr "Numărul documentului..."
-
-#: templates/billing/invoices_list.html:98
-msgid "Document Type"
-msgstr "Tipul documentului"
-
-#: templates/billing/invoices_list.html:101
-msgid "All Documents"
-msgstr "Toate documentele"
-
-#: templates/billing/invoices_list.html:102
-msgid "Proformas Only"
-msgstr "Doar proformele"
-
-#: templates/billing/invoices_list.html:103
-msgid "Invoices Only"
-msgstr "Doar facturile"
-
-#: templates/billing/invoices_list.html:124
-msgid "Filter"
-msgstr "Filtru"
-
-#: templates/billing/invoices_list.html:127
-msgid "Clear"
-msgstr "Șterge"
-
-#: templates/billing/invoices_list.html:137
-msgid "Documents"
-msgstr "Documente"
-
-#: templates/billing/invoices_list.html:156
+#: templates/billing/partials/invoices_table.html:17
 msgid "Number"
 msgstr "Număr"
 
-#: templates/billing/invoices_list.html:165
+#: templates/billing/partials/invoices_table.html:26
 #: templates/services/service_usage.html:141
 msgid "Date"
 msgstr "Data"
 
-#: templates/billing/invoices_list.html:174
+#: templates/billing/partials/invoices_table.html:35
+#: templates/billing/partials/invoices_table.html:96
 msgid "📄 Proforma"
 msgstr "Proformă"
 
-#: templates/billing/invoices_list.html:176
+#: templates/billing/partials/invoices_table.html:37
+#: templates/billing/partials/invoices_table.html:98
 msgid "🧾 Invoice"
 msgstr "Factură"
 
-#: templates/billing/invoices_list.html:193
-#: templates/billing/invoices_list.html:217
+#: templates/billing/partials/invoices_table.html:51
+#: templates/billing/partials/invoices_table.html:75
 #: templates/billing/proforma_detail.html:268
 msgid "📝 Draft"
 msgstr "Ciornă"
 
-#: templates/billing/invoices_list.html:195
-#: templates/billing/invoices_list.html:209
+#: templates/billing/partials/invoices_table.html:53
+#: templates/billing/partials/invoices_table.html:67
 #: templates/billing/proforma_detail.html:270
 msgid "📧 Sent"
 msgstr "Trimisă"
 
-#: templates/billing/invoices_list.html:197
+#: templates/billing/partials/invoices_table.html:55
 #: templates/billing/proforma_detail.html:272
 msgid "✅ Accepted"
 msgstr "Acceptată"
 
-#: templates/billing/invoices_list.html:199
+#: templates/billing/partials/invoices_table.html:57
 #: templates/billing/proforma_detail.html:274
 msgid "❌ Expired"
 msgstr "Expirată"
 
-#: templates/billing/invoices_list.html:205
+#: templates/billing/partials/invoices_table.html:63
 msgid "✅ Paid"
 msgstr "Plătită"
 
-#: templates/billing/invoices_list.html:207
+#: templates/billing/partials/invoices_table.html:65
 msgid "❌ Overdue"
 msgstr "Restantă"
 
-#: templates/billing/invoices_list.html:211
+#: templates/billing/partials/invoices_table.html:69
 msgid "⏳ Pending"
 msgstr "În așteptare"
 
-#: templates/billing/invoices_list.html:213
+#: templates/billing/partials/invoices_table.html:71
 msgid "❌ Cancelled"
 msgstr "Anulat"
 
-#: templates/billing/invoices_list.html:215
+#: templates/billing/partials/invoices_table.html:73
 msgid "↩️ Refunded"
 msgstr "Rambursată"
 
-#: templates/billing/invoices_list.html:239
+#: templates/billing/partials/invoices_table.html:154
+msgid "No documents found"
+msgstr "Nu s-au găsit documente"
+
+#: templates/billing/partials/invoices_table.html:156
+msgid "No billing documents available for your account."
+msgstr "Nu sunt disponibile documente de facturare pentru contul tău."
+
 #: templates/billing/proforma_detail.html:6
 #: templates/billing/proforma_detail.html:14
 #: templates/dashboard/dashboard.html:106
 msgid "Proforma"
 msgstr "Proformă"
-
-#: templates/billing/invoices_list.html:293
-#, python-format
-msgid ""
-"\n"
-"            Page %(page_number)s of %(num_pages)s\n"
-"            "
-msgstr ""
-"\n"
-"            Pagina %(page_number)s din %(num_pages)s\n"
-"            "
-
-#: templates/billing/invoices_list.html:302
-#: templates/components/pagination.html:70
-#: templates/components/pagination.html:79
-#: templates/services/service_list.html:326
-msgid "Previous"
-msgstr "Anterior"
-
-#: templates/billing/invoices_list.html:303
-msgid "Prev"
-msgstr "Ant"
-
-#: templates/billing/invoices_list.html:310
-#: templates/billing/invoices_list.html:311
-#: templates/components/pagination.html:171
-#: templates/components/pagination.html:180
-#: templates/services/service_list.html:333
-msgid "Next"
-msgstr "Următorul"
-
-#: templates/billing/invoices_list.html:323
-msgid "No documents found"
-msgstr "Nu s-au găsit documente"
-
-#: templates/billing/invoices_list.html:325
-msgid "No billing documents available for your account."
-msgstr "Nu sunt disponibile documente de facturare pentru contul tău."
 
 #: templates/billing/proforma_detail.html:17
 msgid "Created on"
@@ -2409,14 +2498,6 @@ msgstr "Acțiuni"
 msgid "Select Customer"
 msgstr "Client"
 
-#: templates/components/customer_selector.html:21
-#: templates/components/customer_selector.html:74
-#: templates/components/portal_mobile_header.html:75
-#: templates/services/service_detail.html:258
-#: templates/users/company_profile.html:24 templates/users/profile.html:264
-msgid "Billing"
-msgstr "Facturare"
-
 #: templates/components/customer_selector.html:22
 #: templates/components/customer_selector.html:75
 #: templates/users/company_profile.html:25 templates/users/profile.html:265
@@ -2438,6 +2519,11 @@ msgstr "Chat live disponibil"
 #: templates/components/customer_selector.html:97
 msgid "Your access level determines what actions you can perform"
 msgstr "Nivelul dvs. de acces determină ce acțiuni puteți efectua"
+
+#: templates/components/list_page_filters.html:66
+#: templates/components/list_page_filters.html:92
+msgid "Search"
+msgstr "Căutare"
 
 #: templates/components/mobile_header.html:33
 #: templates/components/portal_mobile_header.html:29
@@ -2471,12 +2557,12 @@ msgstr "Setări"
 msgid "Profile & preferences"
 msgstr "Profil și preferințe"
 
-#: templates/components/mobile_header.html:168
+#: templates/components/mobile_header.html:169
 #: templates/components/portal_mobile_header.html:161
 msgid "Sign Out"
 msgstr "Deconectare"
 
-#: templates/components/mobile_header.html:169
+#: templates/components/mobile_header.html:170
 #: templates/components/portal_mobile_header.html:162
 msgid "End your session"
 msgstr "Încheie sesiunea"
@@ -2508,6 +2594,11 @@ msgstr "Paginare"
 msgid "Go to previous page"
 msgstr "Mergi la pagina anterioară"
 
+#: templates/components/pagination.html:70
+#: templates/components/pagination.html:79
+msgid "Previous"
+msgstr "Anterior"
+
 #: templates/components/pagination.html:75
 msgid "Previous page (unavailable)"
 msgstr "Pagina anterioară (indisponibilă)"
@@ -2521,6 +2612,11 @@ msgstr "Mai multe pagini"
 msgid "Go to next page"
 msgstr "Mergi la pagina următoare"
 
+#: templates/components/pagination.html:171
+#: templates/components/pagination.html:180
+msgid "Next"
+msgstr "Următorul"
+
 #: templates/components/pagination.html:179
 msgid "Next page (unavailable)"
 msgstr "Pagina următoare (indisponibilă)"
@@ -2528,10 +2624,6 @@ msgstr "Pagina următoare (indisponibilă)"
 #: templates/components/portal_mobile_header.html:58
 msgid "Overview & status"
 msgstr "Prezentare generală și stare"
-
-#: templates/components/portal_mobile_header.html:93
-msgid "Services"
-msgstr "Servicii"
 
 #: templates/components/portal_mobile_header.html:94
 msgid "My hosting services"
@@ -2556,6 +2648,10 @@ msgstr "Înapoi"
 msgid "Back to"
 msgstr "Înapoi la"
 
+#: templates/components/table.html:127
+msgid "Nu există date"
+msgstr ""
+
 #: templates/components/table_enhanced.html:38
 #: templates/services/service_detail.html:129
 msgid "Actions"
@@ -2569,9 +2665,69 @@ msgstr "Nu s-a găsit niciun(o) data"
 msgid "No items available."
 msgstr "Nu există niciun(o) items disponibil(ă)."
 
+#: templates/dashboard/account_overview.html:4
+#: templates/dashboard/account_overview.html:19
+#, fuzzy
+#| msgid "Account Security"
+msgid "Account Overview"
+msgstr "Securitatea contului"
+
+#: templates/dashboard/account_overview.html:12
 #: templates/dashboard/dashboard.html:16
 msgid "Platform service temporarily unavailable. Some features may be limited."
 msgstr "Serviciul platformei este temporar indisponibil. Unele funcții pot fi limitate."
+
+#: templates/dashboard/account_overview.html:20
+#, fuzzy
+#| msgid "Manage your account settings and personal information"
+msgid "View your account and customer information."
+msgstr "Gestionează setările contului și informațiile personale"
+
+#: templates/dashboard/account_overview.html:25
+#, fuzzy
+#| msgid "Account Settings"
+msgid "Account Details"
+msgstr "Setări Cont"
+
+#: templates/dashboard/account_overview.html:28
+#, fuzzy
+#| msgid "Email:"
+msgid "Email"
+msgstr "Email:"
+
+#: templates/dashboard/account_overview.html:32
+#, fuzzy
+#| msgid "Customer ID:"
+msgid "Customer ID"
+msgstr "ID Client:"
+
+#: templates/dashboard/account_overview.html:37
+#, fuzzy
+#| msgid "Company:"
+msgid "Company"
+msgstr "Companie:"
+
+#: templates/dashboard/account_overview.html:43
+msgid "Tax ID"
+msgstr ""
+
+#: templates/dashboard/account_overview.html:52
+#, fuzzy
+#| msgid "Quick Actions"
+msgid "Quick Links"
+msgstr "Acțiuni rapide"
+
+#: templates/dashboard/account_overview.html:55
+#, fuzzy
+#| msgid "Edit Company Profile"
+msgid "Edit Profile"
+msgstr "Profilul meu"
+
+#: templates/dashboard/account_overview.html:61
+#, fuzzy
+#| msgid "🏠 Back to dashboard"
+msgid "Back to Dashboard"
+msgstr "🏠 Înapoi la panou de control"
 
 #: templates/dashboard/dashboard.html:25
 #, python-format
@@ -2596,8 +2752,7 @@ msgid "Account Status"
 msgstr "Starea contului"
 
 #: templates/dashboard/dashboard.html:83
-#: templates/services/service_list.html:181
-#: templates/services/service_list.html:281
+#: templates/services/partials/services_table.html:25
 msgid "Next Billing"
 msgstr "Următoarea facturare"
 
@@ -2622,38 +2777,6 @@ msgstr "Vezi toate"
 msgid "My Recent Tickets"
 msgstr "Tichetele mele recente"
 
-#: templates/dashboard/dashboard.html:163
-#: templates/tickets/partials/status_and_comments.html:17
-#: templates/tickets/partials/tickets_table.html:62
-#: templates/tickets/partials/tickets_table.html:140
-#: templates/tickets/ticket_list.html:76 templates/tickets/ticket_list.html:127
-msgid "Open"
-msgstr "Deschis"
-
-#: templates/dashboard/dashboard.html:165
-#: templates/tickets/partials/status_and_comments.html:19
-#: templates/tickets/partials/tickets_table.html:66
-#: templates/tickets/partials/tickets_table.html:144
-#: templates/tickets/ticket_list.html:128
-msgid "In Progress"
-msgstr "În progres"
-
-#: templates/dashboard/dashboard.html:167
-#: templates/tickets/partials/status_and_comments.html:21
-#: templates/tickets/partials/tickets_table.html:70
-#: templates/tickets/partials/tickets_table.html:148
-#: templates/tickets/ticket_list.html:129
-msgid "Waiting on You"
-msgstr "Așteaptă răspunsul tău"
-
-#: templates/dashboard/dashboard.html:169
-#: templates/tickets/partials/status_and_comments.html:23
-#: templates/tickets/partials/tickets_table.html:74
-#: templates/tickets/partials/tickets_table.html:152
-#: templates/tickets/ticket_list.html:130
-msgid "Closed"
-msgstr "Închis"
-
 #: templates/dashboard/dashboard.html:187
 msgid "No recent support tickets"
 msgstr "Nu există tichete de suport recente"
@@ -2663,14 +2786,10 @@ msgstr "Nu există tichete de suport recente"
 msgid "Quick Actions"
 msgstr "Acțiuni rapide"
 
-#: templates/dashboard/dashboard.html:209 templates/tickets/ticket_list.html:41
+#: templates/dashboard/dashboard.html:209
+#: templates/tickets/partials/header_action.html:4
 msgid "New Ticket"
 msgstr "Tichet nou"
-
-#: templates/dashboard/dashboard.html:212
-#: templates/services/service_detail.html:835
-msgid "View Invoices"
-msgstr "Vezi facturile"
 
 #: templates/dashboard/dashboard.html:218
 msgid "My Profile"
@@ -3177,11 +3296,11 @@ msgstr "Eroare la încărcarea totalurilor"
 msgid "Create Order for Bank Transfer"
 msgstr "Creați Order for Bank Transfer"
 
-#: templates/orders/checkout.html:352
+#: templates/orders/checkout.html:353
 msgid "Please complete your company profile information before creating the order."
 msgstr "Vă rugăm completați informațiile profilului companiei dvs. înainte de a crea comanda."
 
-#: templates/orders/checkout.html:383
+#: templates/orders/checkout.html:385
 msgid "Please select a payment method"
 msgstr "Vă rugăm selectați o metodă de plată"
 
@@ -3478,8 +3597,6 @@ msgstr "Sfârșitul lunii"
 
 #: templates/orders/product_catalog.html:131
 #: templates/orders/product_catalog.html:138
-#: templates/services/service_list.html:125
-#: templates/services/service_list.html:150
 msgid "total"
 msgstr "Total"
 
@@ -3504,7 +3621,6 @@ msgid "Add to Cart"
 msgstr "Înapoi la coș"
 
 #: templates/orders/product_catalog.html:202
-#: templates/services/service_list.html:288
 msgid "View Details"
 msgstr "Detalii tichet"
 
@@ -3566,6 +3682,37 @@ msgstr "🛒 Adăugați în coș"
 #: templates/orders/product_detail.html:61
 msgid "Înapoi la catalog"
 msgstr "Înapoi la catalog"
+
+#: templates/services/partials/header_action.html:3
+#, fuzzy
+#| msgid "🛒 Order Service"
+msgid "Order Service"
+msgstr "🛒 Comandă serviciu"
+
+#: templates/services/partials/services_table.html:13
+#: templates/services/service_request_action.html:218
+msgid "Service Name"
+msgstr "Nume serviciu"
+
+#: templates/services/partials/services_table.html:16
+#: templates/services/partials/services_table.html:115
+msgid "Plan"
+msgstr "Plan"
+
+#: templates/services/partials/services_table.html:19
+#: templates/services/partials/services_table.html:119
+msgid "Price"
+msgstr "Preț"
+
+#: templates/services/partials/services_table.html:139
+#, fuzzy
+#| msgid "No items found"
+msgid "No services found"
+msgstr "Nu s-au găsit elemente"
+
+#: templates/services/partials/services_table.html:141
+msgid "Contact our sales team to get started with hosting services."
+msgstr "Contactați echipa noastră de vânzări pentru a începe cu serviciile de găzduire."
 
 #: templates/services/partials/usage_chart.html:13
 msgid "Unable to load usage data"
@@ -3714,7 +3861,7 @@ msgid "days"
 msgstr "zile"
 
 #: templates/services/service_detail.html:200
-#: templates/tickets/ticket_list.html:42 templates/tickets/ticket_list.html:67
+#: templates/tickets/partials/header_action.html:5
 msgid "New"
 msgstr "Nou"
 
@@ -4039,85 +4186,6 @@ msgstr "Proforma nu este disponibilă"
 msgid "Associated Domains"
 msgstr "Domenii asociate"
 
-#: templates/services/service_list.html:13
-msgid "Manage your hosting services and resources"
-msgstr "Gestionează serviciile de hosting și resursele"
-
-#: templates/services/service_list.html:19
-msgid "🛒 Order New Service"
-msgstr "🛒 Comandă serviciu nou"
-
-#: templates/services/service_list.html:25
-msgid "🛒 Order Service"
-msgstr "🛒 Comandă serviciu"
-
-#: templates/services/service_list.html:104
-#: templates/services/service_list.html:136
-msgid "service"
-msgstr "Serviciu"
-
-#: templates/services/service_list.html:106
-#: templates/services/service_list.html:122
-#: templates/services/service_list.html:138
-#: templates/services/service_list.html:148
-msgid "services"
-msgstr "servicii"
-
-#: templates/services/service_list.html:112
-msgid "Filter:"
-msgstr "Filtru:"
-
-#: templates/services/service_list.html:122
-#: templates/services/service_list.html:148
-msgid "active"
-msgstr "Activ"
-
-#: templates/services/service_list.html:122
-#: templates/services/service_list.html:148
-msgid "suspended"
-msgstr "Suspendat"
-
-#: templates/services/service_list.html:122
-#: templates/services/service_list.html:148
-msgid "pending"
-msgstr "În așteptare"
-
-#: templates/services/service_list.html:122
-#: templates/services/service_list.html:148
-msgid "cancelled"
-msgstr "Anulat"
-
-#: templates/services/service_list.html:169
-#: templates/services/service_request_action.html:218
-msgid "Service Name"
-msgstr "Nume serviciu"
-
-#: templates/services/service_list.html:172
-#: templates/services/service_list.html:270
-msgid "Plan"
-msgstr "Plan"
-
-#: templates/services/service_list.html:175
-#: templates/services/service_list.html:274
-msgid "Price"
-msgstr "Preț"
-
-#: templates/services/service_list.html:299
-msgid "No services found for the selected filter"
-msgstr "Niciun serviciu găsit pentru filtrul selectat"
-
-#: templates/services/service_list.html:301
-msgid "No services yet"
-msgstr "Niciun serviciu deocamdată"
-
-#: templates/services/service_list.html:306
-msgid "Contact our sales team to get started with hosting services."
-msgstr "Contactați echipa noastră de vânzări pentru a începe cu serviciile de găzduire."
-
-#: templates/services/service_list.html:318
-msgid "Page"
-msgstr "Pagină"
-
 #: templates/services/service_request_action.html:4
 msgid "Service Action Request"
 msgstr "Cerere de acțiune pentru serviciu"
@@ -4239,11 +4307,11 @@ msgstr "Contactează suportul"
 msgid "Please provide a detailed reason for this request (required)..."
 msgstr "Te rugăm să oferi informații detaliate despre cererea sau problema ta..."
 
-#: templates/services/service_request_action.html:399
+#: templates/services/service_request_action.html:400
 msgid "Please select an action type."
 msgstr "Selectați an action type."
 
-#: templates/services/service_request_action.html:416
+#: templates/services/service_request_action.html:418
 msgid "Please provide a reason for this request."
 msgstr "Te rugăm să oferi informații detaliate despre cererea sau problema ta..."
 
@@ -4326,6 +4394,12 @@ msgstr "răspunsuri"
 #: templates/tickets/partials/status_and_comments.html:136
 msgid "Write your reply..."
 msgstr "Scrie răspunsul tău..."
+
+#: templates/tickets/partials/status_and_comments.html:149
+#, fuzzy
+#| msgid "Attach file"
+msgid "Attach files"
+msgstr "Atașează fișier"
 
 #: templates/tickets/partials/status_and_comments.html:150
 msgid "Attach file"
@@ -4506,7 +4580,7 @@ msgstr "Întrebare despre"
 msgid "Brief description of the issue"
 msgstr "Descriere scurtă a problemei"
 
-#: templates/tickets/ticket_create.html:201
+#: templates/tickets/ticket_create.html:202
 msgid "Please fill in both title and description fields."
 msgstr "Vă rugăm să completați atât câmpul de titlu, cât și câmpul de descriere."
 
@@ -4521,30 +4595,6 @@ msgstr "Înapoi la tichete"
 #: templates/tickets/ticket_detail.html:195
 msgid "Sending..."
 msgstr "În așteptare"
-
-#: templates/tickets/ticket_list.html:5 templates/tickets/ticket_list.html:22
-msgid "My Support Tickets"
-msgstr "Tichetele mele de suport"
-
-#: templates/tickets/ticket_list.html:23
-msgid "Get help with your hosting services"
-msgstr "Obține ajutor cu serviciile de hosting"
-
-#: templates/tickets/ticket_list.html:30
-msgid "Open Tickets"
-msgstr "Tichete deschise"
-
-#: templates/tickets/ticket_list.html:34
-msgid "Total Tickets"
-msgstr "Total tichete"
-
-#: templates/tickets/ticket_list.html:60 templates/users/data_export.html:56
-msgid "Support Tickets"
-msgstr "Tichete de suport"
-
-#: templates/tickets/ticket_list.html:126
-msgid "All statuses"
-msgstr "Toate stările"
 
 #: templates/users/change_password.html:14
 msgid "Update your account password securely"
@@ -5125,35 +5175,35 @@ msgstr "Când rămân doar câteva coduri, generați coduri noi pentru a asigura
 msgid "Back to MFA Management"
 msgstr "Înapoi la Gestionarea MFA"
 
-#: templates/users/mfa_backup_codes.html:172
+#: templates/users/mfa_backup_codes.html:173
 msgid "All backup codes copied to clipboard!"
 msgstr "Toate codurile de rezervă au fost copiate în clipboard!"
 
-#: templates/users/mfa_backup_codes.html:186
+#: templates/users/mfa_backup_codes.html:187
 msgid "MFA Backup Codes"
 msgstr "Coduri de Rezervă MFA"
 
-#: templates/users/mfa_backup_codes.html:206
+#: templates/users/mfa_backup_codes.html:207
 msgid "PragmaticHost - MFA Backup Codes"
 msgstr "PragmaticHost - Coduri de Rezervă MFA"
 
-#: templates/users/mfa_backup_codes.html:207
+#: templates/users/mfa_backup_codes.html:208
 msgid "Account:"
 msgstr "Cont:"
 
-#: templates/users/mfa_backup_codes.html:209
+#: templates/users/mfa_backup_codes.html:210
 msgid "Important:"
 msgstr "Important:"
 
-#: templates/users/mfa_backup_codes.html:210
+#: templates/users/mfa_backup_codes.html:211
 msgid "Store these codes safely. Each can only be used once."
 msgstr "Stocați aceste coduri în siguranță. Fiecare poate fi utilizat o singură dată."
 
-#: templates/users/mfa_backup_codes.html:213
+#: templates/users/mfa_backup_codes.html:214
 msgid "Generated:"
 msgstr "Generat:"
 
-#: templates/users/mfa_backup_codes.html:223
+#: templates/users/mfa_backup_codes.html:224
 msgid "Are you sure you want to generate new backup codes? This will invalidate all current codes."
 msgstr "Sunteți sigur că doriți să generați coduri de rezervă noi? Aceasta va invalida toate codurile actuale."
 
@@ -5547,10 +5597,6 @@ msgstr "Contactează suportul pentru a-ți schimba adresa de email"
 msgid "Preferences"
 msgstr "Preferințe"
 
-#: templates/users/profile.html:97
-msgid "Language"
-msgstr "Limbă"
-
 #: templates/users/profile.html:153
 msgid "Member Since"
 msgstr "Membru din"
@@ -5699,6 +5745,109 @@ msgstr "Aveți deja un cont?"
 msgid "Sign in here"
 msgstr "Conectați-vă aici"
 
+#~ msgid "Successfully synced {len(synced_invoices)} invoices."
+#~ msgstr "S-au sincronizat cu succes {len(synced_invoices)} facturi."
+
+#~ msgid "All Types"
+#~ msgstr "Toate tipurile"
+
+#~ msgid "VPS"
+#~ msgstr "VPS"
+
+#~ msgid "Submit refund request? We will create a support ticket and contact you."
+#~ msgstr "Trimiteți cerere de rambursare? Vom crea un tichet de suport și vă vom contacta."
+
+#~ msgid "Refund request feature coming soon! Please contact support directly."
+#~ msgstr "Funcția de cerere de rambursare va fi disponibilă în curând! Contactați direct echipa de suport."
+
+#~ msgid "Pending Quotes"
+#~ msgstr "Oferte în așteptare"
+
+#~ msgid "Total Documents"
+#~ msgstr "Vezi toate documentele"
+
+#~ msgid "Total Spent"
+#~ msgstr "Total cheltuit"
+
+#~ msgid "Billing Documents"
+#~ msgstr "Vezi toate documentele"
+
+#~ msgid "Quotes"
+#~ msgstr "Oferte"
+
+#~ msgid "Spent"
+#~ msgstr "Cheltuit"
+
+#~ msgid "Document number..."
+#~ msgstr "Numărul documentului..."
+
+#~ msgid "Document Type"
+#~ msgstr "Tipul documentului"
+
+#~ msgid "Proformas Only"
+#~ msgstr "Doar proformele"
+
+#~ msgid "Invoices Only"
+#~ msgstr "Doar facturile"
+
+#~ msgid "Filter"
+#~ msgstr "Filtru"
+
+#~ msgid "Clear"
+#~ msgstr "Șterge"
+
+#~ msgid "Documents"
+#~ msgstr "Documente"
+
+#, python-format
+#~ msgid ""
+#~ "\n"
+#~ "            Page %(page_number)s of %(num_pages)s\n"
+#~ "            "
+#~ msgstr ""
+#~ "\n"
+#~ "            Pagina %(page_number)s din %(num_pages)s\n"
+#~ "            "
+
+#~ msgid "Prev"
+#~ msgstr "Ant"
+
+#~ msgid "🛒 Order New Service"
+#~ msgstr "🛒 Comandă serviciu nou"
+
+#~ msgid "service"
+#~ msgstr "Serviciu"
+
+#~ msgid "services"
+#~ msgstr "servicii"
+
+#~ msgid "Filter:"
+#~ msgstr "Filtru:"
+
+#~ msgid "active"
+#~ msgstr "Activ"
+
+#~ msgid "suspended"
+#~ msgstr "Suspendat"
+
+#~ msgid "pending"
+#~ msgstr "În așteptare"
+
+#~ msgid "cancelled"
+#~ msgstr "Anulat"
+
+#~ msgid "No services found for the selected filter"
+#~ msgstr "Niciun serviciu găsit pentru filtrul selectat"
+
+#~ msgid "No services yet"
+#~ msgstr "Niciun serviciu deocamdată"
+
+#~ msgid "Page"
+#~ msgstr "Pagină"
+
+#~ msgid "All statuses"
+#~ msgstr "Toate stările"
+
 #, fuzzy
 #~ msgid "Error validating product"
 #~ msgstr "Eroare la validarea produsului"
@@ -5723,9 +5872,6 @@ msgstr "Conectați-vă aici"
 
 #~ msgid "View my tickets"
 #~ msgstr "Vezi tichetele mele"
-
-#~ msgid "Invoices"
-#~ msgstr "Facturi"
 
 #~ msgid "Support Level"
 #~ msgstr "Nivel de suport"

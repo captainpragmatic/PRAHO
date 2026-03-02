@@ -114,25 +114,25 @@
                   <!-- Dashboard -->
                   <a href="/dashboard/"
                     class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                    <span class="mr-1">📊</span> {% trans 'Dashboard' %}
+                    {% icon "dashboard" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Dashboard' %}
                   </a>
 
                   <!-- My Invoices -->
                   <a href="/billing/invoices/"
                     class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                    <span class="mr-1">📄</span> {% trans 'My Invoices' %}
+                    {% icon "invoices" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'My Invoices' %}
                   </a>
 
                   <!-- My Services -->
                   <a href="/services/"
                     class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                    <span class="mr-1">🚀</span> {% trans 'My Services' %}
+                    {% icon "services" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'My Services' %}
                   </a>
 
                   <!-- My Tickets -->
                   <a href="/tickets/"
                     class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                    <span class="mr-1">🎫</span> {% trans 'My Tickets' %}
+                    {% icon "tickets" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'My Tickets' %}
                   </a>
                 </div>
               </div>
@@ -141,7 +141,7 @@
               <div class="w-72 flex items-center justify-end space-x-2 flex-shrink-0">
                 <a href="/profile/"
                   class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
-                  <span class="mr-1">⚙️</span> {% trans 'Profile' %}
+                  {% icon "settings" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Profile' %}
                 </a>
                 <form action="{% url 'users:logout' %}" method="post" class="inline">
                   {% csrf_token %}
@@ -154,6 +154,11 @@
             </div>
           </div>
         </nav>
+        {% endif %}
+
+        <!-- Account Status Banner -->
+        {% if account_banner %}
+          {% include "components/account_status_banner.html" with banner=account_banner %}
         {% endif %}
 
         <!-- Main Content -->

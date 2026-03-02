@@ -2,9 +2,14 @@
 Context processors for PRAHO Portal Service
 """
 
+import logging
 from typing import Any
 
 from django.http import HttpRequest
+
+from apps.common.account_health import get_account_health
+
+logger = logging.getLogger(__name__)
 
 
 def portal_context(request: HttpRequest) -> dict[str, Any]:
@@ -12,7 +17,7 @@ def portal_context(request: HttpRequest) -> dict[str, Any]:
     Add portal-specific context to templates.
     Stateless portal - no request.user available.
     """
-    context = {
+    context: dict[str, Any] = {
         "portal_version": "1.0.0",
         "is_portal": True,
     }
@@ -32,5 +37,12 @@ def portal_context(request: HttpRequest) -> dict[str, Any]:
                 "user_is_authenticated": False,
             }
         )
+
+    # Account health banner — only for authenticated users with a session
+    if request.session.get("customer_id") and request.session.get("user_id"):
+        try:
+            context["account_banner"] = get_account_health(request)
+        except Exception as e:
+            logger.warning("⚠️ [ContextProcessor] Account health check failed: %s", e)
 
     return context
