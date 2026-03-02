@@ -154,8 +154,7 @@ class StripeGateway(BasePaymentGateway):
             payment_intent = self._stripe.PaymentIntent.create(**payment_intent_params)
 
             self.logger.info(
-                f"✅ Created Stripe PaymentIntent {payment_intent.id} "
-                f"for order {order_id} ({amount_cents} {currency})"
+                f"✅ Created Stripe PaymentIntent {payment_intent.id} for order {order_id} ({amount_cents} {currency})"
             )
 
             return PaymentIntentResult(
@@ -225,7 +224,7 @@ class StripeGateway(BasePaymentGateway):
             subscription = self._stripe.Subscription.create(**subscription_params)
 
             self.logger.info(
-                f"✅ Created Stripe subscription {subscription.id} " f"for customer {customer_id} (price: {price_id})"
+                f"✅ Created Stripe subscription {subscription.id} for customer {customer_id} (price: {price_id})"
             )
 
             return SubscriptionResult(
@@ -264,7 +263,7 @@ class StripeGateway(BasePaymentGateway):
             refund = self._stripe.Refund.create(**params)
 
             self.logger.info(
-                f"✅ Stripe refund {refund.id} for {gateway_txn_id}: " f"{refund.amount} cents, status={refund.status}"
+                f"✅ Stripe refund {refund.id} for {gateway_txn_id}: {refund.amount} cents, status={refund.status}"
             )
 
             return RefundResult(

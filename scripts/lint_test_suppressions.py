@@ -96,8 +96,7 @@ RULES: list[dict] = [
         "name": "pytest.mark.skip without issue reference",
         "severity": HIGH,
         "regex": r"@pytest\.mark\.skip\b(?!.*(?:issue|ticket|bug|TODO|FIXME|http))",
-        "message": "Test skipped without linking to a tracking issue. "
-        "Skipped tests accumulate and hide regressions.",
+        "message": "Test skipped without linking to a tracking issue. Skipped tests accumulate and hide regressions.",
         "fix_hint": "Either fix the test or add a skip reason with an issue link: "
         '@pytest.mark.skip(reason="See issue #123")',
     },
@@ -124,7 +123,7 @@ RULES: list[dict] = [
         "severity": MEDIUM,
         "regex": r"except\s*:\s*\n\s*(pass|continue|return\s+(?:None|False))",
         "multiline": True,
-        "message": "Bare except clause silently swallows all errors in test code. " "This hides real failures.",
+        "message": "Bare except clause silently swallows all errors in test code. This hides real failures.",
         "fix_hint": "Catch specific exceptions, or let the error propagate to fail the test.",
     },
     {

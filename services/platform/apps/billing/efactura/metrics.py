@@ -377,7 +377,7 @@ class EFacturaMetrics:
     def time_submission(
         self,
         document_type: str = "invoice",
-    ) -> Generator[None, None, None]:
+    ) -> Generator[None]:
         """Context manager to time and record submissions."""
         start = time.monotonic()
         status = "success"
@@ -391,7 +391,7 @@ class EFacturaMetrics:
             self.record_submission(status, document_type, duration)
 
     @contextmanager
-    def time_api_request(self, endpoint: str) -> Generator[dict[str, Any], None, None]:
+    def time_api_request(self, endpoint: str) -> Generator[dict[str, Any]]:
         """Context manager to time API requests."""
         start = time.monotonic()
         context: dict[str, Any] = {"status_code": 0}

@@ -14,6 +14,7 @@ inside hooks use the same venv, regardless of the hook's working directory.
 
 Safe to run multiple times (idempotent — checks for PATCHED_MARKER).
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -65,7 +66,7 @@ def patch_hook(hook_path: pathlib.Path) -> bool:
 
     if count == 0:
         print(
-            f"⚠️   {hook_path.name}: INSTALL_PYTHON line not found — " "pre-commit format may have changed. Skipping.",
+            f"⚠️   {hook_path.name}: INSTALL_PYTHON line not found — pre-commit format may have changed. Skipping.",
             file=sys.stderr,
         )
         return False
@@ -91,7 +92,7 @@ def main() -> int:
     if patched_count == 0:
         print("ℹ️   No hooks needed patching (all already patched or not pre-commit hooks).")
     else:
-        print(f"\n✅  Patched {patched_count} hook(s). " "`git commit` now works on both macOS and Linux.")
+        print(f"\n✅  Patched {patched_count} hook(s). `git commit` now works on both macOS and Linux.")
 
     return 0
 

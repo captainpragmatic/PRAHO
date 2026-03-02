@@ -38,3 +38,25 @@ services/platform/apps/billing/tax_models.py:I18N005
 
 # Django LANGUAGES setting tuples — standard Django pattern, not choices
 services/platform/config/settings/base.py:I18N005
+
+# I18N009: JS alert() with pre-translated context variables (e.g., alert('{{ msg|escapejs }}'))
+# These template variables are already translated in the Python view — cannot wrap in {% trans %}
+services/platform/templates/billing/invoice_detail.html:I18N009
+services/platform/templates/billing/proforma_detail.html:I18N009
+services/platform/templates/customers/delete_confirm.html:I18N009
+services/platform/templates/legal/cookie_policy.html:I18N009
+services/platform/templates/orders/order_detail.html:I18N009
+services/platform/templates/orders/order_item_form.html:I18N009
+services/platform/templates/orders/partials/order_items_list.html:I18N009
+services/platform/templates/settings/partials/category_form.html:I18N009
+services/platform/templates/users/mfa_disable.html:I18N009
+services/platform/templates/users/mfa_method_selection.html:I18N009
+services/platform/templates/users/mfa_regenerate_backup_codes.html:I18N009
+services/platform/templates/base.html:I18N009
+services/portal/templates/orders/checkout.html:I18N009
+services/portal/templates/services/service_request_action.html:I18N009
+services/portal/templates/tickets/ticket_create.html:I18N009
+services/portal/templates/users/mfa_backup_codes.html:I18N009
+
+# I18N010: Company proper nouns in data processors page — should not be translated
+services/platform/templates/legal/data_processors.html:I18N010

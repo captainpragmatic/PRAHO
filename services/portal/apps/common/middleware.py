@@ -5,6 +5,7 @@ Enhanced with security features for session protection and attack prevention.
 
 import hashlib
 import logging
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -17,6 +18,33 @@ from django.utils.deprecation import MiddlewareMixin
 
 logger = logging.getLogger(__name__)
 
+# Thread-local storage for request ID (portal equivalent of platform's logging.py)
+_request_context = threading.local()
+
+
+def set_request_id(request_id: str) -> None:
+    """Set the current request ID in thread-local storage."""
+    _request_context.request_id = request_id
+
+
+def get_request_id() -> str | None:
+    """Get the current request ID from thread-local storage."""
+    return getattr(_request_context, "request_id", None)
+
+
+def clear_request_id() -> None:
+    """Clear the request ID from thread-local storage."""
+    _request_context.request_id = None
+
+
+class RequestIDFilter(logging.Filter):
+    """Add request_id to log records from thread-local storage."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "request_id"):
+            record.request_id = getattr(_request_context, "request_id", None) or "-" * 36
+        return True
+
 
 class RequestIDMiddleware:
     """Add unique request ID for tracing"""
@@ -28,12 +56,15 @@ class RequestIDMiddleware:
         # Generate unique request ID
         request_id = str(uuid.uuid4())
         request.META["REQUEST_ID"] = request_id
+        set_request_id(request_id)
 
-        # Add to response headers for debugging
-        response = self.get_response(request)
-        response["X-Request-ID"] = request_id
-
-        return response
+        try:
+            # Add to response headers for debugging
+            response = self.get_response(request)
+            response["X-Request-ID"] = request_id
+            return response
+        finally:
+            clear_request_id()
 
 
 class SessionSecurityMiddleware(MiddlewareMixin):

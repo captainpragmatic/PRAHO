@@ -270,7 +270,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         severity = self._get_sink_severity(category)
         cwe_id = self._get_cwe_for_category(category)
 
-        message = f"Tainted data from '{path.source_var}' reaches sink '{path.sink_func}' " f"without sanitization"
+        message = f"Tainted data from '{path.source_var}' reaches sink '{path.sink_func}' without sanitization"
         if path.intermediate_vars:
             message += f" (via: {' -> '.join(path.intermediate_vars)})"
 
@@ -353,7 +353,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                 "Use yaml.safe_load() instead of yaml.load(). Prefer JSON for data exchange."
             ),
             IssueCategory.TAINTED_DATA: (
-                "Validate and sanitize all user input before use. " "Apply appropriate encoding for the context."
+                "Validate and sanitize all user input before use. Apply appropriate encoding for the context."
             ),
         }
         return remediations.get(category, "Validate and sanitize user input.")
@@ -515,8 +515,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
                             location=location,
                             code_snippet=self.get_source_line(self.context, location.line_number),
                             remediation=(
-                                "Sanitize the variable before use in f-string, "
-                                "or use proper escaping for the context."
+                                "Sanitize the variable before use in f-string, or use proper escaping for the context."
                             ),
                             cwe_id="CWE-116",
                         )

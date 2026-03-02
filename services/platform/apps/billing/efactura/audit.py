@@ -394,8 +394,7 @@ class EFacturaAuditService:
                 defaults={
                     "severity": severity,
                     "description": (
-                        f"Invoice {invoice.number} must be submitted to e-Factura "
-                        f"within {hours_remaining:.1f} hours"
+                        f"Invoice {invoice.number} must be submitted to e-Factura within {hours_remaining:.1f} hours"
                     ),
                     "status": "open",
                 },

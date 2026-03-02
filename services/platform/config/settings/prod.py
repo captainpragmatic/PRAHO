@@ -140,62 +140,6 @@ if SENTRY_DSN and HAS_SENTRY:
     )
 
 # ===============================================================================
-# LOGGING CONFIGURATION (Production)
-# ===============================================================================
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "json": {
-            "format": '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s", "request_id": "%(request_id)s"}',
-            "datefmt": "%Y-%m-%d %H:%M:%S",
-        },
-    },
-    "filters": {
-        "add_request_id": {
-            "()": "apps.common.logging.RequestIDFilter",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "json",
-            "filters": ["add_request_id"],
-        },
-        "file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/pragmatichost/app.log",
-            "maxBytes": 10485760,  # 10MB
-            "backupCount": 5,
-            "formatter": "json",
-            "filters": ["add_request_id"],
-        },
-    },
-    "root": {
-        "handlers": ["console", "file"],
-        "level": "INFO",
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console", "file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "apps": {
-            "handlers": ["console", "file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "django.security": {
-            "handlers": ["console", "file"],
-            "level": "INFO",
-            "propagate": False,
-        },
-    },
-}
-
-# ===============================================================================
 # EMAIL CONFIGURATION (Production - Multi-Provider via Anymail)
 # ===============================================================================
 

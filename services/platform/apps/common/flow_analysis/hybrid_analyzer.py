@@ -371,11 +371,11 @@ class HybridFlowAnalyzer:
                         FlowIssue(
                             category=IssueCategory.TAINTED_DATA,
                             severity=AnalysisSeverity.HIGH,
-                            message=(f"EXCEPTION CONTEXT: {data_issue.message} - " f"near improper exception handling"),
+                            message=(f"EXCEPTION CONTEXT: {data_issue.message} - near improper exception handling"),
                             location=data_issue.location,
                             mode=AnalysisMode.HYBRID,
                             code_snippet=data_issue.code_snippet,
-                            remediation=(f"{data_issue.remediation} " f"Also ensure proper exception handling."),
+                            remediation=(f"{data_issue.remediation} Also ensure proper exception handling."),
                             cwe_id=data_issue.cwe_id,
                             metadata={
                                 **data_issue.metadata,

@@ -430,8 +430,7 @@ class ComplianceReportService:
         from apps.audit.models import AuditEvent  # noqa: PLC0415
 
         logger.info(
-            f"📊 [Compliance] Generating {report_type.value} report "
-            f"for {period_start.date()} to {period_end.date()}"
+            f"📊 [Compliance] Generating {report_type.value} report for {period_start.date()} to {period_end.date()}"
         )
 
         # Fetch relevant events
@@ -480,7 +479,7 @@ class ComplianceReportService:
         # Calculate overall compliance score
         self._calculate_compliance_score(report)
 
-        logger.info(f"✅ [Compliance] Report generated: {report.report_id} " f"(score: {report.compliance_score}%)")
+        logger.info(f"✅ [Compliance] Report generated: {report.report_id} (score: {report.compliance_score}%)")
 
         return report
 

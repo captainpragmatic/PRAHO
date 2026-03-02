@@ -868,7 +868,7 @@ def cmd_stats(po_file: Path, include_fuzzy: bool = False) -> None:
     for stats in sorted_apps:
         bar_filled = int(stats.percent / 5)
         bar = "#" * bar_filled + "." * (20 - bar_filled)
-        print(f"{stats.app:<{col_w}} {stats.translated:>12} {stats.total:>8} " f"{stats.percent:>9.1f}%  [{bar}]")
+        print(f"{stats.app:<{col_w}} {stats.translated:>12} {stats.total:>8} {stats.percent:>9.1f}%  [{bar}]")
 
     print(separator)
     overall_pct = (total_translated / total_all * 100) if total_all else 0.0

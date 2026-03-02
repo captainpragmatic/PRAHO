@@ -110,7 +110,7 @@ def set_request_context(**kwargs: Any) -> None:
 def get_request_context() -> dict[str, Any]:
     """Get request context for the current thread"""
     return {
-        "request_id": getattr(_request_context, "request_id", "-"),
+        "request_id": getattr(_request_context, "request_id", None) or "-" * 36,
         "user_id": getattr(_request_context, "user_id", None),
         "user_email": getattr(_request_context, "user_email", None),
         "ip_address": getattr(_request_context, "ip_address", None),
@@ -141,7 +141,7 @@ class RequestIDFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Add request_id attribute to log record"""
         if not hasattr(record, "request_id"):
-            record.request_id = getattr(_request_context, "request_id", "-")
+            record.request_id = getattr(_request_context, "request_id", None) or "-" * 36
 
         # Add other context if available
         if not hasattr(record, "user_id"):
@@ -620,7 +620,7 @@ class MethodTracer:
 
     @classmethod
     @contextlib.contextmanager
-    def context(cls, name: str) -> Generator[MethodTrace, None, None]:
+    def context(cls, name: str) -> Generator[MethodTrace]:
         """Context manager for tracing a block of code."""
         trace = MethodTrace(
             method_name=name,
@@ -875,7 +875,7 @@ class RuntimeAnalyzer:
         self._analyses: dict[str, dict[str, Any]] = {}
 
     @contextlib.contextmanager
-    def analyze(self, operation_name: str) -> Generator[dict[str, Any], None, None]:
+    def analyze(self, operation_name: str) -> Generator[dict[str, Any]]:
         """Context manager to analyze an operation."""
         analysis: dict[str, Any] = {
             "operation": operation_name,
@@ -1063,7 +1063,7 @@ def assert_max_queries(
     return QueryTracer(budget=budget)
 
 
-def trace_execution(func: F) -> F:
+def trace_execution[F: Callable[..., Any]](func: F) -> F:
     """
     Decorator to trace function execution with full analysis.
 

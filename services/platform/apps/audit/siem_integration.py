@@ -132,7 +132,7 @@ class SIEMEvent:
             if v
         )
 
-        return f"CEF:0|PRAHO|Platform|1.0|{self.event_type}|" f"{self.description[:100]}|{self.severity}|{extension}"
+        return f"CEF:0|PRAHO|Platform|1.0|{self.event_type}|{self.description[:100]}|{self.severity}|{extension}"
 
     def to_syslog(self) -> str:
         """Convert to syslog RFC 5424 format."""

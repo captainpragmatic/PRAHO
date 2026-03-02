@@ -198,7 +198,7 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:  # 
 
             except Product.DoesNotExist:
                 warnings.append(
-                    {"type": "product_not_found", "message": f'Product not found: {item_data["product_id"]}'}
+                    {"type": "product_not_found", "message": f"Product not found: {item_data['product_id']}"}
                 )
 
         # 🔒 SECURITY: Calculate totals with proper VAT compliance

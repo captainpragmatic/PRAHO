@@ -44,6 +44,18 @@
       command: docker exec praho_platform python manage.py collectstatic --noinput
       when: deploy_platform
 
+    - name: Run post-deploy setup commands
+      command: "docker exec praho_platform python manage.py {{ item }}"
+      loop:
+        - setup_categories
+        - setup_default_settings
+        - setup_email_templates
+        - setup_tax_rules
+        - setup_dunning_policies
+        - setup_scheduled_tasks
+      when: deploy_platform
+      ignore_errors: yes
+
     - name: Verify deployment
       uri:
         url: "https://{{ domain }}/health/"

@@ -315,7 +315,7 @@ class FileUploadSecurityService:
             )
             return FileValidationResult(
                 is_valid=False,
-                error_message=f"File size ({(file_size or 0) // (1024*1024)}MB) exceeds maximum ({file_type.max_size_mb}MB)",
+                error_message=f"File size ({(file_size or 0) // (1024 * 1024)}MB) exceeds maximum ({file_type.max_size_mb}MB)",
                 file_size=file_size or 0,
                 detected_extension=extension,
             )

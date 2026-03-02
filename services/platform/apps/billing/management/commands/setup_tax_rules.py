@@ -132,7 +132,7 @@ class Command(BaseCommand):
 
         count = stale_open_rules.update(valid_to=cutoff)
         if count > 0:
-            self.stdout.write(f"  🧹 Closed {count} legacy open-ended RO VAT rule(s) " f"(set valid_to={cutoff})")
+            self.stdout.write(f"  🧹 Closed {count} legacy open-ended RO VAT rule(s) (set valid_to={cutoff})")
         return count
 
     def _create_romanian_rules(self, today: date, force: bool) -> tuple[int, int]:

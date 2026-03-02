@@ -325,7 +325,7 @@ def available_service_plans_api(request: HttpRequest) -> Response:
 @api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def update_service_auto_renew_api(request: HttpRequest, service_id: int, customer: Customer) -> Response:
+def update_service_auto_renew_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
     """
     🔄 Update Service Auto-Renew API
 
@@ -386,7 +386,7 @@ def update_service_auto_renew_api(request: HttpRequest, service_id: int, custome
                 "success": True,
                 "data": {
                     "service": serializer.data,
-                    "message": f'Auto-renew {"enabled" if auto_renew else "disabled"} successfully',
+                    "message": f"Auto-renew {'enabled' if auto_renew else 'disabled'} successfully",
                 },
             }
         )
@@ -399,7 +399,7 @@ def update_service_auto_renew_api(request: HttpRequest, service_id: int, custome
 @api_view(["POST"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
-def service_usage_stats_api(request: HttpRequest, service_id: int, customer: Customer) -> Response:
+def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
     """
     📊 Service Usage Statistics API
 

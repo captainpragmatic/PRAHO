@@ -118,23 +118,69 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "detailed": {
-            "format": "[{asctime}] {levelname} {name} {process:d} {thread:d} {message}",
+        "json": {
+            "()": "apps.audit.logging_formatters.SIEMJSONFormatter",
+        },
+        "verbose": {
+            "format": "[{asctime}] {levelname} [{name}:{funcName}:{lineno}] {message}",
             "style": "{",
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
+        "audit": {
+            "()": "apps.audit.logging_formatters.AuditLogFormatter",
+        },
+    },
+    "filters": {
+        "add_request_id": {
+            "()": "apps.common.logging.RequestIDFilter",
+        },
+        "add_audit_context": {
+            "()": "apps.audit.logging_formatters.AuditContextFilter",
+        },
     },
     "handlers": {
+        # Console handler for containerized deployments
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "detailed",
+            "formatter": "json",
+            "filters": ["add_request_id", "add_audit_context"],
         },
+        # Main application log file (smaller retention than prod)
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/pragmatichost/staging.log",
-            "maxBytes": 5242880,  # 5MB
-            "backupCount": 3,
-            "formatter": "detailed",
+            "filename": "/var/log/praho/staging/app.log",
+            "maxBytes": 10485760,  # 10MB (prod: 50MB)
+            "backupCount": 5,  # prod: 10
+            "formatter": "json",
+            "filters": ["add_request_id", "add_audit_context"],
+        },
+        # Security-specific log file
+        "security_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "/var/log/praho/staging/security.log",
+            "maxBytes": 10485760,  # 10MB (prod: 50MB)
+            "backupCount": 10,  # prod: 30
+            "formatter": "json",
+            "filters": ["add_request_id", "add_audit_context"],
+        },
+        # Audit log file (immutable audit trail)
+        "audit_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "/var/log/praho/staging/audit.log",
+            "maxBytes": 20971520,  # 20MB (prod: 100MB)
+            "backupCount": 30,  # prod: 90
+            "formatter": "audit",
+            "filters": ["add_request_id", "add_audit_context"],
+        },
+        # Error log for critical issues
+        "error_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "/var/log/praho/staging/error.log",
+            "maxBytes": 10485760,  # 10MB (prod: 50MB)
+            "backupCount": 10,  # prod: 30
+            "formatter": "json",
+            "filters": ["add_request_id"],
+            "level": "ERROR",
         },
     },
     "root": {
@@ -142,19 +188,50 @@ LOGGING = {
         "level": "INFO",
     },
     "loggers": {
+        # Django framework logging
         "django": {
             "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,
         },
-        "apps": {
-            "handlers": ["console", "file"],
-            "level": "DEBUG",  # More verbose logging for staging
+        "django.security": {
+            "handlers": ["console", "security_file"],
+            "level": "INFO",
             "propagate": False,
         },
-        "django.security": {
+        "django.request": {
+            "handlers": ["console", "file", "error_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Application logging (DEBUG for staging verbosity)
+        "apps": {
             "handlers": ["console", "file"],
-            "level": "WARNING",
+            "level": "DEBUG",
+            "propagate": False,
+        },
+        # Audit-specific logging (for SIEM integration)
+        "apps.audit": {
+            "handlers": ["console", "audit_file", "security_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Security events (authentication, authorization)
+        "apps.users": {
+            "handlers": ["console", "file", "security_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Common middleware (request/response logging)
+        "apps.common.middleware": {
+            "handlers": ["console", "audit_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # SIEM integration logging
+        "apps.audit.siem": {
+            "handlers": ["console", "security_file"],
+            "level": "INFO",
             "propagate": False,
         },
     },

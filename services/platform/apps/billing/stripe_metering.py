@@ -215,7 +215,7 @@ class StripeMeterEventService:
             # Send meter event
             event = self.stripe.billing.MeterEvent.create(**event_params)
 
-            logger.info(f"Reported usage to Stripe: {event_name} = {value} " f"for customer {stripe_customer_id}")
+            logger.info(f"Reported usage to Stripe: {event_name} = {value} for customer {stripe_customer_id}")
 
             return Result.ok(
                 {
@@ -309,7 +309,7 @@ class StripeSubscriptionMeterService:
 
             subscription = self.stripe.Subscription.create(**sub_params)
 
-            logger.info(f"Created metered subscription: {subscription.id} " f"for customer {customer_id}")
+            logger.info(f"Created metered subscription: {subscription.id} for customer {customer_id}")
 
             return Result.ok(
                 {
@@ -489,7 +489,7 @@ class StripeUsageSyncService:
                 error_count += 1
                 errors.append(f"{agg.meter.name}: {result.error}")
 
-        logger.info(f"Synced billing cycle {billing_cycle_id}: " f"{success_count} succeeded, {error_count} failed")
+        logger.info(f"Synced billing cycle {billing_cycle_id}: {success_count} succeeded, {error_count} failed")
 
         return Result.ok(
             {

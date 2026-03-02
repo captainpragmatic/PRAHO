@@ -292,7 +292,7 @@ class UsageInvoiceService:
                 },
             )
 
-        logger.info(f"Generated invoice {invoice.number} for billing cycle {billing_cycle_id}: " f"{total_cents} cents")
+        logger.info(f"Generated invoice {invoice.number} for billing cycle {billing_cycle_id}: {total_cents} cents")
 
         return Result.ok(
             {

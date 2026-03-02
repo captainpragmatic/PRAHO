@@ -119,29 +119,19 @@ def _validate_user_membership(
 ) -> tuple[bool, Response | None]:
     """Validate user membership to customer"""
     # Resolve user identity from signed body only (no header reliance)
-    logger.debug(f"🔍 [API Security] Validating membership - body_user_id: {body_user_id}, customer_id: {customer_id}")
-
     try:
         resolved_user_id = int(body_user_id)
-        logger.debug(f"🔍 [API Security] Resolved user_id: {resolved_user_id}")
     except (TypeError, ValueError):
         logger.warning(f"🚨 [API Security] Invalid user_id format in HMAC context: {body_user_id}")
         return False, _uniform_error_response("Authentication required", 401)
 
     try:
         user = User.objects.get(id=resolved_user_id, is_active=True)
-        logger.debug(f"🔍 [API Security] Found user: {user.email}, is_active: {user.is_active}")
     except User.DoesNotExist:
         logger.warning(f"🚨 [API Security] User not found or inactive: {resolved_user_id}")
         return False, _uniform_error_response("Authentication required", 401)
 
     membership = CustomerMembership.objects.filter(user=user, customer=customer).first()
-
-    logger.debug(f"🔍 [API Security] Membership query result: {membership}")
-    if membership:
-        logger.debug(
-            f"🔍 [API Security] Membership details - user: {membership.user.email}, customer: {membership.customer.company_name}"
-        )
 
     if not membership:
         logger.warning(
@@ -149,9 +139,7 @@ def _validate_user_membership(
         )
         return False, _uniform_error_response()  # Generic "access denied"
 
-    logger.debug(
-        f"✅ [API Security] Membership validation successful for user {user.email} -> customer {customer.company_name}"
-    )
+    logger.debug(f"✅ [API Security] {user.email} authenticated for {customer.company_name} ({action})")
     return True, None
 
 

@@ -9,7 +9,7 @@ import contextlib
 import enum
 import uuid
 from decimal import Decimal
-from typing import Any, Generic, TypedDict, TypeVar, cast
+from typing import Any, TypedDict, cast
 
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, Sum
@@ -17,11 +17,8 @@ from django.db.models import Count, Q, Sum
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
 from apps.orders.models import Order
 
-T = TypeVar("T")
-E = TypeVar("E")
 
-
-class Result(Generic[T, E]):
+class Result[T, E]:
     """Result type for RefundService operations - implements Result<T,E> pattern"""
 
     def __init__(self, value: T | E, is_success: bool = True):

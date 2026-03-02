@@ -100,8 +100,8 @@ class TestRequestIDFilter(TestCase):
         result = filter_instance.filter(record)
 
         assert result is True
-        # After clear_request_id(), attribute is None (not absent)
-        assert record.request_id is None
+        # After clear_request_id(), filter sets a 36-char dash sentinel for log readability
+        assert record.request_id == "-" * 36
 
     def test_request_id_thread_local_isolation(self):
         """Test that request IDs are properly isolated in thread-local storage."""
@@ -460,10 +460,9 @@ class TestCriticalPathAnalysis:
         """Test that bulk operations are efficient."""
         with QueryTracer() as tracer:
             # Bulk create should use single query
-            User.objects.bulk_create([
-                User(username=f"bulk_user_{i}", email=f"bulk_{i}@example.com")
-                for i in range(10)
-            ])
+            User.objects.bulk_create(
+                [User(username=f"bulk_user_{i}", email=f"bulk_{i}@example.com") for i in range(10)]
+            )
 
         summary = tracer.get_summary()
         # Bulk create should use minimal queries
@@ -489,6 +488,7 @@ class TestMiddlewareTracing(TestCase):
             # During request processing, request ID should be available
             current_id = get_request_id()
             from django.http import HttpResponse
+
             return HttpResponse(f"Request ID: {current_id}")
 
         middleware = RequestIDMiddleware(mock_get_response)
@@ -567,6 +567,7 @@ class TestLoggingInfrastructure:
 
             # Create a handler with our filter
             import io
+
             stream = io.StringIO()
             handler = logging.StreamHandler(stream)
             handler.addFilter(filter_instance)
@@ -607,6 +608,7 @@ class TestLoggingInfrastructure:
 
             # Verify record has request_id for JSON formatting
             import json
+
             log_dict = {
                 "message": record.getMessage(),
                 "request_id": record.request_id,

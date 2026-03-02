@@ -109,12 +109,12 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.HTTP_INFO(
-                f"\n{'='*60}\n"
+                f"\n{'=' * 60}\n"
                 f"PRAHO Audit Integrity Check\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
                 f"Period: {period_start.isoformat()} to {period_end.isoformat()}\n"
                 f"Check Type: {check_type}\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
             )
         )
 
@@ -193,8 +193,7 @@ class Command(BaseCommand):
                 self.stdout.write("\n  Findings:")
                 for finding in check.findings[:10]:  # Limit output
                     self.stdout.write(
-                        f"    - [{finding.get('severity', 'unknown')}] "
-                        f"{finding.get('description', 'No description')}"
+                        f"    - [{finding.get('severity', 'unknown')}] {finding.get('description', 'No description')}"
                     )
 
             return {
@@ -230,7 +229,7 @@ class Command(BaseCommand):
 
     def _print_summary(self, results: list[dict[str, Any]], send_alerts: bool) -> None:
         """Print summary of all checks."""
-        self.stdout.write(self.style.HTTP_INFO(f"\n{'='*60}\n" f"INTEGRITY CHECK SUMMARY\n" f"{'='*60}"))
+        self.stdout.write(self.style.HTTP_INFO(f"\n{'=' * 60}\nINTEGRITY CHECK SUMMARY\n{'=' * 60}"))
 
         total_issues = 0
         compromised = False
@@ -256,7 +255,7 @@ class Command(BaseCommand):
 
         if compromised:
             self.stdout.write(
-                self.style.ERROR("\nCRITICAL: Compromised audit data detected!\n" "Immediate investigation required.")
+                self.style.ERROR("\nCRITICAL: Compromised audit data detected!\nImmediate investigation required.")
             )
             if send_alerts:
                 self.stdout.write("  Alerts have been sent to security team.")

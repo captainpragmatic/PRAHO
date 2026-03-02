@@ -133,6 +133,7 @@ dev = [
     "ipython>=8.15.0",
     "coverage>=7.3.0",
     "polib>=1.2.0",
+    "colorlog>=6.10.1",
 ]
 
 # Production dependencies - server, monitoring, optimization

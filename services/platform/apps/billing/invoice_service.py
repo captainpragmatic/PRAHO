@@ -276,9 +276,9 @@ def _generate_placeholder_pdf(invoice: Invoice) -> bytes:
     """Generate a simple placeholder PDF when weasyprint is not available."""
     # Return a minimal PDF structure
     content = f"""Invoice: {invoice.number}
-Customer: {invoice.customer.get_display_name() if invoice.customer else 'N/A'}
+Customer: {invoice.customer.get_display_name() if invoice.customer else "N/A"}
 Amount: {Decimal(invoice.total_cents) / 100:.2f}
-Date: {invoice.created_at.strftime('%Y-%m-%d') if invoice.created_at else 'N/A'}
+Date: {invoice.created_at.strftime("%Y-%m-%d") if invoice.created_at else "N/A"}
 
 This is a placeholder PDF. Install weasyprint for proper PDF generation.
 """
@@ -401,19 +401,19 @@ def send_invoice_email(invoice: Invoice, recipient_email: str | None = None) -> 
         # Build email
         subject = f"Invoice {invoice.number} from {getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')}"
 
-        body = f"""Dear {invoice.customer.get_display_name() if invoice.customer else 'Customer'},
+        body = f"""Dear {invoice.customer.get_display_name() if invoice.customer else "Customer"},
 
 Please find attached invoice {invoice.number}.
 
 Invoice Details:
 - Invoice Number: {invoice.number}
 - Amount: €{Decimal(invoice.total_cents) / 100:.2f}
-- Due Date: {invoice.due_date.strftime('%Y-%m-%d') if hasattr(invoice, 'due_date') and invoice.due_date else 'N/A'}
+- Due Date: {invoice.due_date.strftime("%Y-%m-%d") if hasattr(invoice, "due_date") and invoice.due_date else "N/A"}
 
 Thank you for your business.
 
 Best regards,
-{getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')}
+{getattr(settings, "COMPANY_NAME", "PRAHO Platform")}
 """
 
         email_message = EmailMessage(

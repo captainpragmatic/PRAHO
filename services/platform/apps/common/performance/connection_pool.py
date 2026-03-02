@@ -120,9 +120,7 @@ class HTTPConnectionPool:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-        logger.debug(
-            f"HTTPConnectionPool initialized for {base_url} " f"(pool_size={pool_maxsize}, retries={max_retries})"
-        )
+        logger.debug(f"HTTPConnectionPool initialized for {base_url} (pool_size={pool_maxsize}, retries={max_retries})")
 
     @classmethod
     def get_pool(

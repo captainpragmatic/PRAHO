@@ -207,7 +207,7 @@ IMPORTANT: Each code can only be used once. Store securely.`;
 function printCodes() {
   const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %},{% endif %}{% endfor %}];
   const printContent = `
-    <h1>PRAHO Platform - Backup Codes</h1>
+    <h1>{% trans "PRAHO Platform - Backup Codes" %}</h1>
     <p>Generated: ${new Date().toLocaleDateString()}</p>
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0;">
       ${codes.map(code => `<div style="border: 1px solid #000; padding: 10px; text-align: center; font-family: monospace; font-size: 16px;">${code}</div>`).join('')}

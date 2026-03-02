@@ -204,7 +204,7 @@ class MeteringService:
 
             if timestamp < min_timestamp:
                 return Result.err(
-                    f"Event timestamp too old: {timestamp}. " f"Grace period is {meter.event_grace_period_hours} hours."
+                    f"Event timestamp too old: {timestamp}. Grace period is {meter.event_grace_period_hours} hours."
                 )
             if timestamp > max_timestamp:
                 return Result.err(f"Event timestamp in future: {timestamp}")
@@ -259,7 +259,7 @@ class MeteringService:
                 raise  # Re-raise if not an idempotency issue
 
             # Log the event
-            logger.info(f"Usage event recorded: {meter.name} = {event_data.value} " f"for customer {customer.id}")
+            logger.info(f"Usage event recorded: {meter.name} = {event_data.value} for customer {customer.id}")
 
             # Trigger async aggregation update
             self._schedule_aggregation_update(event)
@@ -624,7 +624,7 @@ class RatingEngine:
                 user=None,
                 content_object=aggregation,
                 description=(
-                    f"Usage rated: {meter.name} = {billable_value} " f"({overage_value} overage) = {charge_cents} cents"
+                    f"Usage rated: {meter.name} = {billable_value} ({overage_value} overage) = {charge_cents} cents"
                 ),
                 actor_type="system",
                 metadata={
@@ -912,7 +912,7 @@ class UsageAlertService:
             user=None,
             content_object=alert,
             description=(
-                f"Usage alert triggered: {threshold.meter.name} at " f"{usage_percentage or aggregation.total_value}"
+                f"Usage alert triggered: {threshold.meter.name} at {usage_percentage or aggregation.total_value}"
             ),
             actor_type="system",
             metadata={

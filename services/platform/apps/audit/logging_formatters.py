@@ -71,7 +71,7 @@ class AuditContextFilter(logging.Filter):
         context = get_audit_context()
 
         # Add context attributes to record
-        record.request_id = context.get("request_id", "-")
+        record.request_id = context.get("request_id") or "-" * 36
         record.user_id = context.get("user_id", "-")
         record.user_email = context.get("user_email", "-")
         record.ip_address = context.get("ip_address", "-")
@@ -400,7 +400,7 @@ class RequestIDFilter(logging.Filter):
         """Add request_id attribute to log record"""
         if not hasattr(record, "request_id"):
             # Try to get from thread local storage
-            record.request_id = getattr(_audit_context, "request_id", "-")
+            record.request_id = getattr(_audit_context, "request_id", None) or "-" * 36
         return True
 
 

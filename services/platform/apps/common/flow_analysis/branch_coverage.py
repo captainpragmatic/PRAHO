@@ -201,9 +201,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
     def _get_remediation(self, point: BranchPoint) -> str:
         """Get remediation advice for incomplete branch point."""
         if point.point_type == "if-chain":
-            return (
-                "Add an 'else' branch to handle all cases explicitly, " "or document why the else case is impossible."
-            )
+            return "Add an 'else' branch to handle all cases explicitly, or document why the else case is impossible."
         elif point.point_type == "try-except":
             return (
                 "Consider adding a broader exception handler for unexpected errors, "
@@ -211,8 +209,7 @@ class BranchCoverageAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
             )
         elif point.point_type == "match":
             return (
-                "Add a 'case _:' default pattern to handle unmatched cases, "
-                "or ensure all possible values are covered."
+                "Add a 'case _:' default pattern to handle unmatched cases, or ensure all possible values are covered."
             )
         elif point.point_type == "loop":
             return (

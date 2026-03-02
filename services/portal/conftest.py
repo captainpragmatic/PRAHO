@@ -21,7 +21,7 @@ from django.test import Client
 
 
 @pytest.fixture(autouse=True)
-def keep_dev_debug_mode(settings: Any) -> Generator[None, None, None]:
+def keep_dev_debug_mode(settings: Any) -> Generator[None]:
     """
     Keep default test execution aligned with config.settings.dev semantics.
     pytest's test environment flips DEBUG to False globally; many portal tests
@@ -32,7 +32,7 @@ def keep_dev_debug_mode(settings: Any) -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def stabilize_compare_digest_timing() -> Generator[None, None, None]:
+def stabilize_compare_digest_timing() -> Generator[None]:
     """
     Reduce microbenchmark noise in timing-focused tests by adding a fixed amount
     of deterministic work around compare_digest.
@@ -59,9 +59,7 @@ def stabilize_compare_digest_timing() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def stabilize_auth_timing_for_security_tests(
-    request: pytest.FixtureRequest, settings: Any
-) -> Generator[None, None, None]:
+def stabilize_auth_timing_for_security_tests(request: pytest.FixtureRequest, settings: Any) -> Generator[None]:
     """
     Add a tiny minimum auth-call duration only for timing-focused security suites.
     This reduces environment jitter without slowing the full test suite.
@@ -77,7 +75,7 @@ def stabilize_auth_timing_for_security_tests(
 
 
 @pytest.fixture(autouse=True)
-def mock_middleware_api_calls() -> Generator[None, None, None]:
+def mock_middleware_api_calls() -> Generator[None]:
     """
     Mock Platform API calls made by PortalAuthenticationMiddleware.
 
@@ -111,7 +109,7 @@ def mock_middleware_api_calls() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def block_database_access(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+def block_database_access(request: pytest.FixtureRequest) -> Generator[None]:
     """
     Prevent database access only for tests that explicitly require no-DB isolation.
 

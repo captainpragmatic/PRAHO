@@ -434,7 +434,7 @@ def _send_order_confirmation_email(order: Order) -> None:
         from apps.notifications.services import EmailService  # noqa: PLC0415
 
         EmailService.send_template_email(
-            template_key="order_confirmation",
+            template_key="order_placed",
             recipient=order.customer_email,
             context={"order": order, "customer": order.customer, "order_items": order.items.all()},
             priority="high",

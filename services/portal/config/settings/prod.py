@@ -83,41 +83,71 @@ CACHES = {
     }
 }
 
-# Production logging
+# Production logging — structured JSON with request ID tracing
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
+        "json": {
+            "()": "apps.common.logging.PortalJSONFormatter",
+        },
         "verbose": {
-            "format": "{levelname} {asctime} {module} {message}",
+            "format": "[{asctime}] {levelname} [{name}:{funcName}:{lineno}] {message}",
             "style": "{",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "filters": {
+        "add_request_id": {
+            "()": "apps.common.middleware.RequestIDFilter",
         },
     },
     "handlers": {
-        "file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/portal/portal.log",
-            "maxBytes": 1024 * 1024 * 15,  # 15MB
-            "backupCount": 10,
-            "formatter": "verbose",
-        },
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
+            "formatter": "json",
+            "filters": ["add_request_id"],
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "/var/log/praho/portal/app.log",
+            "maxBytes": 52428800,  # 50MB
+            "backupCount": 10,
+            "formatter": "json",
+            "filters": ["add_request_id"],
+        },
+        "error_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "/var/log/praho/portal/error.log",
+            "maxBytes": 52428800,  # 50MB
+            "backupCount": 30,
+            "formatter": "json",
+            "filters": ["add_request_id"],
+            "level": "ERROR",
         },
     },
     "root": {
-        "handlers": ["file", "console"],
-        "level": "WARNING",
+        "handlers": ["console", "file"],
+        "level": "INFO",
     },
     "loggers": {
         "django": {
-            "handlers": ["file", "console"],
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console", "file", "error_file"],
             "level": "WARNING",
             "propagate": False,
         },
+        "django.request": {
+            "handlers": ["console", "file", "error_file"],
+            "level": "ERROR",
+            "propagate": False,
+        },
         "apps": {
-            "handlers": ["file", "console"],
+            "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,
         },

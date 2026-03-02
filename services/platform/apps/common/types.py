@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 # ModelAdmin import removed - Django admin disabled
 from django.contrib.auth.models import AbstractUser
@@ -44,7 +44,7 @@ FormT = TypeVar("FormT", bound=Form)
 
 
 @dataclass(frozen=True)
-class Ok(Generic[T]):
+class Ok[T]:
     """Success result containing a value"""
 
     value: T
@@ -83,7 +83,7 @@ class Ok(Generic[T]):
 
 
 @dataclass(frozen=True)
-class Err(Generic[E]):
+class Err[E]:
     """Error result containing an error value"""
 
     error: E
@@ -586,64 +586,51 @@ class APIRateLimitError(BusinessError):
 class Serializable(Protocol):
     """Protocol for objects that can be serialized to JSON"""
 
-    def serialize(self) -> dict[str, Any]:
-        ...
+    def serialize(self) -> dict[str, Any]: ...
 
 
 class Auditable(Protocol):
     """Protocol for objects that support audit logging"""
 
-    def get_audit_data(self) -> AuditChanges:
-        ...
+    def get_audit_data(self) -> AuditChanges: ...
 
-    def get_audit_entity(self) -> AuditEntity:
-        ...
+    def get_audit_entity(self) -> AuditEntity: ...
 
 
 class Billable(Protocol):
     """Protocol for objects that can generate billing entries"""
 
-    def get_billing_amount(self) -> Amount:
-        ...
+    def get_billing_amount(self) -> Amount: ...
 
-    def get_billing_description(self) -> str:
-        ...
+    def get_billing_description(self) -> str: ...
 
-    def get_billing_currency(self) -> Currency:
-        ...
+    def get_billing_currency(self) -> Currency: ...
 
 
 class Provisionable(Protocol):
     """Protocol for services that can be provisioned"""
 
-    def provision(self) -> Result[ServiceConfig, str]:
-        ...
+    def provision(self) -> Result[ServiceConfig, str]: ...
 
-    def deprovision(self) -> Result[bool, str]:
-        ...
+    def deprovision(self) -> Result[bool, str]: ...
 
-    def get_status(self) -> ServiceStatus:
-        ...
+    def get_status(self) -> ServiceStatus: ...
 
 
 class Cacheable(Protocol):
     """Protocol for objects that can be cached"""
 
-    def get_cache_key(self) -> CacheKey:
-        ...
+    def get_cache_key(self) -> CacheKey: ...
 
-    def get_cache_ttl(self) -> CacheTTL:
-        ...
+    def get_cache_ttl(self) -> CacheTTL: ...
 
 
 class Notifiable(Protocol):
     """Protocol for objects that can receive notifications"""
 
-    def get_notification_preferences(self) -> dict[NotificationType, bool]:
-        ...
+    def get_notification_preferences(self) -> dict[NotificationType, bool]: ...
 
-    def get_notification_address(self, channel: NotificationChannel) -> str:
-        ...
+    def get_notification_address(self, channel: NotificationChannel) -> str: ...
 
 
 # ===============================================================================

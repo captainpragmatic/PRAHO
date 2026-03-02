@@ -63,7 +63,7 @@ class QuotaExceededError(Exception):
         self.reset_at = reset_at
 
         super().__init__(
-            f"Quota exceeded for {endpoint.value}: {current}/{limit} " f"(CUI: {cui}, resets: {reset_at or 'tomorrow'})"
+            f"Quota exceeded for {endpoint.value}: {current}/{limit} (CUI: {cui}, resets: {reset_at or 'tomorrow'})"
         )
 
 
@@ -288,7 +288,7 @@ class ANAFQuotaTracker:
         except ValueError:
             cache.set(global_key, count, timeout=self.MINUTE_WINDOW_SECONDS, version=self.CACHE_VERSION)
 
-        logger.debug(f"Quota increment: {endpoint.value} for {cui} " f"(message: {message_id}) = {new_value}")
+        logger.debug(f"Quota increment: {endpoint.value} for {cui} (message: {message_id}) = {new_value}")
 
         return new_value
 

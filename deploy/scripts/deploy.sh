@@ -109,6 +109,14 @@ deploy_single_server() {
     log_info "Collecting static files..."
     docker exec praho_platform python manage.py collectstatic --noinput || true
 
+    log_info "Running post-deploy setup commands..."
+    docker exec praho_platform python manage.py setup_categories || log_warn "setup_categories failed"
+    docker exec praho_platform python manage.py setup_default_settings || log_warn "setup_default_settings failed"
+    docker exec praho_platform python manage.py setup_email_templates || log_warn "setup_email_templates failed"
+    docker exec praho_platform python manage.py setup_tax_rules || log_warn "setup_tax_rules failed"
+    docker exec praho_platform python manage.py setup_dunning_policies || log_warn "setup_dunning_policies failed"
+    docker exec praho_platform python manage.py setup_scheduled_tasks || log_warn "setup_scheduled_tasks failed"
+
     verify_deployment "single-server"
 }
 

@@ -42,6 +42,17 @@
     - name: Collect static files
       command: docker exec praho_platform python manage.py collectstatic --noinput
 
+    - name: Run post-deploy setup commands
+      command: "docker exec praho_platform python manage.py {{ item }}"
+      loop:
+        - setup_categories
+        - setup_default_settings
+        - setup_email_templates
+        - setup_tax_rules
+        - setup_dunning_policies
+        - setup_scheduled_tasks
+      ignore_errors: yes
+
     - name: Get platform API URL for portal
       set_fact:
         platform_api_url: "https://{{ domain }}/api"

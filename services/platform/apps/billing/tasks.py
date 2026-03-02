@@ -850,7 +850,7 @@ def run_payment_collection() -> dict[str, Any]:
         logger.info(
             f"💳 [Collection] Run completed: "
             f"{successful} recovered, {failed} failed, "
-            f"{total_recovered_cents/100:.2f} total recovered"
+            f"{total_recovered_cents / 100:.2f} total recovered"
         )
 
         return {

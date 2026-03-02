@@ -491,6 +491,780 @@ class Command(BaseCommand):
                 "description": "Welcome email for new customers",
                 "variables": {"customer_name": "Customer name", "client_area_url": "Client area URL"},
             },
+            # ===============================================================================
+            # PAYMENT TEMPLATES
+            # ===============================================================================
+            {
+                "key": "payment_success",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Plata a fost procesată cu succes - PragmaticHost",
+                "body_html": """
+                <h2>✅ Plata dumneavoastră a fost procesată!</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Confirmăm primirea plății pentru factura <strong>{{invoice_number}}</strong>.</p>
+                <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
+                    <h3>💳 Detalii plată:</h3>
+                    <ul>
+                        <li><strong>Sumă:</strong> {{payment_amount}} {{currency}}</li>
+                        <li><strong>Factură:</strong> {{invoice_number}}</li>
+                        <li><strong>Metodă:</strong> {{payment_method}}</li>
+                    </ul>
+                </div>
+                <p>Mulțumim pentru plată!</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Confirmare plată procesată cu succes",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "invoice_number": "Numărul facturii",
+                    "payment_amount": "Suma plătită",
+                    "currency": "Moneda",
+                    "payment_method": "Metoda de plată",
+                },
+            },
+            {
+                "key": "payment_success",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Payment processed successfully - PragmaticHost",
+                "body_html": """
+                <h2>✅ Your payment has been processed!</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>We confirm receipt of your payment for invoice <strong>{{invoice_number}}</strong>.</p>
+                <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
+                    <h3>💳 Payment Details:</h3>
+                    <ul>
+                        <li><strong>Amount:</strong> {{payment_amount}} {{currency}}</li>
+                        <li><strong>Invoice:</strong> {{invoice_number}}</li>
+                        <li><strong>Method:</strong> {{payment_method}}</li>
+                    </ul>
+                </div>
+                <p>Thank you for your payment!</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Payment processed successfully confirmation",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "invoice_number": "Invoice number",
+                    "payment_amount": "Payment amount",
+                    "currency": "Currency",
+                    "payment_method": "Payment method",
+                },
+            },
+            {
+                "key": "payment_failed",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "⚠️ Plata nu a putut fi procesată - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Plata nu a putut fi procesată</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Din păcate, plata dumneavoastră pentru factura <strong>{{invoice_number}}</strong> nu a putut fi procesată.</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <h3>Ce puteți face:</h3>
+                    <ol>
+                        <li>Verificați datele cardului sau metoda de plată</li>
+                        <li>Asigurați-vă că aveți fonduri suficiente</li>
+                        <li>Încercați din nou din zona client</li>
+                    </ol>
+                </div>
+                <p>Dacă problema persistă, contactați-ne la billing@pragmatichost.com</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare plată eșuată",
+                "variables": {"customer_name": "Numele clientului", "invoice_number": "Numărul facturii"},
+            },
+            {
+                "key": "payment_failed",
+                "locale": "en",
+                "category": "billing",
+                "subject": "⚠️ Payment could not be processed - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Payment could not be processed</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Unfortunately, your payment for invoice <strong>{{invoice_number}}</strong> could not be processed.</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <h3>What you can do:</h3>
+                    <ol>
+                        <li>Check your card details or payment method</li>
+                        <li>Ensure you have sufficient funds</li>
+                        <li>Try again from your client area</li>
+                    </ol>
+                </div>
+                <p>If the issue persists, contact us at billing@pragmatichost.com</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Payment failed notification",
+                "variables": {"customer_name": "Customer name", "invoice_number": "Invoice number"},
+            },
+            {
+                "key": "payment_refund",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Rambursare procesată - PragmaticHost",
+                "body_html": """
+                <h2>💰 Rambursarea a fost procesată</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Rambursarea pentru factura <strong>{{invoice_number}}</strong> a fost procesată.</p>
+                <div style="background-color: #e7f3ff; padding: 15px; border-left: 4px solid #007bff; margin: 15px 0;">
+                    <p><strong>Sumă rambursată:</strong> {{refund_amount}} {{currency}}</p>
+                </div>
+                <p>Suma va fi returnată în contul dumneavoastră în 5-10 zile lucrătoare.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Confirmare rambursare plată",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "invoice_number": "Numărul facturii",
+                    "refund_amount": "Suma rambursată",
+                    "currency": "Moneda",
+                },
+            },
+            {
+                "key": "payment_refund",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Refund processed - PragmaticHost",
+                "body_html": """
+                <h2>💰 Your refund has been processed</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>The refund for invoice <strong>{{invoice_number}}</strong> has been processed.</p>
+                <div style="background-color: #e7f3ff; padding: 15px; border-left: 4px solid #007bff; margin: 15px 0;">
+                    <p><strong>Refund amount:</strong> {{refund_amount}} {{currency}}</p>
+                </div>
+                <p>The amount will be returned to your account within 5-10 business days.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Payment refund confirmation",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "invoice_number": "Invoice number",
+                    "refund_amount": "Refund amount",
+                    "currency": "Currency",
+                },
+            },
+            {
+                "key": "invoice_refund_confirmation",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Factura {{invoice_number}} - rambursare confirmată - PragmaticHost",
+                "body_html": """
+                <h2>✅ Rambursarea facturii a fost confirmată</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Factura <strong>{{invoice_number}}</strong> a fost rambursată integral.</p>
+                <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
+                    <p><strong>Sumă rambursată:</strong> {{refund_amount}} {{currency}}</p>
+                </div>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Confirmare rambursare factură",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "invoice_number": "Numărul facturii",
+                    "refund_amount": "Suma rambursată",
+                    "currency": "Moneda",
+                },
+            },
+            {
+                "key": "invoice_refund_confirmation",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Invoice {{invoice_number}} - refund confirmed - PragmaticHost",
+                "body_html": """
+                <h2>✅ Invoice refund confirmed</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Invoice <strong>{{invoice_number}}</strong> has been fully refunded.</p>
+                <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
+                    <p><strong>Refund amount:</strong> {{refund_amount}} {{currency}}</p>
+                </div>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Invoice refund confirmation",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "invoice_number": "Invoice number",
+                    "refund_amount": "Refund amount",
+                    "currency": "Currency",
+                },
+            },
+            {
+                "key": "payment_retry_success",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "✅ Plata a fost procesată la a doua încercare - PragmaticHost",
+                "body_html": """
+                <h2>✅ Plata a fost procesată cu succes!</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Vă informăm că plata dumneavoastră a fost procesată cu succes la reîncercare.</p>
+                <p>Serviciile asociate sunt acum active.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Confirmare plată reușită la reîncercare",
+                "variables": {"customer_name": "Numele clientului"},
+            },
+            {
+                "key": "payment_retry_success",
+                "locale": "en",
+                "category": "billing",
+                "subject": "✅ Payment processed on retry - PragmaticHost",
+                "body_html": """
+                <h2>✅ Payment processed successfully!</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>We're happy to let you know that your payment was successfully processed on retry.</p>
+                <p>Your associated services are now active.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Payment retry success confirmation",
+                "variables": {"customer_name": "Customer name"},
+            },
+            # ===============================================================================
+            # INTERNAL ALERT TEMPLATES
+            # ===============================================================================
+            {
+                "key": "finance_large_refund_alert",
+                "locale": "ro",
+                "category": "internal",
+                "subject": "🚨 Alertă: Rambursare mare - Factura {{invoice_number}}",
+                "body_html": """
+                <h2>🚨 Alertă rambursare mare</h2>
+                <p>O rambursare ce depășește pragul de <strong>{{threshold}} EUR</strong> a fost procesată:</p>
+                <div style="background-color: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 15px 0;">
+                    <ul>
+                        <li><strong>Factură:</strong> {{invoice_number}}</li>
+                        <li><strong>Client:</strong> {{customer_name}}</li>
+                        <li><strong>Sumă:</strong> {{refund_amount}} {{currency}}</li>
+                    </ul>
+                </div>
+                <p>Verificați tranzacția în panoul de administrare.</p>
+                """,
+                "description": "Alertă internă pentru rambursări mari",
+                "variables": {
+                    "invoice_number": "Numărul facturii",
+                    "customer_name": "Numele clientului",
+                    "refund_amount": "Suma rambursată",
+                    "currency": "Moneda",
+                    "threshold": "Pragul de alertă",
+                },
+            },
+            {
+                "key": "finance_large_refund_alert",
+                "locale": "en",
+                "category": "internal",
+                "subject": "🚨 Alert: Large refund - Invoice {{invoice_number}}",
+                "body_html": """
+                <h2>🚨 Large Refund Alert</h2>
+                <p>A refund exceeding the <strong>{{threshold}} EUR</strong> threshold has been processed:</p>
+                <div style="background-color: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 15px 0;">
+                    <ul>
+                        <li><strong>Invoice:</strong> {{invoice_number}}</li>
+                        <li><strong>Customer:</strong> {{customer_name}}</li>
+                        <li><strong>Amount:</strong> {{refund_amount}} {{currency}}</li>
+                    </ul>
+                </div>
+                <p>Please review the transaction in the admin panel.</p>
+                """,
+                "description": "Internal alert for large refunds",
+                "variables": {
+                    "invoice_number": "Invoice number",
+                    "customer_name": "Customer name",
+                    "refund_amount": "Refund amount",
+                    "currency": "Currency",
+                    "threshold": "Alert threshold",
+                },
+            },
+            # ===============================================================================
+            # GRANDFATHERING TEMPLATES
+            # ===============================================================================
+            {
+                "key": "grandfathering_expiring",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Prețul special pentru {{product_name}} expiră curând - PragmaticHost",
+                "body_html": """
+                <h2>⏰ Prețul dumneavoastră special expiră curând</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Vă informăm că prețul preferențial de <strong>{{locked_price}} {{currency}}</strong>
+                   pentru <strong>{{product_name}}</strong> expiră la <strong>{{expires_at}}</strong>.</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <p>Economisiți <strong>{{savings_percent}}%</strong> față de prețul standard.
+                       Reînnoiți înainte de expirare pentru a păstra acest preț!</p>
+                </div>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare expirare preț grandfathered",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "product_name": "Numele produsului",
+                    "locked_price": "Prețul blocat",
+                    "currency": "Moneda",
+                    "expires_at": "Data expirării",
+                    "savings_percent": "Procentul de economisire",
+                },
+            },
+            {
+                "key": "grandfathering_expiring",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Your special price for {{product_name}} expires soon - PragmaticHost",
+                "body_html": """
+                <h2>⏰ Your special price expires soon</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>This is a reminder that your grandfathered price of <strong>{{locked_price}} {{currency}}</strong>
+                   for <strong>{{product_name}}</strong> expires on <strong>{{expires_at}}</strong>.</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <p>You're saving <strong>{{savings_percent}}%</strong> compared to the standard price.
+                       Renew before expiry to keep this rate!</p>
+                </div>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Grandfathered price expiring notification",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "product_name": "Product name",
+                    "locked_price": "Locked price",
+                    "currency": "Currency",
+                    "expires_at": "Expiry date",
+                    "savings_percent": "Savings percentage",
+                },
+            },
+            # ===============================================================================
+            # INVOICE LIFECYCLE TEMPLATES
+            # ===============================================================================
+            {
+                "key": "invoice_created",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Factură nouă {{invoice_number}} - PragmaticHost",
+                "body_html": """
+                <h2>📋 Factură nouă creată</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>O factură nouă a fost creată pentru contul dumneavoastră:</p>
+                <div style="background-color: #e7f3ff; padding: 15px; border-left: 4px solid #007bff; margin: 15px 0;">
+                    <ul>
+                        <li><strong>Număr factură:</strong> {{invoice_number}}</li>
+                        <li><strong>Sumă:</strong> {{total_amount}} {{currency}}</li>
+                        <li><strong>Scadență:</strong> {{due_date}}</li>
+                    </ul>
+                </div>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare factură creată",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "invoice_number": "Numărul facturii",
+                    "total_amount": "Suma totală",
+                    "currency": "Moneda",
+                    "due_date": "Data scadenței",
+                },
+            },
+            {
+                "key": "invoice_created",
+                "locale": "en",
+                "category": "billing",
+                "subject": "New invoice {{invoice_number}} - PragmaticHost",
+                "body_html": """
+                <h2>📋 New invoice created</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>A new invoice has been created for your account:</p>
+                <div style="background-color: #e7f3ff; padding: 15px; border-left: 4px solid #007bff; margin: 15px 0;">
+                    <ul>
+                        <li><strong>Invoice number:</strong> {{invoice_number}}</li>
+                        <li><strong>Amount:</strong> {{total_amount}} {{currency}}</li>
+                        <li><strong>Due date:</strong> {{due_date}}</li>
+                    </ul>
+                </div>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Invoice created notification",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "invoice_number": "Invoice number",
+                    "total_amount": "Total amount",
+                    "currency": "Currency",
+                    "due_date": "Due date",
+                },
+            },
+            {
+                "key": "payment_received",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Plată primită pentru factura {{invoice_number}} - PragmaticHost",
+                "body_html": """
+                <h2>✅ Plata a fost primită</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Am primit plata pentru factura <strong>{{invoice_number}}</strong>. Mulțumim!</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Confirmare plată primită pentru factură",
+                "variables": {"customer_name": "Numele clientului", "invoice_number": "Numărul facturii"},
+            },
+            {
+                "key": "payment_received",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Payment received for invoice {{invoice_number}} - PragmaticHost",
+                "body_html": """
+                <h2>✅ Payment received</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>We've received your payment for invoice <strong>{{invoice_number}}</strong>. Thank you!</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Payment received for invoice confirmation",
+                "variables": {"customer_name": "Customer name", "invoice_number": "Invoice number"},
+            },
+            {
+                "key": "invoice_overdue",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "⚠️ Factura {{invoice_number}} este restantă - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Factură restantă</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Factura <strong>{{invoice_number}}</strong> este restantă de <strong>{{days_overdue}} zile</strong>.</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <p>Vă rugăm să efectuați plata cât mai curând posibil pentru a evita suspendarea serviciilor.</p>
+                </div>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare factură restantă",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "invoice_number": "Numărul facturii",
+                    "days_overdue": "Zile de întârziere",
+                },
+            },
+            {
+                "key": "invoice_overdue",
+                "locale": "en",
+                "category": "billing",
+                "subject": "⚠️ Invoice {{invoice_number}} is overdue - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Invoice overdue</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Invoice <strong>{{invoice_number}}</strong> is <strong>{{days_overdue}} days</strong> overdue.</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <p>Please make payment as soon as possible to avoid service suspension.</p>
+                </div>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Invoice overdue notification",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "invoice_number": "Invoice number",
+                    "days_overdue": "Days overdue",
+                },
+            },
+            {
+                "key": "invoice_voided",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Factura {{invoice_number}} a fost anulată - PragmaticHost",
+                "body_html": """
+                <h2>🚫 Factură anulată</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Factura <strong>{{invoice_number}}</strong> a fost anulată.</p>
+                <p>Dacă aveți întrebări, contactați-ne la billing@pragmatichost.com</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare factură anulată",
+                "variables": {"customer_name": "Numele clientului", "invoice_number": "Numărul facturii"},
+            },
+            {
+                "key": "invoice_voided",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Invoice {{invoice_number}} has been voided - PragmaticHost",
+                "body_html": """
+                <h2>🚫 Invoice voided</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Invoice <strong>{{invoice_number}}</strong> has been voided.</p>
+                <p>If you have questions, contact us at billing@pragmatichost.com</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Invoice voided notification",
+                "variables": {"customer_name": "Customer name", "invoice_number": "Invoice number"},
+            },
+            # ===============================================================================
+            # ORDER LIFECYCLE TEMPLATES
+            # ===============================================================================
+            {
+                "key": "order_cancelled",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Comanda #{{order_number}} a fost anulată - PragmaticHost",
+                "body_html": """
+                <h2>🚫 Comandă anulată</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Comanda dumneavoastră <strong>#{{order_number}}</strong> a fost anulată.</p>
+                <p>Dacă nu ați solicitat această anulare, contactați-ne imediat.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare comandă anulată",
+                "variables": {"customer_name": "Numele clientului", "order_number": "Numărul comenzii"},
+            },
+            {
+                "key": "order_cancelled",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Order #{{order_number}} has been cancelled - PragmaticHost",
+                "body_html": """
+                <h2>🚫 Order cancelled</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your order <strong>#{{order_number}}</strong> has been cancelled.</p>
+                <p>If you did not request this cancellation, please contact us immediately.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Order cancelled notification",
+                "variables": {"customer_name": "Customer name", "order_number": "Order number"},
+            },
+            # ===============================================================================
+            # PROVISIONING TEMPLATES
+            # ===============================================================================
+            {
+                "key": "service_ready",
+                "locale": "ro",
+                "category": "provisioning",
+                "subject": "🚀 Serviciul dumneavoastră este activ! - PragmaticHost",
+                "body_html": """
+                <h2>🚀 Serviciul este gata de utilizare!</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Serviciul comandat a fost activat cu succes:</p>
+                <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
+                    <ul>
+                        <li><strong>Serviciu:</strong> {{service_name}}</li>
+                        <li><strong>Comandă:</strong> #{{order_number}}</li>
+                    </ul>
+                </div>
+                <p>Puteți gestiona serviciul din zona client.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare serviciu activat și gata de utilizare",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "service_name": "Numele serviciului",
+                    "order_number": "Numărul comenzii",
+                },
+            },
+            {
+                "key": "service_ready",
+                "locale": "en",
+                "category": "provisioning",
+                "subject": "🚀 Your service is active! - PragmaticHost",
+                "body_html": """
+                <h2>🚀 Your service is ready to use!</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your ordered service has been successfully activated:</p>
+                <div style="background-color: #d4edda; padding: 15px; border-left: 4px solid #28a745; margin: 15px 0;">
+                    <ul>
+                        <li><strong>Service:</strong> {{service_name}}</li>
+                        <li><strong>Order:</strong> #{{order_number}}</li>
+                    </ul>
+                </div>
+                <p>You can manage your service from the client area.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Service activated and ready notification",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "service_name": "Service name",
+                    "order_number": "Order number",
+                },
+            },
+            {
+                "key": "provisioning_failed",
+                "locale": "ro",
+                "category": "provisioning",
+                "subject": "⚠️ Activarea serviciului a eșuat - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Activarea serviciului a eșuat</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Din păcate, activarea serviciului din comanda <strong>#{{order_number}}</strong> a întâmpinat o problemă.</p>
+                <div style="background-color: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 15px 0;">
+                    <p>Echipa noastră tehnică a fost notificată și lucrează la rezolvarea problemei.
+                       Veți fi contactat(ă) în cel mai scurt timp.</p>
+                </div>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare eșec activare serviciu",
+                "variables": {"customer_name": "Numele clientului", "order_number": "Numărul comenzii"},
+            },
+            {
+                "key": "provisioning_failed",
+                "locale": "en",
+                "category": "provisioning",
+                "subject": "⚠️ Service activation failed - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Service activation failed</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Unfortunately, the service activation for order <strong>#{{order_number}}</strong> encountered an issue.</p>
+                <div style="background-color: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 15px 0;">
+                    <p>Our technical team has been notified and is working on resolving the issue.
+                       You will be contacted shortly.</p>
+                </div>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Service provisioning failed notification",
+                "variables": {"customer_name": "Customer name", "order_number": "Order number"},
+            },
+            {
+                "key": "order_completed",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Comanda #{{order_number}} a fost finalizată - PragmaticHost",
+                "body_html": """
+                <h2>✅ Comanda dumneavoastră a fost finalizată!</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Comanda <strong>#{{order_number}}</strong> a fost procesată complet.
+                   Toate serviciile comandate sunt acum active.</p>
+                <p>Puteți gestiona serviciile din zona client.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare comandă finalizată",
+                "variables": {"customer_name": "Numele clientului", "order_number": "Numărul comenzii"},
+            },
+            {
+                "key": "order_completed",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Order #{{order_number}} completed - PragmaticHost",
+                "body_html": """
+                <h2>✅ Your order has been completed!</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Order <strong>#{{order_number}}</strong> has been fully processed.
+                   All ordered services are now active.</p>
+                <p>You can manage your services from the client area.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Order completed notification",
+                "variables": {"customer_name": "Customer name", "order_number": "Order number"},
+            },
+            # ===============================================================================
+            # INTERNAL NOTIFICATION TEMPLATES
+            # ===============================================================================
+            {
+                "key": "important_customer_note",
+                "locale": "ro",
+                "category": "internal",
+                "subject": "📌 Notă importantă client: {{customer_name}}",
+                "body_html": """
+                <h2>📌 Notă importantă de la client</h2>
+                <p>O notă marcată ca importantă a fost adăugată pentru clientul <strong>{{customer_name}}</strong>:</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <p>{{note_content}}</p>
+                </div>
+                <p>Verificați detaliile în panoul de administrare.</p>
+                """,
+                "description": "Alertă internă pentru note importante client",
+                "variables": {"customer_name": "Numele clientului", "note_content": "Conținutul notei"},
+            },
+            {
+                "key": "important_customer_note",
+                "locale": "en",
+                "category": "internal",
+                "subject": "📌 Important customer note: {{customer_name}}",
+                "body_html": """
+                <h2>📌 Important Customer Note</h2>
+                <p>A note marked as important has been added for customer <strong>{{customer_name}}</strong>:</p>
+                <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 15px 0;">
+                    <p>{{note_content}}</p>
+                </div>
+                <p>Check the details in the admin panel.</p>
+                """,
+                "description": "Internal alert for important customer notes",
+                "variables": {"customer_name": "Customer name", "note_content": "Note content"},
+            },
+            # ===============================================================================
+            # CUSTOMER LIFECYCLE TEMPLATES
+            # ===============================================================================
+            {
+                "key": "customer_activated",
+                "locale": "ro",
+                "category": "welcome",
+                "subject": "Contul dumneavoastră a fost activat - PragmaticHost",
+                "body_html": """
+                <h2>✅ Cont activat</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Contul dumneavoastră PragmaticHost a fost activat cu succes. Puteți comanda servicii de hosting!</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Confirmare activare cont client",
+                "variables": {"customer_name": "Numele clientului"},
+            },
+            {
+                "key": "customer_activated",
+                "locale": "en",
+                "category": "welcome",
+                "subject": "Your account has been activated - PragmaticHost",
+                "body_html": """
+                <h2>✅ Account activated</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your PragmaticHost account has been successfully activated. You can now order hosting services!</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Customer account activation confirmation",
+                "variables": {"customer_name": "Customer name"},
+            },
+            {
+                "key": "customer_suspended",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "⚠️ Contul dumneavoastră a fost suspendat - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Cont suspendat</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Contul dumneavoastră PragmaticHost a fost suspendat.</p>
+                <p>Contactați-ne la billing@pragmatichost.com pentru detalii și reactivare.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare suspendare cont client",
+                "variables": {"customer_name": "Numele clientului"},
+            },
+            {
+                "key": "customer_suspended",
+                "locale": "en",
+                "category": "billing",
+                "subject": "⚠️ Your account has been suspended - PragmaticHost",
+                "body_html": """
+                <h2>⚠️ Account suspended</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your PragmaticHost account has been suspended.</p>
+                <p>Contact us at billing@pragmatichost.com for details and reactivation.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Customer account suspension notification",
+                "variables": {"customer_name": "Customer name"},
+            },
+            {
+                "key": "customer_deactivated",
+                "locale": "ro",
+                "category": "billing",
+                "subject": "Contul dumneavoastră a fost dezactivat - PragmaticHost",
+                "body_html": """
+                <h2>🚫 Cont dezactivat</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Contul dumneavoastră PragmaticHost a fost dezactivat.</p>
+                <p>Dacă doriți reactivarea, contactați-ne la support@pragmatichost.com</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare dezactivare cont client",
+                "variables": {"customer_name": "Numele clientului"},
+            },
+            {
+                "key": "customer_deactivated",
+                "locale": "en",
+                "category": "billing",
+                "subject": "Your account has been deactivated - PragmaticHost",
+                "body_html": """
+                <h2>🚫 Account deactivated</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your PragmaticHost account has been deactivated.</p>
+                <p>If you wish to reactivate, contact us at support@pragmatichost.com</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Customer account deactivation notification",
+                "variables": {"customer_name": "Customer name"},
+            },
         ]
 
         created_count = 0

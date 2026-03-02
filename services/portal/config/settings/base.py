@@ -2,6 +2,7 @@
 Django settings for PRAHO Portal Service - Customer-facing app configuration.
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -230,23 +231,51 @@ PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 # LOGGING CONFIGURATION
 # ===============================================================================
 
+
+class _ServiceNameFilter(logging.Filter):
+    """Inject a fixed service tag into every log record."""
+
+    def __init__(self, service_name: str = "PORT") -> None:
+        super().__init__()
+        self.service_name = service_name
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        setattr(record, "service_name", self.service_name)  # noqa: B010
+        return True
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "verbose": {
-            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+        "unified": {
+            "()": "colorlog.ColoredFormatter",
+            "format": "{asctime} {log_color}{levelname:<8}{reset} {service_name} {name:<40} {message} [{request_id}]",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
             "style": "{",
+            "log_colors": {
+                "DEBUG": "cyan",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_red",
+            },
         },
-        "simple": {
-            "format": "{levelname} {message}",
-            "style": "{",
+    },
+    "filters": {
+        "add_request_id": {
+            "()": "apps.common.middleware.RequestIDFilter",
+        },
+        "add_service_name": {
+            "()": _ServiceNameFilter,
+            "service_name": "PORT",
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
+            "formatter": "unified",
+            "filters": ["add_request_id", "add_service_name"],
         },
     },
     "root": {
@@ -257,6 +286,11 @@ LOGGING = {
         "django": {
             "handlers": ["console"],
             "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False,
         },
         "apps": {

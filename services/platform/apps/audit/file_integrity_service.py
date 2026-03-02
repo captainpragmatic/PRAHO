@@ -264,7 +264,7 @@ class FileIntegrityMonitoringService:
         cache.set(LAST_CHECK_CACHE_KEY, timezone.now().isoformat())
 
         logger.info(
-            f"[FIM] Baseline established: {results['files_baselined']} files, " f"{results['skipped_existing']} skipped"
+            f"[FIM] Baseline established: {results['files_baselined']} files, {results['skipped_existing']} skipped"
         )
 
         return results
@@ -348,7 +348,7 @@ class FileIntegrityMonitoringService:
         # Log summary
         if changes:
             logger.warning(
-                f"[FIM] Integrity check found {len(changes)} changes: " f"{[c.change_type.value for c in changes]}"
+                f"[FIM] Integrity check found {len(changes)} changes: {[c.change_type.value for c in changes]}"
             )
         else:
             logger.info("[FIM] Integrity check completed: no changes detected")

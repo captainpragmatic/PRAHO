@@ -10,7 +10,7 @@
         </div>
         <div>
             <p class="text-slate-400 text-sm">{% trans 'Customer' %}:</p>
-            <p class="text-white font-medium text-lg">{{ ticket.customer.get_display_name }}</p>
+            <p class="text-white font-medium text-lg"><a href="{% url 'customers:detail' ticket.customer.id %}" class="hover:text-blue-400 transition-colors">{{ ticket.customer.get_display_name }}</a></p>
         </div>
         <div>
             <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>

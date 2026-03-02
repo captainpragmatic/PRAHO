@@ -1024,7 +1024,7 @@ class PriceGrandfathering(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"{self.customer} - {self.product} @ {self.locked_price_cents/100:.2f}"
+        return f"{self.customer} - {self.product} @ {self.locked_price_cents / 100:.2f}"
 
     @property
     def locked_price(self) -> Decimal:

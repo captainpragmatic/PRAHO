@@ -1,7 +1,8 @@
+{% load i18n %}
 <!-- Cart Summary Partial - Loaded via HTMX -->
 <div class="p-6">
     {% if cart_order and cart_order.items.exists %}
-        <h3 class="text-lg font-medium text-white mb-4">Order Summary</h3>
+        <h3 class="text-lg font-medium text-white mb-4">{% trans "Order Summary" %}</h3>
 
         <div class="space-y-3 text-sm">
             <!-- Subtotal -->

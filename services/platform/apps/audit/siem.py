@@ -326,7 +326,7 @@ class LEEFFormatter(SIEMLogFormatter):
 
         attr_str = "\t".join(attrs)
 
-        return f"LEEF:2.0|{config.vendor}|{config.product}|{config.version}|" f"{entry.action}|{attr_str}"
+        return f"LEEF:2.0|{config.vendor}|{config.product}|{config.version}|{entry.action}|{attr_str}"
 
     @staticmethod
     def _escape_leef(value: str) -> str:
@@ -415,7 +415,7 @@ class SyslogFormatter(SIEMLogFormatter):
 
         # Structured data
         sd = (
-            f'[audit@{config.vendor.lower()} '
+            f"[audit@{config.vendor.lower()} "
             f'eventId="{entry.event_id}" '
             f'action="{entry.action}" '
             f'category="{entry.category}" '
@@ -429,9 +429,7 @@ class SyslogFormatter(SIEMLogFormatter):
 
         timestamp = entry.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-        return (
-            f"<{pri}>1 {timestamp} {entry.hostname} {entry.application} " f"- {entry.event_id} {sd} {entry.description}"
-        )
+        return f"<{pri}>1 {timestamp} {entry.hostname} {entry.application} - {entry.event_id} {sd} {entry.description}"
 
 
 class OCSFFormatter(SIEMLogFormatter):

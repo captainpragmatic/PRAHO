@@ -3,6 +3,7 @@ Development settings for PRAHO Platform
 Fast iteration with debugging tools enabled.
 """
 
+import logging
 import os
 import sys
 from typing import TYPE_CHECKING
@@ -173,37 +174,51 @@ if os.environ.get("USE_REDIS") != "true":
 # LOGGING CONFIGURATION - Enhanced with Request ID Tracing
 # ===============================================================================
 
+
+class _ServiceNameFilter(logging.Filter):
+    """Inject a fixed service tag into every log record (dev-only)."""
+
+    def __init__(self, service_name: str = "PLAT") -> None:
+        super().__init__()
+        self.service_name = service_name
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        setattr(record, "service_name", self.service_name)  # noqa: B010
+        return True
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "verbose": {
-            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+        "unified": {
+            "()": "colorlog.ColoredFormatter",
+            "format": "{asctime} {log_color}{levelname:<8}{reset} {service_name} {name:<40} {message} [{request_id}]",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
             "style": "{",
-        },
-        "simple": {
-            "format": "{levelname} {message}",
-            "style": "{",
-        },
-        "trace": {
-            "format": "[{request_id}] {levelname} {asctime} {module}: {message}",
-            "style": "{",
+            "log_colors": {
+                "DEBUG": "cyan",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_red",
+            },
         },
     },
     "filters": {
         "add_request_id": {
             "()": "apps.common.logging.RequestIDFilter",
         },
+        "add_service_name": {
+            "()": _ServiceNameFilter,
+            "service_name": "PLAT",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        },
-        "trace_console": {
-            "class": "logging.StreamHandler",
-            "formatter": "trace",
-            "filters": ["add_request_id"],
+            "formatter": "unified",
+            "filters": ["add_request_id", "add_service_name"],
         },
     },
     "root": {
@@ -216,13 +231,13 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
-        "apps": {
-            "handlers": ["trace_console"],
-            "level": "DEBUG",
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False,
         },
-        "apps.common.logging": {
-            "handlers": ["trace_console"],
+        "apps": {
+            "handlers": ["console"],
             "level": "DEBUG",
             "propagate": False,
         },

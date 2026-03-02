@@ -192,15 +192,10 @@ class TestAuditContextFilter(SimpleTestCase):
         self.assertEqual(record.customer_id, 3)
 
     def test_filter_uses_dash_for_missing_context(self) -> None:
-        """When context is None, filter should use '-' as fallback."""
+        """When context is empty, filter should use 36-dash placeholder as fallback."""
         record = make_record()
         self.filter.filter(record)
-        # None from get_audit_context() becomes the value passed to .get(..., "-")
-        # get_audit_context returns None for unset keys, and dict.get with default
-        # only triggers on missing keys, not None values.
-        # So record attributes will be None (the value returned by getattr default)
-        # This tests the actual behaviour of the code.
-        self.assertIsNone(record.request_id)
+        self.assertEqual(record.request_id, "-" * 36)
 
     def test_filter_adds_hostname(self) -> None:
         record = make_record()
@@ -267,7 +262,7 @@ class TestRequestIDFilter(SimpleTestCase):
     def test_request_id_dash_when_context_empty(self) -> None:
         record = make_record()
         self.filter.filter(record)
-        self.assertEqual(record.request_id, "-")
+        self.assertEqual(record.request_id, "-" * 36)
 
 
 # =============================================================================

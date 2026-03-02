@@ -254,7 +254,7 @@ class QuotaEnforcer:
         cache.set(cache_key, limit, None)  # No timeout for custom limits
         self._custom_quotas[(customer_id, quota_type)] = limit
 
-        logger.info(f"Custom quota set: customer={customer_id}, " f"type={quota_type.value}, limit={limit}")
+        logger.info(f"Custom quota set: customer={customer_id}, type={quota_type.value}, limit={limit}")
 
     def reset_usage(
         self,
@@ -459,7 +459,7 @@ def enforce_quota(
     return decorator
 
 
-def track_api_usage(func: Callable[..., T]) -> Callable[..., T]:
+def track_api_usage[T](func: Callable[..., T]) -> Callable[..., T]:
     """
     Decorator to track API request usage for quota purposes.
     Lighter weight than enforce_quota - just tracks, doesn't block.

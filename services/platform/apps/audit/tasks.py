@@ -119,7 +119,7 @@ def run_integrity_check(
                 elif check.status == "warning" and results["status"] == "healthy":
                     results["status"] = "warning"
 
-                logger.info(f"[Integrity Task] {ct} completed: {check.status} " f"({check.issues_found} issues)")
+                logger.info(f"[Integrity Task] {ct} completed: {check.status} ({check.issues_found} issues)")
             else:
                 logger.error(f"[Integrity Task] {ct} failed: {result.error}")
                 results["checks"].append(
@@ -286,7 +286,7 @@ def _send_integrity_escalation_alert(results: dict[str, Any]) -> None:
             },
         )
 
-        logger.critical(f"[Integrity Alert] Created critical alert {alert.id} for " f"compromised audit data")
+        logger.critical(f"[Integrity Alert] Created critical alert {alert.id} for compromised audit data")
 
         # Send email notification to admins
         from apps.settings.services import SettingsService  # noqa: PLC0415
@@ -343,7 +343,7 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
             },
         )
 
-        logger.warning(f"[File Integrity Alert] Created alert {alert.id} for " f"{len(changed_files)} file changes")
+        logger.warning(f"[File Integrity Alert] Created alert {alert.id} for {len(changed_files)} file changes")
 
         # Send email notification to admins
         from apps.settings.services import SettingsService  # noqa: PLC0415
@@ -412,7 +412,7 @@ def cleanup_old_integrity_checks(days: int = 90) -> dict[str, Any]:
         checked_at__lt=cutoff,
     ).delete()[0]
 
-    logger.info(f"[Integrity Cleanup] Deleted {deleted_count} old healthy checks " f"(older than {days} days)")
+    logger.info(f"[Integrity Cleanup] Deleted {deleted_count} old healthy checks (older than {days} days)")
 
     return {
         "deleted_count": deleted_count,

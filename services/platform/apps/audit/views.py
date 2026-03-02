@@ -1032,9 +1032,9 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
         # Serve file
         file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type="application/json")
-        response[
-            "Content-Disposition"
-        ] = f'attachment; filename="gdpr_export_{export_request.requested_by.id}_{export_request.id}.json"'
+        response["Content-Disposition"] = (
+            f'attachment; filename="gdpr_export_{export_request.requested_by.id}_{export_request.id}.json"'
+        )
         response["Content-Length"] = len(file_content)
 
         return response

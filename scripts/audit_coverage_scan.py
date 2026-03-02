@@ -464,8 +464,7 @@ def main() -> int:
         print("\nFindings:")
         for issue in issues[: args.max_issues]:
             print(
-                f"[{issue.severity.upper():8}] {issue.code:25} "
-                f"{issue.file}:{issue.line}:{issue.col} - {issue.message}"
+                f"[{issue.severity.upper():8}] {issue.code:25} {issue.file}:{issue.line}:{issue.col} - {issue.message}"
             )
             if issue.snippet:
                 print(f"    {issue.snippet.strip()}")

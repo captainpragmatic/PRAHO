@@ -150,7 +150,7 @@ def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60) -> Calla
     return decorator
 
 
-def timing_safe_validator(func: F) -> F:
+def timing_safe_validator[F: Callable[..., Any]](func: F) -> F:
     """
     Decorator to prevent timing attacks by ensuring consistent execution time
     """

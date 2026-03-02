@@ -3946,8 +3946,8 @@ class TicketsAuditService:
 
         # Calculate resolution duration
         resolution_duration = None
-        if ticket.resolved_at:
-            duration = ticket.resolved_at - ticket.created_at
+        if ticket.closed_at:
+            duration = ticket.closed_at - ticket.created_at
             resolution_duration = {
                 "total_seconds": int(duration.total_seconds()),
                 "hours": duration.total_seconds() / 3600,
@@ -3999,7 +3999,7 @@ class TicketsAuditService:
             old_values={"status": old_status},
             new_values={
                 "status": new_status,
-                "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+                "resolved_at": ticket.closed_at.isoformat() if ticket.closed_at else None,
                 "sla_compliant": sla_performance["overall_compliance"],
                 "resolution_grade": sla_performance["sla_grade"],
             },

@@ -110,7 +110,7 @@ class Command(BaseCommand):
                     config,  # i + 1 to continue numbering after test customer
                 )
                 customers.append(customer)
-                self.stdout.write(f"  ✓ Complete customer {i+2}/{num_customers}: {customer.get_display_name()}")
+                self.stdout.write(f"  ✓ Complete customer {i + 2}/{num_customers}: {customer.get_display_name()}")
         else:
             self.stdout.write("Only creating the guaranteed test customer.")
 
@@ -627,7 +627,7 @@ class Command(BaseCommand):
             user_data = {
                 "first_name": fake.first_name(),
                 "last_name": fake.last_name(),
-                "email": f"user{i+1}@example.com",  # Use unique predictable emails
+                "email": f"user{i + 1}@example.com",  # Use unique predictable emails
                 "is_active": True,
                 "staff_role": "customer",
             }
@@ -636,7 +636,7 @@ class Command(BaseCommand):
             users.append(user)
 
             if i % 2 == 0:
-                self.stdout.write(f"  ✓ User {i+1}/{count}: {user.email}")
+                self.stdout.write(f"  ✓ User {i + 1}/{count}: {user.email}")
 
         return users
 
@@ -870,7 +870,7 @@ class Command(BaseCommand):
 
             order_data = {
                 "customer": customer,
-                "order_number": f"ORD-{customer.id:04d}-{i+1:03d}-{status.upper()}",
+                "order_number": f"ORD-{customer.id:04d}-{i + 1:03d}-{status.upper()}",
                 "status": status,
                 "currency": currency,
                 "subtotal_cents": subtotal_cents,

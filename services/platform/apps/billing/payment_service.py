@@ -63,8 +63,7 @@ class PaymentService:
             currency = str(order.currency or "RON")
 
             logger.info(
-                f"💳 Creating payment intent for order {order.order_number} "
-                f"({amount_cents} {currency}) via {gateway}"
+                f"💳 Creating payment intent for order {order.order_number} ({amount_cents} {currency}) via {gateway}"
             )
 
             # Get payment gateway
@@ -173,7 +172,7 @@ class PaymentService:
         """
         try:
             logger.info(
-                f"💳 Creating payment intent for Portal order {order_id} " f"({amount_cents} {currency}) via {gateway}"
+                f"💳 Creating payment intent for Portal order {order_id} ({amount_cents} {currency}) via {gateway}"
             )
 
             # Get payment gateway
@@ -344,7 +343,7 @@ class PaymentService:
 
             customer = Customer.objects.get(id=customer_id)
 
-            logger.info(f"🔄 Creating subscription for customer {customer.name} " f"(price: {price_id}) via {gateway}")
+            logger.info(f"🔄 Creating subscription for customer {customer.name} (price: {price_id}) via {gateway}")
 
             # Get payment gateway
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
@@ -405,7 +404,7 @@ class PaymentService:
                             logger.warning(f"⚠️ Could not create local subscription record: {sub_result.unwrap_err()}")
                 except Exception as e:
                     logger.warning(f"⚠️ Could not create local subscription record: {e}")
-                logger.info(f"✅ Created subscription {subscription_id} " f"for customer {customer.name}")
+                logger.info(f"✅ Created subscription {subscription_id} for customer {customer.name}")
 
                 log_security_event(
                     "gateway_subscription_created",

@@ -88,7 +88,6 @@ class TaxConfiguration:
         cached_rate = cache.get(cache_key)
 
         if cached_rate is not None:
-            logger.debug(f"💰 [TaxService] Using cached rate for {country_code}: {cached_rate}%")
             return Decimal(cached_rate) / 100 if as_decimal else Decimal(cached_rate)
 
         # Try to get from database (if model exists)
@@ -108,9 +107,7 @@ class TaxConfiguration:
         # DEFAULT_VAT_RATES entry, it's safest to charge Romanian VAT. This avoids
         # tax leakage from typos like "R0" or "ZZ" silently getting 0%.
         if rate is None:
-            logger.warning(
-                f"⚠️ [TaxService] No rate found for {country_code!r}, " f"defaulting to Romanian VAT (fail-safe)"
-            )
+            logger.warning(f"⚠️ [TaxService] No rate found for {country_code!r}, defaulting to Romanian VAT (fail-safe)")
             rate = cls.DEFAULT_VAT_RATES["RO"]
 
         # Cache the rate
@@ -193,7 +190,7 @@ class TaxConfiguration:
         # EU B2B reverse charge: 0% VAT when business has valid VAT number
         # and is in an EU country other than Romania (provider's home country)
         if is_business and vat_number and cls.is_eu_country(country_code) and country_code != "RO":
-            logger.info(f"💰 [TaxService] EU B2B reverse charge: {country_code} " f"VAT {vat_number} → 0% VAT")
+            logger.info(f"💰 [TaxService] EU B2B reverse charge: {country_code} VAT {vat_number} → 0% VAT")
             return {
                 "vat_cents": 0,
                 "total_cents": amount_cents,

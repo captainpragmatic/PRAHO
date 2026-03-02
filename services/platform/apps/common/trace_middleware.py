@@ -285,14 +285,14 @@ class DebugTraceMiddleware(TraceMiddleware):
                 🔍 Trace Report
             </div>
             <div style="margin-bottom: 5px;">
-                <strong>Duration:</strong> {performance.get('duration_ms', 0):.2f}ms
+                <strong>Duration:</strong> {performance.get("duration_ms", 0):.2f}ms
             </div>
             <div style="margin-bottom: 5px;">
-                <strong>Queries:</strong> {query_trace.get('total_queries', 0)}
-                ({query_trace.get('total_time_ms', 0):.2f}ms)
+                <strong>Queries:</strong> {query_trace.get("total_queries", 0)}
+                ({query_trace.get("total_time_ms", 0):.2f}ms)
             </div>
-            <div style="margin-bottom: 5px; color: {'#ff6b6b' if query_trace.get('duplicate_count', 0) > 0 else '#4ecdc4'};">
-                <strong>N+1 Detected:</strong> {query_trace.get('duplicate_count', 0)} patterns
+            <div style="margin-bottom: 5px; color: {"#ff6b6b" if query_trace.get("duplicate_count", 0) > 0 else "#4ecdc4"};">
+                <strong>N+1 Detected:</strong> {query_trace.get("duplicate_count", 0)} patterns
             </div>
             <button onclick="this.parentElement.remove()" style="
                 margin-top: 10px; background: #ff6b6b; border: none;

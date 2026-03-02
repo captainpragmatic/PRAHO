@@ -300,7 +300,7 @@ document.addEventListener('htmx:afterRequest', function(event) {
                                     </svg>
                                 </div>
                                 <div class="ml-3 flex-1">
-                                    <h3 class="text-sm font-medium text-green-400">Settings Updated Successfully</h3>
+                                    <h3 class="text-sm font-medium text-green-400">{% trans "Settings Updated Successfully" %}</h3>
                                     <p class="mt-1 text-sm text-green-300/80">
                                         ${response.updated || 0} settings were updated successfully.
                                     </p>
@@ -336,7 +336,7 @@ document.addEventListener('htmx:afterRequest', function(event) {
                                     </svg>
                                 </div>
                                 <div class="ml-3 flex-1">
-                                    <h3 class="text-sm font-medium text-red-400">Error Updating Settings</h3>
+                                    <h3 class="text-sm font-medium text-red-400">{% trans "Error Updating Settings" %}</h3>
                                     <ul class="mt-2 text-red-300/80 space-y-1">
                                         ${errorHtml}
                                     </ul>

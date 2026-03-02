@@ -42,9 +42,7 @@ class Command(BaseCommand):
         try:
             from apps.settings.models import SystemSetting  # noqa: PLC0415
         except ImportError:
-            self.stderr.write(
-                self.style.ERROR("Settings app not available. " "Please ensure apps.settings is installed.")
-            )
+            self.stderr.write(self.style.ERROR("Settings app not available. Please ensure apps.settings is installed."))
             return
 
         from apps.billing.efactura.settings import (  # noqa: PLC0415

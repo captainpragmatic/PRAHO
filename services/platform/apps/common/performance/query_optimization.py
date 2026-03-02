@@ -268,9 +268,7 @@ class QueryProfiler:
             self.query_count = len(connection.queries) - self._start_queries
 
             if self.log_queries or self.query_count > QUERY_WARNING_THRESHOLD:
-                logger.warning(
-                    f"⚠️ Query profiler [{self.name}]: " f"{self.query_count} queries in {self.total_time:.2f}ms"
-                )
+                logger.warning(f"⚠️ Query profiler [{self.name}]: {self.query_count} queries in {self.total_time:.2f}ms")
                 if self.log_queries:
                     for query in connection.queries[-self.query_count :]:
                         logger.debug(f"  SQL: {query['sql'][:200]}...")
@@ -313,7 +311,7 @@ def profile_queries(name: str = "", warn_threshold: int = 5) -> Any:
 # Bulk operation utilities
 
 
-def bulk_select_related(
+def bulk_select_related[T: models.Model](
     queryset: QuerySet[T],
     field_name: str,
     ids: list[Any],
@@ -331,7 +329,7 @@ def bulk_select_related(
     return {getattr(obj, field_name): obj for obj in objects}
 
 
-def annotate_counts(
+def annotate_counts[T: models.Model](
     queryset: QuerySet[T],
     count_relations: dict[str, str],
 ) -> QuerySet[T]:

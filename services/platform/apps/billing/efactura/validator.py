@@ -98,9 +98,9 @@ class CIUSROValidator:
 
     # CIUS-RO version
     CIUS_RO_VERSION: ClassVar[str] = "1.0.1"
-    EXPECTED_CUSTOMIZATION_ID: ClassVar[
-        str
-    ] = "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
+    EXPECTED_CUSTOMIZATION_ID: ClassVar[str] = (
+        "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
+    )
 
     # Romanian CUI validation pattern (8-10 digits)
     CUI_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^(RO)?[0-9]{2,10}$")
