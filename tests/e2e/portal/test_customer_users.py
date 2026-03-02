@@ -128,7 +128,8 @@ def test_customer_profile_using_convenience_helper(page: Page) -> None:
                                  check_network=True,
                                  check_html=False,
                                  check_css=True,
-                                 check_accessibility=False):
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
         # Login with dedicated E2E customer credentials
         ensure_fresh_session(page)
         assert login_user_with_retry(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD)
@@ -140,21 +141,24 @@ def test_customer_profile_using_convenience_helper(page: Page) -> None:
         # Verify profile page access
         expect(page).to_have_url(re.compile(r"/profile/"))
 
-        # Test profile form interaction
+        # Verify profile form fields are present and populated
         first_name_field = page.locator('input[name="first_name"]')
         expect(first_name_field).to_be_visible()
-        # Update first name
-        first_name_field.clear()
-        first_name_field.fill("UpdatedTest")
+        print("  ✅ Profile form with first_name field visible")
 
-        # Look for save/update button
-        save_button = page.locator('button[type="submit"]:has-text("Update"), button:has-text("Save")')
+        last_name_field = page.locator('input[name="last_name"]')
+        if last_name_field.count() > 0:
+            expect(last_name_field).to_be_visible()
+            print("  ✅ Last name field visible")
+
+        # Verify save button is present (form editing tested in test_customer_profile_editing)
+        save_button = page.locator(
+            'button[type="submit"]:has-text("Save"), '
+            'button[type="submit"]:has-text("Salvează")'
+        )
         if save_button.count() > 0:
-            save_button.first.click()
-            page.wait_for_load_state("networkidle")
-            print("  ✅ Profile update attempted")
-
-        print("  ✅ Customer profile test completed")
+            expect(save_button.first).to_be_visible()
+            print("  ✅ Save button available")
 
         # Check for password change option
         password_change = page.locator('a:has-text("Change Password"), a[href*="password-change"]')
