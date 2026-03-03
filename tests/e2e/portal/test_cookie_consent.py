@@ -14,7 +14,7 @@ Tests GDPR cookie consent compliance:
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
@@ -188,7 +188,7 @@ def test_accessible(page: Page) -> None:
 def test_cookie_policy_page(page: Page) -> None:
     """/cookie-policy/ loads and describes all 4 categories."""
     # Dismiss banner first since this test focuses on the policy page content
-    from tests.e2e.utils import _dismiss_cookie_consent
+    from tests.e2e.helpers import _dismiss_cookie_consent  # noqa: PLC0415
     _dismiss_cookie_consent(page, BASE_URL)
 
     page.goto(f"{BASE_URL}/cookie-policy/")

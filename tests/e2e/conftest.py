@@ -71,6 +71,10 @@ def pytest_configure(config):
     """Register custom markers for E2E tests."""
     config.addinivalue_line("markers", "e2e: end-to-end test")
     config.addinivalue_line("markers", "no_auto_dismiss: skip automatic cookie consent dismissal")
+    config.addinivalue_line(
+        "markers",
+        "expect_server_errors(pattern): Mark test as expecting specific server error patterns",
+    )
 
 
 # ===============================================================================

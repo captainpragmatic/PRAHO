@@ -193,7 +193,7 @@ def _get_safe_redirect_target(request: HttpRequest, fallback: str = "/dashboard/
 @never_cache
 @csrf_protect
 @require_http_methods(["GET", "POST"])
-def login_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
+def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
     """
     Portal login view using Django sessions.
     Validates credentials via Platform API and creates secure sessions.
@@ -242,6 +242,15 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                         memberships = _get_user_customer_memberships(request)
                         if memberships:
                             request.session["user_memberships"] = memberships
+                            # If platform returned no primary customer (e.g. superuser without
+                            # is_primary membership), fall back to the first accessible customer.
+                            if not customer_id:
+                                customer_id = memberships[0].get("customer_id")
+                                request.session["customer_id"] = customer_id
+                                logger.info(
+                                    f"⚠️ [Portal Auth] No primary customer for {email}, "
+                                    f"using first membership: customer {customer_id}"
+                                )
                     except Exception:
                         logger.debug("Could not fetch memberships on login")
 

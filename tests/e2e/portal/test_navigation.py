@@ -16,7 +16,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
 # Import shared utilities
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,

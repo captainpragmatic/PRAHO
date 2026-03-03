@@ -18,9 +18,10 @@ Replaces: test_customer_tickets.py, test_customer_tickets_mixed.py
 
 import re
 
+import pytest
 from playwright.sync_api import Page, expect
 
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     BASE_URL,
     assert_responsive_results,
     run_responsive_breakpoints_test,
@@ -196,6 +197,13 @@ def test_ticket_create_and_reply(monitored_customer_page: Page) -> None:
     if not still_open.is_visible(timeout=1000):
         still_open = status_area.get_by_text("Deschis", exact=True).first
     # Customer replies should not change status (may become "Customer Replied" in some configs)
+    # Verify a status badge is still visible after the reply
+    has_status = False
+    for status_text in ("Open", "In Progress", "Customer Replied", "Deschis", "In progres", "Răspuns client"):
+        if status_area.get_by_text(status_text, exact=True).first.is_visible(timeout=500):
+            has_status = True
+            break
+    assert has_status, "Ticket should still show a valid status badge after customer reply"
 
 
 def test_ticket_detail_badges(monitored_customer_page: Page) -> None:
@@ -310,9 +318,10 @@ def test_ticket_mobile_responsiveness(monitored_customer_page: Page) -> None:
     assert_responsive_results(results)
 
 
-def test_ticket_isolation(customer_page: Page) -> None:
+@pytest.mark.expect_server_errors("not found", "access denied")
+def test_ticket_isolation(monitored_customer_page: Page) -> None:
     """Test that customers can only see their own tickets, not other customers'."""
-    page = customer_page
+    page = monitored_customer_page
 
     _navigate_to_ticket_list(page)
 
@@ -332,9 +341,13 @@ def test_ticket_isolation(customer_page: Page) -> None:
 
     # Try accessing likely-nonexistent ticket IDs — should get redirect or 403/404
     for fake_id in (99999, 99998):
-        response = page.goto(f"{BASE_URL}/tickets/{fake_id}/")
+        attempted_url = f"{BASE_URL}/tickets/{fake_id}/"
+        response = page.goto(attempted_url)
         if response:
-            assert response.status in (200, 302, 403, 404, 429), (
-                f"Accessing ticket {fake_id} should not return 500"
+            assert response.status in (302, 403, 404, 429), (
+                f"Accessing ticket {fake_id} returned {response.status} — expected redirect or denial, not 200"
             )
-        # If redirected, that's fine — customer shouldn't see other tickets
+        # After navigation, verify we're not on the ticket detail page with content
+        assert "/login/" in page.url or f"/tickets/{fake_id}/" not in page.url, (
+            f"Should not be able to view ticket {fake_id} — expected redirect away"
+        )

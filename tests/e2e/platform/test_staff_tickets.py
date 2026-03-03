@@ -17,9 +17,10 @@ Uses shared utilities from tests.e2e.utils for consistency.
 Based on real staff workflows for Romanian hosting support operations.
 """
 
+import pytest
 from playwright.sync_api import Page
 
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     PLATFORM_BASE_URL,
     MobileTestContext,
     assert_responsive_results,
@@ -680,7 +681,7 @@ def test_staff_complete_ticket_management_workflow(monitored_staff_page: Page) -
         _test_ticket_lifecycle(page)
         print("  ✅ Complete staff ticket workflow successful")
     else:
-        print("  ⚠️ Workflow limited due to ticket creation issues")
+        pytest.fail("Ticket creation failed — is the E2E service running?")
 
 
 def test_staff_ticket_system_responsive_breakpoints(monitored_staff_page: Page) -> None:

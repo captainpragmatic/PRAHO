@@ -18,7 +18,7 @@ import re
 
 from playwright.sync_api import Locator, Page, expect
 
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     BASE_URL,
     MobileTestContext,
     assert_responsive_results,

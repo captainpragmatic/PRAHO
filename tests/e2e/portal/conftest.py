@@ -7,7 +7,7 @@ Fixtures and configuration for portal (customer frontend :8701) E2E tests.
 import pytest
 from playwright.sync_api import Page
 
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     BASE_URL,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
@@ -97,7 +97,10 @@ def monitored_customer_page(page: Page, request: pytest.FixtureRequest, _custome
                                   check_html=True,
                                   check_css=True,
                                   check_accessibility=True,
-                                  check_performance=False):
+                                  check_performance=False) as monitor:
+        markers = request.node.iter_markers("expect_server_errors")
+        for marker in markers:
+            monitor.add_expected_error_patterns(list(marker.args))
         if not apply_storage_state(page, _customer_storage_state,
                                    f"{BASE_URL}/dashboard/",
                                    "/login/"):
@@ -124,7 +127,10 @@ def monitored_superuser_page(page: Page, request: pytest.FixtureRequest, _superu
                                   check_html=True,
                                   check_css=True,
                                   check_accessibility=True,
-                                  check_performance=False):
+                                  check_performance=False) as monitor:
+        markers = request.node.iter_markers("expect_server_errors")
+        for marker in markers:
+            monitor.add_expected_error_patterns(list(marker.args))
         if not apply_storage_state(page, _superuser_storage_state,
                                    f"{BASE_URL}/dashboard/",
                                    "/login/"):

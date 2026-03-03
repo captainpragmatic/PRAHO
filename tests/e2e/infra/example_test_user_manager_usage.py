@@ -22,7 +22,7 @@ Framework: Playwright + pytest + TestUserManager
 from playwright.sync_api import Page
 
 # Import the new test user management system
-from tests.e2e.utils import (
+from tests.e2e.helpers import (
     BASE_URL,
     LOGOUT_URL,
     ComprehensivePageMonitor,

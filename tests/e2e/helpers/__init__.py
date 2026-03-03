@@ -35,15 +35,19 @@ from tests.e2e.helpers.constants import (
     CUSTOMER2_PASSWORD,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
+    DJANGO_Q_LOG_FILE,
     LEGACY_CUSTOMER_EMAIL,
     LEGACY_CUSTOMER_PASSWORD,
     LEGACY_SUPERUSER_EMAIL,
     LEGACY_SUPERUSER_PASSWORD,
+    LOG_DIR,
     LOGIN_URL,
     LOGOUT_URL,
     PLATFORM_BASE_URL,
+    PLATFORM_LOG_FILE,
     PLATFORM_LOGIN_URL,
     PLATFORM_LOGOUT_URL,
+    PORTAL_LOG_FILE,
     REGISTER_URL,
     STAFF_EMAIL,
     STAFF_PASSWORD,
@@ -97,6 +101,13 @@ from tests.e2e.helpers.navigation import (
     verify_role_based_content,
 )
 
+# Server Log Monitoring
+from tests.e2e.helpers.server_logs import (
+    LogEntry,
+    ServerLogScanner,
+    parse_log_line,
+)
+
 # User Management
 from tests.e2e.helpers.user_manager import (
     E2EUserManager,
@@ -108,40 +119,40 @@ from tests.e2e.helpers.user_manager import (
 )
 
 __all__ = [
-    # Constants
     "BASE_URL",
     "CUSTOMER2_EMAIL",
     "CUSTOMER2_PASSWORD",
     "CUSTOMER_EMAIL",
     "CUSTOMER_PASSWORD",
     "DESKTOP_VIEWPORT",
+    "DJANGO_Q_LOG_FILE",
     "LEGACY_CUSTOMER_EMAIL",
     "LEGACY_CUSTOMER_PASSWORD",
     "LEGACY_SUPERUSER_EMAIL",
     "LEGACY_SUPERUSER_PASSWORD",
     "LOGIN_URL",
     "LOGOUT_URL",
+    "LOG_DIR",
     "MOBILE_VIEWPORTS",
     "PLATFORM_BASE_URL",
     "PLATFORM_LOGIN_URL",
     "PLATFORM_LOGOUT_URL",
+    "PLATFORM_LOG_FILE",
+    "PORTAL_LOG_FILE",
     "REGISTER_URL",
     "STAFF_EMAIL",
     "STAFF_PASSWORD",
     "SUPERUSER_EMAIL",
     "SUPERUSER_PASSWORD",
-    # Auth
     "AuthenticationError",
-    # Monitoring
     "ComprehensivePageMonitor",
     "ConsoleMonitor",
-    # User Management
     "E2EUserManager",
-    # Mobile
+    "LogEntry",
     "MobileTestContext",
     "PageQualityConfig",
+    "ServerLogScanner",
     "TestUserManager",
-    # Navigation
     "_check_no_staff_navigation",
     "_check_staff_navigation",
     "_debug_navigation_links",
@@ -155,7 +166,6 @@ __all__ = [
     "check_html_validation",
     "check_network_errors",
     "check_performance_issues",
-    # Interactions
     "count_elements",
     "create_and_login_admin",
     "create_and_login_customer",
@@ -174,6 +184,7 @@ __all__ = [
     "navigate_to_dashboard",
     "navigate_to_page",
     "navigate_to_platform_page",
+    "parse_log_line",
     "require_authentication",
     "run_responsive_breakpoints_test",
     "run_standard_mobile_test",

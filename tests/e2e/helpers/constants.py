@@ -5,6 +5,14 @@ All URL and credential constants used across E2E tests.
 """
 
 import os
+import pathlib
+
+# Project paths
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]  # tests/e2e/helpers -> project root
+LOG_DIR = PROJECT_ROOT / "logs"
+PLATFORM_LOG_FILE = LOG_DIR / "platform_e2e.log"
+PORTAL_LOG_FILE = LOG_DIR / "portal_e2e.log"
+DJANGO_Q_LOG_FILE = PROJECT_ROOT / "services" / "platform" / "django_q.log"
 
 # Portal (customer-facing) at :8701
 BASE_URL = os.environ.get("PORTAL_BASE_URL", "http://localhost:8701")

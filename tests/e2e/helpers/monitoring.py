@@ -9,6 +9,9 @@ from typing import Any
 
 from playwright.sync_api import Page
 
+from tests.e2e.helpers.constants import DJANGO_Q_LOG_FILE, PLATFORM_LOG_FILE, PORTAL_LOG_FILE
+from tests.e2e.helpers.server_logs import ServerLogScanner
+
 # ===============================================================================
 # CONSOLE ERROR MONITORING
 # ===============================================================================
@@ -404,6 +407,7 @@ class PageQualityConfig:
     check_css: bool = True
     check_accessibility: bool = False  # Can be slow
     check_performance: bool = False    # Can be slow
+    check_server_logs: bool = True     # Check platform/portal server logs for errors
     ignore_patterns: list[str] = field(default_factory=list)
 
 
@@ -444,6 +448,12 @@ class ComprehensivePageMonitor:
         self.check_performance = config.check_performance
         self.ignore_patterns = list(config.ignore_patterns)
         self.console_messages: list[str] = []
+        self.check_server_logs = config.check_server_logs
+        self._request_ids: set[str] = set()
+        self._http_500s: list[str] = []
+        self._log_scanner: ServerLogScanner | None = None
+        self._expected_error_patterns: list[str] = []
+        self._response_listener: Any | None = None
 
         # Security hardening: never suppress auth/access-denied/not-found errors by default.
         if not allow_auth_error_ignores and self.ignore_patterns:
@@ -457,6 +467,24 @@ class ComprehensivePageMonitor:
     def __enter__(self):
         if self.check_console:
             self.console_messages = setup_console_monitoring_standalone(self.page)
+
+        if self.check_server_logs:
+            self._log_scanner = ServerLogScanner([PLATFORM_LOG_FILE, PORTAL_LOG_FILE, DJANGO_Q_LOG_FILE])
+            if self._log_scanner.available:
+                self._log_scanner.mark_position()
+            else:
+                print("  ⚠️ Server log files not found — run `make dev-e2e-bg` to enable log checking")
+
+            def _collect_response(response: Any) -> None:
+                req_id = response.headers.get("x-request-id")
+                if req_id:
+                    self._request_ids.add(req_id)
+                if response.status >= 500:
+                    self._http_500s.append(f"{response.status} {response.url}")
+
+            self._response_listener = _collect_response
+            self.page.on("response", _collect_response)
+
         return self
 
     def _check_console_issues(self) -> list[str]:
@@ -514,6 +542,59 @@ class ComprehensivePageMonitor:
         perf_issues = check_performance_issues(self.page)
         return [f"PERF: {issue}" for issue in perf_issues] if perf_issues else []
 
+    def add_expected_error_patterns(self, patterns: list[str]) -> None:
+        """Add patterns for expected server errors (matched case-insensitively).
+
+        Accumulates across multiple calls so that multiple
+        ``@pytest.mark.expect_server_errors`` markers on a single test
+        all take effect.  Non-string arguments are coerced to ``str``
+        to prevent ``AttributeError`` in the downstream ``.lower()`` filter.
+        """
+        self._expected_error_patterns.extend(str(p) for p in patterns)
+
+    # Keep old name as alias so any external callers still work.
+    set_expected_error_patterns = add_expected_error_patterns
+
+    def _check_server_log_issues(self) -> list[str]:
+        """Check for server-side errors in platform/portal logs."""
+        if not self.check_server_logs:
+            return []
+
+        # Layer 1: HTTP 500+ responses
+        issues: list[str] = [f"HTTP: {error}" for error in self._http_500s]
+
+        # Layer 2: Server log scanning
+        if self._log_scanner and self._log_scanner.available:
+            entries = self._log_scanner.get_new_entries()
+
+            # Errors correlated to this test's requests
+            if self._request_ids:
+                correlated = self._log_scanner.filter_by_request_ids(entries, self._request_ids)
+                correlated_errors = self._log_scanner.filter_errors(correlated)
+                issues.extend(
+                    f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
+                    f'"{entry.message}" [req-id: {entry.request_id[:8]}...]'
+                    for entry in correlated_errors
+                )
+
+            # Uncorrelated errors from other requests during this test's window
+            uncorrelated = self._log_scanner.filter_uncorrelated_errors(entries, self._request_ids)
+            issues.extend(
+                f"ServerLog[{entry.service}]: {entry.level} {entry.logger} "
+                f'"{entry.message}" [uncorrelated]'
+                for entry in uncorrelated
+            )
+
+        # Filter out expected error patterns
+        if issues and self._expected_error_patterns:
+            issues = [
+                issue
+                for issue in issues
+                if not any(pat.lower() in issue.lower() for pat in self._expected_error_patterns)
+            ]
+
+        return issues
+
     def _get_all_quality_issues(self) -> list[str]:
         """Collect all quality issues from different checks."""
         all_issues = []
@@ -523,6 +604,7 @@ class ComprehensivePageMonitor:
         all_issues.extend(self._check_css_issues())
         all_issues.extend(self._check_accessibility_issues())
         all_issues.extend(self._check_performance_issues())
+        all_issues.extend(self._check_server_log_issues())
         return all_issues
 
     def _get_checks_performed(self) -> list[str]:
@@ -540,6 +622,8 @@ class ComprehensivePageMonitor:
             checks_performed.append("accessibility")
         if self.check_performance:
             checks_performed.append("performance")
+        if self.check_server_logs:
+            checks_performed.append("server-logs")
         return checks_performed
 
     def _print_success_message(self) -> None:
@@ -553,6 +637,12 @@ class ComprehensivePageMonitor:
             print(f"  ✅ Page quality verified ({checks_str})")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # Unregister the response listener to prevent callback accumulation
+        # when the monitor is reused on the same page object.
+        if self._response_listener is not None:
+            self.page.remove_listener("response", self._response_listener)
+            self._response_listener = None
+
         # Only check quality issues if the test didn't already fail
         if exc_type is not None:
             return

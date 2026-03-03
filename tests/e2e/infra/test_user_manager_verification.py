@@ -18,7 +18,7 @@ import pytest
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
 django.setup()
 
-from tests.e2e.utils import TestUserManager, test_users
+from tests.e2e.helpers import TestUserManager, test_users  # noqa: E402
 
 
 @pytest.mark.django_db

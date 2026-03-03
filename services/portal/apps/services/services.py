@@ -212,8 +212,12 @@ class ServicesAPIClient(PlatformAPIClient):
             return cast(list[dict[str, Any]], response.get("domains", []))
 
         except PlatformAPIError as e:
-            logger.error(
-                f"🔥 [Services API] Error retrieving domains for service {service_id} for customer {customer_id}: {e}"
+            # Domains API endpoint not yet implemented on platform (returns 404).
+            # Gracefully degrade — log as warning, not error.
+            http_not_found = 404
+            log_level = logger.warning if getattr(e, "status_code", 500) == http_not_found else logger.error
+            log_level(
+                f"⚠️ [Services API] Could not retrieve domains for service {service_id} for customer {customer_id}: {e}"
             )
             return []
 
