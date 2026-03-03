@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **Server-side log checking in E2E tests (ADR-0028)**: ComprehensivePageMonitor now detects Django errors in platform/portal logs, correlated per-test via X-Request-ID
+
+### Changed
+- **E2E test suite cleanup**: Deleted 3 legacy duplicate test files (-1,003 lines), migrated ~127 tests to use `monitored_staff_page`/`monitored_customer_page` fixtures, standardized imports from `tests.e2e.utils` to `tests.e2e.helpers`
+- **ComprehensivePageMonitor bug fixes**: `add_expected_error_patterns` now accumulates across multiple markers (was overwriting), non-string args coerced to `str`, Playwright response listener properly unregistered in `__exit__`
+
+### Fixed
+- **12 vacuous E2E tests hardened**: Workflow tests that silently passed on failure now `pytest.fail()`, security isolation tests now assert denial, soft-check helpers now return bools with caller assertions
+- **Reply textarea selector**: Portal ticket tests now use correct `name="message"` field
+- **Duplicate proforma helpers consolidated**: Merged `_fill_proforma_form` and `_fill_workflow_proforma_form` into single function with `submit` parameter
 
 ---
 

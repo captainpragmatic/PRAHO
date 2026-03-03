@@ -1234,7 +1234,7 @@ class TestTicketsAuditService(TestCase):
         m.satisfaction_comment = ""
         m.closed_at = None
         m.is_escalated = False
-        m.requires_customer_response = False
+        m.is_awaiting_customer = False
         m.customer = Mock()
         m.customer.id = uuid.uuid4()
         m.customer.get_display_name.return_value = "Test Company"

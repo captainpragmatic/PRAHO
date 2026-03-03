@@ -20,6 +20,7 @@ from django.test import SimpleTestCase
 _PROD_ENV = {
     "SECRET_KEY": "test-only-secret-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "PLATFORM_API_SECRET": "dGVzdC1vbmx5LXNlY3JldC1rZXktZm9yLWxvZ2dpbmctdGVzdHM=",
+    "SENTRY_DSN": "",  # Disable Sentry during test imports (placeholder in .env triggers BadDsn)
 }
 
 

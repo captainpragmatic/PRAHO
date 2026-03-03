@@ -3972,7 +3972,7 @@ class TicketsAuditService:
             "closure_context": {
                 "was_escalated": ticket.is_escalated,
                 "final_agent": ticket.assigned_to.get_full_name() if ticket.assigned_to else None,
-                "required_customer_input": ticket.requires_customer_response,
+                "required_customer_input": ticket.is_awaiting_customer,
                 "closure_method": "manual" if user else "automatic",
             },
             "compliance": romanian_compliance or {},
@@ -3995,13 +3995,13 @@ class TicketsAuditService:
         audit_event_data = AuditEventData(
             event_type="support_ticket_closed",
             content_object=ticket,
-            description=f"Ticket {ticket.ticket_number} closed: {old_status} -> {new_status} (SLA: {sla_performance['sla_grade']})",
+            description=f"Ticket {ticket.ticket_number} closed: {old_status} -> {new_status} (SLA: {sla_performance.get('sla_grade', 'N/A')})",
             old_values={"status": old_status},
             new_values={
                 "status": new_status,
                 "resolved_at": ticket.closed_at.isoformat() if ticket.closed_at else None,
-                "sla_compliant": sla_performance["overall_compliance"],
-                "resolution_grade": sla_performance["sla_grade"],
+                "sla_compliant": sla_performance.get("overall_compliance", False),
+                "resolution_grade": sla_performance.get("sla_grade", "N/A"),
             },
         )
 

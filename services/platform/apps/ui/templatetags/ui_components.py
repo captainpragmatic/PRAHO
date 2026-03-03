@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from django import template
-from django.utils.html import format_html, mark_safe  # For XSS prevention
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe  # For XSS prevention
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 

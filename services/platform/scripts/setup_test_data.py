@@ -191,6 +191,16 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
         e2e_admin.save()
         print("✅ Ensured E2E admin user (e2e-admin@test.local)")
 
+        # Ensure the E2E admin user has a customer membership (required for portal login)
+        CustomerMembership.objects.get_or_create(
+            user=e2e_admin,
+            customer=customer,
+            defaults={
+                "role": "owner",
+                "is_primary": True,
+            },
+        )
+
         # Customer test user
         e2e_customer, _ = User.objects.get_or_create(
             email="e2e-customer@test.local",

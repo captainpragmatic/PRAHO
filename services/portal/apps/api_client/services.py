@@ -470,7 +470,7 @@ class PlatformAPIClient:
                     "token": user_data.get("id"),  # Use user ID as simple token for now
                     # Backward-compatible: expose both user_id and customer_id (legacy name)
                     "user_id": user_data.get("id"),
-                    "customer_id": user_data.get("customer_id") or user_data.get("id"),
+                    "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                 }
             if data.get("success") and self._headers_allow_success_fallback(self._last_request_headers):

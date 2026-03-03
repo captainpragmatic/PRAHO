@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.cache import cache
 from django.http import HttpRequest, JsonResponse
@@ -295,6 +296,10 @@ class SessionValidationThrottle(BaseThrottle):
     """Custom throttle for session validation - prevent brute force (60/min per portal)"""
 
     def allow_request(self, request: HttpRequest, view: Any) -> bool:
+        # Skip throttling when rate limiting is disabled (tests, dev with RATELIMIT_ENABLE=false)
+        if not getattr(settings, "RATELIMIT_ENABLE", True):
+            return True
+
         portal_id = request.headers.get("X-Portal-Id", "unknown")
         cache_key = f"session_validation_throttle:{portal_id}"
 
