@@ -143,6 +143,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
             'success': True,
             'user': {
                 'id': 123,
+                'customer_id': 123,
                 'email': 'test@example.com',
                 'is_active': True
             },
@@ -314,6 +315,63 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         sent_body = call_args.kwargs['data']
         parsed = json.loads(sent_body if isinstance(sent_body, str) else sent_body.decode())
         self.assertEqual(str(parsed['timestamp']), headers['X-Timestamp'])
+
+
+class HMACCustomerIdExtractionTestCase(unittest.TestCase):
+    """H18: Tests that customer_id is properly extracted from HMAC-authenticated responses."""
+
+    def setUp(self):
+        self.test_secret = "test-hmac-secret-for-unit-tests"
+        self.test_portal_id = "test-portal-001"
+        with patch.object(settings, "PORTAL_ID", self.test_portal_id), \
+             patch.object(settings, "PLATFORM_API_SECRET", self.test_secret), \
+             patch.object(settings, "PLATFORM_API_BASE_URL", "http://testserver"), \
+             patch.object(settings, "PLATFORM_API_TIMEOUT", 10):
+            self.client = PlatformAPIClient()
+
+    @patch("apps.api_client.services.requests.request")
+    def test_customer_id_extracted_from_response(self, mock_request):
+        """customer_id from Platform user dict must be propagated to the auth result."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "user": {
+                "id": 10,
+                "customer_id": 55,
+                "email": "test@example.com",
+                "is_active": True,
+            },
+            "authenticated": True,
+        }
+        mock_request.return_value = mock_response
+
+        result = self.client.authenticate_customer("test@example.com", "pass123")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["customer_id"], 55)
+        self.assertEqual(result["user_id"], 10)
+
+    @patch("apps.api_client.services.requests.request")
+    def test_missing_customer_id_returns_none_value(self, mock_request):
+        """If Platform doesn't include customer_id, the field should be None (not crash)."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "user": {
+                "id": 20,
+                "email": "nofield@example.com",
+                "is_active": True,
+            },
+        }
+        mock_request.return_value = mock_response
+
+        result = self.client.authenticate_customer("nofield@example.com", "pass123")
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["valid"])
+        self.assertIsNone(result["customer_id"])
 
 
 class PlatformAPIClientIntegrationTestCase(unittest.TestCase):

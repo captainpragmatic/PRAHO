@@ -9,6 +9,9 @@ Verifies:
 - _mark_failed uses the state machine instead of bypassing it
 - "stopped" state participates in transitions correctly
 - Every STATUS_CHOICES entry has a VALID_TRANSITIONS entry
+- C5: DriftCheck.started_at defaults properly for bulk_create
+- H7: can_be_destroyed includes "stopped"
+- M1/M4: get_next_node_number concurrency
 """
 
 from __future__ import annotations
@@ -19,10 +22,12 @@ from unittest.mock import MagicMock, patch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.models import (
     CloudProvider,
+    DriftCheck,
     NodeDeployment,
     NodeDeploymentLog,
     NodeRegion,
@@ -399,3 +404,107 @@ class TestMarkFailedUsesStateMachine(TestCase):
         ).first()
         self.assertIsNotNone(log)
         self.assertIn("something went wrong", log.message)
+
+
+class TestDriftCheckStartedAtDefault(TestCase):
+    """C5: DriftCheck.started_at must default to timezone.now, not None."""
+
+    def test_bulk_create_sets_started_at(self) -> None:
+        """bulk_create bypasses save() — started_at must come from field default."""
+        deployment = _create_deployment("completed")
+        before = timezone.now()
+
+        DriftCheck.objects.bulk_create([
+            DriftCheck(deployment=deployment, check_type="cloud"),
+            DriftCheck(deployment=deployment, check_type="network"),
+        ])
+
+        checks = DriftCheck.objects.filter(deployment=deployment)
+        self.assertEqual(checks.count(), 2)
+        for check in checks:
+            self.assertIsNotNone(check.started_at)
+            self.assertGreaterEqual(check.started_at, before)
+
+    def test_regular_create_sets_started_at(self) -> None:
+        """Regular create should also set started_at via field default."""
+        deployment = _create_deployment("completed")
+        check = DriftCheck.objects.create(
+            deployment=deployment,
+            check_type="application",
+        )
+        self.assertIsNotNone(check.started_at)
+
+    def test_started_at_is_not_null(self) -> None:
+        """started_at field must have a non-None default."""
+        field = DriftCheck._meta.get_field("started_at")
+        self.assertIsNotNone(field.default)
+        # default should be timezone.now (callable), not None
+        self.assertTrue(callable(field.default))
+
+
+class TestCanBeDestroyedIncludesStopped(TestCase):
+    """H7: can_be_destroyed must include 'stopped' status."""
+
+    def test_stopped_can_be_destroyed(self) -> None:
+        deployment = _create_deployment("stopped")
+        self.assertTrue(deployment.can_be_destroyed)
+
+    def test_completed_can_be_destroyed(self) -> None:
+        deployment = _create_deployment("completed")
+        self.assertTrue(deployment.can_be_destroyed)
+
+    def test_failed_can_be_destroyed(self) -> None:
+        deployment = _create_deployment("failed")
+        self.assertTrue(deployment.can_be_destroyed)
+
+    def test_pending_cannot_be_destroyed(self) -> None:
+        deployment = _create_deployment("pending")
+        self.assertFalse(deployment.can_be_destroyed)
+
+    def test_destroyed_cannot_be_destroyed(self) -> None:
+        deployment = _create_deployment("destroyed")
+        self.assertFalse(deployment.can_be_destroyed)
+
+    def test_provisioning_cannot_be_destroyed(self) -> None:
+        deployment = _create_deployment("provisioning_node")
+        self.assertFalse(deployment.can_be_destroyed)
+
+
+class TestGetNextNodeNumber(TestCase):
+    """M1/M4: get_next_node_number correctness tests."""
+
+    def test_first_node_returns_1(self) -> None:
+        """When no nodes exist, return 1."""
+        provider, _ = CloudProvider.objects.get_or_create(
+            code="NUM",
+            defaults={
+                "name": "Number Test Provider",
+                "provider_type": "hetzner",
+                "is_active": True,
+            },
+        )
+        region, _ = NodeRegion.objects.get_or_create(
+            provider=provider,
+            normalized_code="num1",
+            defaults={
+                "name": "Number Region",
+                "provider_region_id": "num1",
+                "country_code": "de",
+                "city": "Test",
+                "is_active": True,
+            },
+        )
+        result = NodeDeployment.get_next_node_number("prd", "sha", provider, region)
+        self.assertEqual(result, 1)
+
+    def test_sequential_numbering(self) -> None:
+        """Node numbers increment sequentially."""
+        deployment = _create_deployment("completed")
+        provider = deployment.provider
+        region = deployment.region
+
+        result = NodeDeployment.get_next_node_number(
+            deployment.environment, deployment.node_type, provider, region
+        )
+        # Should be one more than the existing node
+        self.assertEqual(result, deployment.node_number + 1)

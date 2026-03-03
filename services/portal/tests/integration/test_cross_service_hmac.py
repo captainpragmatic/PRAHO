@@ -52,6 +52,7 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
                 'success': True,
                 'user': {
                     'id': 42,
+                    'customer_id': 42,
                     'email': 'integration@example.com',
                     'is_active': True
                 },
@@ -316,6 +317,82 @@ class CrossServiceHMACIntegrationTestCase(SimpleTestCase):
             self.assertEqual(len(signature), 64, f"{method} signature should be 64 hex chars")
             self.assertTrue(all(c in '0123456789abcdef' for c in signature.lower()),
                            f"{method} signature should be hexadecimal")
+
+
+class CrossServiceHMACResponseExtractionTestCase(SimpleTestCase):
+    """H18: Tests that verify customer_id is properly extracted from HMAC-signed responses."""
+
+    @override_settings(
+        PLATFORM_API_SECRET="integration-test-hmac-secret-key-2024",
+        PORTAL_ID="portal-integration-test",
+        PLATFORM_API_BASE_URL="http://localhost:8000",
+        PLATFORM_API_TIMEOUT=10,
+    )
+    def test_customer_id_extracted_from_hmac_response(self):
+        """Verify customer_id is extracted from the Platform's HMAC-authenticated response."""
+        client = PlatformAPIClient()
+
+        with patch("requests.request") as mock_request:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "success": True,
+                "user": {
+                    "id": 77,
+                    "customer_id": 42,
+                    "email": "customer@example.com",
+                    "is_active": True,
+                },
+                "authenticated": True,
+            }
+            mock_response.headers = {"X-Portal-Auth": "hmac-verified"}
+            mock_request.return_value = mock_response
+
+            result = client.authenticate_customer("customer@example.com", "password123")
+
+            # The key assertion: customer_id must be extracted from the nested user object
+            self.assertIsNotNone(result)
+            self.assertTrue(result["valid"])
+            self.assertEqual(result["customer_id"], 42)
+            # user_id should also be extracted
+            self.assertEqual(result["user_id"], 77)
+            # Full customer data must be available
+            self.assertEqual(result["customer_data"]["email"], "customer@example.com")
+
+    @override_settings(
+        PLATFORM_API_SECRET="integration-test-hmac-secret-key-2024",
+        PORTAL_ID="portal-integration-test",
+        PLATFORM_API_BASE_URL="http://localhost:8000",
+        PLATFORM_API_TIMEOUT=10,
+    )
+    def test_hmac_response_missing_customer_id_backward_compat(self):
+        """Older Platform responses without customer_id should still work (backward compat)."""
+        client = PlatformAPIClient()
+
+        with patch("requests.request") as mock_request:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            # Simulate an older Platform that doesn't include customer_id in user dict
+            mock_response.json.return_value = {
+                "success": True,
+                "user": {
+                    "id": 99,
+                    "email": "legacy@example.com",
+                    "is_active": True,
+                },
+                "authenticated": True,
+            }
+            mock_response.headers = {}
+            mock_request.return_value = mock_response
+
+            result = client.authenticate_customer("legacy@example.com", "password123")
+
+            # Should still succeed — customer_id is None but doesn't crash
+            self.assertIsNotNone(result)
+            self.assertTrue(result["valid"])
+            self.assertIsNone(result["customer_id"])
+            # user_id should still be extracted from 'id'
+            self.assertEqual(result["user_id"], 99)
 
 
 class CrossServiceHMACFailureRecoveryTestCase(SimpleTestCase):

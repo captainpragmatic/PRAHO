@@ -6,6 +6,7 @@ from decimal import Decimal
 from io import BytesIO
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -86,9 +87,9 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertIsNotNone(company_info['cui'])
         self.assertIsNotNone(company_info['email'])
 
-        # Test specific known values from project
-        self.assertEqual(company_info['name'], 'PRAHO Platform')
-        self.assertEqual(company_info['cui'], 'RO12345678')
+        # Test that values match current project settings (not hard-coded defaults)
+        self.assertEqual(company_info['name'], settings.COMPANY_NAME)
+        self.assertEqual(company_info['cui'], settings.COMPANY_CUI)
 
     @override_settings(
         COMPANY_NAME='Test Company',

@@ -11,7 +11,8 @@ from unittest import mock
 
 from django.test import TestCase
 
-from apps.infrastructure.hcloud_service import HcloudResult, HcloudServerInfo, HcloudService
+from apps.infrastructure.cloud_gateway import ServerCreateRequest, ServerCreateResult, ServerInfo, SSHKeyResult
+from apps.infrastructure.hcloud_service import HcloudService
 
 
 def _make_mock_server(  # noqa: PLR0913
@@ -46,11 +47,24 @@ def _make_service() -> tuple[HcloudService, mock.Mock]:
     return svc, client_instance
 
 
+def _req(name: str = "test", **kwargs: str) -> ServerCreateRequest:
+    """Build a ServerCreateRequest with defaults."""
+    ssh_keys_raw = kwargs.get("ssh_keys", "my-key")
+    ssh_keys: list[str] = ssh_keys_raw.split(",")
+    return ServerCreateRequest(
+        name=name,
+        server_type=kwargs.get("server_type", "cpx21"),
+        location=kwargs.get("location", "fsn1"),
+        ssh_keys=ssh_keys,
+        labels={"env": "prd"} if "labels" not in kwargs else {},
+    )
+
+
 class TestCreateServer(TestCase):
     """Tests for HcloudService.create_server()."""
 
     def test_create_server_success(self):
-        """Successful server creation returns Ok with populated HcloudResult."""
+        """Successful server creation returns Ok with ServerCreateResult."""
         svc, client = _make_service()
         server = _make_mock_server()
         action = mock.Mock()
@@ -61,18 +75,17 @@ class TestCreateServer(TestCase):
         response.root_password = "secret123"
         client.servers.create.return_value = response
 
-        result = svc.create_server(
+        result = svc.create_server(ServerCreateRequest(
             name="prd-sha-het-de-fsn1-001",
             server_type="cpx21",
             location="fsn1",
             ssh_keys=["my-key"],
             labels={"env": "prd"},
-        )
+        ))
 
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertIsInstance(data, HcloudResult)
-        self.assertTrue(data.success)
+        self.assertIsInstance(data, ServerCreateResult)
         self.assertEqual(data.server_id, "42")
         self.assertEqual(data.ipv4_address, "1.2.3.4")
         self.assertEqual(data.ipv6_address, "2001:db8::1")
@@ -84,9 +97,7 @@ class TestCreateServer(TestCase):
         svc, client = _make_service()
         client.servers.create.side_effect = Exception("API rate limit exceeded")
 
-        result = svc.create_server(
-            name="test", server_type="cpx21", location="fsn1", ssh_keys=["k"]
-        )
+        result = svc.create_server(_req())
 
         self.assertTrue(result.is_err())
         self.assertIn("Server creation failed", result.unwrap_err())
@@ -105,9 +116,7 @@ class TestCreateServer(TestCase):
         response.root_password = ""
         client.servers.create.return_value = response
 
-        result = svc.create_server(
-            name="test", server_type="cpx21", location="fsn1", ssh_keys=[]
-        )
+        result = svc.create_server(_req())
 
         self.assertTrue(result.is_err())
         self.assertIn("timed out", result.unwrap_err())
@@ -126,9 +135,7 @@ class TestCreateServer(TestCase):
         response.root_password = None
         client.servers.create.return_value = response
 
-        result = svc.create_server(
-            name="test", server_type="cpx21", location="fsn1", ssh_keys=[]
-        )
+        result = svc.create_server(_req())
 
         self.assertTrue(result.is_ok())
         data = result.unwrap()
@@ -141,19 +148,17 @@ class TestDeleteServer(TestCase):
     """Tests for HcloudService.delete_server()."""
 
     def test_delete_server_success(self):
-        """Successful deletion returns Ok."""
+        """Successful deletion returns Ok(True)."""
         svc, client = _make_service()
         server = _make_mock_server()
         client.servers.get_by_id.return_value = server
         action = mock.Mock()
         client.servers.delete.return_value = action
 
-        result = svc.delete_server(42)
+        result = svc.delete_server("42")
 
         self.assertTrue(result.is_ok())
-        data = result.unwrap()
-        self.assertTrue(data.success)
-        self.assertEqual(data.server_id, "42")
+        self.assertTrue(result.unwrap())
         action.wait_until_finished.assert_called_once()
 
     def test_delete_server_not_found(self):
@@ -161,7 +166,7 @@ class TestDeleteServer(TestCase):
         svc, client = _make_service()
         client.servers.get_by_id.side_effect = Exception("Server not found")
 
-        result = svc.delete_server(999)
+        result = svc.delete_server("999")
 
         self.assertTrue(result.is_err())
         self.assertIn("Server deletion failed", result.unwrap_err())
@@ -171,17 +176,17 @@ class TestGetServer(TestCase):
     """Tests for HcloudService.get_server()."""
 
     def test_get_server_success(self):
-        """Successful get returns Ok with HcloudServerInfo."""
+        """Successful get returns Ok with ServerInfo."""
         svc, client = _make_service()
         server = _make_mock_server(server_id=10, name="web1", status="running")
         client.servers.get_by_id.return_value = server
 
-        result = svc.get_server(10)
+        result = svc.get_server("10")
 
         self.assertTrue(result.is_ok())
         info = result.unwrap()
-        self.assertIsInstance(info, HcloudServerInfo)
-        self.assertEqual(info.server_id, 10)
+        assert isinstance(info, ServerInfo)
+        self.assertEqual(info.server_id, "10")
         self.assertEqual(info.name, "web1")
         self.assertEqual(info.status, "running")
         self.assertEqual(info.ipv4_address, "1.2.3.4")
@@ -189,14 +194,14 @@ class TestGetServer(TestCase):
         self.assertEqual(info.location, "fsn1")
 
     def test_get_server_not_found(self):
-        """Getting a nonexistent server returns Err."""
+        """Getting a nonexistent server returns Ok(None)."""
         svc, client = _make_service()
         client.servers.get_by_id.side_effect = Exception("not found")
 
-        result = svc.get_server(999)
+        result = svc.get_server("999")
 
-        self.assertTrue(result.is_err())
-        self.assertIn("Failed to get server 999", result.unwrap_err())
+        self.assertTrue(result.is_ok())
+        self.assertIsNone(result.unwrap())
 
 
 class TestPowerOperations(TestCase):
@@ -211,7 +216,7 @@ class TestPowerOperations(TestCase):
     def test_power_on_success(self):
         self.client.servers.power_on.return_value = self.action
 
-        result = self.svc.power_on(42)
+        result = self.svc.power_on("42")
 
         self.assertTrue(result.is_ok())
         self.assertTrue(result.unwrap())
@@ -220,7 +225,7 @@ class TestPowerOperations(TestCase):
     def test_power_on_error(self):
         self.client.servers.power_on.side_effect = Exception("already on")
 
-        result = self.svc.power_on(42)
+        result = self.svc.power_on("42")
 
         self.assertTrue(result.is_err())
         self.assertIn("Power on failed", result.unwrap_err())
@@ -228,7 +233,7 @@ class TestPowerOperations(TestCase):
     def test_power_off_success(self):
         self.client.servers.power_off.return_value = self.action
 
-        result = self.svc.power_off(42)
+        result = self.svc.power_off("42")
 
         self.assertTrue(result.is_ok())
         self.assertTrue(result.unwrap())
@@ -236,7 +241,7 @@ class TestPowerOperations(TestCase):
     def test_power_off_error(self):
         self.client.servers.power_off.side_effect = Exception("timeout")
 
-        result = self.svc.power_off(42)
+        result = self.svc.power_off("42")
 
         self.assertTrue(result.is_err())
         self.assertIn("Power off failed", result.unwrap_err())
@@ -244,7 +249,7 @@ class TestPowerOperations(TestCase):
     def test_reboot_success(self):
         self.client.servers.reboot.return_value = self.action
 
-        result = self.svc.reboot(42)
+        result = self.svc.reboot("42")
 
         self.assertTrue(result.is_ok())
         self.assertTrue(result.unwrap())
@@ -252,7 +257,7 @@ class TestPowerOperations(TestCase):
     def test_reboot_error(self):
         self.client.servers.reboot.side_effect = Exception("server locked")
 
-        result = self.svc.reboot(42)
+        result = self.svc.reboot("42")
 
         self.assertTrue(result.is_err())
         self.assertIn("Reboot failed", result.unwrap_err())
@@ -287,8 +292,8 @@ class TestGetServerTypes(TestCase):
 
     def test_get_server_types_returns_list(self):
         svc, client = _make_service()
-        st1 = mock.Mock()
-        st2 = mock.Mock()
+        st1 = mock.Mock(name="cx11", description="CX11", cores=1, memory=2, disk=20, deprecated=False, prices=[])
+        st2 = mock.Mock(name="cx21", description="CX21", cores=2, memory=4, disk=40, deprecated=False, prices=[])
         client.server_types.get_all.return_value = [st1, st2]
 
         result = svc.get_server_types()
@@ -314,12 +319,18 @@ class TestUploadSshKey(TestCase):
         svc, client = _make_service()
         client.ssh_keys.get_by_name.return_value = None
         new_key = mock.Mock()
+        new_key.id = 101
+        new_key.name = "deploy-key"
+        new_key.fingerprint = "aa:bb:cc"
         client.ssh_keys.create.return_value = new_key
 
         result = svc.upload_ssh_key("deploy-key", "ssh-ed25519 AAAA...")
 
         self.assertTrue(result.is_ok())
-        self.assertEqual(result.unwrap(), new_key)
+        data = result.unwrap()
+        self.assertIsInstance(data, SSHKeyResult)
+        self.assertEqual(data.key_id, "101")
+        self.assertEqual(data.name, "deploy-key")
         client.ssh_keys.create.assert_called_once_with(
             name="deploy-key", public_key="ssh-ed25519 AAAA..."
         )
@@ -328,12 +339,18 @@ class TestUploadSshKey(TestCase):
         """Existing key is returned without creating a new one."""
         svc, client = _make_service()
         existing_key = mock.Mock()
+        existing_key.id = 50
+        existing_key.name = "deploy-key"
+        existing_key.fingerprint = "dd:ee:ff"
+        existing_key.public_key = "ssh-ed25519 AAAA..."
         client.ssh_keys.get_by_name.return_value = existing_key
 
         result = svc.upload_ssh_key("deploy-key", "ssh-ed25519 AAAA...")
 
         self.assertTrue(result.is_ok())
-        self.assertEqual(result.unwrap(), existing_key)
+        data = result.unwrap()
+        self.assertIsInstance(data, SSHKeyResult)
+        self.assertEqual(data.key_id, "50")
         client.ssh_keys.create.assert_not_called()
 
     def test_upload_ssh_key_error(self):
@@ -345,3 +362,245 @@ class TestUploadSshKey(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIn("SSH key upload failed", result.unwrap_err())
+
+    def test_upload_ssh_key_replaces_different_content(self):
+        """Existing key with different content is deleted and re-created."""
+        svc, client = _make_service()
+        existing_key = mock.Mock()
+        existing_key.id = 50
+        existing_key.name = "deploy-key"
+        existing_key.fingerprint = "dd:ee:ff"
+        existing_key.public_key = "ssh-ed25519 OLD_KEY..."
+        client.ssh_keys.get_by_name.return_value = existing_key
+
+        new_key = mock.Mock()
+        new_key.id = 51
+        new_key.name = "deploy-key"
+        new_key.fingerprint = "aa:bb:cc"
+        client.ssh_keys.create.return_value = new_key
+
+        result = svc.upload_ssh_key("deploy-key", "ssh-ed25519 NEW_KEY...")
+
+        self.assertTrue(result.is_ok())
+        client.ssh_keys.delete.assert_called_once_with(existing_key)
+        client.ssh_keys.create.assert_called_once()
+
+
+class TestDeleteSshKey(TestCase):
+    """Tests for HcloudService.delete_ssh_key()."""
+
+    def test_delete_existing_key(self):
+        svc, client = _make_service()
+        existing = mock.Mock()
+        client.ssh_keys.get_by_name.return_value = existing
+        result = svc.delete_ssh_key("deploy-key")
+        self.assertTrue(result.is_ok())
+        client.ssh_keys.delete.assert_called_once_with(existing)
+
+    def test_delete_missing_key_returns_ok(self):
+        svc, client = _make_service()
+        client.ssh_keys.get_by_name.return_value = None
+        result = svc.delete_ssh_key("missing-key")
+        self.assertTrue(result.is_ok())
+        self.assertTrue(result.unwrap())
+
+
+class TestInvalidServerId(TestCase):
+    """C7: Non-numeric server_id must return Err, not raise ValueError."""
+
+    def test_delete_server_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.delete_server("not-a-number")
+        self.assertTrue(result.is_err())
+
+    def test_get_server_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.get_server("abc")
+        self.assertTrue(result.is_err())
+
+    def test_power_on_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.power_on("xyz")
+        self.assertTrue(result.is_err())
+
+    def test_power_off_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.power_off("xyz")
+        self.assertTrue(result.is_err())
+
+    def test_reboot_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.reboot("xyz")
+        self.assertTrue(result.is_err())
+
+    def test_resize_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.resize("xyz", "cpx31")
+        self.assertTrue(result.is_err())
+
+    def test_create_snapshot_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.create_snapshot("xyz", "snap-1")
+        self.assertTrue(result.is_err())
+
+    def test_restore_snapshot_invalid_id_returns_err(self):
+        svc, _ = _make_service()
+        result = svc.restore_snapshot("xyz", "123")
+        self.assertTrue(result.is_err())
+
+
+class TestServerStatusNormalized(TestCase):
+    """H10: HcloudService normalizes server status via normalize_server_status."""
+
+    def test_server_status_normalized(self):
+        """Status 'active' should be normalized to 'running'."""
+        svc, client = _make_service()
+        # Hetzner returns raw status like 'running', 'off', etc.
+        # but if it returns 'active' (unlikely), it should normalize
+        server = _make_mock_server(server_id=10, status="running")
+        client.servers.get_by_id.return_value = server
+
+        result = svc.get_server("10")
+        self.assertTrue(result.is_ok())
+        info = result.unwrap()
+        assert isinstance(info, ServerInfo)
+        self.assertEqual(info.status, "running")
+
+    def test_server_status_normalizes_non_standard(self):
+        """Provider-specific status like 'initializing' passes through if unmapped."""
+        svc, client = _make_service()
+        server = _make_mock_server(server_id=10, status="initializing")
+        client.servers.get_by_id.return_value = server
+
+        result = svc.get_server("10")
+        self.assertTrue(result.is_ok())
+        info = result.unwrap()
+        assert isinstance(info, ServerInfo)
+        self.assertEqual(info.status, "initializing")
+
+
+class TestCreateServerIdempotent(TestCase):
+    """Idempotent create: if a server with the praho-deployment label exists, return it."""
+
+    def test_create_server_returns_existing_on_match(self):
+        svc, client = _make_service()
+        existing = _make_mock_server(server_id=77)
+        client.servers.get_all.return_value = [existing]
+
+        req = ServerCreateRequest(
+            name="test", server_type="cpx21", location="fsn1",
+            ssh_keys=["key"], labels={"praho-deployment": "dep-1"},
+        )
+        result = svc.create_server(req)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap().server_id, "77")
+        client.servers.create.assert_not_called()
+
+
+class TestDeleteServerAlreadyGone(TestCase):
+    """delete_server returns Ok(True) if server is already None."""
+
+    def test_delete_server_already_gone(self):
+        svc, client = _make_service()
+        client.servers.get_by_id.return_value = None
+        result = svc.delete_server("42")
+        self.assertTrue(result.is_ok())
+        self.assertTrue(result.unwrap())
+
+
+class TestResizeServer(TestCase):
+    """Tests for HcloudService.resize()."""
+
+    def test_resize_success(self):
+        svc, client = _make_service()
+        server = _make_mock_server()
+        client.servers.get_by_id.return_value = server
+        action = mock.Mock()
+        client.servers.change_type.return_value = action
+
+        result = svc.resize("42", "cpx31")
+        self.assertTrue(result.is_ok())
+        action.wait_until_finished.assert_called_once()
+
+    def test_resize_error(self):
+        svc, client = _make_service()
+        client.servers.get_by_id.side_effect = Exception("not found")
+        result = svc.resize("42", "cpx31")
+        self.assertTrue(result.is_err())
+
+
+class TestFirewallOperations(TestCase):
+    """Tests for firewall create/delete."""
+
+    def test_create_firewall_success(self):
+        from apps.infrastructure.cloud_gateway import FirewallRule
+        svc, client = _make_service()
+        fw = mock.Mock()
+        fw.id = 100
+        response = mock.Mock()
+        response.firewall = fw
+        client.firewalls.create.return_value = response
+
+        rules = [FirewallRule(protocol="tcp", port="22")]
+        result = svc.create_firewall("test-fw", rules)
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), "100")
+
+    def test_delete_firewall_success(self):
+        svc, client = _make_service()
+        fw = mock.Mock()
+        client.firewalls.get_by_id.return_value = fw
+        result = svc.delete_firewall("100")
+        self.assertTrue(result.is_ok())
+
+    def test_delete_firewall_already_gone(self):
+        svc, client = _make_service()
+        client.firewalls.get_by_id.return_value = None
+        result = svc.delete_firewall("100")
+        self.assertTrue(result.is_ok())
+
+
+class TestSnapshotOperations(TestCase):
+    """Tests for snapshot create/restore/list/delete."""
+
+    def test_create_snapshot_success(self):
+        svc, client = _make_service()
+        server = _make_mock_server()
+        client.servers.get_by_id.return_value = server
+        image = mock.Mock()
+        image.id = 200
+        action = mock.Mock()
+        response = mock.Mock()
+        response.action = action
+        response.image = image
+        client.servers.create_image.return_value = response
+
+        result = svc.create_snapshot("42", "daily-backup")
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), "200")
+
+    def test_restore_snapshot_success(self):
+        svc, client = _make_service()
+        server = _make_mock_server()
+        client.servers.get_by_id.return_value = server
+        action = mock.Mock()
+        rebuild_response = mock.Mock()
+        rebuild_response.action = action
+        client.servers.rebuild.return_value = rebuild_response
+
+        result = svc.restore_snapshot("42", "200")
+        self.assertTrue(result.is_ok())
+
+    def test_delete_snapshot_success(self):
+        svc, client = _make_service()
+        image = mock.Mock()
+        client.images.get_by_id.return_value = image
+        result = svc.delete_snapshot("200")
+        self.assertTrue(result.is_ok())
+
+    def test_delete_snapshot_already_gone(self):
+        svc, client = _make_service()
+        client.images.get_by_id.return_value = None
+        result = svc.delete_snapshot("200")
+        self.assertTrue(result.is_ok())

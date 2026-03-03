@@ -20,7 +20,7 @@ class TestExtractPricing(TestCase):
 
     def test_extracts_fsn1_pricing(self) -> None:
         """Picks fsn1 pricing when available."""
-        prices = [
+        prices: list[dict[str, object]] = [
             {
                 "location": "nbg1",
                 "price_hourly": {"net": "0.0050", "gross": "0.0060"},

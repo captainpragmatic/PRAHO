@@ -37,8 +37,6 @@ from apps.infrastructure.models import (
 from apps.infrastructure.provider_config import (
     PROVIDER_CONFIG,
     get_provider_config,
-    get_terraform_variables_for_deployment,
-    map_terraform_outputs_to_deployment,
 )
 
 User = get_user_model()
@@ -164,19 +162,22 @@ class TestDeploymentPipelineIntegration(TestCase):
 
         deployment = create_test_deployment(self.infra)
 
-        # Mock all external dependencies
-        with mock.patch("shutil.which", return_value="/usr/bin/terraform"):
-            with mock.patch(
-                "apps.infrastructure.terraform_service.TerraformService.generate_deployment_config"
-            ) as mock_gen:
-                mock_gen.return_value = Err("Test config error")
+        # Mock all external dependencies — deployment uses cloud gateway
+        with mock.patch(
+            "apps.infrastructure.deployment_service.get_cloud_gateway"
+        ) as mock_gateway_factory, mock.patch(
+            "apps.infrastructure.deployment_service.get_ansible_service"
+        ):
+            mock_gw = mock.MagicMock()
+            mock_gw.create_server.return_value = Err("Test provisioning error")
+            mock_gateway_factory.return_value = mock_gw
 
-                service = NodeDeploymentService()
-                result = service.deploy_node(
-                    deployment=deployment,
-                    credentials={"api_token": "test"},
-                    user=self.infra["user"],
-                )
+            service = NodeDeploymentService()
+            result = service.deploy_node(
+                deployment=deployment,
+                credentials={"api_token": "test"},
+                user=self.infra["user"],
+            )
 
         # Check that logs were created
         logs = NodeDeploymentLog.objects.filter(deployment=deployment)
@@ -226,103 +227,33 @@ class TestDeploymentPipelineIntegration(TestCase):
 # =============================================================================
 
 
-class TestTerraformServiceIntegration(TestCase):
+class TestProviderConfigIntegration(TestCase):
     """
-    Integration tests for terraform service with provider_config.
+    Integration tests for provider config with SDK-based provisioning.
 
-    Tests that terraform configurations are correctly generated
-    for different cloud providers.
+    All providers now use native SDKs (ADR-0027), not Terraform.
     """
 
-    def setUp(self):
-        self.hetzner_infra = create_test_infrastructure("hetzner")
-        self.digitalocean_infra = create_test_infrastructure("digitalocean")
-
-    def test_hetzner_uses_hcloud_sdk_not_terraform(self):
-        """Hetzner provisioning uses hcloud SDK, not Terraform (ADR-0027)."""
-        config = get_provider_config("hetzner")
-        assert config is not None
-
-        # Hetzner should not have terraform-specific keys
-        self.assertNotIn("terraform_module", config)
-        self.assertNotIn("terraform_provider", config)
-        self.assertNotIn("terraform_vars", config)
-
-        # But should still have credential and output mappings
-        self.assertEqual(config["credential_key"], "hcloud_token")
-        self.assertIn("server_id", config["output_mappings"])
-
-    @mock.patch("shutil.which")
-    def test_terraform_config_generation_digitalocean(self, mock_which):
-        """Test terraform config is correctly generated for DigitalOcean."""
-        from apps.infrastructure.terraform_service import TerraformService
-
-        mock_which.return_value = "/usr/bin/terraform"
-        deployment = create_test_deployment(self.digitalocean_infra)
-
-        with mock.patch("pathlib.Path.mkdir"), \
-             mock.patch("pathlib.Path.write_text"), \
-             mock.patch.object(type(deployment), "save"):
-
-            service = TerraformService()
-            result = service.generate_deployment_config(
-                deployment=deployment,
-                ssh_public_key="ssh-ed25519 AAAA... test@example.com",
-                credentials={"do_token": "test-do-token"},
-                cloudflare_api_token="cf-token",
-            )
-
-            # Should succeed
-            self.assertTrue(result.is_ok(), f"Config generation failed: {result}")
-
-    def test_terraform_output_mapping_integration(self):
-        """
-        Test that terraform outputs are correctly mapped to deployment fields.
-
-        This tests the integration between terraform_service and provider_config.
-        """
-        deployment = create_test_deployment(self.hetzner_infra)
-
-        # Simulate terraform outputs in the format Terraform returns
-        # Hetzner uses 'server_id' which maps to 'external_node_id'
-        terraform_outputs = {
-            "server_id": {"value": "98765"},
-            "ipv4_address": {"value": "10.0.0.1"},
-            "ipv6_address": {"value": "2001:db8::100"},
-            "status": {"value": "running"},
-        }
-
-        # Map outputs to deployment
-        map_terraform_outputs_to_deployment(
-            provider_type="hetzner",
-            outputs=terraform_outputs,
-            deployment=deployment,
-        )
-
-        # Verify mapping - use correct field names from model
-        self.assertEqual(deployment.external_node_id, "98765")
-        self.assertEqual(deployment.ipv4_address, "10.0.0.1")
-        self.assertEqual(deployment.ipv6_address, "2001:db8::100")
-
-    def test_terraform_variables_generation_all_providers(self):
-        """
-        Test that terraform variables are correctly generated for providers
-        that use Terraform. Hetzner uses hcloud SDK and has no terraform_vars.
-        """
-        for provider_type in PROVIDER_CONFIG.keys():
+    def test_all_providers_use_sdk_not_terraform(self):
+        """All providers should use SDK-based provisioning (ADR-0027)."""
+        for provider_type in PROVIDER_CONFIG:
             with self.subTest(provider=provider_type):
                 config = get_provider_config(provider_type)
-                assert config is not None, f"No config for {provider_type}"
+                assert config is not None
+                # No terraform keys should exist in any provider config
+                self.assertNotIn("terraform_module", config)
+                self.assertNotIn("terraform_provider", config)
+                self.assertNotIn("terraform_vars", config)
 
-                if "terraform_vars" not in config:
-                    continue  # Hetzner uses hcloud SDK
-
-                tf_vars = config["terraform_vars"]
-                self.assertIn(
-                    "api_token_var",
-                    tf_vars,
-                    f"Missing api_token_var for {provider_type}"
-                )
+    def test_all_providers_have_credential_and_output_config(self):
+        """Each provider should have credentials and output mappings."""
+        for provider_type in PROVIDER_CONFIG:
+            with self.subTest(provider=provider_type):
+                config = get_provider_config(provider_type)
+                assert config is not None
+                self.assertIn("credential_key", config)
+                self.assertIn("output_mappings", config)
+                self.assertTrue(len(config["output_mappings"]) > 0)
 
 
 # =============================================================================
@@ -374,30 +305,29 @@ class TestCredentialFlowIntegration(TestCase):
 
         deployment = create_test_deployment(self.infra)
 
-        with mock.patch("shutil.which", return_value="/usr/bin/terraform"):
-            with mock.patch(
-                "apps.infrastructure.deployment_service.NodeDeploymentService.deploy_node"
-            ) as mock_deploy:
-                mock_deploy.return_value = Ok(mock.MagicMock(
-                    success=True,
-                    deployment_id=deployment.id,
-                    stages_completed=["init"],
-                ))
+        mock_service = mock.MagicMock()
+        mock_service.deploy_node.return_value = Ok(mock.MagicMock(
+            success=True,
+            deployment_id=deployment.id,
+            stages_completed=["init"],
+        ))
 
-                result = deploy_node_task(
-                    deployment_id=deployment.id,
-                    credentials={"api_token": "task-token"},
-                    cloudflare_api_token="cf-token",
-                    user_id=self.infra["user"].id,
-                )
+        with mock.patch(
+            "apps.infrastructure.tasks.get_deployment_service", return_value=mock_service
+        ), mock.patch(
+            "apps.infrastructure.provider_config.get_provider_token"
+        ) as mock_token:
+            mock_token.return_value = Ok("task-token")
 
-                # Verify deploy_node was called with credentials
-                mock_deploy.assert_called_once()
-                call_kwargs = mock_deploy.call_args[1]
-                self.assertEqual(
-                    call_kwargs["credentials"],
-                    {"api_token": "task-token"}
-                )
+            provider = self.infra["provider"]
+            result = deploy_node_task(
+                deployment_id=deployment.id,
+                provider_id=provider.id,
+                user_id=self.infra["user"].id,
+            )
+
+            # Verify deploy_node was called
+            mock_service.deploy_node.assert_called_once()
 
 
 # =============================================================================
@@ -412,30 +342,6 @@ class TestMultiProviderIntegration(TestCase):
     Verifies that the system can handle deployments to different
     cloud providers using the same code paths.
     """
-
-    def test_all_configured_providers_have_terraform_modules(self):
-        """
-        Test that non-hetzner providers in PROVIDER_CONFIG have corresponding
-        terraform modules defined. Hetzner uses hcloud SDK directly.
-        """
-        from apps.infrastructure.provider_config import get_terraform_module_path
-
-        base_path = "/var/lib/praho/terraform/modules"
-
-        for provider_type, config in PROVIDER_CONFIG.items():
-            with self.subTest(provider=provider_type):
-                if "terraform_module" not in config:
-                    # Hetzner uses hcloud SDK, no terraform module
-                    module_path = get_terraform_module_path(provider_type, base_path)
-                    self.assertIsNone(module_path)
-                    continue
-                module_path = get_terraform_module_path(provider_type, base_path)
-                assert module_path is not None, f"No terraform module path for {provider_type}"
-                self.assertIn(
-                    config["terraform_module"],
-                    module_path,
-                    f"Module path doesn't contain expected module name"
-                )
 
     def test_provider_cli_commands_are_well_formed(self):
         """
@@ -610,10 +516,10 @@ class TestTaskQueueIntegration(TestCase):
         with mock.patch("django_q.tasks.async_task") as mock_async:
             mock_async.return_value = "task-id-123"
 
+            provider = self.infra["provider"]
             task_id = queue_deploy_node(
                 deployment_id=deployment.id,
-                credentials={"api_token": "test"},
-                cloudflare_api_token="cf-token",
+                provider_id=provider.id,
                 user_id=self.infra["user"].id,
             )
 
@@ -630,8 +536,8 @@ class TestTaskQueueIntegration(TestCase):
             # Deployment ID should be passed
             self.assertEqual(call_args[0][1], deployment.id)
 
-            # Credentials should be passed
-            self.assertEqual(call_args[0][2], {"api_token": "test"})
+            # Provider ID should be passed
+            self.assertEqual(call_args[0][2], provider.id)
 
     def test_queue_destroy_node_creates_task(self):
         """
@@ -646,7 +552,7 @@ class TestTaskQueueIntegration(TestCase):
 
             task_id = queue_destroy_node(
                 deployment_id=deployment.id,
-                credentials={"api_token": "test"},
+                provider_id=deployment.provider_id,
                 user_id=self.infra["user"].id,
             )
 
@@ -682,7 +588,7 @@ class TestTaskQueueIntegration(TestCase):
 
                     task_id = queue_fn(
                         deployment_id=deployment.id,
-                        credentials={"api_token": "test"},
+                        provider_id=deployment.provider_id,
                         user_id=self.infra["user"].id,
                     )
 

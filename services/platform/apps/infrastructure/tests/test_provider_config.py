@@ -6,24 +6,24 @@ Comprehensive tests for the config-driven multi-provider infrastructure system.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from unittest import mock
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from apps.infrastructure.provider_config import (
     PROVIDER_CONFIG,
+    PROVIDER_SYNC_REGISTRY,
     ProviderCommandResult,
     get_cli_tool_path,
     get_provider_config,
+    get_provider_sync_fn,
+    get_provider_token,
     get_supported_providers,
-    get_terraform_provider_block,
-    get_terraform_variables_for_deployment,
     is_cli_available,
     is_provider_supported,
-    map_terraform_outputs_to_deployment,
     run_provider_command,
+    store_provider_token,
     validate_provider_prerequisites,
 )
 
@@ -39,12 +39,6 @@ class TestProviderConfigData(TestCase):
             "cli",
             "output_mappings",
         ]
-        terraform_keys = [
-            "terraform_module",
-            "terraform_provider",
-            "terraform_provider_version",
-            "terraform_vars",
-        ]
 
         for provider, config in PROVIDER_CONFIG.items():
             for key in common_required_keys:
@@ -53,18 +47,11 @@ class TestProviderConfigData(TestCase):
                     config,
                     f"Provider '{provider}' missing required key: {key}",
                 )
-            # Terraform keys only required for non-hetzner providers
-            if provider != "hetzner":
-                for key in terraform_keys:
-                    self.assertIn(
-                        key,
-                        config,
-                        f"Provider '{provider}' missing required key: {key}",
-                    )
 
     def test_all_providers_have_required_cli_commands(self):
         """Each provider CLI config must have standard power commands."""
-        required_commands = ["power_off", "power_on", "reboot", "resize", "delete"]
+        # AWS uses modify-instance-attribute for resize (multi-step), so resize is optional
+        required_commands = ["power_off", "power_on", "reboot", "delete"]
 
         for provider, config in PROVIDER_CONFIG.items():
             cli = config.get("cli", {})
@@ -81,21 +68,6 @@ class TestProviderConfigData(TestCase):
                     cli[cmd],
                     list,
                     f"Provider '{provider}' CLI command '{cmd}' must be a list",
-                )
-
-    def test_all_providers_have_required_terraform_vars(self):
-        """Non-hetzner providers must have required terraform variable mappings."""
-        required_vars = ["api_token_var", "server_type_var", "region_var", "image_default"]
-
-        for provider, config in PROVIDER_CONFIG.items():
-            if "terraform_vars" not in config:
-                continue  # Hetzner uses hcloud SDK, no terraform_vars
-            tf_vars = config["terraform_vars"]
-            for var in required_vars:
-                self.assertIn(
-                    var,
-                    tf_vars,
-                    f"Provider '{provider}' terraform_vars missing: {var}",
                 )
 
     def test_all_providers_have_output_mappings(self):
@@ -123,7 +95,9 @@ class TestProviderConfigData(TestCase):
         self.assertIn("hetzner", providers)
         self.assertIn("digitalocean", providers)
         self.assertIn("vultr", providers)
-        self.assertIn("linode", providers)
+        self.assertIn("aws", providers)
+        # Linode is NOT a supported provider (no entry in PROVIDER_CONFIG)
+        self.assertNotIn("linode", providers)
 
     def test_no_hardcoded_credentials_in_config(self):
         """Ensure no actual credentials are hardcoded in config."""
@@ -168,17 +142,15 @@ class TestGetProviderConfig(TestCase):
     """Tests for get_provider_config function."""
 
     def test_get_hetzner_config(self):
-        """Test retrieving Hetzner configuration (uses hcloud SDK, not Terraform)."""
+        """Test retrieving Hetzner configuration (uses hcloud SDK)."""
         config = get_provider_config("hetzner")
         assert config is not None
         self.assertEqual(config["credential_key"], "hcloud_token")
-        self.assertNotIn("terraform_module", config)
 
     def test_get_digitalocean_config(self):
         """Test retrieving DigitalOcean configuration."""
         config = get_provider_config("digitalocean")
         assert config is not None
-        self.assertEqual(config["terraform_module"], "digitalocean")
         self.assertEqual(config["credential_key"], "do_token")
 
     def test_get_unknown_provider_returns_none(self):
@@ -203,11 +175,10 @@ class TestIsProviderSupported(TestCase):
         self.assertTrue(is_provider_supported("hetzner"))
         self.assertTrue(is_provider_supported("digitalocean"))
         self.assertTrue(is_provider_supported("vultr"))
-        self.assertTrue(is_provider_supported("linode"))
+        self.assertTrue(is_provider_supported("aws"))
 
     def test_unsupported_providers(self):
         """Test unsupported providers return False."""
-        self.assertFalse(is_provider_supported("aws"))
         self.assertFalse(is_provider_supported("gcp"))
         self.assertFalse(is_provider_supported("azure"))
         self.assertFalse(is_provider_supported(""))
@@ -371,81 +342,6 @@ class TestRunProviderCommand(TestCase):
         self.assertIn("cpx41", call_args)
 
 
-class TestTerraformHelpers(TestCase):
-    """Tests for Terraform-related helper functions."""
-
-    def test_get_terraform_provider_block_hetzner(self):
-        """Hetzner uses hcloud SDK, so terraform provider block is None."""
-        block = get_terraform_provider_block("hetzner")
-        self.assertIsNone(block)
-
-    def test_get_terraform_provider_block_digitalocean(self):
-        """Test Terraform provider block generation for DigitalOcean."""
-        block = get_terraform_provider_block("digitalocean")
-        assert block is not None
-        self.assertIn("digitalocean/digitalocean", block)
-
-    def test_get_terraform_provider_block_unknown_returns_none(self):
-        """Unknown provider should return None for provider block."""
-        block = get_terraform_provider_block("unknown")
-        self.assertIsNone(block)
-
-
-class TestOutputMappings(TestCase):
-    """Tests for map_terraform_outputs_to_deployment function."""
-
-    def test_maps_outputs_to_deployment_fields(self):
-        """Test that Terraform outputs are correctly mapped to deployment."""
-        # Create a mock deployment
-        class MockDeployment:
-            external_node_id = None
-            ipv4_address = None
-            ipv6_address = None
-
-        deployment = MockDeployment()
-        outputs = {
-            "server_id": "12345",
-            "ipv4_address": "1.2.3.4",
-            "ipv6_address": "2001:db8::1",
-        }
-
-        map_terraform_outputs_to_deployment("hetzner", outputs, deployment)  # type: ignore[arg-type]
-
-        self.assertEqual(deployment.external_node_id, "12345")
-        self.assertEqual(deployment.ipv4_address, "1.2.3.4")
-        self.assertEqual(deployment.ipv6_address, "2001:db8::1")
-
-    def test_handles_nested_terraform_output_format(self):
-        """Test handling of nested Terraform output format with 'value' key."""
-        class MockDeployment:
-            external_node_id = None
-            ipv4_address = None
-
-        deployment = MockDeployment()
-        # Terraform sometimes returns outputs as {"value": "actual_value"}
-        outputs = {
-            "server_id": {"value": "12345"},
-            "ipv4_address": {"value": "1.2.3.4"},
-        }
-
-        map_terraform_outputs_to_deployment("hetzner", outputs, deployment)  # type: ignore[arg-type]
-
-        self.assertEqual(deployment.external_node_id, "12345")
-        self.assertEqual(deployment.ipv4_address, "1.2.3.4")
-
-    def test_unknown_provider_does_nothing(self):
-        """Unknown provider should not modify deployment."""
-        class MockDeployment:
-            external_node_id = "original"
-
-        deployment = MockDeployment()
-        outputs = {"server_id": "new_value"}
-
-        map_terraform_outputs_to_deployment("unknown", outputs, deployment)  # type: ignore[arg-type]
-
-        self.assertEqual(deployment.external_node_id, "original")
-
-
 class TestSecurityConsiderations(TestCase):
     """Security-focused tests."""
 
@@ -552,8 +448,7 @@ class TestValidateProviderPrerequisites(TestCase):
     """Tests for validate_provider_prerequisites()."""
 
     @mock.patch("apps.infrastructure.provider_config.shutil.which")
-    @mock.patch("apps.infrastructure.provider_config.Path.is_dir", return_value=True)
-    def test_valid_provider_passes(self, mock_is_dir, mock_which):
+    def test_valid_provider_passes(self, mock_which):
         """All prerequisites met should return Ok."""
         mock_which.side_effect = lambda tool: f"/usr/bin/{tool}"
 
@@ -562,7 +457,6 @@ class TestValidateProviderPrerequisites(TestCase):
         details = result.unwrap()
         self.assertEqual(details["provider"], "hetzner")
         self.assertIn("cli_tool", details)
-        self.assertIn("terraform_path", details)
 
     def test_unknown_provider_fails(self):
         """Unknown provider should return Err."""
@@ -577,43 +471,113 @@ class TestValidateProviderPrerequisites(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("CLI tool", result.unwrap_err())
 
-    @mock.patch("apps.infrastructure.provider_config.shutil.which")
-    def test_missing_terraform_fails(self, mock_which):
-        """Missing terraform binary should return Err."""
-        # CLI tool found, but terraform not found
-        def side_effect(tool):
-            if tool == "hcloud":
-                return "/usr/bin/hcloud"
-            return None  # terraform not found
 
-        mock_which.side_effect = side_effect
+class TestSupportedProvidersNoLinode(TestCase):
+    """Test that linode is NOT in the supported providers list (M6 fix)."""
 
-        result = validate_provider_prerequisites("hetzner")
+    def test_supported_providers_no_linode(self):
+        """Linode has no entry in PROVIDER_CONFIG; it must not appear as supported."""
+        providers = get_supported_providers()
+        self.assertNotIn("linode", providers)
+
+    def test_linode_not_supported(self):
+        """is_provider_supported returns False for linode."""
+        self.assertFalse(is_provider_supported("linode"))
+
+    def test_exactly_four_providers_configured(self):
+        """Only hetzner, digitalocean, vultr, aws are configured."""
+        expected = {"hetzner", "digitalocean", "vultr", "aws"}
+        self.assertEqual(set(PROVIDER_CONFIG.keys()), expected)
+
+
+class TestGetProviderToken(TestCase):
+    """Tests for get_provider_token vault + env fallback."""
+
+    def _make_provider(self, credential_identifier: str = "hcloud_token") -> mock.Mock:
+        provider = mock.Mock()
+        provider.provider_type = "hetzner"
+        provider.name = "Hetzner Cloud"
+        provider.credential_identifier = credential_identifier
+        return provider
+
+    @mock.patch("apps.common.credential_vault.get_credential_vault")
+    def test_get_provider_token_vault_success(self, mock_get_vault):
+        """Token returned from vault when credential_identifier is set."""
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        vault = mock.Mock()
+        vault.get_credential.return_value = Ok(("hetzner", "secret-token-123", {}))
+        mock_get_vault.return_value = vault
+
+        provider = self._make_provider("hcloud_token")
+        result = get_provider_token(provider)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), "secret-token-123")
+
+    @mock.patch("apps.common.credential_vault.get_credential_vault")
+    def test_get_provider_token_vault_failure(self, mock_get_vault):
+        """Err when vault lookup fails and credential_identifier is set."""
+        from apps.common.types import Err  # noqa: PLC0415
+
+        vault = mock.Mock()
+        vault.get_credential.return_value = Err("not found")
+        mock_get_vault.return_value = vault
+
+        provider = self._make_provider("hcloud_token")
+        result = get_provider_token(provider)
+
         self.assertTrue(result.is_err())
-        self.assertIn("Terraform binary not found", result.unwrap_err())
+        self.assertIn("Credential vault lookup failed", result.unwrap_err())
 
-    @mock.patch("apps.infrastructure.provider_config.shutil.which")
-    @mock.patch("apps.infrastructure.provider_config.Path.is_dir", return_value=False)
-    def test_missing_terraform_module_fails(self, mock_is_dir, mock_which):
-        """Missing terraform module directory should return Err."""
-        mock_which.side_effect = lambda tool: f"/usr/bin/{tool}"
+    @mock.patch.dict("os.environ", {"HCLOUD_TOKEN": "env-token-456"})
+    def test_get_provider_token_env_fallback(self):
+        """Falls back to env var when no credential_identifier."""
+        provider = self._make_provider(credential_identifier="")
+        result = get_provider_token(provider)
 
-        result = validate_provider_prerequisites("hetzner")
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), "env-token-456")
+
+
+class TestStoreProviderToken(TestCase):
+    """Tests for store_provider_token."""
+
+    def _make_provider(self) -> mock.Mock:
+        provider = mock.Mock()
+        provider.provider_type = "hetzner"
+        provider.name = "Hetzner Cloud"
+        provider.code = "het"
+        provider.credential_identifier = "hcloud_token"
+        return provider
+
+    @mock.patch("apps.common.credential_vault.get_credential_vault")
+    def test_store_provider_token_success(self, mock_get_vault):
+        """Successfully stores token in vault."""
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        vault = mock.Mock()
+        vault.store_credential.return_value = Ok("hcloud_token")
+        mock_get_vault.return_value = vault
+
+        provider = self._make_provider()
+        result = store_provider_token(provider, "new-token-789")
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), "hcloud_token")
+        vault.store_credential.assert_called_once()
+
+    @mock.patch("apps.common.credential_vault.get_credential_vault")
+    def test_store_provider_token_failure(self, mock_get_vault):
+        """Returns Err when vault store fails."""
+        from apps.common.types import Err  # noqa: PLC0415
+
+        vault = mock.Mock()
+        vault.store_credential.return_value = Err("vault sealed")
+        mock_get_vault.return_value = vault
+
+        provider = self._make_provider()
+        result = store_provider_token(provider, "token")
+
         self.assertTrue(result.is_err())
-        self.assertIn("Terraform module not found", result.unwrap_err())
-
-    def test_all_configured_providers_have_terraform_modules(self):
-        """Non-hetzner providers in PROVIDER_CONFIG should have terraform module dirs on disk."""
-        from pathlib import Path
-
-        modules_base = Path(__file__).parent.parent.parent.parent / "infrastructure" / "terraform" / "modules"
-
-        for provider_type, config in PROVIDER_CONFIG.items():
-            if "terraform_module" not in config:
-                continue  # Hetzner uses hcloud SDK, no terraform module
-            module_name = config["terraform_module"]
-            module_path = modules_base / module_name
-            self.assertTrue(
-                module_path.is_dir(),
-                f"Terraform module directory missing for provider '{provider_type}': {module_path}",
-            )
+        self.assertIn("vault sealed", result.unwrap_err())
