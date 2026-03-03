@@ -108,8 +108,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "paginator_data": paginator_data,
             "pagination_params": pagination_params,
             # Shared header component data
-            "page_title": _("My Support Tickets"),
-            "page_title_mobile": _("Support Tickets"),
+            "page_title": _("Tickets"),
+            "page_title_mobile": _("Tickets"),
             "page_subtitle": _("Get help with your hosting services"),
             "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
             "header_stats": [
@@ -137,8 +137,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "paginator_data": paginator_data,
             "pagination_params": "",
             # Shared template component data
-            "page_title": _("My Support Tickets"),
-            "page_title_mobile": _("Support Tickets"),
+            "page_title": _("Tickets"),
+            "page_title_mobile": _("Tickets"),
             "page_subtitle": _("Get help with your hosting services"),
             "search_placeholder": _("Search by ticket number, subject, description, status, or date…"),
             "header_stats": [
