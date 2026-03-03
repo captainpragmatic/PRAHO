@@ -550,6 +550,24 @@ def cents_to_currency(value: int | float | Decimal) -> Decimal:
 
 
 @register.filter
+def as_percentage(value: TemplateNumeric) -> Decimal:
+    """
+    Convert a proportion (0.21) to a percentage (21).
+
+    Usage:
+        {{ line.tax_rate|as_percentage|floatformat:0 }}%  -> 21% (from 0.21)
+        {{ rate|as_percentage|floatformat:1 }}%            -> 5.0% (from 0.05)
+    """
+    if value is None:
+        return Decimal("0")
+
+    try:
+        return Decimal(str(value)) * Decimal("100")
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        return Decimal("0")
+
+
+@register.filter
 def multiply(value: TemplateNumeric, multiplier: TemplateNumeric) -> Decimal:
     """
     Multiply two numbers safely with decimal precision

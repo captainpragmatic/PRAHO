@@ -136,7 +136,7 @@ class DomainValidationService:
     """
 
     @staticmethod
-    def validate_domain_name(  # noqa: PLR0911 - Domain validation requires multiple early returns
+    def validate_domain_name(
         domain_name: str,
     ) -> tuple[bool, str]:
         """🔍 Validate domain name format and characters"""
@@ -519,7 +519,7 @@ class DomainOrderService:
     """
 
     @staticmethod
-    def create_domain_order_item(  # Domain order requires multiple configuration parameters  # noqa: PLR0913
+    def create_domain_order_item(  # Domain order requires multiple configuration parameters
         order: Order,
         domain_name: str,
         action: str,

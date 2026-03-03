@@ -34,7 +34,7 @@ HMAC_NONCE_MIN_LENGTH = 32
 HMAC_NONCE_MAX_LENGTH = 256
 
 # Import logging utilities for request ID propagation
-from apps.common.logging import clear_request_id, set_request_id  # noqa: E402
+from apps.common.logging import clear_request_id, set_request_id
 
 # Import for session security - handle potential circular import gracefully
 try:
@@ -392,7 +392,7 @@ class PortalServiceHMACMiddleware:
             cache.set(key, current, timeout=self._rl_window)
         return current > self._rl_max_calls
 
-    def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:  # noqa: C901, PLR0912, PLR0915
+    def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:
         """
         Validate HMAC signature from portal service.
         Returns (is_valid, error_message)
@@ -545,7 +545,7 @@ class PortalServiceHMACMiddleware:
                 # Allow session-authenticated staff users to access specific API paths
                 # that platform templates call via browser fetch() (no HMAC headers).
                 # Restricted to an explicit allowlist to prevent broad bypass.
-                STAFF_SESSION_ALLOWED_PREFIXES = [  # noqa: N806
+                STAFF_SESSION_ALLOWED_PREFIXES = [
                     "/api/customers/",  # Ticket form: fetch customer services
                 ]
                 if (

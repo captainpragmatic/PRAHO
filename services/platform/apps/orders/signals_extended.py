@@ -119,7 +119,7 @@ def handle_service_group_management(sender: type[OrderItem], instance: OrderItem
             bundle_group = instance.config["bundle_group"]
 
             try:
-                from apps.provisioning.services import ServiceGroupService  # noqa: PLC0415
+                from apps.provisioning.services import ServiceGroupService
 
                 # Create or update service group for this bundle
                 result = ServiceGroupService.create_or_update_bundle_group(  # type: ignore[attr-defined]
@@ -255,7 +255,7 @@ def handle_order_item_service_cleanup(sender: type[OrderItem], instance: OrderIt
     try:
         if instance.service:
             try:
-                from apps.provisioning.services import ServiceManagementService  # noqa: PLC0415
+                from apps.provisioning.services import ServiceManagementService
 
                 # Mark service for review if order item is deleted
                 result = ServiceManagementService.mark_service_for_review(  # type: ignore[call-arg]
@@ -297,7 +297,7 @@ def handle_external_system_sync(sender: type[Order], instance: Order, created: b
 
             for integration in active_integrations:
                 try:
-                    from apps.integrations.services import ExternalSyncService  # noqa: PLC0415
+                    from apps.integrations.services import ExternalSyncService
 
                     # Queue sync job for each active integration
                     ExternalSyncService.queue_order_sync(  # type: ignore[attr-defined]
@@ -321,7 +321,7 @@ def handle_external_system_sync(sender: type[Order], instance: Order, created: b
 def _update_customer_order_history(order: Order, event_type: str) -> None:
     """Update customer order statistics and payment history"""
     try:
-        from apps.customers.services import CustomerStatsService  # noqa: PLC0415
+        from apps.customers.services import CustomerStatsService
 
         CustomerStatsService.update_order_stats(  # type: ignore[attr-defined]
             customer=order.customer, event_type=event_type, order_total=order.total_cents, order_date=order.created_at
@@ -366,7 +366,7 @@ def _cleanup_generated_documents(order: Order) -> None:
 def _cancel_order_webhooks(order: Order) -> None:
     """Cancel any pending webhook deliveries for the order"""
     try:
-        from apps.integrations.models import WebhookDelivery  # noqa: PLC0415
+        from apps.integrations.models import WebhookDelivery
 
         # Cancel pending webhooks related to this order
         # Use customer and event type since WebhookDelivery doesn't use GenericForeignKey

@@ -195,7 +195,7 @@ class PragmaticHostDeployment:
                 return True
 
             cmd = [sys.executable, str(backup_script)]
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Backup failed: {result.stderr}")
@@ -215,7 +215,7 @@ class PragmaticHostDeployment:
 
             cmd = ["git", "clone", "--branch", branch, "--depth", "1", self.config["git_repo"], str(release_dir)]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Git clone failed: {result.stderr}")
@@ -286,7 +286,7 @@ class PragmaticHostDeployment:
 
             cmd = [self.config["pip_path"], "install", "--upgrade", "--requirement", str(requirements_file)]
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), capture_output=True, text=True)  # noqa: S603
+            result = subprocess.run(cmd, check=False, cwd=str(release_dir), capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Pip install failed: {result.stderr}")
@@ -309,7 +309,7 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)  # noqa: S603
+            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Migrations failed: {result.stderr}")
@@ -332,7 +332,7 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)  # noqa: S603
+            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)
 
             if result.returncode != 0:
                 logger.error(f"Static files collection failed: {result.stderr}")
@@ -377,7 +377,7 @@ class PragmaticHostDeployment:
                     logger.info(f"Restarting {service}...")
 
                     cmd = ["sudo", "systemctl", "restart", service]
-                    result = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+                    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
 
                     if result.returncode != 0:
                         logger.error(f"Failed to restart {service}: {result.stderr}")
@@ -470,7 +470,7 @@ class PragmaticHostDeployment:
 
             for release in to_remove:
                 logger.info(f"Removing old release: {release.name}")
-                subprocess.run(["rm", "-rf", str(release)], check=False)  # noqa: S603, S607
+                subprocess.run(["rm", "-rf", str(release)], check=False)
 
             logger.info(f"Cleaned up {len(to_remove)} old releases")
 

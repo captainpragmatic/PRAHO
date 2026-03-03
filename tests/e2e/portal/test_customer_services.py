@@ -675,3 +675,75 @@ def test_services_pagination(monitored_customer_page: Page) -> None:
         print(f"    ✅ Pagination: {pagination_text.first.inner_text()}")
 
     print("  ✅ Services pagination validated")
+
+
+# ===============================================================================
+# QA FIX REGRESSION TESTS
+# ===============================================================================
+
+
+def test_service_detail_shows_actual_dates_not_calculating(monitored_customer_page: Page) -> None:
+    """M3/M4: Service detail page shows real dates (start date, renewal date), not 'Calculating...'."""
+    page = monitored_customer_page
+    print("🧪 Testing service detail shows real dates, not 'Calculating...'")
+
+    # Navigate to services list
+    page.goto(f"{BASE_URL}/services/")
+    page.wait_for_load_state("networkidle")
+
+    # Click first service row
+    first_row: Locator = page.locator("tr[onclick], div[onclick]").first
+    if first_row.count() == 0:
+        print("  [i] No services found for this customer, skipping date check")
+        return
+
+    first_row.click()
+    page.wait_for_load_state("networkidle")
+
+    current_url: str = page.url
+    if not re.search(r"/services/\d+/", current_url):
+        print(f"  [i] Did not land on service detail URL: {current_url}")
+        return
+
+    print(f"    ✅ On service detail: {current_url}")
+
+    page_text: str = page.text_content("body") or ""
+
+    # "Calculating..." must not appear on the fully-loaded page
+    assert "Calculating..." not in page_text, (
+        "Service detail must not show 'Calculating...' after page load — "
+        "dates must be resolved by the backend, not deferred to the client"
+    )
+    print("    ✅ No 'Calculating...' placeholder text found")
+
+    # Also check that "---" placeholders are not excessive (a few may be ok for genuinely unknown values)
+    placeholder_count = page_text.count("---")
+    assert placeholder_count < 5, (
+        f"Service detail has {placeholder_count} '---' placeholders, "
+        "suggesting dates are not being populated from the backend"
+    )
+
+    # Look for date-related fields and verify they have real values
+    date_fields: Locator = page.locator(
+        'dt:has-text("Start"), dt:has-text("Renewal"), dt:has-text("Expiry"), '
+        'dt:has-text("Since"), dt:has-text("Dată"), dt:has-text("Reînnoire")'
+    )
+    if date_fields.count() > 0:
+        for field in date_fields.all():
+            value_el: Locator = field.locator("xpath=following-sibling::dd[1]")
+            if value_el.count() == 0:
+                continue
+            value_text: str = (value_el.first.text_content() or "").strip()
+            if not value_text or value_text in ("—", "-", "N/A", ""):
+                # Optional: log but don't fail for fields that may legitimately be empty
+                print(f"    [i] Date field '{(field.text_content() or '').strip()}' has empty value")
+                continue
+            # Value should not be "Calculating..."
+            assert "Calculating" not in value_text, (
+                f"Date field should not show 'Calculating...', got: '{value_text}'"
+            )
+            # If it has a real date value, it should contain a year
+            if re.search(r"\d", value_text):
+                print(f"    ✅ Date field has value: '{value_text}'")
+
+    print("  ✅ Service detail dates test completed")

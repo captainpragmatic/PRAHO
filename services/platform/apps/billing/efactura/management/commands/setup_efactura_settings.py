@@ -40,12 +40,12 @@ class Command(BaseCommand):
         dry_run = options.get("dry_run", False)
 
         try:
-            from apps.settings.models import SystemSetting  # noqa: PLC0415
+            from apps.settings.models import SystemSetting
         except ImportError:
             self.stderr.write(self.style.ERROR("Settings app not available. Please ensure apps.settings is installed."))
             return
 
-        from apps.billing.efactura.settings import (  # noqa: PLC0415
+        from apps.billing.efactura.settings import (
             EFACTURA_DEFAULTS,
             EFacturaSettingKeys,
         )

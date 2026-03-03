@@ -505,7 +505,7 @@ class SettingsService:
         Returns:
             Result with updated setting or validation error
         """
-        from django.db import IntegrityError  # noqa: PLC0415
+        from django.db import IntegrityError
 
         try:
             # Infer data type

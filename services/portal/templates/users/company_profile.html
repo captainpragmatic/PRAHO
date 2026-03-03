@@ -77,8 +77,8 @@
                     <div>
                         <dt class="text-sm font-medium text-slate-400 mb-1">{% trans "Company Name" %}</dt>
                         <dd class="text-lg text-white">
-                            {% if company_data.name %}
-                                {{ company_data.name }}
+                            {% if company_data.company_name %}
+                                {{ company_data.company_name }}
                             {% else %}
                                 <span class="text-slate-500 italic">{% trans "Not specified" %}</span>
                             {% endif %}

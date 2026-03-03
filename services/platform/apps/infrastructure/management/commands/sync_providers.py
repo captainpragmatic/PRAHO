@@ -50,7 +50,7 @@ class Command(BaseCommand):
             self._sync_provider(provider_type, dry_run=dry_run)
 
     def _sync_provider(self, provider_type: str, dry_run: bool = False) -> None:
-        from apps.infrastructure.models import CloudProvider  # noqa: PLC0415
+        from apps.infrastructure.models import CloudProvider
 
         self.stdout.write(f"🌐 Syncing {provider_type} provider catalog...")
 

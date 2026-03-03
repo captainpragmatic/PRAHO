@@ -146,7 +146,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def create_payment_intent_direct(  # noqa: PLR0913
+    def create_payment_intent_direct(
         order_id: str,
         amount_cents: int,
         currency: str = "RON",
@@ -199,7 +199,7 @@ class PaymentService:
                     customer_obj = None
                     if customer_id:
                         try:
-                            from apps.customers.models import (  # noqa: PLC0415
+                            from apps.customers.models import (
                                 Customer,
                             )
 
@@ -339,7 +339,7 @@ class PaymentService:
             SubscriptionResult with subscription details
         """
         try:
-            from apps.customers.models import Customer  # noqa: PLC0415
+            from apps.customers.models import Customer
 
             customer = Customer.objects.get(id=customer_id)
 
@@ -387,7 +387,7 @@ class PaymentService:
                 # Create local Subscription record linked to gateway subscription
                 subscription_id = result.get("subscription_id", "unknown")
                 try:
-                    from apps.billing.subscription_service import SubscriptionService  # noqa: PLC0415
+                    from apps.billing.subscription_service import SubscriptionService
 
                     latest_sub = customer.subscriptions.first() if customer.subscriptions.exists() else None
                     if latest_sub is not None:
@@ -507,7 +507,7 @@ class PaymentService:
                             order.save(update_fields=["status"])
                             logger.info(f"✅ Order {order.order_number} completed after payment")
                             # Send confirmation email
-                            from apps.notifications.services import EmailService  # noqa: PLC0415
+                            from apps.notifications.services import EmailService
 
                             EmailService.send_invoice_paid(payment.invoice) if payment.invoice else None
                     except Order.DoesNotExist:
@@ -537,7 +537,7 @@ class PaymentService:
 
                 # Trigger dunning process for the invoice
                 if payment.invoice:
-                    from apps.billing.tasks import start_dunning_process_async  # noqa: PLC0415
+                    from apps.billing.tasks import start_dunning_process_async
 
                     start_dunning_process_async(str(payment.invoice.id))
                     logger.info(f"⚠️ [Dunning] Triggered for invoice {payment.invoice.number}")
@@ -604,7 +604,7 @@ class PaymentService:
 
         try:
             # Delegate to RecurringBillingService which has the real implementation
-            from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
+            from apps.billing.subscription_service import RecurringBillingService
 
             billing_result = RecurringBillingService.run_billing_cycle()
             results["processed"] = billing_result["subscriptions_processed"]

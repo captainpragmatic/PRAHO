@@ -21,7 +21,7 @@ MAX_SESSION_AGE_HOURS = _DEFAULT_MAX_SESSION_AGE_HOURS
 
 def get_max_session_age_hours() -> int:
     """Get max session age hours from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("security.max_session_age_seconds", _DEFAULT_MAX_SESSION_AGE_HOURS)
 

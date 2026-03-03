@@ -725,7 +725,7 @@ class SecureCustomerUserService:
     # ===============================================================================
 
     @classmethod
-    def create_user_for_customer_legacy(  # noqa: PLR0913
+    def create_user_for_customer_legacy(
         cls,
         customer: Customer,
         first_name: str = "",
@@ -747,7 +747,7 @@ class SecureCustomerUserService:
         return cls.create_user_for_customer(request, **kwargs)
 
     @classmethod
-    def link_existing_user_legacy(  # noqa: PLR0913
+    def link_existing_user_legacy(
         cls,
         user: User,
         customer: Customer,
@@ -764,7 +764,7 @@ class SecureCustomerUserService:
         return cls.link_existing_user(request, **kwargs)
 
     @classmethod
-    def invite_user_to_customer_legacy(  # noqa: PLR0913
+    def invite_user_to_customer_legacy(
         cls,
         inviter: User,
         invitee_email: str,

@@ -48,7 +48,7 @@ _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
 def get_registration_rate_limit() -> int:
     """Get registration rate limit per IP from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "security.registration_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
@@ -57,7 +57,7 @@ def get_registration_rate_limit() -> int:
 
 def get_invitation_rate_limit() -> int:
     """Get invitation rate limit per user from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "security.invitation_rate_limit_per_user", _DEFAULT_RATE_LIMIT_INVITATION_PER_USER
@@ -704,7 +704,7 @@ class BusinessLogicValidator:
         # Rate limiting for enumeration prevention
         cache_key = f"company_check:{request_ip or 'unknown'}"
         current_checks = cache.get(cache_key, 0)
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         if current_checks >= SettingsService.get_integer_setting(
             "security.company_check_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP
@@ -845,7 +845,7 @@ def log_security_event(
     """
     details = details or {}
     try:
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         metadata = {**details}
         if user_email:

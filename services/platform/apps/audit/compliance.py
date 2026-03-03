@@ -39,14 +39,14 @@ PARTIAL_SCORE_THRESHOLD = _DEFAULT_PARTIAL_SCORE_THRESHOLD
 
 def get_compliant_score_threshold() -> int:
     """Get compliant score threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("audit.compliant_score_threshold", _DEFAULT_COMPLIANT_SCORE_THRESHOLD)
 
 
 def get_partial_score_threshold() -> int:
     """Get partial score threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("audit.partial_score_threshold", _DEFAULT_PARTIAL_SCORE_THRESHOLD)
 
@@ -427,7 +427,7 @@ class ComplianceReportService:
         Returns:
             ComplianceReport object
         """
-        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.audit.models import AuditEvent
 
         logger.info(
             f"📊 [Compliance] Generating {report_type.value} report for {period_start.date()} to {period_end.date()}"
@@ -649,7 +649,7 @@ class ComplianceReportService:
 
     def _generate_log_integrity(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate log integrity verification section"""
-        from apps.audit.siem import get_siem_service  # noqa: PLC0415
+        from apps.audit.siem import get_siem_service
 
         siem = get_siem_service()
 
@@ -690,7 +690,7 @@ class ComplianceReportService:
 
     def _generate_retention_compliance(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate retention compliance section"""
-        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.audit.models import AuditEvent
 
         retention_config = getattr(settings, "AUDIT_LOG_RETENTION", {})
 
@@ -1011,7 +1011,7 @@ class LogRetentionService:
 
     def _process_category(self, category: str, config: dict[str, Any]) -> dict[str, int]:
         """Process retention for a specific category"""
-        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.audit.models import AuditEvent
 
         retention_days = config.get("retention_days", 365)
         action = config.get("action", "archive")
@@ -1088,7 +1088,7 @@ class LogRetentionService:
 
     def get_retention_status(self) -> dict[str, Any]:
         """Get current retention status for all categories"""
-        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.audit.models import AuditEvent
 
         status = {}
 

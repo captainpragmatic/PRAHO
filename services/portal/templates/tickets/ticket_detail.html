@@ -6,6 +6,12 @@
 
 {% block content %}
 <div class="px-4">
+    <div class="mb-4">
+        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
+            ← {% trans 'Back to Tickets' %}
+        </a>
+    </div>
+
     <h1 class="text-3xl font-bold text-white mb-4">
         {% trans 'Ticket' %}
         {% if ticket.ticket_number %}
@@ -32,12 +38,6 @@
         {% include 'tickets/partials/status_and_comments.html' with replies=replies %}
     </div>
     <!-- End dynamic content -->
-
-    <div class="mt-6">
-        <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
-            ← {% trans 'Back to Tickets' %}
-        </a>
-    </div>
 </div>
 
 <!-- Enhanced JavaScript for HTMX replies -->

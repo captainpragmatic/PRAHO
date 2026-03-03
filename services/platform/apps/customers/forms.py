@@ -1188,7 +1188,7 @@ class CustomerEditForm(forms.Form):
 
             # Billing address logic
             # Check if customer has a separate billing address
-            from .contact_models import CustomerAddress  # noqa: PLC0415
+            from .contact_models import CustomerAddress
 
             separate_billing_address = CustomerAddress.objects.filter(
                 customer=customer, address_type="billing", is_current=True
@@ -1322,7 +1322,7 @@ class CustomerEditForm(forms.Form):
 
         return cleaned_data
 
-    def save(self, user: User | None = None) -> Customer:  # noqa: PLR0915
+    def save(self, user: User | None = None) -> Customer:
         """Update customer and all related profiles"""
         data = self.cleaned_data
 
@@ -1369,7 +1369,7 @@ class CustomerEditForm(forms.Form):
         # Update or create primary address
         primary_address = self.customer.get_primary_address()
         if not primary_address:
-            from .contact_models import CustomerAddress  # noqa: PLC0415
+            from .contact_models import CustomerAddress
 
             primary_address = CustomerAddress.objects.create(
                 customer=self.customer, address_type="primary", is_current=True
@@ -1385,7 +1385,7 @@ class CustomerEditForm(forms.Form):
         primary_address.save()
 
         # Handle billing address
-        from .contact_models import CustomerAddress  # noqa: PLC0415
+        from .contact_models import CustomerAddress
 
         billing_same_as_primary = data.get("billing_same_as_primary", True)
         existing_billing_address = CustomerAddress.objects.filter(

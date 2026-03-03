@@ -125,7 +125,8 @@ def _can_edit_company_profile(request: HttpRequest, customer_id: str) -> bool:
 def _handle_totp_setup_get(request: HttpRequest, customer_id: str, customer_email: str) -> HttpResponse:
     """Handle GET request for TOTP setup"""
     try:
-        totp_data = api_client.setup_totp_mfa(customer_id)
+        user_id = request.session.get("user_id")
+        totp_data = api_client.setup_totp_mfa(customer_id, user_id=user_id)
         if not totp_data:
             return _handle_mfa_error_redirect(
                 request, "users:mfa_management", _("Failed to initialize MFA setup. Please try again.")
@@ -152,7 +153,8 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
         return _handle_mfa_error_redirect(request, "users:mfa_setup_totp", _("Please enter the verification code."))
 
     try:
-        success = api_client.verify_totp_mfa(customer_id, token)
+        user_id = request.session.get("user_id")
+        success = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
         if success:
             logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
             return _handle_mfa_success_redirect(
@@ -282,7 +284,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
 
                 else:
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
-                    messages.error(request, _("Invalid email address or password. Please try again."))
+                    form.add_error(None, _("Invalid email address or password. Please try again."))
 
             except PlatformAPIError as e:
                 logger.error(f"🔥 [Portal Auth] Platform API error during login: {e}")

@@ -40,14 +40,14 @@ MAX_FILES_DISPLAYED = _DEFAULT_MAX_FILES_DISPLAYED
 
 def get_file_hash_cache_timeout() -> int:
     """Get file hash cache timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("audit.file_hash_cache_timeout", _DEFAULT_FILE_HASH_CACHE_TIMEOUT)
 
 
 def get_max_files_displayed() -> int:
     """Get max files displayed from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("audit.max_files_displayed", _DEFAULT_MAX_FILES_DISPLAYED)
 
@@ -289,11 +289,11 @@ def _send_integrity_escalation_alert(results: dict[str, Any]) -> None:
         logger.critical(f"[Integrity Alert] Created critical alert {alert.id} for compromised audit data")
 
         # Send email notification to admins
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         if SettingsService.get_boolean_setting("audit.notify_on_critical_alerts", True):
             try:
-                from apps.notifications.services import NotificationService  # noqa: PLC0415
+                from apps.notifications.services import NotificationService
 
                 NotificationService.send_admin_alert(
                     subject="Audit Data Integrity Compromised",
@@ -346,11 +346,11 @@ def _create_file_integrity_alert(results: dict[str, Any]) -> None:
         logger.warning(f"[File Integrity Alert] Created alert {alert.id} for {len(changed_files)} file changes")
 
         # Send email notification to admins
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         if SettingsService.get_boolean_setting("audit.notify_on_file_integrity_alerts", True):
             try:
-                from apps.notifications.services import NotificationService  # noqa: PLC0415
+                from apps.notifications.services import NotificationService
 
                 NotificationService.send_admin_alert(
                     subject=f"File Integrity: {len(changed_files)} Critical Files Modified",

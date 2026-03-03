@@ -40,7 +40,7 @@ security_logger = logging.getLogger("security")
 def _handle_secure_error(request: HttpRequest, error: Exception, operation: str, user_id: int | None = None) -> None:
     """🔒 Handle errors securely without leaking sensitive information"""
     # Use logger from re-export module so patches work correctly
-    from . import views as views_module  # noqa: PLC0415
+    from . import views as views_module
 
     logger = views_module.security_logger
 

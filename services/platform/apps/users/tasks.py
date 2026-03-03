@@ -476,7 +476,7 @@ def cleanup_expired_password_reset_tokens_async() -> str:
 
 def setup_user_security_scheduled_tasks() -> dict[str, str]:
     """Set up all user security scheduled tasks."""
-    from django_q.models import Schedule as ScheduleModel  # noqa: PLC0415
+    from django_q.models import Schedule as ScheduleModel
 
     tasks_created = {}
 
@@ -539,9 +539,9 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
             name="user-password-reset-cleanup",
             cluster="praho-cluster",
         )
-        tasks_created["password_reset_cleanup"] = "created"  # noqa: S105
+        tasks_created["password_reset_cleanup"] = "created"
     else:
-        tasks_created["password_reset_cleanup"] = "already_exists"  # noqa: S105
+        tasks_created["password_reset_cleanup"] = "already_exists"
 
     logger.info(f"✅ [UserSecurity] Scheduled tasks setup: {tasks_created}")
     return tasks_created

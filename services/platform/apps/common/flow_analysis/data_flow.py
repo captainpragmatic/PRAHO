@@ -603,7 +603,7 @@ class DataFlowAnalyzer(BaseFlowAnalyzer, ast.NodeVisitor):
         all_sinks = SQL_SINKS | XSS_SINKS | COMMAND_SINKS | PATH_SINKS | DESERIALIZATION_SINKS
         return func_name in all_sinks or any(sink in func_name for sink in all_sinks)
 
-    def _get_taint_source(self, node: ast.expr) -> str | None:  # noqa: PLR0911
+    def _get_taint_source(self, node: ast.expr) -> str | None:
         """Get the name of the tainted variable in an expression."""
         if isinstance(node, ast.Name):
             if node.id in self.tainted_vars:

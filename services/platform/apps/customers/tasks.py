@@ -33,14 +33,14 @@ _RECENCY_THRESHOLD_LOW = 90
 
 def get_task_soft_time_limit() -> int:
     """Get task soft time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("customers.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
 
 
 def get_task_time_limit() -> int:
     """Get task time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("customers.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
@@ -58,7 +58,7 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
     logger.info(f"💬 [CustomerFeedback] Processing feedback for note {note_id}")
 
     try:
-        from apps.customers.models import CustomerNote  # noqa: PLC0415
+        from apps.customers.models import CustomerNote
 
         note = CustomerNote.objects.get(id=note_id)
 
@@ -107,7 +107,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
     logger.info(f"🚀 [CustomerOnboarding] Starting onboarding for customer {customer_id}")
 
     try:
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
         customer = Customer.objects.get(id=customer_id)
 
@@ -169,14 +169,14 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
     logger.info(f"📊 [CustomerAnalytics] Updating analytics for customer {customer_id}")
 
     try:
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
         customer = Customer.objects.get(id=customer_id)
 
-        from django.db.models import Sum  # noqa: PLC0415
+        from django.db.models import Sum
 
-        from apps.billing.invoice_models import Invoice  # noqa: PLC0415
-        from apps.orders.models import Order  # noqa: PLC0415
+        from apps.billing.invoice_models import Invoice
+        from apps.orders.models import Order
 
         total_orders = Order.objects.filter(customer=customer).count()
 
@@ -242,9 +242,9 @@ def cleanup_inactive_customers() -> dict[str, Any]:
         cache.set(lock_key, True, 3600)
 
         try:
-            from datetime import timedelta  # noqa: PLC0415
+            from datetime import timedelta
 
-            from apps.customers.models import Customer  # noqa: PLC0415
+            from apps.customers.models import Customer
 
             # Find customers inactive for more than 1 year
             cutoff_date = timezone.now() - timedelta(days=365)
@@ -309,7 +309,7 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
     logger.info(f"📧 [CustomerWelcome] Sending welcome email to customer {customer_id}")
 
     try:
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
         customer = Customer.objects.get(id=customer_id)
 
@@ -345,7 +345,7 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
 
 def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
     """Calculate customer engagement score (0-100) based on weighted factors."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     order_weight = SettingsService.get_integer_setting("customers.engagement_order_weight", 40)
     recency_weight = SettingsService.get_integer_setting("customers.engagement_recency_weight", 30)

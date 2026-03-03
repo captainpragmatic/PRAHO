@@ -38,28 +38,28 @@ CACHE_TIMEOUT_VERY_LONG = _DEFAULT_CACHE_TIMEOUT_VERY_LONG
 
 def get_cache_timeout_short() -> int:
     """Get cache timeout short from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.cache_timeout_short", _DEFAULT_CACHE_TIMEOUT_SHORT)
 
 
 def get_cache_timeout_medium() -> int:
     """Get cache timeout medium from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.cache_timeout_medium", _DEFAULT_CACHE_TIMEOUT_MEDIUM)
 
 
 def get_cache_timeout_long() -> int:
     """Get cache timeout long from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.cache_timeout_long", _DEFAULT_CACHE_TIMEOUT_LONG)
 
 
 def get_cache_timeout_very_long() -> int:
     """Get cache timeout very long from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.cache_timeout_very_long", _DEFAULT_CACHE_TIMEOUT_VERY_LONG)
 
@@ -208,7 +208,7 @@ class CacheService:
         """Generate a cache key for a queryset count."""
         # Create a hash of the query SQL
         sql = str(queryset.query)
-        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]  # noqa: S324
+        query_hash = hashlib.md5(sql.encode()).hexdigest()[:12]
         model = queryset.model._meta.label
         return f"{self.PREFIX_QUERYSET}:count:{model}:{query_hash}"
 
@@ -219,7 +219,7 @@ _cache_service: CacheService | None = None
 
 def get_cache_service() -> CacheService:
     """Get the global cache service instance."""
-    global _cache_service  # noqa: PLW0603
+    global _cache_service
     if _cache_service is None:
         _cache_service = CacheService()
     return _cache_service
@@ -310,7 +310,7 @@ def cached_queryset(
                     key_parts.append(f"{k}={str(v)[:50]}")
 
             key = f"{CacheService.PREFIX_QUERYSET}:{':'.join(key_parts)}"
-            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]  # noqa: S324
+            key_hash = hashlib.md5(key.encode()).hexdigest()[:16]
             cache_key = f"qs:{func.__name__}:{key_hash}"
 
             cached_result = cache.get(cache_key)

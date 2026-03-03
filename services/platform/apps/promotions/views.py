@@ -109,8 +109,8 @@ class ValidateCouponView(View):
     Rate limited to prevent brute-force attacks on coupon codes.
     """
 
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:  # noqa: PLR0911
-        from apps.orders.models import Order  # noqa: PLC0415
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
+        from apps.orders.models import Order
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -231,7 +231,7 @@ class ApplyCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order  # noqa: PLC0415
+        from apps.orders.models import Order
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -328,7 +328,7 @@ class RemoveCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order  # noqa: PLC0415
+        from apps.orders.models import Order
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -406,7 +406,7 @@ class AvailableCouponsView(View):
     """
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order  # noqa: PLC0415
+        from apps.orders.models import Order
 
         order_id = request.GET.get("order_id")
 
@@ -516,7 +516,7 @@ class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order  # noqa: PLC0415
+        from apps.orders.models import Order
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -902,7 +902,7 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
 
     def _get_max_batch_size(self) -> int:
         """Get max batch size from SettingsService at runtime."""
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return SettingsService.get_integer_setting("promotions.max_coupon_batch_size", self._DEFAULT_MAX_BATCH_SIZE)
 

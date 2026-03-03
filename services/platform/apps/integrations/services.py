@@ -35,7 +35,7 @@ class ExternalSyncService:
         Returns:
             Dictionary with sync results
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         if data_type not in ExternalSyncService.SYNC_TYPES:
             logger.warning(f"⚠️ [ExternalSync] Unknown data type: {data_type}")
@@ -86,7 +86,7 @@ class ExternalSyncService:
     @staticmethod
     def _sync_customer(customer_id: str) -> dict[str, Any]:
         """Sync customer data to external systems."""
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -108,7 +108,7 @@ class ExternalSyncService:
     @staticmethod
     def _sync_invoice(invoice_id: str) -> dict[str, Any]:
         """Sync invoice data to external systems."""
-        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.billing.models import Invoice
 
         try:
             invoice = Invoice.objects.get(id=invoice_id)
@@ -136,7 +136,7 @@ class ExternalSyncService:
     @staticmethod
     def _sync_payment(payment_id: str) -> dict[str, Any]:
         """Sync payment data to external systems."""
-        from apps.billing.models import Payment  # noqa: PLC0415
+        from apps.billing.models import Payment
 
         try:
             payment = Payment.objects.get(id=payment_id)
@@ -160,7 +160,7 @@ class ExternalSyncService:
     @staticmethod
     def _sync_service(service_id: str) -> dict[str, Any]:
         """Sync service data to external systems."""
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.provisioning.models import Service
 
         try:
             service = Service.objects.get(id=service_id)
@@ -183,7 +183,7 @@ class ExternalSyncService:
     @staticmethod
     def _sync_domain(domain_id: str) -> dict[str, Any]:
         """Sync domain data to external systems."""
-        from apps.domains.models import Domain  # noqa: PLC0415
+        from apps.domains.models import Domain
 
         try:
             domain = Domain.objects.get(id=domain_id)

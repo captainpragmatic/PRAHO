@@ -51,7 +51,7 @@ MAX_HEADER_JSON_LENGTH = _DEFAULT_MAX_HEADER_JSON_LENGTH
 
 def get_max_header_json_length() -> int:
     """Get max header json length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
 
@@ -321,7 +321,7 @@ def trace_view(
         def my_view(request):
             return render(request, "template.html")
     """
-    from functools import wraps  # noqa: PLC0415
+    from functools import wraps
 
     def decorator(view_func: Callable[..., Any]) -> Any:
         @wraps(view_func)

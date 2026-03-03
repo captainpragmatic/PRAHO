@@ -122,20 +122,20 @@
                       data-price="{{ price.monthly_price }}"
                       data-setup="{{ price.setup_fee|default:0 }}"
                       selected>
-                {% trans "Monthly" %} - {{ price.monthly_price }} RON/{% trans "month" %}
+                {% trans "Monthly" %} — {{ price.monthly_price }}/mo
               </option>
               {% if price.has_semiannual_discount %}
               <option value="semiannual"
                       data-price="{{ price.semiannual_price }}"
                       data-setup="{{ price.setup_fee|default:0 }}">
-                {% trans "6 Months" %} - {{ price.semiannual_price }} RON {% trans "total" %}
+                {% trans "6 Months" %} — {{ price.semiannual_price }} {% trans "total" %}
               </option>
               {% endif %}
               {% if price.has_annual_discount %}
               <option value="annual"
                       data-price="{{ price.annual_price }}"
                       data-setup="{{ price.setup_fee|default:0 }}">
-                {% trans "12 Months" %} - {{ price.annual_price }} RON {% trans "total" %}
+                {% trans "12 Months" %} — {{ price.annual_price }} {% trans "total" %}
               </option>
               {% endif %}
             </select>

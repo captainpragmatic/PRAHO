@@ -1,0 +1,17 @@
+{% load i18n ui_components %}
+
+<!-- Empty Cart State (returned by calculate_totals_htmx when cart has no items) -->
+<div id="cart-totals" class="p-6 text-center">
+  <div class="text-slate-500 mb-3">
+    {% icon "shopping-cart" size="2xl" css_class="text-slate-500" %}
+  </div>
+  <p class="text-sm text-slate-400 mb-2">
+    {% trans "Your cart is empty" %}
+  </p>
+  <p class="text-xs text-slate-500">
+    {% trans "Add products to your cart to see the order summary." %}
+  </p>
+  <a href="{% url 'orders:product_catalog' %}" class="mt-4 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+    {% trans "Browse Products" %}
+  </a>
+</div>

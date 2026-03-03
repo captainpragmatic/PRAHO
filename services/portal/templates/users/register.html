@@ -284,6 +284,18 @@
             <p class="mt-1 text-sm text-red-400">{{ form.marketing_consent.errors.0 }}</p>
             {% endif %}
           </div>
+
+          <!-- Terms Accepted -->
+          <div class="flex items-start">
+            {{ form.terms_accepted }}
+            <label for="{{ form.terms_accepted.id_for_label }}" class="ml-3 block text-sm text-slate-300">
+              {% trans "I accept the terms and conditions" %}
+              <span class="block text-xs text-slate-400 mt-1">{% trans "Required: Agreement to terms of service." %}</span>
+            </label>
+            {% if form.terms_accepted.errors %}
+            <p class="mt-1 text-sm text-red-400">{{ form.terms_accepted.errors.0 }}</p>
+            {% endif %}
+          </div>
         </div>
 
         <!-- Submit Button -->

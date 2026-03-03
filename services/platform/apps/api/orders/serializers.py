@@ -26,7 +26,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductPrice
-        fields = [  # noqa: RUF012
+        fields = [
             "id",
             "monthly_price",
             "semiannual_price",
@@ -49,7 +49,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
                 logger.warning("🚨 [Sealing] No request context available for sealed price tokens")
                 return None
 
-            from apps.orders.price_sealing import get_client_ip  # noqa: PLC0415
+            from apps.orders.price_sealing import get_client_ip
 
             client_ip = get_client_ip(request)
 
@@ -68,7 +68,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
         except Exception as e:
             # If sealing fails completely, return None
             logger.error(f"🔥 [Sealing] Complete failure in sealed price token generation: {e}")
-            import traceback  # noqa: PLC0415
+            import traceback
 
             logger.error(traceback.format_exc())
             return None
@@ -82,7 +82,7 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = [  # noqa: RUF012
+        fields = [
             "id",
             "slug",
             "name",
@@ -104,7 +104,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = [  # noqa: RUF012
+        fields = [
             "id",
             "slug",
             "name",
@@ -135,7 +135,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = [  # noqa: RUF012
+        fields = [
             "id",
             "product_name",
             "product_type",
@@ -163,7 +163,7 @@ class OrderListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = [  # noqa: RUF012
+        fields = [
             "id",
             "order_number",
             "status",
@@ -190,7 +190,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = [  # noqa: RUF012
+        fields = [
             "id",
             "order_number",
             "status",

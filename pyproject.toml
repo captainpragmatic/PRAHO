@@ -83,6 +83,7 @@ dependencies = [
     "django-ipware>=7.0.1",
     "django-q2>=1.9.0",
     "lxml>=6.0.2",
+    "bleach>=6.3.0",
 ]
 
 # ===============================================================================
@@ -200,6 +201,7 @@ platform = [
     # Server provisioning & SSH
     "paramiko>=4.0.0",
     "hcloud>=2.0.0",
+    "pydo>=0.3.0",
 
     # Monitoring & Logging
     "sentry-sdk[django]>=1.32.0",

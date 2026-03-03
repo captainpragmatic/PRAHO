@@ -104,7 +104,7 @@ EU_COUNTRY_CODES = frozenset(
 def get_invoice_payment_terms_days() -> int:
     """Get invoice payment terms from SettingsService (ADR-0015 cascade)."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         value: int = SettingsService.get_integer_setting("billing.invoice_payment_terms_days", 14)
         return max(1, value)
@@ -129,7 +129,7 @@ _DEFAULT_FUTURE_EVENT_DRIFT_MINUTES = 5
 def get_event_grace_period_hours() -> int:
     """Get grace period for accepting late usage events (hours) from SettingsService."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return max(
             1,
@@ -143,7 +143,7 @@ def get_event_grace_period_hours() -> int:
 def get_future_event_drift_minutes() -> int:
     """Get max time drift allowed for future events (minutes) from SettingsService."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return max(
             1,
@@ -193,7 +193,7 @@ _DEFAULT_ALERT_COOLDOWN_HOURS = 24
 def get_alert_cooldown_hours() -> int:
     """Get hours between repeat notifications for same threshold from SettingsService."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return max(
             1, SettingsService.get_integer_setting("billing.alert_cooldown_hours", _DEFAULT_ALERT_COOLDOWN_HOURS)
@@ -218,7 +218,7 @@ _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS = 10000  # 100 RON
 def get_efactura_minimum_amount_cents() -> int:
     """Get minimum amount for mandatory e-Factura submission from SettingsService."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return max(
             1,
@@ -254,9 +254,9 @@ def get_vat_rate(country_code: str | None = None, fallback: bool = True) -> Deci
     Returns:
         VAT rate as Decimal (e.g., Decimal("0.21") for 21%)
     """
-    from apps.common.tax_service import TaxService  # noqa: PLC0415
+    from apps.common.tax_service import TaxService
 
-    from .tax_models import TaxRule  # noqa: PLC0415
+    from .tax_models import TaxRule
 
     country = (country_code or DEFAULT_COUNTRY_CODE).upper()
     rate = TaxService.get_vat_rate(country, as_decimal=True)
@@ -295,7 +295,7 @@ def get_payment_due_date(issue_date: datetime | None = None) -> datetime:
     Returns:
         datetime: Due date
     """
-    from django.utils import timezone  # noqa: PLC0415
+    from django.utils import timezone
 
     if issue_date is None:
         issue_date = timezone.now()

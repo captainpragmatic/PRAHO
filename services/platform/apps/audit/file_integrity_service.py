@@ -388,7 +388,7 @@ class FileIntegrityMonitoringService:
 
     def _is_excluded(self, relative_path: str) -> bool:
         """Check if a path should be excluded."""
-        from fnmatch import fnmatch  # noqa: PLC0415
+        from fnmatch import fnmatch
 
         return any(fnmatch(relative_path, pattern) for pattern in self.config.exclude_patterns)
 

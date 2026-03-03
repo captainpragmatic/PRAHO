@@ -200,7 +200,7 @@ class EmailSuppressionService:
             return bool(cached)
 
         # Check database
-        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
+        from apps.notifications.models import EmailSuppression
 
         is_suppressed = EmailSuppression.is_suppressed(email)
 
@@ -219,7 +219,7 @@ class EmailSuppressionService:
             reason: Reason for suppression (bounce, complaint, unsubscribe)
             duration_days: How long to suppress (None = permanent)
         """
-        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
+        from apps.notifications.models import EmailSuppression
 
         # Persist to database (source of truth)
         EmailSuppression.suppress(
@@ -245,7 +245,7 @@ class EmailSuppressionService:
     @classmethod
     def unsuppress_email(cls, email: str) -> bool:
         """Remove an email from the suppression list."""
-        from apps.notifications.models import EmailSuppression  # noqa: PLC0415
+        from apps.notifications.models import EmailSuppression
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
@@ -335,8 +335,8 @@ class EmailService:
     @staticmethod
     def _send_email(recipient: str, subject: str, body: str, html_body: str | None = None) -> bool:
         """Internal method to send email using Django's email backend."""
-        from django.conf import settings  # noqa: PLC0415
-        from django.core.mail import EmailMultiAlternatives  # noqa: PLC0415
+        from django.conf import settings
+        from django.core.mail import EmailMultiAlternatives
 
         try:
             from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or str(
@@ -366,7 +366,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_email(  # noqa: PLR0913
+    def send_email(
         cls,
         to: str | list[str],
         subject: str,
@@ -493,7 +493,7 @@ class EmailService:
         )
 
     @classmethod
-    def _send_now(  # noqa: PLR0913
+    def _send_now(
         cls,
         to: list[str],
         subject: str,
@@ -621,7 +621,7 @@ class EmailService:
             )
 
     @classmethod
-    def _send_async(  # noqa: PLR0913
+    def _send_async(
         cls,
         to: list[str],
         subject: str,
@@ -661,7 +661,7 @@ class EmailService:
         )
 
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             # Queue the email task
             task_id = async_task(
@@ -714,7 +714,7 @@ class EmailService:
             )
 
     @classmethod
-    def _queue_email_for_retry(  # noqa: PLR0913
+    def _queue_email_for_retry(
         cls,
         to: list[str],
         subject: str,
@@ -747,7 +747,7 @@ class EmailService:
         )
 
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             retry_config = getattr(settings, "EMAIL_RETRY", {})
             retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)
@@ -778,7 +778,7 @@ class EmailService:
             )
 
     @staticmethod
-    def _create_email_log(  # noqa: PLR0913
+    def _create_email_log(
         to: str,
         from_addr: str,
         reply_to: str,
@@ -813,7 +813,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_template_email(  # noqa: PLR0913
+    def send_template_email(
         cls,
         template_key: str,
         recipient: str,
@@ -966,7 +966,7 @@ class EmailService:
     @staticmethod
     def _generate_unsubscribe_url(email: str, template_key: str) -> str:
         """Generate unsubscribe URL for email."""
-        import hashlib  # noqa: PLC0415
+        import hashlib
 
         token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
         base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
@@ -1136,7 +1136,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def handle_delivery_event(  # noqa: C901, PLR0912
+    def handle_delivery_event(
         cls,
         event_type: str,
         message_id: str,
@@ -1232,7 +1232,7 @@ class EmailService:
     ) -> None:
         """Log email-related audit event."""
         try:
-            from apps.audit.services import AuditEventData, AuditService  # noqa: PLC0415
+            from apps.audit.services import AuditEventData, AuditService
 
             event_data = AuditEventData(
                 event_type=f"email_{event_type}",
@@ -1275,7 +1275,7 @@ class NotificationService:
         Returns:
             True if notification was sent successfully
         """
-        from django.conf import settings  # noqa: PLC0415
+        from django.conf import settings
 
         try:
             admin_emails = getattr(settings, "ADMIN_ALERT_EMAILS", None)
@@ -1337,7 +1337,7 @@ class NotificationService:
         Returns:
             True if notification was sent successfully
         """
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -1424,10 +1424,10 @@ class EmailPreferenceService:
         Returns:
             True if unsubscribe was successful
         """
-        import hashlib  # noqa: PLC0415
-        import hmac  # noqa: PLC0415
+        import hashlib
+        import hmac
 
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
         # Verify token using timing-safe comparison
         # Check against known template keys to validate

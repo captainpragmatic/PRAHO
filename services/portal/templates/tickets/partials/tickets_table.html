@@ -93,25 +93,7 @@
             </div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {% if ticket.created_at %}
-              {% with day=ticket.created_at|slice:"8:10"|add:0 month=ticket.created_at|slice:"5:7"|add:0 year=ticket.created_at|slice:":4" %}
-                {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-              {% endwith %}
-            {% elif ticket.date_created %}
-              {% with day=ticket.date_created|slice:"8:10"|add:0 month=ticket.date_created|slice:"5:7"|add:0 year=ticket.date_created|slice:":4" %}
-                {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-              {% endwith %}
-            {% elif ticket.timestamp %}
-              {% with day=ticket.timestamp|slice:"8:10"|add:0 month=ticket.timestamp|slice:"5:7"|add:0 year=ticket.timestamp|slice:":4" %}
-                {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-              {% endwith %}
-            {% elif ticket.created %}
-              {% with day=ticket.created|slice:"8:10"|add:0 month=ticket.created|slice:"5:7"|add:0 year=ticket.created|slice:":4" %}
-                {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-              {% endwith %}
-            {% else %}
-              --
-            {% endif %}
+            {{ ticket.created_at|date:"d.m.Y"|default:ticket.date_created|date:"d.m.Y"|default:ticket.timestamp|date:"d.m.Y"|default:ticket.created|date:"d.m.Y"|default:"—" }}
           </td>
         </tr>
         {% endfor %}
@@ -121,7 +103,7 @@
 </div>
 
 <!-- Mobile Card List (visible on mobile only) -->
-<div class="sm:hidden divide-y divide-slate-700">
+<div class="md:hidden divide-y divide-slate-700">
   {% for ticket in tickets %}
   <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'tickets:detail' ticket_id=ticket.id %}';">
     <div class="flex items-center justify-between mb-2">
@@ -177,25 +159,7 @@
     </div>
     <div class="flex items-center justify-between text-sm">
       <span class="text-slate-400">
-        {% if ticket.created_at %}
-          {% with day=ticket.created_at|slice:"8:10"|add:0 month=ticket.created_at|slice:"5:7"|add:0 year=ticket.created_at|slice:":4" %}
-            {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-          {% endwith %}
-        {% elif ticket.date_created %}
-          {% with day=ticket.date_created|slice:"8:10"|add:0 month=ticket.date_created|slice:"5:7"|add:0 year=ticket.date_created|slice:":4" %}
-            {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-          {% endwith %}
-        {% elif ticket.timestamp %}
-          {% with day=ticket.timestamp|slice:"8:10"|add:0 month=ticket.timestamp|slice:"5:7"|add:0 year=ticket.timestamp|slice:":4" %}
-            {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-          {% endwith %}
-        {% elif ticket.created %}
-          {% with day=ticket.created|slice:"8:10"|add:0 month=ticket.created|slice:"5:7"|add:0 year=ticket.created|slice:":4" %}
-            {{ day }} {% if month == 1 %}Jan{% elif month == 2 %}Feb{% elif month == 3 %}Mar{% elif month == 4 %}Apr{% elif month == 5 %}May{% elif month == 6 %}Jun{% elif month == 7 %}Jul{% elif month == 8 %}Aug{% elif month == 9 %}Sep{% elif month == 10 %}Oct{% elif month == 11 %}Nov{% elif month == 12 %}Dec{% endif %} {{ year }}
-          {% endwith %}
-        {% else %}
-          --
-        {% endif %}
+        {{ ticket.created_at|date:"d.m.Y"|default:ticket.date_created|date:"d.m.Y"|default:ticket.timestamp|date:"d.m.Y"|default:ticket.created|date:"d.m.Y"|default:"—" }}
       </span>
     </div>
   </div>

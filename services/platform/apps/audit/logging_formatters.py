@@ -214,7 +214,7 @@ class SIEMJSONFormatter(logging.Formatter):
             "stack_trace": "".join(traceback.format_exception(*exc_info)) if exc_tb else "",
         }
 
-    def _get_event_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
+    def _get_event_category(self, record: logging.LogRecord) -> str:
         """Determine event category from logger name"""
         logger_name = record.name.lower()
 
@@ -315,7 +315,7 @@ class AuditLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format audit log record with integrity chain"""
-        import hashlib  # noqa: PLC0415
+        import hashlib
 
         self.sequence += 1
         timestamp = datetime.utcfromtimestamp(record.created).isoformat() + "Z"
@@ -363,7 +363,7 @@ class AuditLogFormatter(logging.Formatter):
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
+    def _determine_category(self, record: logging.LogRecord) -> str:
         """Determine audit category from log record"""
         message = record.getMessage().lower()
 
@@ -466,7 +466,7 @@ class ComplianceLogFormatter(logging.Formatter):
 
         return json.dumps(compliance_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:  # noqa: PLR0911
+    def _determine_category(self, record: logging.LogRecord) -> str:
         """Determine compliance category"""
         message = record.getMessage().lower()
 

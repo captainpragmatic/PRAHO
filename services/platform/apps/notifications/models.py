@@ -39,21 +39,21 @@ MAX_NAME_LENGTH = _DEFAULT_MAX_NAME_LENGTH
 
 def get_max_template_size() -> int:
     """Get max template size from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("notifications.max_template_size", _DEFAULT_MAX_TEMPLATE_SIZE)
 
 
 def get_max_subject_length() -> int:
     """Get max subject length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("notifications.max_subject_length", _DEFAULT_MAX_SUBJECT_LENGTH)
 
 
 def get_max_name_length() -> int:
     """Get max name length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("notifications.max_name_length", _DEFAULT_MAX_NAME_LENGTH)
 
@@ -693,15 +693,15 @@ class EmailSuppression(models.Model):
             provider: Email provider that reported the issue
             expires_days: Days until suppression expires (None = permanent)
         """
-        import hashlib  # noqa: PLC0415
+        import hashlib
 
-        from django.db import transaction  # noqa: PLC0415
-        from django.utils import timezone  # noqa: PLC0415
+        from django.db import transaction
+        from django.utils import timezone
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         expires_at = None
         if expires_days:
-            from datetime import timedelta  # noqa: PLC0415
+            from datetime import timedelta
 
             expires_at = timezone.now() + timedelta(days=expires_days)
 
@@ -737,9 +737,9 @@ class EmailSuppression(models.Model):
     @classmethod
     def is_suppressed(cls, email: str) -> bool:
         """Check if an email is currently suppressed."""
-        import hashlib  # noqa: PLC0415
+        import hashlib
 
-        from django.utils import timezone  # noqa: PLC0415
+        from django.utils import timezone
 
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
@@ -888,7 +888,7 @@ class EmailPreference(models.Model):
 
     def update_marketing_consent(self, consent: bool, source: str = "") -> None:
         """Update marketing consent with GDPR tracking."""
-        from django.utils import timezone  # noqa: PLC0415
+        from django.utils import timezone
 
         self.marketing = consent
         if consent:

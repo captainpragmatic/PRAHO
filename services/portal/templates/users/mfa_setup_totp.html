@@ -142,6 +142,16 @@
         <form method="post" class="space-y-4">
           {% csrf_token %}
 
+          {% if form.errors %}
+          <div class="bg-red-900 border border-red-700 rounded-md p-3 mb-4">
+            {% for field, errors in form.errors.items %}
+              {% for error in errors %}
+              <p class="text-red-100 text-sm">{{ error }}</p>
+              {% endfor %}
+            {% endfor %}
+          </div>
+          {% endif %}
+
           <div>
             <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
               {% trans 'Enter verification code from your app:' %}

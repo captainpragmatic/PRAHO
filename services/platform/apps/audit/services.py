@@ -58,7 +58,7 @@ WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
 
 def get_high_complexity_filter_threshold() -> int:
     """Get high complexity filter threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "audit.high_complexity_filter_threshold", _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
@@ -67,7 +67,7 @@ def get_high_complexity_filter_threshold() -> int:
 
 def get_webhook_healthy_response_threshold() -> int:
     """Get webhook healthy response threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "audit.webhook_healthy_response_threshold", _DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD
@@ -76,7 +76,7 @@ def get_webhook_healthy_response_threshold() -> int:
 
 def get_webhook_max_retry_threshold() -> int:
     """Get webhook max retry threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "audit.webhook_max_retry_threshold", _DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD
@@ -85,7 +85,7 @@ def get_webhook_max_retry_threshold() -> int:
 
 def get_webhook_suspicious_retry_threshold() -> int:
     """Get webhook suspicious retry threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "audit.webhook_suspicious_retry_threshold", _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
@@ -704,7 +704,7 @@ class AuditService:
             raise
 
     @staticmethod
-    def log_simple_event(  # noqa: PLR0913
+    def log_simple_event(
         event_type: str,
         *,
         user: Any | None = None,
@@ -1052,7 +1052,7 @@ class AuditService:
     # ===============================================================================
 
     @staticmethod
-    def log_event_legacy(  # noqa: PLR0913
+    def log_event_legacy(
         event_type: str,
         user: User | None = None,
         content_object: Any | None = None,
@@ -1088,7 +1088,7 @@ class AuditService:
         return AuditService.log_event(event_data, context)
 
     @staticmethod
-    def log_2fa_event_legacy(  # noqa: PLR0913
+    def log_2fa_event_legacy(
         event_type: str,
         user: User,
         ip_address: str | None = None,
@@ -1112,7 +1112,7 @@ class AuditService:
         return AuditService.log_2fa_event(request)
 
     @staticmethod
-    def log_compliance_event_legacy(  # noqa: PLR0913
+    def log_compliance_event_legacy(
         compliance_type: str,
         reference_id: str,
         description: str,
@@ -1702,7 +1702,7 @@ class GDPRConsentService:
 
     @classmethod
     @transaction.atomic
-    def record_cookie_consent(  # noqa: PLR0913
+    def record_cookie_consent(
         cls,
         *,
         cookie_id: str,
@@ -1721,7 +1721,7 @@ class GDPRConsentService:
         When user_id is provided with a cookie_id, also links any prior anonymous
         CookieConsent records with the same cookie_id to this user.
         """
-        from .signals import cookie_consent_updated  # circular import  # noqa: PLC0415
+        from .signals import cookie_consent_updated  # circular import
 
         try:
             status_map = {
@@ -2294,7 +2294,7 @@ class CustomersAuditService:
     """
 
     @staticmethod
-    def log_customer_event(  # noqa: PLR0913
+    def log_customer_event(
         event_type: str,
         customer: Any,
         user: User | None = None,
@@ -2375,7 +2375,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_tax_profile_event(  # noqa: PLR0913
+    def log_tax_profile_event(
         event_type: str,
         tax_profile: Any,
         user: User | None = None,
@@ -2432,7 +2432,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_billing_profile_event(  # noqa: PLR0913
+    def log_billing_profile_event(
         event_type: str,
         billing_profile: Any,
         user: User | None = None,
@@ -2487,7 +2487,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_address_event(  # noqa: PLR0913
+    def log_address_event(
         event_type: str,
         address: Any,
         user: User | None = None,
@@ -2550,7 +2550,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_payment_method_event(  # noqa: PLR0913
+    def log_payment_method_event(
         event_type: str,
         payment_method: Any,
         user: User | None = None,
@@ -2681,7 +2681,7 @@ class ProvisioningAuditService:
     """
 
     @staticmethod
-    def log_service_plan_event(  # noqa: PLR0913
+    def log_service_plan_event(
         event_type: str,
         service_plan: Any,
         user: User | None = None,
@@ -2748,7 +2748,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_server_event(  # noqa: PLR0913
+    def log_server_event(
         event_type: str,
         server: Any,
         user: User | None = None,
@@ -2828,7 +2828,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_service_event(  # noqa: PLR0913
+    def log_service_event(
         event_type: str,
         service: Any,
         user: User | None = None,
@@ -2978,7 +2978,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_service_group_event(  # noqa: PLR0913
+    def log_service_group_event(
         event_type: str,
         service_group: Any,
         user: User | None = None,
@@ -3041,7 +3041,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_provisioning_task_event(  # noqa: PLR0913
+    def log_provisioning_task_event(
         event_type: str,
         task: Any,
         user: User | None = None,
@@ -3844,7 +3844,7 @@ class TicketsAuditService:
     """
 
     @staticmethod
-    def log_ticket_opened(  # noqa: PLR0913
+    def log_ticket_opened(
         ticket: Any,
         sla_metadata: dict[str, Any],
         should_escalate: bool = False,
@@ -3917,7 +3917,7 @@ class TicketsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_ticket_closed(  # noqa: PLR0913
+    def log_ticket_closed(
         ticket: Any,
         old_status: str,
         new_status: str,
@@ -4159,7 +4159,7 @@ class ProductsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_product_pricing_changed(  # noqa: PLR0913
+    def log_product_pricing_changed(
         product_price: Any,
         change_type: str,
         changes: dict[str, Any],
@@ -4273,7 +4273,7 @@ class DomainsAuditService:
     """
 
     @staticmethod
-    def log_domain_event(  # Domain audit requires multiple domain-specific parameters  # noqa: PLR0913
+    def log_domain_event(  # Domain audit requires multiple domain-specific parameters
         event_type: str,
         domain: Any,
         user: User | None = None,
@@ -4347,7 +4347,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_tld_event(  # TLD audit requires multiple configuration parameters  # noqa: PLR0913
+    def log_tld_event(  # TLD audit requires multiple configuration parameters
         event_type: str,
         tld: Any,
         user: User | None = None,
@@ -4415,7 +4415,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_registrar_event(  # Registrar audit requires multiple security parameters  # noqa: PLR0913
+    def log_registrar_event(  # Registrar audit requires multiple security parameters
         event_type: str,
         registrar: Any,
         user: User | None = None,
@@ -4487,7 +4487,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_order_event(  # Order audit requires multiple order-specific parameters  # noqa: PLR0913
+    def log_domain_order_event(  # Order audit requires multiple order-specific parameters
         event_type: str,
         domain_order_item: Any,
         user: User | None = None,
@@ -4556,7 +4556,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_security_event(  # Security audit requires multiple security parameters  # noqa: PLR0913
+    def log_domain_security_event(  # Security audit requires multiple security parameters
         event_type: str,
         domain: Any,
         security_action: str,
@@ -4701,7 +4701,7 @@ class IntegrationsAuditService:
     """
 
     @staticmethod
-    def log_webhook_success(  # Webhook audit requires multiple related parameters  # noqa: PLR0913
+    def log_webhook_success(  # Webhook audit requires multiple related parameters
         webhook_event: Any,
         response_time_ms: int,
         response_status: int = 200,
@@ -4787,7 +4787,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_failure(  # Webhook failure audit requires multiple error context parameters  # noqa: PLR0913
+    def log_webhook_failure(  # Webhook failure audit requires multiple error context parameters
         webhook_event: Any,
         error_details: dict[str, Any],
         security_flags: dict[str, bool] | None = None,
@@ -4881,7 +4881,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_retry_exhausted(  # Webhook retry exhaustion tracking needs comprehensive failure context  # noqa: PLR0913
+    def log_webhook_retry_exhausted(  # Webhook retry exhaustion tracking needs comprehensive failure context
         webhook_event: Any,
         total_attempts: int,
         final_error: str,

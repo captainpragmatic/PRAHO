@@ -338,7 +338,7 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
 
 def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:
     """Calculate Romanian VAT for the given amount using TaxService (ADR-0015)."""
-    from apps.common.tax_service import TaxService  # noqa: PLC0415
+    from apps.common.tax_service import TaxService
 
     vat_rate = float(TaxService.get_vat_rate("RO", as_decimal=True))
 

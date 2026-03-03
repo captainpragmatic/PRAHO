@@ -69,7 +69,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:  # noqa: PLR0911
+def __getattr__(name: str) -> Any:
     """Lazy import for module attributes to avoid AppRegistryNotReady issues."""
     # Models
     if name in (
@@ -81,25 +81,25 @@ def __getattr__(name: str) -> Any:  # noqa: PLR0911
         "NodeDeploymentLog",
         "NodeDeploymentCostRecord",
     ):
-        from apps.infrastructure import models  # noqa: PLC0415
+        from apps.infrastructure import models
 
         return getattr(models, name)
 
     # SSH Key Management
     if name in ("SSHKeyManager", "SSHKeyPair", "SSHKeyInfo", "get_ssh_key_manager"):
-        from apps.infrastructure import ssh_key_manager  # noqa: PLC0415
+        from apps.infrastructure import ssh_key_manager
 
         return getattr(ssh_key_manager, name)
 
     # Terraform
     if name in ("TerraformService", "TerraformResult", "get_terraform_service"):
-        from apps.infrastructure import terraform_service  # noqa: PLC0415
+        from apps.infrastructure import terraform_service
 
         return getattr(terraform_service, name)
 
     # Ansible
     if name in ("AnsibleService", "AnsibleResult", "get_ansible_service"):
-        from apps.infrastructure import ansible_service  # noqa: PLC0415
+        from apps.infrastructure import ansible_service
 
         return getattr(ansible_service, name)
 
@@ -110,13 +110,13 @@ def __getattr__(name: str) -> Any:  # noqa: PLR0911
         "ValidationResult",
         "get_validation_service",
     ):
-        from apps.infrastructure import validation_service  # noqa: PLC0415
+        from apps.infrastructure import validation_service
 
         return getattr(validation_service, name)
 
     # Registration
     if name in ("NodeRegistrationService", "get_registration_service"):
-        from apps.infrastructure import registration_service  # noqa: PLC0415
+        from apps.infrastructure import registration_service
 
         return getattr(registration_service, name)
 
@@ -127,7 +127,7 @@ def __getattr__(name: str) -> Any:  # noqa: PLR0911
         "DeploymentProgress",
         "get_deployment_service",
     ):
-        from apps.infrastructure import deployment_service  # noqa: PLC0415
+        from apps.infrastructure import deployment_service
 
         return getattr(deployment_service, name)
 
@@ -137,7 +137,7 @@ def __getattr__(name: str) -> Any:  # noqa: PLR0911
         "InfrastructureAuditContext",
         "get_infrastructure_audit_service",
     ):
-        from apps.infrastructure import audit_service  # noqa: PLC0415
+        from apps.infrastructure import audit_service
 
         return getattr(audit_service, name)
 
@@ -150,7 +150,7 @@ def __getattr__(name: str) -> Any:  # noqa: PLR0911
         "can_manage_sizes",
         "can_manage_regions",
     ):
-        from apps.infrastructure import permissions  # noqa: PLC0415
+        from apps.infrastructure import permissions
 
         return getattr(permissions, name)
 
@@ -161,7 +161,7 @@ def __getattr__(name: str) -> Any:  # noqa: PLR0911
         "DeploymentCostBreakdown",
         "get_cost_tracking_service",
     ):
-        from apps.infrastructure import cost_service  # noqa: PLC0415
+        from apps.infrastructure import cost_service
 
         return getattr(cost_service, name)
 

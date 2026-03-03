@@ -47,7 +47,7 @@ class BillingAnalyticsService:
         Returns:
             Dictionary with metrics update details
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         try:
             metrics = {
@@ -92,8 +92,8 @@ class BillingAnalyticsService:
         Returns:
             Dictionary with customer metrics
         """
-        from apps.billing.models import Invoice as InvoiceModel  # noqa: PLC0415
-        from apps.billing.models import Payment  # noqa: PLC0415
+        from apps.billing.models import Invoice as InvoiceModel
+        from apps.billing.models import Payment
 
         try:
             # Calculate customer billing stats
@@ -138,7 +138,7 @@ class BillingAnalyticsService:
         Returns:
             Dictionary with refund record details
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         try:
             refund_data = {
@@ -178,7 +178,7 @@ class BillingAnalyticsService:
         Returns:
             Dictionary with LTV adjustment details
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         try:
             adjustment_amount = Decimal(adjustment_amount_cents) / 100
@@ -239,7 +239,7 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     try:
         # Try to use weasyprint for PDF generation
         try:
-            from weasyprint import HTML  # noqa: PLC0415
+            from weasyprint import HTML
         except ImportError:
             logger.warning("⚠️ [PDF] weasyprint not installed, returning placeholder PDF")
             return _generate_placeholder_pdf(invoice)
@@ -386,7 +386,7 @@ def send_invoice_email(invoice: Invoice, recipient_email: str | None = None) -> 
     Returns:
         True if email was sent successfully
     """
-    from django.core.mail import EmailMessage  # noqa: PLC0415
+    from django.core.mail import EmailMessage
 
     try:
         email = recipient_email or (invoice.customer.primary_email if invoice.customer else None)
@@ -451,7 +451,7 @@ def generate_vat_summary(period_start: str, period_end: str) -> dict[str, Any]:
     Returns:
         Dictionary with VAT summary data
     """
-    from apps.billing.models import Invoice  # noqa: PLC0415
+    from apps.billing.models import Invoice
 
     try:
         start_date = datetime.strptime(period_start, "%Y-%m-%d")

@@ -68,7 +68,7 @@ class CostTrackingService:
     HOURS_PER_MONTH = Decimal("730")  # Average hours per month
     HOURS_PER_DAY = Decimal("24")
 
-    def calculate_deployment_costs(  # noqa: PLR0911
+    def calculate_deployment_costs(
         self,
         deployment: NodeDeployment,
         period_start: datetime,
@@ -85,7 +85,7 @@ class CostTrackingService:
         Returns:
             Result with the created cost record or error
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentCostRecord
 
         # Validate period
         if period_end <= period_start:
@@ -180,7 +180,7 @@ class CostTrackingService:
         Returns:
             List of results for each deployment
         """
-        from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeployment
 
         # Get all deployments that were active during this period
         active_deployments = (
@@ -226,7 +226,7 @@ class CostTrackingService:
         Returns:
             CostSummary with totals
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentCostRecord
 
         records = NodeDeploymentCostRecord.objects.filter(
             period_start__gte=period_start,
@@ -261,7 +261,7 @@ class CostTrackingService:
         Returns:
             CostSummary for the month
         """
-        from calendar import monthrange  # noqa: PLC0415
+        from calendar import monthrange
 
         _, days_in_month = monthrange(year, month)
         period_start = timezone.make_aware(datetime(year, month, 1))
@@ -284,7 +284,7 @@ class CostTrackingService:
         Returns:
             List of DeploymentCostBreakdown for each deployment
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentCostRecord
 
         breakdowns = []
 
@@ -346,7 +346,7 @@ class CostTrackingService:
         Returns:
             Dict mapping provider name to total cost
         """
-        from apps.infrastructure.models import NodeDeploymentCostRecord  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentCostRecord
 
         records = NodeDeploymentCostRecord.objects.filter(
             period_start__gte=period_start,
@@ -394,7 +394,7 @@ _cost_service: CostTrackingService | None = None
 
 def get_cost_tracking_service() -> CostTrackingService:
     """Get global cost tracking service instance"""
-    global _cost_service  # noqa: PLW0603
+    global _cost_service
     if _cost_service is None:
         _cost_service = CostTrackingService()
     return _cost_service

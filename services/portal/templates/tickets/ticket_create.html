@@ -26,6 +26,11 @@
       <form method="post" class="space-y-6">
         {% csrf_token %}
 
+        <!-- Inline validation error display -->
+        <div id="form-error" class="bg-red-900 border border-red-700 rounded-md p-3 hidden">
+          <p id="form-error-message" class="text-red-100 text-sm"></p>
+        </div>
+
         <!-- Category & Priority -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -205,7 +210,11 @@
       e.preventDefault();
       {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "Please fill in both title and description fields." as fill_both_msg %}
-      alert('{{ fill_both_msg|escapejs }}');
+      const errorDiv = document.getElementById('form-error');
+      const errorMsg = document.getElementById('form-error-message');
+      errorMsg.textContent = '{{ fill_both_msg|escapejs }}';
+      errorDiv.classList.remove('hidden');
+      errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return false;
     }
   });

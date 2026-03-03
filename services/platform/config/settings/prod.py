@@ -16,7 +16,7 @@ try:
 except ImportError:
     HAS_SENTRY = False
 
-from .base import *  # noqa: F403
+from .base import *
 
 # ===============================================================================
 # PRODUCTION SECURITY VALIDATION

@@ -381,6 +381,7 @@ class CustomerRegistrationForm(forms.Form):
                     "postal_code": self.cleaned_data["postal_code"],
                     "data_processing_consent": self.cleaned_data["data_processing_consent"],
                     "marketing_consent": self.cleaned_data.get("marketing_consent", False),
+                    "terms_accepted": self.cleaned_data.get("terms_accepted", False),
                 },
             }
 

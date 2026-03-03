@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 
 @dataclass
@@ -89,6 +90,22 @@ class Invoice:
     efactura_id: str = ""
     efactura_sent: bool = False
 
+    # Status display labels
+    _STATUS_LABELS: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def status_display(self) -> str:
+        """Human-readable status label with i18n support."""
+        labels = {
+            "draft": str(_("Draft")),
+            "issued": str(_("Issued")),
+            "paid": str(_("Paid")),
+            "overdue": str(_("Overdue")),
+            "cancelled": str(_("Cancelled")),
+            "partially_paid": str(_("Partially Paid")),
+        }
+        return labels.get(self.status, self.status.replace("_", " ").title())
+
     # Business methods
     @property
     def total_display(self) -> str:
@@ -111,19 +128,6 @@ class Invoice:
         if not self.due_at or self.status in ["paid", "void", "refunded"]:
             return False
         return timezone.now().date() > self.due_at.date()
-
-    @property
-    def status_display(self) -> str:
-        """Get status display with emoji"""
-        status_map = {
-            "draft": "📝 Draft",
-            "issued": "📧 Issued",
-            "paid": "✅ Paid",
-            "overdue": "⚠️ Overdue",
-            "void": "❌ Void",
-            "refunded": "↩️ Refunded",
-        }
-        return status_map.get(self.status, f"❓ {self.status.title()}")
 
 
 @dataclass

@@ -1472,3 +1472,129 @@ def test_customer_cart_calculate_totals(monitored_customer_page: Page) -> None:
     # Endpoint may return 200 (with totals HTML), 4xx (validation), or 500 (no Stripe config)
     assert status in (200, 400, 403, 429, 500), f"Calculate endpoint returned unexpected status: {status}"
     print(f"  ✅ Calculate totals endpoint responded: status={status}, {len(html)} chars")
+
+
+# ===============================================================================
+# QA FIX REGRESSION TESTS
+# ===============================================================================
+
+
+def test_registration_form_has_terms_accepted_checkbox(page: Page) -> None:
+    """C2: Registration form has a terms_accepted checkbox (required, not missing from form)."""
+    print("🧪 Testing registration form has terms_accepted checkbox")
+
+    with ComprehensivePageMonitor(
+        page,
+        "registration terms checkbox",
+        check_console=False,  # Alpine.js CSP eval errors expected on signup forms
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        page.goto(f"{BASE_URL}{REGISTER_URL}")
+        page.wait_for_load_state("networkidle")
+
+        assert REGISTER_URL in page.url, f"Should be on register page, got: {page.url}"
+        print("    ✅ Registration page loaded")
+
+        # The terms_accepted checkbox must be present in the form
+        terms_checkbox: Locator = page.locator(
+            'input[name="terms_accepted"], input[name="terms"], '
+            'input[type="checkbox"][name*="terms"]'
+        )
+        assert terms_checkbox.count() > 0, (
+            "Registration form must have a 'terms_accepted' checkbox — "
+            "if missing the form will submit without consent and fail server-side"
+        )
+        expect(terms_checkbox.first).to_be_visible()
+        print("    ✅ terms_accepted checkbox is present and visible")
+
+        # It should be unchecked by default (user must actively accept)
+        is_checked: bool = terms_checkbox.first.is_checked()
+        assert not is_checked, "terms_accepted checkbox should default to unchecked"
+        print("    ✅ Checkbox defaults to unchecked (requires explicit acceptance)")
+
+        # The label should reference terms/privacy
+        page_text: str = page.text_content("body") or ""
+        has_terms_text: bool = any(
+            keyword in page_text.lower()
+            for keyword in ["terms", "privacy", "conditions", "termeni", "politica"]
+        )
+        assert has_terms_text, "Page should mention terms/conditions/privacy near the checkbox"
+        print("    ✅ Terms/conditions text present on registration page")
+
+    print("  ✅ Registration terms_accepted checkbox test completed")
+
+
+def test_cart_order_summary_loads_without_error(monitored_customer_page: Page) -> None:
+    """C1: Cart order summary page loads without UUID error or server crash."""
+    page = monitored_customer_page
+    print("🧪 Testing cart order summary loads cleanly")
+
+    # Navigate to cart page
+    page.goto(f"{BASE_URL}/order/cart/")
+    page.wait_for_load_state("networkidle")
+
+    current_url: str = page.url
+
+    # Must not redirect to login — customer is authenticated
+    assert "/login/" not in current_url, "Cart should not redirect authenticated customer to login"
+    print(f"    ✅ Cart page loaded: {current_url}")
+
+    page_content: str = page.content().lower()
+
+    # Must not show a Python traceback or server error
+    has_server_error: bool = any(
+        keyword in page_content
+        for keyword in [
+            "traceback", "exception", "server error", "erreur serveur",
+            "internal server error", "valueerror", "typeerror",
+        ]
+    )
+    assert not has_server_error, (
+        "Cart page must not show a server error or Python traceback. "
+        "Check UUID handling in cart views."
+    )
+    print("    ✅ No server error / traceback on cart page")
+
+    # Page must have some meaningful cart content (empty state or items)
+    has_cart_content: bool = any(
+        keyword in page_content
+        for keyword in [
+            "cart", "order", "coș", "total", "checkout",
+            "empty", "no items", "add", "produs",
+        ]
+    )
+    assert has_cart_content, (
+        "Cart page must show cart content or an empty-cart message, not a blank page"
+    )
+    print("    ✅ Cart page contains expected content")
+
+    # Verify the order summary partial also loads via HTMX fetch
+    print("  🔄 Testing mini-cart HTMX partial...")
+    response_data: dict = page.evaluate("""
+        async () => {
+            const resp = await fetch('/order/partials/mini-cart/', {
+                credentials: 'same-origin',
+                headers: { 'HX-Request': 'true' },
+            });
+            return { status: resp.status, html: await resp.text() };
+        }
+    """)
+
+    status: int = response_data.get("status", 0)
+    html: str = response_data.get("html", "")
+
+    # Mini-cart partial must return 200 without crashing
+    assert status == 200, f"Mini-cart HTMX partial must return 200, got: {status}"
+
+    # Must not contain Python traceback
+    assert "traceback" not in html.lower() and "exception" not in html.lower(), (
+        "Mini-cart partial returned a server error response"
+    )
+    print(f"    ✅ Mini-cart partial: status={status}, {len(html)} chars, no errors")
+
+    print("  ✅ Cart order summary loads cleanly test completed")

@@ -202,7 +202,7 @@ class XSDValidator:
         """
         return getattr(efactura_settings, key, default)
 
-    def validate(self, xml_content: str | bytes) -> XSDValidationResult:  # noqa: PLR0911
+    def validate(self, xml_content: str | bytes) -> XSDValidationResult:
         """
         Validate XML content against appropriate XSD schema.
 

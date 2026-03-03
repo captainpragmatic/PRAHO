@@ -5,6 +5,7 @@ Romanian hosting provider test data generation.
 
 import random
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -237,6 +238,12 @@ class Command(BaseCommand):
             {
                 "name": "Web Hosting Starter",
                 "plan_type": "shared_hosting",
+                "description": (
+                    "Pachet ideal pentru site-uri personale și mici afaceri. "
+                    "Include 5 GB spațiu SSD, 50 GB transfer lunar, 10 conturi email "
+                    "și 2 baze de date MySQL. Găzduit pe servere optimizate LiteSpeed "
+                    "cu certificat SSL gratuit și panou de control cPanel inclus."
+                ),
                 "price_monthly": Decimal("29.99"),
                 "price_annual": Decimal("299.90"),
                 "disk_space_gb": 5,
@@ -248,6 +255,12 @@ class Command(BaseCommand):
             {
                 "name": "Web Hosting Professional",
                 "plan_type": "shared_hosting",
+                "description": (
+                    "Soluție completă pentru site-uri de business și magazine online. "
+                    "20 GB spațiu SSD NVMe, 200 GB transfer lunar, 50 conturi email, "
+                    "10 baze de date MySQL și suport pentru 5 domenii. "
+                    "Include backup zilnic automat, CDN gratuit și suport prioritar 24/7."
+                ),
                 "price_monthly": Decimal("59.99"),
                 "price_annual": Decimal("599.90"),
                 "disk_space_gb": 20,
@@ -259,6 +272,12 @@ class Command(BaseCommand):
             {
                 "name": "VPS Basic",
                 "plan_type": "vps",
+                "description": (
+                    "Server virtual privat entry-level pentru aplicații și site-uri cu trafic mediu. "
+                    "2 vCPU, 4 GB RAM DDR4, 80 GB SSD NVMe. "
+                    "Acces root complet, IP dedicat, snapshots automate și monitorizare inclusă. "
+                    "Ideal pentru magazine online, aplicații Node.js/Python sau servere de email."
+                ),
                 "price_monthly": Decimal("99.99"),
                 "price_annual": Decimal("999.90"),
                 "cpu_cores": 2,
@@ -268,6 +287,12 @@ class Command(BaseCommand):
             {
                 "name": "VPS Advanced",
                 "plan_type": "vps",
+                "description": (
+                    "Server virtual performant pentru aplicații intensive și trafic ridicat. "
+                    "4 vCPU, 8 GB RAM DDR4, 160 GB SSD NVMe RAID-10. "
+                    "Include IP dedicat, backup zilnic, protecție DDoS și SLA 99.9%. "
+                    "Recomandat pentru platforme e-commerce, ERP sau aplicații SaaS."
+                ),
                 "price_monthly": Decimal("199.99"),
                 "price_annual": Decimal("1999.90"),
                 "cpu_cores": 4,
@@ -434,6 +459,8 @@ class Command(BaseCommand):
             plan = random.choice(plans)
             server = random.choice(servers) if servers else None
 
+            status = random.choice(["active", "pending", "suspended"])
+            activated = timezone.now() - timedelta(days=random.randint(30, 365)) if status == "active" else None
             service_data = {
                 "customer": customer,
                 "service_plan": plan,
@@ -443,8 +470,10 @@ class Command(BaseCommand):
                 "username": f"user{random.randint(1000, 9999)}",
                 "billing_cycle": random.choice(["monthly", "annual"]),
                 "price": plan.price_monthly,
-                "status": random.choice(["active", "pending", "suspended"]),
+                "status": status,
                 "auto_renew": random.choice([True, False]),
+                "activated_at": activated,
+                "expires_at": timezone.now() + timedelta(days=random.randint(30, 365)) if activated else None,
             }
 
             service = Service.objects.create(**service_data)
@@ -576,7 +605,7 @@ class Command(BaseCommand):
                 defaults={
                     "name": plan.name,
                     "description": plan.description,
-                    "short_description": plan.description[:500] if plan.description else "",
+                    "short_description": plan.description[:200] if plan.description else "",
                     "product_type": type_mapping.get(plan.plan_type, "shared_hosting"),
                     "is_active": plan.is_active,
                     "is_featured": False,
@@ -584,6 +613,12 @@ class Command(BaseCommand):
                     "includes_vat": plan.includes_vat,
                 },
             )
+
+            # Update description on existing products if plan now has one
+            if not product_created and plan.description and not product.description:
+                product.description = plan.description
+                product.short_description = plan.description[:200]
+                product.save(update_fields=["description", "short_description"])
 
             if product_created:
                 products_created += 1
@@ -831,6 +866,7 @@ class Command(BaseCommand):
             # Use specific statuses for comprehensive testing (Test Company gets all statuses)
             status = service_statuses[i % len(service_statuses)]
 
+            activated = timezone.now() - timedelta(days=random.randint(30, 365)) if status == "active" else None
             service_data = {
                 "customer": customer,
                 "service_plan": plan,
@@ -842,6 +878,8 @@ class Command(BaseCommand):
                 "price": plan.price_monthly,
                 "status": status,
                 "auto_renew": status == "active",  # Only active services auto-renew
+                "activated_at": activated,
+                "expires_at": timezone.now() + timedelta(days=random.randint(30, 365)) if activated else None,
             }
 
             service = Service.objects.create(**service_data)
@@ -1126,7 +1164,7 @@ class Command(BaseCommand):
             priority = ticket_priorities[i % len(ticket_priorities)]
 
             ticket_data = {
-                "title": f"[{status.upper()}] {fake.sentence(nb_words=4)} - {priority.title()} Priority",
+                "title": f"{fake.sentence(nb_words=6)}",
                 "description": f"Status: {status}, Priority: {priority}. {fake.text(max_nb_chars=400)}",
                 "customer": customer,
                 "contact_email": customer.primary_email,

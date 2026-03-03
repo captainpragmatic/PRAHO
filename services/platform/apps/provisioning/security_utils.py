@@ -522,7 +522,7 @@ def log_security_event_safe(
             safe_details["domain"] = domain
 
         # Use the common security logging function
-        from apps.common.validators import log_security_event  # noqa: PLC0415
+        from apps.common.validators import log_security_event
 
         log_security_event(
             event_type=event_type,

@@ -271,7 +271,7 @@ class QuotaEnforcer:
                 cache_key = f"{self.CACHE_PREFIX}:usage:{customer_id}:{qt.value}"
                 cache.delete(cache_key)
 
-    def _calculate_usage_from_db(  # noqa: PLR0911
+    def _calculate_usage_from_db(
         self,
         customer_id: int,
         quota_type: QuotaType,
@@ -280,7 +280,7 @@ class QuotaEnforcer:
         # Import models here to avoid circular imports
         try:
             if quota_type == QuotaType.SERVICES:
-                from apps.provisioning.models import Service  # noqa: PLC0415
+                from apps.provisioning.models import Service
 
                 return Service.objects.filter(
                     customer_id=customer_id,
@@ -288,7 +288,7 @@ class QuotaEnforcer:
                 ).count()
 
             elif quota_type == QuotaType.DOMAINS:
-                from apps.provisioning.models import (  # noqa: PLC0415
+                from apps.provisioning.models import (
                     ServiceDomain,
                 )
 
@@ -297,7 +297,7 @@ class QuotaEnforcer:
                 ).count()
 
             elif quota_type == QuotaType.STORAGE_MB:
-                from apps.provisioning.models import Service  # noqa: PLC0415
+                from apps.provisioning.models import Service
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -306,7 +306,7 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.BANDWIDTH_MB:
-                from apps.provisioning.models import Service  # noqa: PLC0415
+                from apps.provisioning.models import Service
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -315,7 +315,7 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.EMAIL_ACCOUNTS:
-                from apps.provisioning.models import Service  # noqa: PLC0415
+                from apps.provisioning.models import Service
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -324,7 +324,7 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.DATABASES:
-                from apps.provisioning.models import Service  # noqa: PLC0415
+                from apps.provisioning.models import Service
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -337,7 +337,7 @@ class QuotaEnforcer:
                 return 0
 
             elif quota_type == QuotaType.USERS:
-                from apps.users.models import CustomerMembership  # noqa: PLC0415
+                from apps.users.models import CustomerMembership
 
                 return CustomerMembership.objects.filter(
                     customer_id=customer_id,
@@ -375,7 +375,7 @@ _quota_enforcer: QuotaEnforcer | None = None
 
 def get_quota_enforcer() -> QuotaEnforcer:
     """Get the global quota enforcer instance."""
-    global _quota_enforcer  # noqa: PLW0603
+    global _quota_enforcer
     if _quota_enforcer is None:
         _quota_enforcer = QuotaEnforcer()
     return _quota_enforcer

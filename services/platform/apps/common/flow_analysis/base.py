@@ -296,7 +296,7 @@ class BaseFlowAnalyzer:
         """Analyze code and return issues. Override in subclasses."""
         raise NotImplementedError("Subclasses must implement analyze()")
 
-    def add_issue(  # noqa: PLR0913
+    def add_issue(
         self,
         category: IssueCategory,
         severity: AnalysisSeverity,

@@ -66,7 +66,7 @@ class EFacturaWebhookProcessor(BaseWebhookProcessor):
         if not upload_index:
             return False
 
-        from apps.billing.efactura.models import EFacturaDocument  # noqa: PLC0415
+        from apps.billing.efactura.models import EFacturaDocument
 
         return EFacturaDocument.objects.filter(anaf_upload_index=upload_index).exists()
 

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 
-def create_audit_event(  # noqa: PLR0913
+def create_audit_event(
     action: str,
     instance: Any,
     category: str = "business_operation",
@@ -68,9 +68,9 @@ def create_audit_event(  # noqa: PLR0913
 
 def _serialize_value(value: Any) -> Any:
     """Serialize a value for JSON storage in audit events."""
-    from datetime import date, datetime  # noqa: PLC0415
-    from decimal import Decimal  # noqa: PLC0415
-    from uuid import UUID  # noqa: PLC0415
+    from datetime import date, datetime
+    from decimal import Decimal
+    from uuid import UUID
 
     if value is None:
         return None

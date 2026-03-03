@@ -1181,7 +1181,7 @@ class RefundService:
         payment: Any, refund_amount_cents: int | None, effective_amount: int
     ) -> Result[dict[str, Any], str]:
         """Execute refund via payment gateway or return local success for non-gateway payments."""
-        from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS  # noqa: PLC0415
+        from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS
 
         payment_method = getattr(payment, "payment_method", "")
         gateway_txn_id = getattr(payment, "gateway_txn_id", "")
@@ -1211,7 +1211,7 @@ class RefundService:
                 }
             )
 
-        from apps.billing.gateways.base import PaymentGatewayFactory  # noqa: PLC0415
+        from apps.billing.gateways.base import PaymentGatewayFactory
 
         gateway = PaymentGatewayFactory.create_gateway(payment.payment_method)
         refund_result = gateway.refund_payment(

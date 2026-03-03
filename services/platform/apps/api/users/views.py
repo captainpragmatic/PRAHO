@@ -42,7 +42,7 @@ SESSION_VALIDATION_RATE_LIMIT = _DEFAULT_SESSION_VALIDATION_RATE_LIMIT
 
 def get_session_validation_rate_limit() -> int:
     """Get session validation rate limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "security.session_validation_rate_limit", _DEFAULT_SESSION_VALIDATION_RATE_LIMIT
@@ -914,7 +914,7 @@ def user_customers_api(request: HttpRequest, user: User) -> Response:
     """
     try:
         # Get customer memberships with role information
-        from apps.users.models import CustomerMembership  # noqa: PLC0415
+        from apps.users.models import CustomerMembership
 
         memberships = CustomerMembership.objects.filter(user=user).select_related("customer")
 

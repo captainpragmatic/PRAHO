@@ -149,7 +149,7 @@ class CustomerPaymentMethod(SoftDeleteModel):
             validate_bank_details(self.bank_details)
 
             # Additional validation with existing secure input validator
-            from apps.common.validators import SecureInputValidator  # Avoid circular import  # noqa: PLC0415
+            from apps.common.validators import SecureInputValidator  # Avoid circular import
 
             self.bank_details = SecureInputValidator.validate_bank_details_schema(self.bank_details)
 

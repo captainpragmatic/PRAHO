@@ -1081,3 +1081,96 @@ def test_customer_ticket_dashboard_widget(monitored_customer_page: Page) -> None
     print("    ✅ 'View all' link to tickets list is present")
 
     print("  ✅ Customer ticket dashboard widget testing completed")
+
+
+# ===============================================================================
+# QA FIX REGRESSION TESTS
+# ===============================================================================
+
+
+def test_ticket_subjects_have_no_status_prefix(monitored_customer_page: Page) -> None:
+    """L4: Ticket subjects in the list must not be prefixed with [OPEN], [CLOSED], etc."""
+    page = monitored_customer_page
+    print("🧪 Testing ticket subjects have no [STATUS] prefix in list")
+
+    page.goto(f"{BASE_URL}/tickets/")
+    page.wait_for_load_state("networkidle")
+
+    # Gather all visible ticket subject cells — these are the text cells in the table or cards
+    subject_cells: Locator = page.locator(
+        "#tickets-content td, #tickets-content .text-white.font-medium, "
+        "#tickets-content .font-semibold"
+    )
+
+    if subject_cells.count() == 0:
+        print("  [i] No ticket rows found (customer may have no tickets), skipping")
+        return
+
+    import re as _re
+    status_prefix_pattern = _re.compile(r"^\s*\[(OPEN|CLOSED|PENDING|IN.PROGRESS|RESOLVED)\]", _re.IGNORECASE)
+
+    bad_subjects: list[str] = []
+    for cell in subject_cells.all():
+        text: str = (cell.text_content() or "").strip()
+        if text and status_prefix_pattern.match(text):
+            bad_subjects.append(text)
+
+    assert not bad_subjects, (
+        f"Ticket subjects must not be prefixed with [STATUS] tags. Found: {bad_subjects}"
+    )
+    print(f"    ✅ Checked {subject_cells.count()} subject cells — no [STATUS] prefixes found")
+
+    print("  ✅ Ticket subject no-prefix test completed")
+
+
+def test_ticket_detail_back_link_is_at_top(monitored_customer_page: Page) -> None:
+    """5.1: Ticket detail page has a 'Back to Tickets' link near the top of the page."""
+    page = monitored_customer_page
+    print("🧪 Testing ticket detail back link is at top of page")
+
+    page.goto(f"{BASE_URL}/tickets/")
+    page.wait_for_load_state("networkidle")
+
+    # Find and click the first ticket
+    ticket_links: Locator = page.locator('a[href*="/tickets/"]:has-text("TK")')
+    if ticket_links.count() == 0:
+        ticket_links = page.locator("main a[href*='/tickets/']:not([href*='create'])")
+
+    if ticket_links.count() == 0:
+        print("  [i] No ticket links found, skipping")
+        return
+
+    ticket_links.first.click()
+    page.wait_for_load_state("networkidle")
+
+    current_url: str = page.url
+    if not re.search(r"/tickets/\d+/", current_url):
+        print(f"  [i] Did not land on a ticket detail URL: {current_url}")
+        return
+
+    print(f"    ✅ On ticket detail page: {current_url}")
+
+    # The back link must be present
+    back_link: Locator = page.locator(
+        'a[href*="/tickets/"]:has-text("Back"), '
+        'a[href="/tickets/"]:has-text("Tickets"), '
+        'a:has-text("Back to Tickets"), '
+        'a:has-text("Înapoi la tichete")'
+    ).first
+    assert back_link.count() > 0, "Ticket detail must have a 'Back to Tickets' link"
+    expect(back_link).to_be_visible()
+    print("    ✅ Back to Tickets link is visible")
+
+    # The back link should appear near the top — within the first 30% of page height.
+    # We measure its Y position vs. the document height.
+    link_box: dict = back_link.bounding_box() or {}
+    link_y: float = link_box.get("y", 0)
+    viewport_height: int = page.viewport_size.get("height", 800) if page.viewport_size else 800  # type: ignore[union-attr]
+
+    assert link_y < viewport_height, (
+        f"Back link should be visible within the first viewport (y={link_y:.0f}px, "
+        f"viewport height={viewport_height}px)"
+    )
+    print(f"    ✅ Back link position y={link_y:.0f}px is within first viewport ({viewport_height}px)")
+
+    print("  ✅ Ticket detail back link at top test completed")

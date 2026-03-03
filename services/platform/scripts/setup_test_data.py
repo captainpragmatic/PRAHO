@@ -18,28 +18,28 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 django.setup()
 
-from django.contrib.auth import get_user_model  # noqa: E402
-from django.db import transaction  # noqa: E402
-from django.utils import timezone  # noqa: E402
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.utils import timezone
 
-from apps.billing.models import Currency, Invoice, ProformaInvoice  # noqa: E402
-from apps.customers.models import (  # noqa: E402
+from apps.billing.models import Currency, Invoice, ProformaInvoice
+from apps.customers.models import (
     Customer,
     CustomerAddress,
     CustomerBillingProfile,
     CustomerTaxProfile,
 )
-from apps.orders.models import Order, OrderItem  # noqa: E402
-from apps.products.models import (  # noqa: E402
+from apps.orders.models import Order, OrderItem
+from apps.products.models import (
     Product,
     ProductBundle,
     ProductBundleItem,
     ProductPrice,
     ProductRelationship,
 )
-from apps.provisioning.models import Service, ServicePlan  # noqa: E402
-from apps.tickets.models import SupportCategory, Ticket, TicketComment  # noqa: E402
-from apps.users.models import CustomerMembership  # noqa: E402
+from apps.provisioning.models import Service, ServicePlan
+from apps.tickets.models import SupportCategory, Ticket, TicketComment
+from apps.users.models import CustomerMembership
 
 User = get_user_model()
 
@@ -52,13 +52,13 @@ def check_existing_data() -> bool:
 
     if users_count > 0 or customers_count > 0 or memberships_count > 0:
         print(
-            f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships"  # noqa: RUF001
+            f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships"
         )
         return True
     return False
 
 
-def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
+def create_test_data() -> None:
     """Create comprehensive test data for all models."""
     print("🚀 Creating comprehensive test data...")
 
@@ -79,7 +79,7 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
             superuser.save()
             print("✅ Created superuser")
         else:
-            print("ℹ️  Superuser already exists")  # noqa: RUF001
+            print("ℹ️  Superuser already exists")
 
         # 2. Create test customer
         customer, created = Customer.objects.get_or_create(
@@ -97,7 +97,7 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
         if created:
             print("✅ Created test customer")
         else:
-            print("ℹ️  Test customer already exists")  # noqa: RUF001
+            print("ℹ️  Test customer already exists")
 
         # 3. Create tax profile for customer
         _tax_profile, created = CustomerTaxProfile.objects.get_or_create(
@@ -160,7 +160,7 @@ def create_test_data() -> None:  # noqa: C901, PLR0912, PLR0915
             customer_user.save()
             print("✅ Created customer user")
         else:
-            print("ℹ️  Customer user already exists")  # noqa: RUF001
+            print("ℹ️  Customer user already exists")
 
         # 7. Create membership relationship
         _membership, created = CustomerMembership.objects.get_or_create(
@@ -339,7 +339,7 @@ def create_service_if_missing(customer: Any) -> None:
         print(f"⚠️  Service creation failed: {e}")
 
 
-def create_products_if_missing() -> None:  # noqa: C901, PLR0912
+def create_products_if_missing() -> None:
     """Create comprehensive product catalog with all related models."""
     try:
         # Ensure currencies exist
@@ -711,7 +711,7 @@ def create_products_if_missing() -> None:  # noqa: C901, PLR0912
 
     except Exception as e:
         print(f"⚠️  Products creation failed: {e}")
-        import traceback  # noqa: PLC0415
+        import traceback
 
         traceback.print_exc()
 
@@ -1043,7 +1043,7 @@ def create_tickets_if_missing(customer: Any, customer_user: Any, superuser: Any)
                         time_spent=0.5,
                     )
 
-                elif ticket_data["replies"] == 5:  # noqa: PLR2004
+                elif ticket_data["replies"] == 5:
                     # 5-reply conversation between customer and support
                     comments_data = [
                         {
@@ -1100,7 +1100,7 @@ def create_tickets_if_missing(customer: Any, customer_user: Any, superuser: Any)
         print(f"⚠️  Ticket creation failed: {e}")
 
 
-def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None:  # noqa: C901, PLR0915
+def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None:
     """Print login credentials and test data info."""
     print("\n" + "=" * 60)
     print("🎉 PRAHO Platform Test Data Ready!")
@@ -1129,11 +1129,11 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
     print(f"   🔗 Memberships: {memberships_count}")
 
     if customers_count > 1:
-        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")  # noqa: RUF001
+        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")
 
     # Check optional models
     try:
-        from apps.products.models import Product  # noqa: PLC0415
+        from apps.products.models import Product
 
         products_count = Product.objects.count()
         print(f"   📦 Products: {products_count}")
@@ -1143,7 +1143,7 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.orders.models import Order  # noqa: PLC0415
+        from apps.orders.models import Order
 
         orders_count = Order.objects.count()
         print(f"   🛒 Orders: {orders_count}")
@@ -1153,7 +1153,7 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.provisioning.models import Service
 
         services_count = Service.objects.count()
         print(f"   🚀 Services: {services_count}")
@@ -1163,7 +1163,7 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.billing.models import Invoice, ProformaInvoice  # noqa: PLC0415
+        from apps.billing.models import Invoice, ProformaInvoice
 
         invoices_count = Invoice.objects.count()
         proformas_count = ProformaInvoice.objects.count()
@@ -1175,7 +1175,7 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.tickets.models import Ticket  # noqa: PLC0415
+        from apps.tickets.models import Ticket
 
         tickets_count = Ticket.objects.count()
         print(f"   🎫 Tickets: {tickets_count}")
@@ -1188,10 +1188,10 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
     print("=" * 60)
 
 
-def main() -> None:  # noqa: C901, PLR0912, PLR0915
+def main() -> None:
     """Main function."""
     if check_existing_data():
-        print("ℹ️  Test data already exists. Retrieving existing data...")  # noqa: RUF001
+        print("ℹ️  Test data already exists. Retrieving existing data...")
 
         try:
             # Get existing test accounts - try both possible emails

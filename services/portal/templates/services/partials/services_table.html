@@ -39,7 +39,7 @@
             <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
-            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
+            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}/mo</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             {% if service.status == 'active' %}
@@ -141,7 +141,7 @@
       </div>
       <div class="text-right">
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
-        <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
+        <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}/mo</div>
       </div>
     </div>
   </div>
@@ -162,7 +162,9 @@
     </div>
     <h3 class="text-lg font-medium text-white mb-2">{% trans 'No services found' %}</h3>
     <p class="text-slate-400 mb-6 max-w-sm mx-auto">
-      {% trans 'Contact our sales team to get started with hosting services.' %}
+      <a href="{% url 'orders:product_catalog' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "Browse our hosting plans" %}</a>
+      {% trans "to get started, or" %}
+      <a href="{% url 'tickets:create' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "contact our support team" %}</a>.
     </p>
   </div>
 </div>

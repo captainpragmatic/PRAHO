@@ -272,7 +272,7 @@ class EFacturaXMLGenerator:
         # Invoice type code (380 = Commercial invoice)
         ET.SubElement(root, f"{{{cbc}}}InvoiceTypeCode").text = "380"
 
-        # Note (optional)  # noqa: ERA001
+        # Note (optional)
         if invoice.notes:  # type: ignore[attr-defined]
             ET.SubElement(root, f"{{{cbc}}}Note").text = invoice.notes[:500]  # type: ignore[attr-defined]
 
@@ -585,7 +585,7 @@ class EFacturaSubmissionService:
         xml_hash = hashlib.sha256(xml_content.encode("utf-8")).hexdigest()
 
         # Submit to ANAF via EFacturaClient (if configured)
-        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError, EFacturaConfig  # noqa: PLC0415
+        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError, EFacturaConfig
 
         config = EFacturaConfig.from_settings()
         if not config.is_valid():
@@ -657,7 +657,7 @@ class EFacturaSubmissionService:
         Returns:
             EFacturaSubmissionResult with current status
         """
-        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError, EFacturaConfig  # noqa: PLC0415
+        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError, EFacturaConfig
 
         config = EFacturaConfig.from_settings()
         if not config.is_valid():
@@ -717,14 +717,14 @@ class EFacturaSubmissionService:
         Returns:
             Result with PDF/XML bytes or error
         """
-        from apps.billing.efactura.client import EFacturaConfig  # noqa: PLC0415
+        from apps.billing.efactura.client import EFacturaConfig
 
         config = EFacturaConfig.from_settings()
         if not config.is_valid():
             logger.warning("⚠️ [e-Factura] Not configured — cannot download")
             return Err("e-Factura not configured")
 
-        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError  # noqa: PLC0415
+        from apps.billing.efactura.client import EFacturaClient, EFacturaClientError
 
         logger.info(f"🏛️ [e-Factura] Downloading response: {download_id}")
         try:

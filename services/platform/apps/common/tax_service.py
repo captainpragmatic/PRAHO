@@ -120,7 +120,7 @@ class TaxConfiguration:
     def _get_rate_from_database(cls, country_code: str) -> Decimal | None:
         """Get VAT rate from TaxRule model as percentage (e.g., 21.0)."""
         try:
-            from apps.billing.tax_models import TaxRule  # noqa: PLC0415
+            from apps.billing.tax_models import TaxRule
 
             today = timezone.now().date()
             rule = (

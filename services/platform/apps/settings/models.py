@@ -166,7 +166,7 @@ class SystemSetting(models.Model):
         """Save setting with automatic encryption for sensitive values"""
         # Handle encryption for sensitive settings
         if self.is_sensitive and self.value is not None:
-            from .encryption import SettingsEncryption  # noqa: PLC0415
+            from .encryption import SettingsEncryption
 
             encryption = SettingsEncryption()
             # Only encrypt if not already encrypted
@@ -191,9 +191,7 @@ class SystemSetting(models.Model):
         if self.is_required and self.value is None:
             raise ValidationError({"value": _("Required settings must have a value")})
 
-    def _validate_value(  # noqa: C901, PLR0912 - Setting validation requires checking all data types
-        self, value: Any, field_name: str
-    ) -> None:
+    def _validate_value(self, value: Any, field_name: str) -> None:
         """Validate value against data type"""
         if value is None:
             return
@@ -234,7 +232,7 @@ class SystemSetting(models.Model):
         # Handle decryption for sensitive settings
         raw_value = self.value
         if self.is_sensitive and raw_value is not None:
-            from .encryption import SettingsEncryption  # noqa: PLC0415
+            from .encryption import SettingsEncryption
 
             encryption = SettingsEncryption()
             if encryption.is_encrypted(str(raw_value)):

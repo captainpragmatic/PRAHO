@@ -46,7 +46,7 @@ def _get_subscription_item_for_meter(subscription: Any, meter: Any) -> Any | Non
     if not subscription or not meter:
         return None
 
-    from .subscription_models import SubscriptionItem  # noqa: PLC0415
+    from .subscription_models import SubscriptionItem
 
     items = SubscriptionItem.objects.filter(subscription=subscription, product__is_active=True)
     if not items.exists():
@@ -86,7 +86,7 @@ def _get_allowance_from_subscription_item(sub_item: Any | None) -> Decimal:
     return Decimal("0")
 
 
-def _get_allowance_from_service_plan(meter: Any, service_plan: Any | None) -> Decimal:  # noqa: PLR0911
+def _get_allowance_from_service_plan(meter: Any, service_plan: Any | None) -> Decimal:
     if not service_plan or not meter:
         return Decimal("0")
 
@@ -170,13 +170,13 @@ class MeteringService:
     - Stripe Meter event synchronization
     """
 
-    def record_event(self, event_data: UsageEventData) -> Result:  # noqa: C901, PLR0911, PLR0912
+    def record_event(self, event_data: UsageEventData) -> Result:
         """
         Record a usage event with idempotency protection.
 
         Returns Result containing the UsageEvent if successful.
         """
-        from .metering_models import UsageEvent, UsageMeter  # noqa: PLC0415
+        from .metering_models import UsageEvent, UsageMeter
 
         try:
             # Get the meter
@@ -189,7 +189,7 @@ class MeteringService:
                 return Result.err(f"Meter is inactive: {event_data.meter_name}")
 
             # Get customer
-            from apps.customers.models import Customer  # noqa: PLC0415
+            from apps.customers.models import Customer
 
             try:
                 customer = Customer.objects.get(id=event_data.customer_id)
@@ -214,7 +214,7 @@ class MeteringService:
             service = None
 
             if event_data.subscription_id:
-                from .subscription_models import Subscription  # noqa: PLC0415
+                from .subscription_models import Subscription
 
                 try:
                     subscription = Subscription.objects.get(id=event_data.subscription_id)
@@ -222,7 +222,7 @@ class MeteringService:
                     logger.warning(f"Subscription not found: {event_data.subscription_id}")
 
             if event_data.service_id:
-                from apps.provisioning.models import Service  # noqa: PLC0415
+                from apps.provisioning.models import Service
 
                 try:
                     service = Service.objects.get(id=event_data.service_id)
@@ -231,7 +231,7 @@ class MeteringService:
 
             # Create the event with idempotency using database constraint
             # This is race-condition-safe: we try to insert and catch duplicate
-            from django.db import IntegrityError  # noqa: PLC0415
+            from django.db import IntegrityError
 
             try:
                 with transaction.atomic():
@@ -303,7 +303,7 @@ class MeteringService:
     def _schedule_aggregation_update(self, event: Any) -> None:
         """Schedule async update of aggregation for this event"""
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             async_task("apps.billing.metering_tasks.update_aggregation_for_event", str(event.id), timeout=60)
         except Exception as e:
@@ -314,8 +314,8 @@ class MeteringService:
     def _update_aggregation_sync(self, event: Any) -> None:
         """Synchronously update aggregation for an event"""
         try:
-            from .metering_models import UsageAggregation  # noqa: PLC0415
-            from .subscription_models import Subscription  # noqa: PLC0415
+            from .metering_models import UsageAggregation
+            from .subscription_models import Subscription
 
             # Find the billing cycle for this event
             subscription = event.subscription
@@ -394,7 +394,7 @@ class MeteringService:
     def _check_thresholds_async(self, customer: Any, meter: Any, subscription: Any | None) -> None:
         """Schedule async threshold check"""
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             async_task(
                 "apps.billing.metering_tasks.check_usage_thresholds",
@@ -425,7 +425,7 @@ class AggregationService:
 
         Returns (processed_count, error_count)
         """
-        from .metering_models import UsageEvent  # noqa: PLC0415
+        from .metering_models import UsageEvent
 
         query = UsageEvent.objects.filter(is_processed=False)
 
@@ -455,7 +455,7 @@ class AggregationService:
         """
         Close a billing cycle and prepare aggregations for rating.
         """
-        from .metering_models import BillingCycle, UsageAggregation  # noqa: PLC0415
+        from .metering_models import BillingCycle, UsageAggregation
 
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
@@ -500,7 +500,7 @@ class AggregationService:
         """
         Get a summary of customer usage for a period.
         """
-        from .metering_models import UsageAggregation  # noqa: PLC0415
+        from .metering_models import UsageAggregation
 
         query = UsageAggregation.objects.filter(customer_id=customer_id)
 
@@ -553,7 +553,7 @@ class RatingEngine:
         """
         Calculate charges for a usage aggregation.
         """
-        from .metering_models import PricingTier, UsageAggregation  # noqa: PLC0415
+        from .metering_models import PricingTier, UsageAggregation
 
         try:
             aggregation = UsageAggregation.objects.select_related("meter", "subscription", "billing_cycle").get(
@@ -644,7 +644,7 @@ class RatingEngine:
         """
         Rate all aggregations for a billing cycle.
         """
-        from .metering_models import BillingCycle, UsageAggregation  # noqa: PLC0415
+        from .metering_models import BillingCycle, UsageAggregation
 
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
@@ -718,7 +718,7 @@ class RatingEngine:
         return value
 
     def _get_pricing_brackets(self, pricing_tier: Any) -> Any:
-        from .metering_models import PricingTierBracket  # noqa: PLC0415
+        from .metering_models import PricingTierBracket
 
         return PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
@@ -790,9 +790,9 @@ class UsageAlertService:
 
         Returns list of created alerts.
         """
-        from apps.customers.models import Customer  # noqa: PLC0415
+        from apps.customers.models import Customer
 
-        from .metering_models import (  # noqa: PLC0415
+        from .metering_models import (
             UsageAggregation,
             UsageAlert,
             UsageThreshold,
@@ -929,7 +929,7 @@ class UsageAlertService:
     def _schedule_alert_notification(self, alert: Any) -> None:
         """Schedule async notification for an alert"""
         try:
-            from django_q.tasks import async_task  # noqa: PLC0415
+            from django_q.tasks import async_task
 
             async_task("apps.billing.metering_tasks.send_usage_alert_notification", str(alert.id), timeout=60)
         except Exception as e:
@@ -939,7 +939,7 @@ class UsageAlertService:
         """
         Send notification for a usage alert.
         """
-        from .metering_models import UsageAlert  # noqa: PLC0415
+        from .metering_models import UsageAlert
 
         try:
             alert = UsageAlert.objects.select_related("threshold", "customer", "threshold__meter").get(id=alert_id)
@@ -954,7 +954,7 @@ class UsageAlertService:
         # Send email notification
         if threshold.notify_customer:
             try:
-                from apps.notifications.services import EmailService  # noqa: PLC0415
+                from apps.notifications.services import EmailService
 
                 email_result = EmailService.send_template_email(
                     template_key="usage_alert",
@@ -993,7 +993,7 @@ class UsageAlertService:
             # Just the notification, no service action
             pass
         elif action == "throttle":
-            from apps.provisioning.provisioning_service import ProvisioningService  # noqa: PLC0415
+            from apps.provisioning.provisioning_service import ProvisioningService
 
             ProvisioningService.suspend_services_for_customer(customer_id=alert.customer.id, reason="usage_throttled")
             AuditService.log_simple_event(
@@ -1006,7 +1006,7 @@ class UsageAlertService:
             )
             logger.info(f"⚠️ [Metering] Throttled services for {alert.customer}")
         elif action == "suspend":
-            from apps.provisioning.provisioning_service import ProvisioningService  # noqa: PLC0415
+            from apps.provisioning.provisioning_service import ProvisioningService
 
             ProvisioningService.suspend_services_for_customer(customer_id=alert.customer.id, reason="usage_exceeded")
             AuditService.log_simple_event(
@@ -1019,7 +1019,7 @@ class UsageAlertService:
             )
             logger.info(f"🛑 [Metering] Suspended services for {alert.customer}")
         elif action == "block_new":
-            from django.core.cache import cache as django_cache  # noqa: PLC0415
+            from django.core.cache import cache as django_cache
 
             cache_key = f"usage_blocked:{alert.customer.id}"
             django_cache.set(cache_key, True, timeout=86400)  # 24 hours

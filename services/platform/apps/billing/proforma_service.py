@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def generate_proforma_pdf(proforma: Any) -> bytes:  # ProformaInvoice type would create circular import
     """Generate PDF for a proforma invoice using the ReportLab generator."""
     logger.info(f"📄 [PDF] Generating PDF for proforma {proforma.number}")
-    from apps.billing.pdf_generators import generate_proforma_pdf as _generate_pdf  # noqa: PLC0415
+    from apps.billing.pdf_generators import generate_proforma_pdf as _generate_pdf
 
     return _generate_pdf(proforma)
 
@@ -37,7 +37,7 @@ def send_proforma_email(
     proforma: Any, recipient_email: str | None = None
 ) -> bool:  # ProformaInvoice type would create circular import
     """Send proforma invoice via email with PDF attachment."""
-    from apps.notifications.services import EmailService  # noqa: PLC0415
+    from apps.notifications.services import EmailService
 
     email = recipient_email or proforma.customer.primary_email
     logger.info(f"📧 [Email] Sending proforma {proforma.number} to {email}")

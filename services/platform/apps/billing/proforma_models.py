@@ -243,7 +243,7 @@ class ProformaInvoice(models.Model):
 
     def convert_to_invoice(self) -> None:
         """Convert this proforma to an actual invoice via ProformaConversionService."""
-        from apps.billing.services import ProformaConversionService  # noqa: PLC0415
+        from apps.billing.services import ProformaConversionService
 
         result = ProformaConversionService.convert_to_invoice(str(self.id))
         if result.is_err():
@@ -295,7 +295,7 @@ class ProformaLine(models.Model):
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        from decimal import ROUND_HALF_EVEN  # noqa: PLC0415
+        from decimal import ROUND_HALF_EVEN
 
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderItem)

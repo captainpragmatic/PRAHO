@@ -28,7 +28,7 @@ class TypeCoverageReporter:
         cmd = ["python", "-m", "mypy", target, "--config-file", "pyproject.toml", "--show-traceback", "--error-summary"]
 
         try:
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=self.project_root)  # noqa: S603
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True, cwd=self.project_root)
 
             error_count = len([line for line in result.stdout.split("\n") if "error:" in line])
 

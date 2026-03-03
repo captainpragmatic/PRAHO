@@ -59,21 +59,21 @@ VALUE_SUMMARY_LIMIT = _DEFAULT_VALUE_SUMMARY_LIMIT
 
 def get_sql_display_limit() -> int:
     """Get sql display limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.sql_display_limit", _DEFAULT_SQL_DISPLAY_LIMIT)
 
 
 def get_max_summarized_args() -> int:
     """Get max summarized args from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.max_summarized_args", _DEFAULT_MAX_SUMMARIZED_ARGS)
 
 
 def get_value_summary_limit() -> int:
     """Get value summary limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.value_summary_limit", _DEFAULT_VALUE_SUMMARY_LIMIT)
 
@@ -307,7 +307,7 @@ class QueryBudget:
     raise_on_exceed: bool = False
 
 
-class QueryBudgetExceeded(Exception):  # noqa: N818
+class QueryBudgetExceeded(Exception):
     """Exception raised when query budget is exceeded."""
 
     def __init__(self, message: str, summary: dict[str, Any]) -> None:
@@ -418,7 +418,7 @@ class QueryTracer:
 
     def _normalize_sql(self, sql: str) -> str:
         """Normalize SQL for duplicate detection (remove parameter values)."""
-        import re  # noqa: PLC0415
+        import re
 
         # Replace numeric values
         normalized = re.sub(r"\b\d+\b", "?", sql)
@@ -781,14 +781,14 @@ class PerformanceProfiler:
 
     def _take_snapshot(self) -> PerformanceSnapshot:
         """Take a snapshot of current system metrics."""
-        import gc  # noqa: PLC0415
+        import gc
 
-        from django.core.cache import cache  # noqa: PLC0415
+        from django.core.cache import cache
 
         # Memory usage (requires psutil for accurate measurement)
         memory_mb = 0.0
         try:
-            import psutil  # noqa: PLC0415
+            import psutil
 
             process = psutil.Process()
             memory_mb = process.memory_info().rss / 1024 / 1024

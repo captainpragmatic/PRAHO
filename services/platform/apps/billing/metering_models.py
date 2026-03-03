@@ -277,7 +277,7 @@ class UsageEvent(models.Model):
         verbose_name_plural = _("Usage Events")
         ordering = ("-timestamp",)
         # Enforce idempotency at database level
-        constraints = [  # noqa: RUF012
+        constraints = [
             models.UniqueConstraint(
                 fields=["meter", "customer", "idempotency_key"], name="unique_usage_event_idempotency"
             ),
@@ -425,7 +425,7 @@ class UsageAggregation(models.Model):
         verbose_name = _("Usage Aggregation")
         verbose_name_plural = _("Usage Aggregations")
         ordering = ("-period_start",)
-        constraints = [  # noqa: RUF012
+        constraints = [
             models.UniqueConstraint(fields=["meter", "customer", "billing_cycle"], name="unique_meter_customer_cycle"),
         ]
         indexes = (
@@ -456,7 +456,7 @@ class UsageAggregation(models.Model):
         elif self.meter.aggregation_type == "count":
             self.total_value = Decimal(events.count())
         elif self.meter.aggregation_type == "max":
-            from django.db.models import Max  # noqa: PLC0415
+            from django.db.models import Max
 
             result = events.aggregate(max_val=Max("value"))
             self.max_value = result["max_val"]
@@ -537,7 +537,7 @@ class BillingCycle(models.Model):
         verbose_name = _("Billing Cycle")
         verbose_name_plural = _("Billing Cycles")
         ordering = ("-period_start",)
-        constraints = [  # noqa: RUF012
+        constraints = [
             models.UniqueConstraint(fields=["subscription", "period_start"], name="unique_subscription_period"),
         ]
         indexes = (
@@ -701,7 +701,7 @@ class PricingTierBracket(models.Model):
         verbose_name = _("Pricing Bracket")
         verbose_name_plural = _("Pricing Brackets")
         ordering = ("pricing_tier", "sort_order", "from_quantity")
-        constraints = [  # noqa: RUF012
+        constraints = [
             models.UniqueConstraint(fields=["pricing_tier", "from_quantity"], name="unique_tier_bracket_start"),
         ]
 

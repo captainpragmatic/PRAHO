@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Service Plans" %} - PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+  <!-- Page Header -->
+  <div class="mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="text-3xl font-bold text-white mb-2">
+          {% icon "server" size="lg" css_class="text-blue-400" %} {% trans "Available Plans" %}
+        </h1>
+        <p class="text-slate-400">{% trans "Upgrade or downgrade your hosting plan" %}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Service Type Filter -->
+  {% if service_types %}
+  <div class="mb-6">
+    <div class="border-b border-slate-700">
+      <nav class="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto pb-px">
+        {% for value, label in service_types %}
+        <a href="{% url 'services:plans' %}{% if value %}?type={{ value }}{% endif %}"
+           class="{% if service_type == value %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-600{% endif %} whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors flex-shrink-0">
+          {{ label }}
+        </a>
+        {% endfor %}
+      </nav>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Error Message -->
+  {% if error %}
+  <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
+    <div class="flex items-center space-x-3">
+      <svg class="w-5 h-5 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4v2m0-10a9 9 0 110 18 9 9 0 010-18z"></path>
+      </svg>
+      <p class="text-red-200 text-sm">
+        {% trans "Unable to load hosting plans. Please try again later." %}
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Plans Grid -->
+  {% if plans %}
+  <div class="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+    {% for plan in plans %}
+    <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors overflow-hidden flex flex-col">
+      <!-- Plan Header -->
+      <div class="p-6 pb-4 border-b border-slate-700">
+        <h3 class="text-xl font-semibold text-white mb-2">{{ plan.name }}</h3>
+        <p class="text-slate-400 text-sm">{{ plan.plan_type_display }}</p>
+      </div>
+
+      <!-- Plan Description -->
+      <div class="p-6 pb-4 flex-grow">
+        <p class="text-slate-300 text-sm leading-relaxed mb-4">
+          {{ plan.description|truncatewords:20 }}
+        </p>
+
+        <!-- Key Features -->
+        <div class="space-y-2 text-sm text-slate-300">
+          {% if plan.disk_space_gb %}
+          <div class="flex items-center space-x-2">
+            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{{ plan.disk_space_gb }} GB {% trans "disk space" %}</span>
+          </div>
+          {% endif %}
+
+          {% if plan.bandwidth_gb %}
+          <div class="flex items-center space-x-2">
+            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{{ plan.bandwidth_gb }} GB {% trans "bandwidth" %}</span>
+          </div>
+          {% endif %}
+
+          {% if plan.email_accounts %}
+          <div class="flex items-center space-x-2">
+            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{{ plan.email_accounts }} {% trans "email accounts" %}</span>
+          </div>
+          {% endif %}
+
+          {% if plan.databases %}
+          <div class="flex items-center space-x-2">
+            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{{ plan.databases }} {% trans "databases" %}</span>
+          </div>
+          {% endif %}
+
+          {% if plan.cpu_cores %}
+          <div class="flex items-center space-x-2">
+            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{{ plan.cpu_cores }} {% trans "CPU cores" %}</span>
+          </div>
+          {% endif %}
+
+          {% if plan.ram_gb %}
+          <div class="flex items-center space-x-2">
+            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+            </svg>
+            <span>{{ plan.ram_gb }} GB {% trans "RAM" %}</span>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Pricing -->
+      <div class="px-6 py-4 bg-slate-900 border-t border-slate-700">
+        <div class="grid grid-cols-3 gap-2 mb-4">
+          {% if plan.price_monthly %}
+          <div>
+            <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Monthly" %}</p>
+            <p class="text-lg font-semibold text-white">
+              {{ plan.price_monthly|floatformat:0 }} RON
+            </p>
+          </div>
+          {% endif %}
+
+          {% if plan.price_quarterly %}
+          <div>
+            <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Quarterly" %}</p>
+            <p class="text-lg font-semibold text-white">
+              {{ plan.price_quarterly|floatformat:0 }} RON
+            </p>
+            {% if plan.quarterly_savings %}
+            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.quarterly_savings }}%</p>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if plan.price_annual %}
+          <div>
+            <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Annual" %}</p>
+            <p class="text-lg font-semibold text-white">
+              {{ plan.price_annual|floatformat:0 }} RON
+            </p>
+            {% if plan.annual_savings %}
+            <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.annual_savings }}%</p>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+        {% if plan.setup_fee %}
+        <p class="text-xs text-slate-400 text-center">
+          {% blocktrans %}Setup fee: {{ plan.setup_fee }} RON{% endblocktrans %}
+        </p>
+        {% endif %}
+      </div>
+
+      <!-- Action Button -->
+      <div class="px-6 py-4 border-t border-slate-700">
+        <button class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors">
+          {% trans "Upgrade Plan" %}
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <!-- Empty State -->
+  <div class="flex flex-col items-center justify-center py-12">
+    <svg class="w-16 h-16 text-slate-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+    </svg>
+    <h3 class="text-lg font-semibold text-white mb-2">{% trans "No Plans Available" %}</h3>
+    <p class="text-slate-400 text-center mb-6">
+      {% if service_type %}
+        {% trans "No plans found for the selected type." %}
+      {% else %}
+        {% trans "No hosting plans are currently available." %}
+      {% endif %}
+    </p>
+    <a href="{% url 'services:list' %}" class="inline-flex items-center space-x-2 text-blue-400 hover:text-blue-300 transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+      </svg>
+      <span>{% trans "Back to Services" %}</span>
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

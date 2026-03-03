@@ -878,7 +878,7 @@ def _invalidate_billing_tld_caches(tld: TLD) -> None:
 
 def _handle_existing_virtualmin_account(domain: Domain, virtualmin_account: Any) -> None:
     """Handle updates to existing Virtualmin account based on domain status changes"""
-    from apps.provisioning.virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
+    from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 
     if domain.status != "active" and virtualmin_account.status == "active":
         # Domain became inactive - suspend Virtualmin account
@@ -913,8 +913,8 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
     """
     try:
         # Import here to avoid circular imports
-        from apps.provisioning.models import Service  # noqa: PLC0415
-        from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
+        from apps.provisioning.models import Service
+        from apps.provisioning.virtualmin_models import VirtualminAccount
 
         # Find hosting services associated with this domain
         hosting_services = Service.objects.filter(

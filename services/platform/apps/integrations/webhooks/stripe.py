@@ -62,7 +62,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         could allow forged payloads to pass verification.
         """
         try:
-            from apps.settings.services import SettingsService  # noqa: PLC0415
+            from apps.settings.services import SettingsService
 
             # Get encrypted webhook secret from settings system
             webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
@@ -132,13 +132,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return handler
         return None
 
-    def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:  # noqa: PLR0911
+    def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """💳 Handle PaymentIntent events with race condition protection.
 
         SECURITY FIX: Uses select_for_update() to prevent race conditions where
         concurrent webhook deliveries could corrupt payment state.
         """
-        from django.db import transaction  # noqa: PLC0415
+        from django.db import transaction
 
         payment_intent = payload.get("data", {}).get("object", {})
         stripe_payment_id = payment_intent.get("id")
@@ -204,7 +204,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 # Trigger dunning process if this was an invoice payment
                 if payment.invoice:
                     try:
-                        from apps.billing.tasks import start_dunning_process_async  # noqa: PLC0415
+                        from apps.billing.tasks import start_dunning_process_async
 
                         start_dunning_process_async(str(payment.invoice.id))
                         logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
@@ -274,7 +274,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             # Send urgent notification to admin
             try:
-                from apps.notifications.services import NotificationService  # noqa: PLC0415
+                from apps.notifications.services import NotificationService
 
                 dispute_amount = charge.get("dispute", {}).get("amount", charge.get("amount", 0))
                 NotificationService.send_admin_alert(
@@ -380,8 +380,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
     def _send_portal_webhook(self, data: dict[str, Any]) -> None:
         """Send webhook notification to Portal service"""
         try:
-            import requests  # noqa: PLC0415
-            from django.conf import settings  # noqa: PLC0415
+            import requests
+            from django.conf import settings
 
             # Get Portal webhook URL from settings
             portal_webhook_url = getattr(settings, "PORTAL_PAYMENT_WEBHOOK_URL", None)

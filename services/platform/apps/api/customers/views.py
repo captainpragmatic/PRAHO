@@ -655,7 +655,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
-def update_customer_billing_address(request: Request, customer: Customer) -> Response:  # noqa: C901, PLR0912
+def update_customer_billing_address(request: Request, customer: Customer) -> Response:
     """
     🏠 Update customer billing address during checkout validation failures.
 
@@ -709,7 +709,7 @@ def update_customer_billing_address(request: Request, customer: Customer) -> Res
 
     try:
         # Import models locally to avoid circular imports
-        from apps.customers.models import CustomerAddress, CustomerTaxProfile  # noqa: PLC0415
+        from apps.customers.models import CustomerAddress, CustomerTaxProfile
 
         with transaction.atomic():
             # Update customer basic info

@@ -83,7 +83,7 @@ class HTTPConnectionPool:
     _instances: ClassVar[dict[str, HTTPConnectionPool]] = {}
     _lock = threading.Lock()
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         base_url: str,
         pool_connections: int = 10,
@@ -350,7 +350,7 @@ class SSHConnectionPool:
         idle_timeout: float = 300.0,
     ) -> None:
         try:
-            import paramiko  # noqa: PLC0415
+            import paramiko
 
             self._paramiko = paramiko
         except ImportError:

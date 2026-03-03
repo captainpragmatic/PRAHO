@@ -14,11 +14,11 @@ Provides hierarchical navigation with proper accessibility.
       {% endif %}
 
       {% if item.url and not forloop.last %}
-        <a href="{{ item.url }}" class="text-blue-600 hover:text-blue-800 font-medium transition-colors">
+        <a href="{{ item.url }}" class="text-blue-400 hover:text-blue-300 font-medium transition-colors">
           {{ item.text }}
         </a>
       {% else %}
-        <span class="{% if forloop.last %}text-slate-900 font-semibold{% else %}text-slate-600{% endif %}">
+        <span class="{% if forloop.last %}text-white font-semibold{% else %}text-slate-400{% endif %}">
           {{ item.text }}
         </span>
       {% endif %}

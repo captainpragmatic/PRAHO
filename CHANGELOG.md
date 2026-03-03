@@ -7,12 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Portal QA (8 bugs, 4 fixture gaps, 20 UX improvements)
+
+Portal QA walkthrough identified 19 findings; red-team review elevated 3 more from "not a bug" to confirmed. All fixes include unit + E2E test coverage.
+
+#### Critical (2)
+- **C1**: Cart checkout blocked — Portal stored `product_slug` but Platform expected UUID `product_id`. Fix: store UUID on cart add + Platform slug fallback lookup (`orders/services.py`, `api/orders/views.py`)
+- **C2**: Registration blocked — `terms_accepted` checkbox missing from template and API payload (`register.html`, `forms.py`)
+
+#### High (3)
+- **H1**: Invoice detail — `invoice.bill_to.name` → `invoice.bill_to_name` (flat field); added `status_display` property to Invoice schema with i18n labels (`invoice_detail.html`, `schemas.py`)
+- **H2**: Login error invisible — view used `messages.error()` but template checked `form.non_field_errors`; changed to `form.add_error(None, ...)` for inline display (`users/views.py:285`)
+- **M7**: TOTP setup "Failed to initialize" — Portal sent only `customer_id`, Platform's `@require_customer_authentication` also requires `user_id` in HMAC body (`api_client/services.py`, `users/views.py`)
+
+#### Medium (5)
+- **M1**: Company profile "Not specified" — template checked `company_data.name` but view set `company_data.company_name` (`company_profile.html:80`)
+- **M2**: Profile "Last Login: Never" / "Member Since: N/A" — `CustomerProfileSerializer.to_representation()` now includes `last_login` and `date_joined` (`customers/serializers.py`)
+- **L5**: Proforma VAT rate showed "0.2%" instead of "21%" — new `as_percentage` template filter converts proportion to percentage (`formatting.py`, `proforma_detail.html`)
+- **M3/M4**: Service detail "Calculating..." — `{% if service.service_age_days %}` → `{% if service.service_age_days != None %}` (0 is falsy); fixtures now set `activated_at`/`expires_at`
+- **L3**: Currency formatting — services templates used `floatformat:2` + hardcoded "RON"; now use `{{ service.currency_code|default:"RON" }}`
+
+#### Fixture Data (3)
+- **M9**: Product fixtures now include descriptions and all 3 billing period prices
+- **L4**: Ticket fixture titles no longer embed `[OPEN]`/`[IN_PROGRESS]` status prefix (`generate_sample_data.py`)
+- **L2**: Billing cycle dropdown labels shortened to prevent truncation
+
+### Improved — Portal UX Elevation (20 quick wins)
+
+- Empty states: billing, services, and cart now have CTAs ("Browse Hosting Plans", "Browse Products") instead of dead-end text
+- Tickets mobile breakpoint gap fixed (`sm:hidden` → `md:hidden`) — tablet users no longer see blank page
+- Breadcrumb component colors fixed for dark theme (was invisible: `text-slate-900` on `bg-slate-900`)
+- "Logout" nav text now translated (`{% trans %}`)
+- Ticket create validation: `alert()` replaced with inline error banner
+- MFA TOTP setup: added `{% if form.errors %}` block for failed verification
+- Company edit form: added `non_field_errors` display
+- Toast auto-dismiss raised from 3s to 5s (WCAG recommendation)
+- Ticket detail: "Back to Tickets" link moved from bottom to top of page
+- Ticket dates: replaced fragile string-slicing with Django `|date:"d.m.Y"` filter
+- Scroll hint arrows: initial `opacity:0` prevents flash on page load
+- Company edit: removed redundant `min-h-screen bg-slate-900` wrapper
+- Removed dead Alpine.js loading overlay from base template
+- Removed conflicting HTMX global JS indicator listener (CSS handles it)
+- Account status stat card driven from context (was hardcoded "Active")
+
 ### Added
 - **Server-side log checking in E2E tests (ADR-0028)**: ComprehensivePageMonitor now detects Django errors in platform/portal logs, correlated per-test via X-Request-ID
+- **Multi-provider cloud gateway**: AWS (`aws_service.py`), DigitalOcean (`digitalocean_service.py`), and Vultr (`vultr_service.py`) implementations of `CloudProviderGateway` ABC alongside existing Hetzner
+- **Config drift detection (ADR-0029)**: `DriftCheck`, `DriftReport`, `DriftSnapshot`, `DriftRemediationRequest` models with `drift_scan` management command (exit codes: 0=clean, 1=drifts, 2=errors, 3=both)
+- **Infrastructure management commands**: `deploy_node`, `manage_node`, `cleanup_deployments`, `store_credentials` — CLI parity with web UI for all deployment lifecycle operations
+- **Drift remediation UI**: Templates and views for drift dashboard, scan results, and remediation approval workflow
 
 ### Changed
 - **E2E test suite cleanup**: Deleted 3 legacy duplicate test files (-1,003 lines), migrated ~127 tests to use `monitored_staff_page`/`monitored_customer_page` fixtures, standardized imports from `tests.e2e.utils` to `tests.e2e.helpers`
 - **ComprehensivePageMonitor bug fixes**: `add_expected_error_patterns` now accumulates across multiple markers (was overwriting), non-string args coerced to `str`, Playwright response listener properly unregistered in `__exit__`
+
+### Fixed — Audit Hardening (50 findings, 221 tests)
+
+8-agent deep audit identified 50 issues (10 Critical, 18 High, 16 Medium, 6 Low). All fixed with 221 new tests achieving 90%+ coverage on changed code. 5,264 platform tests pass.
+
+#### Critical (10)
+- **C1**: `virtualmin_disaster_recovery.py` — `VirtualminGateway` now receives `VirtualminConfig` instead of raw server object
+- **C2**: `deploy_node` command — `--dry-run` exits before `deployment.save()`, preventing phantom DB records
+- **C3**: Cloudflare API token removed from all queue function signatures; fetched from `SettingsService` at task execution time (prevents cleartext in Django-Q2 task table)
+- **C4**: `tasks.py` — Fixed `timezone.make_aware()` on already-aware datetime in cost calculation
+- **C5**: `DriftCheck.started_at` changed to `default=timezone.now` (was `None`)
+- **C6**: `provider_sync.py` — `AWS_REGION_CODE_MAP` replaces naive AZ-name truncation for region codes
+- **C7**: `hcloud_service.py` — `int(server_id)` moved inside try/except in all 8 methods (was crashing on invalid IDs)
+- **C8**: Vultr power-ops test mocks fixed to return valid instance data with correct status normalization
+- **C9**: `aws_service.py` — Idempotency tag changed from `"deployment-id"` to `"praho-deployment"` (matches other providers)
+- **C10**: Deployment status template — `progress_step` computed in view, stages passed as list (was splitting comma-string in template)
+
+#### High (18)
+- **H1**: `views.py` — `async_task()` call moved inside `transaction.atomic()` for drift remediation approval (TOCTOU prevention)
+- **H2**: `deployment_service.py` — Distinguished `Err` (transient failure) from `Ok(None)` (server gone) in deploy retry; only clears `external_node_id` on confirmed absence
+- **H3**: `drift_scan` command — Three-code exit scheme (0/1/2/3) for clean/drifts/errors/both
+- **H4**: `retry_deployment` uses `transition_to("pending")` instead of direct `status = "pending"`
+- **H5**: `stop_node`/`start_node` use `transition_to()` with new transitions: `completed → stopped`, `stopped → completed`
+- **H6**: `destroy_node` wrapped in `transaction.atomic()` + `select_for_update()` for TOCTOU prevention
+- **H7**: `can_be_destroyed` property now includes `"stopped"` status
+- **H8**: `is_err()` check before `unwrap()` on master SSH public key (was crashing on vault errors)
+- **H9**: `aws_service.py:get_server` catches generic `Exception` after `ClientError`
+- **H10**: `hcloud_service.py` — Server status normalized via `normalize_server_status()`
+- **H11**: `vultr_service.py` — `delete_firewall` returns `Ok(True)` on 404 (idempotent)
+- **H12**: `aws_service.py` — `upload_ssh_key` checks fingerprint before delete-and-recreate
+- **H13**: `digitalocean_service.py` — `DO_REGION_COUNTRY_MAP` dict replaces broken `slug[:3].upper()` for country codes
+- **H14**: `manage_node` command — Status validation before async dispatch (mirrors view precondition checks)
+- **H15**: `cleanup_deployments` command — Only marks `"destroyed"` when cloud deletion succeeds
+- **H16**: `virtualmin_auth_manager.py` — Dict-dispatch pattern with explicit `Err` for unknown auth methods
+- **H17**: `_mark_failed()` accepts `audit_ctx` parameter for audit trail threading
+- **H18**: Portal HMAC tests assert `customer_id` extraction from response
+
+#### Medium (16)
+- **M1/M4**: `get_next_node_number` — `IntegrityError` retry for empty-table race condition
+- **M2**: `views.py` — `distinct=True` in `Count()` for drift dashboard annotations
+- **M3**: (Covered by C7 — same `int()` fix)
+- **M5**: Provider sync uses Vultr public API for plan catalog (not private `_request`)
+- **M6**: Provider config tests updated for vault-first credential lookup
+- **M7**: DigitalOcean provider code changed from `"do"` to `"dgo"` (3-char convention)
+- **M9**: `_PROVIDER_REGISTRY` and `normalize_server_status` documented with docstrings
+- **M10**: `vultr_service.py` — `create_server` validates image is non-empty before API call
+- **M11**: `digitalocean_service.py` — `logger.warning()` for SSH keys not found during resolution
+- **M13**: Canonical status vocabulary documented on `normalize_server_status`
+- **M14**: ADR-0028 updated to document `NO_REQUEST_ID` exclusion by design
+- **M15**: Quota restoration uses `is not None` checks instead of truthy (zero quota = unlimited)
+- **M16**: Migration 0004 — `started_at` default changed from `None` to `timezone.now`
+
+#### Low (6)
+- **L1**: Replaced realistic AWS key literals with obviously fake test values
+- **L4**: `apps.py` — Narrowed `suppress(Exception)` to `suppress(ImportError)` for django_q import
+- **L5**: Fixed `/home/claude/...` paths in docs to relative paths
 
 ### Fixed
 - **12 vacuous E2E tests hardened**: Workflow tests that silently passed on failure now `pytest.fail()`, security isolation tests now assert denial, soft-check helpers now return bools with caller assertions

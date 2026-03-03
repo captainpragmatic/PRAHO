@@ -52,11 +52,11 @@ class NodeRegistrationService:
             Result with VirtualminServer instance or error
         """
         # Import here to avoid circular imports
-        from apps.common.credential_vault import (  # noqa: PLC0415
+        from apps.common.credential_vault import (
             CredentialData,
             get_credential_vault,
         )
-        from apps.provisioning.virtualmin_models import (  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import (
             VirtualminServer,
         )
 
@@ -162,13 +162,13 @@ class NodeRegistrationService:
         try:
             with transaction.atomic():
                 # Remove credentials from vault
-                from apps.common.credential_vault import (  # noqa: PLC0415
+                from apps.common.credential_vault import (
                     get_credential_vault,
                 )
 
                 get_credential_vault()
                 # Deactivate credential if it exists
-                from apps.common.credential_vault import (  # noqa: PLC0415
+                from apps.common.credential_vault import (
                     EncryptedCredential,
                 )
 
@@ -266,7 +266,7 @@ _registration_service: NodeRegistrationService | None = None
 
 def get_registration_service() -> NodeRegistrationService:
     """Get global registration service instance"""
-    global _registration_service  # noqa: PLW0603
+    global _registration_service
     if _registration_service is None:
         _registration_service = NodeRegistrationService()
     return _registration_service

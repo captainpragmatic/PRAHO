@@ -302,3 +302,120 @@ def test_invoices_responsive_breakpoints(monitored_customer_page: Page) -> None:
 
     results = run_responsive_breakpoints_test(monitored_customer_page, _check_invoices_page)
     assert_responsive_results(results)
+
+
+# ===============================================================================
+# QA FIX REGRESSION TESTS
+# ===============================================================================
+
+
+def test_invoice_detail_shows_customer_name_and_status(monitored_customer_page: Page) -> None:
+    """H1: Invoice detail page shows customer name (not 'N/A') and a status badge."""
+    page = monitored_customer_page
+    print("🧪 Testing invoice detail shows customer name and status badge")
+
+    _navigate_to_invoices(page)
+
+    # Try to open the first clickable invoice row
+    clickable_row: Locator = page.locator("tr[onclick]").first
+    if clickable_row.count() == 0:
+        print("  [i] No invoice rows found, skipping detail check")
+        return
+
+    clickable_row.click()
+    page.wait_for_load_state("networkidle")
+
+    current_url: str = page.url
+    assert re.search(r"/billing/(invoices|proformas)/[\w-]+/", current_url), (
+        f"Expected detail URL after clicking row, got: {current_url}"
+    )
+    print(f"    ✅ Navigated to: {current_url}")
+
+    # Customer name must not be a bare "N/A"
+    page_text: str = page.text_content("body") or ""
+
+    # Look for a customer/company name field that contains actual text
+    customer_section: Locator = page.locator(
+        'dt:has-text("Customer"), dt:has-text("Client"), dt:has-text("Company")'
+    ).first
+    if customer_section.count() > 0:
+        # Adjacent dd contains the value
+        customer_value: Locator = customer_section.locator("xpath=following-sibling::dd[1]")
+        if customer_value.count() > 0:
+            value_text: str = (customer_value.first.text_content() or "").strip()
+            assert value_text not in ("N/A", "—", "", "-"), (
+                f"Customer field on invoice detail must not be empty/N/A, got: '{value_text}'"
+            )
+            print(f"    ✅ Customer name shows real value: '{value_text}'")
+    else:
+        # Fallback: page should not contain isolated "N/A" strings in a billing context
+        # Count occurrences — a few may be acceptable (e.g. missing optional fields)
+        na_count = page_text.count("N/A")
+        print(f"    [i] No explicit customer dt found; page has {na_count} 'N/A' occurrences")
+
+    # A status badge must be visible
+    status_badge: Locator = page.locator(
+        "span[class*='inline-flex'], span[class*='badge'], "
+        "span:has-text('Paid'), span:has-text('Unpaid'), span:has-text('Overdue'), "
+        "span:has-text('Plătit'), span:has-text('Draft'), span:has-text('Sent')"
+    ).first
+    assert status_badge.count() > 0 and status_badge.is_visible(), (
+        "Invoice detail must display a visible status badge"
+    )
+    print(f"    ✅ Status badge visible: '{(status_badge.text_content() or '').strip()}'")
+
+    print("  ✅ Invoice detail customer name and status test completed")
+
+
+def test_proforma_vat_rate_shows_percentage_not_decimal(monitored_customer_page: Page) -> None:
+    """L5: Proforma VAT rate is displayed as '21%' not '0.21' or '0.2%'."""
+    page = monitored_customer_page
+    print("🧪 Testing proforma VAT rate display format")
+
+    _navigate_to_invoices(page)
+
+    # Switch to Proformas tab
+    proformas_tab: Locator = page.locator(
+        "button[role='tab']:has-text('Proforma'), button[role='tab']:has-text('Proforme')"
+    ).first
+    if proformas_tab.count() == 0:
+        print("  [i] No Proformas tab found, skipping")
+        return
+
+    proformas_tab.click()
+    _wait_for_htmx(page)
+
+    # Click first proforma row
+    clickable_row: Locator = page.locator("tr[onclick]").first
+    if clickable_row.count() == 0:
+        print("  [i] No proforma rows found, skipping VAT rate check")
+        return
+
+    clickable_row.click()
+    page.wait_for_load_state("networkidle")
+
+    current_url: str = page.url
+    if not re.search(r"/billing/(proformas|invoices)/[\w-]+/", current_url):
+        print(f"  [i] Unexpected URL after proforma click: {current_url}")
+        return
+
+    page_text: str = page.text_content("body") or ""
+
+    # VAT rate must NOT be shown as a raw decimal like 0.21 or 0.2
+    assert "0.21%" not in page_text, "VAT rate must not be '0.21%' — should be '21%'"
+    assert "0.2%" not in page_text, "VAT rate must not be '0.2%' — should be '21%'"
+
+    # If a VAT rate is shown at all, it should be in percentage form
+    import re as _re
+    raw_decimal_vat = _re.search(r"\b0\.\d+\s*%", page_text)
+    assert raw_decimal_vat is None, (
+        f"Found raw decimal VAT rate in page: '{raw_decimal_vat.group()}' — should be '21%'"
+    )
+
+    # Ideally 21% appears (Romanian standard VAT)
+    if "21%" in page_text:
+        print("    ✅ VAT rate correctly shows '21%'")
+    else:
+        print("    [i] No explicit VAT rate found on proforma (may be hidden or zero-rated)")
+
+    print("  ✅ Proforma VAT rate format test completed")

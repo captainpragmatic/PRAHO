@@ -38,7 +38,7 @@ class ProvisioningService:
         Returns:
             Result with success status or error message
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         try:
             previous_status = service.status
@@ -82,8 +82,8 @@ class ProvisioningService:
         Returns:
             Dictionary with activation results
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.audit.services import AuditService
+        from apps.provisioning.models import Service
 
         if invoice is None:
             logger.warning("⚠️ [Provisioning] Cannot activate services for None invoice")
@@ -156,9 +156,9 @@ class ProvisioningService:
         Returns:
             Dictionary with suspension results
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
-        from apps.customers.models import Customer  # noqa: PLC0415
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.audit.services import AuditService
+        from apps.customers.models import Customer
+        from apps.provisioning.models import Service
 
         results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_suspended": 0, "errors": []}
 
@@ -216,9 +216,9 @@ class ProvisioningService:
         Returns:
             Dictionary with reactivation results
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
-        from apps.customers.models import Customer  # noqa: PLC0415
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.audit.services import AuditService
+        from apps.customers.models import Customer
+        from apps.provisioning.models import Service
 
         results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
 
@@ -274,12 +274,12 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_reactivated": 0}
 
     @staticmethod
-    def provision_service(service: Service) -> dict[str, Any]:  # noqa: PLR0911, PLR0915
+    def provision_service(service: Service) -> dict[str, Any]:
         """
         Provision a new service after order confirmation.
         This triggers the actual infrastructure setup for the service.
         """
-        from django.utils import timezone  # noqa: PLC0415
+        from django.utils import timezone
 
         try:
             logger.info(f"🚀 [Provisioning] Provisioning service {service.id} ({service.service_name})")
@@ -312,7 +312,7 @@ class ProvisioningService:
                 # Implement actual provisioning based on control panel type
                 if service.server.control_panel == "Virtualmin":
                     try:
-                        from .virtualmin_gateway import (  # noqa: PLC0415
+                        from .virtualmin_gateway import (
                             VirtualminAuthError,
                             VirtualminConfig,
                             VirtualminGateway,

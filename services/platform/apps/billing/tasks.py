@@ -26,14 +26,14 @@ TASK_TIME_LIMIT = 600  # 10 minutes
 
 def _get_task_retry_delay() -> int:
     """Get task retry delay seconds from SettingsService."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY)
 
 
 def _get_task_max_retries() -> int:
     """Get task max retries from SettingsService."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES)
 
@@ -59,7 +59,7 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
         invoice = Invoice.objects.get(id=invoice_id)
 
         # Submit via real EFacturaSubmissionService
-        from apps.billing.efactura_service import EFacturaSubmissionService  # noqa: PLC0415
+        from apps.billing.efactura_service import EFacturaSubmissionService
 
         service = EFacturaSubmissionService()
         submission_result = service.submit_invoice(invoice)
@@ -125,7 +125,7 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
             }
 
         # Schedule 3 reminders: 7 days before, 1 day before, on due date
-        from datetime import timedelta  # noqa: PLC0415
+        from datetime import timedelta
 
         if not invoice.due_date:
             logger.info(f"📅 [Reminders] No due date for invoice {invoice.number}, skipping reminders")
@@ -203,7 +203,7 @@ def cancel_payment_reminders(invoice_id: str) -> dict[str, Any]:
         invoice = Invoice.objects.get(id=invoice_id)
 
         # Cancel scheduled django-q tasks for this invoice
-        from django_q.models import Schedule  # noqa: PLC0415
+        from django_q.models import Schedule
 
         cancelled = Schedule.objects.filter(name__startswith=f"payment_reminder_{invoice.id}_").delete()
         cancelled_count = cancelled[0] if cancelled else 0
@@ -264,8 +264,8 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
             }
 
         # Find customer's retry policy and create first retry attempt
-        from apps.billing.payment_models import PaymentRetryAttempt, PaymentRetryPolicy  # noqa: PLC0415
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.billing.payment_models import PaymentRetryAttempt, PaymentRetryPolicy
+        from apps.notifications.services import EmailService
 
         # Send dunning email
         EmailService.send_payment_reminder(invoice)
@@ -334,7 +334,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
     logger.info(f"🏛️ [VAT] Validating VAT number for tax profile {tax_profile_id}")
 
     try:
-        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile
 
         tax_profile = CustomerTaxProfile.objects.get(id=tax_profile_id)
 
@@ -343,8 +343,8 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             return {"success": True, "tax_profile_id": str(tax_profile.id), "message": "No VAT number to validate"}
 
         # Validate using CUI validator and store result in VATValidation
-        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
-        from apps.common.types import validate_romanian_cui  # noqa: PLC0415
+        from apps.billing.tax_models import VATValidation
+        from apps.common.types import validate_romanian_cui
 
         vat_number = tax_profile.vat_number
         is_valid = False
@@ -423,7 +423,7 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
             }
 
         # Process payment using customer's stored payment method
-        from apps.billing.payment_service import PaymentService  # noqa: PLC0415
+        from apps.billing.payment_service import PaymentService
 
         result = (
             PaymentService.create_payment_intent(
@@ -482,7 +482,7 @@ def _send_payment_reminder(invoice_id: str) -> dict[str, Any]:
     """Send a single payment reminder email for an invoice."""
     try:
         invoice = Invoice.objects.get(id=invoice_id)
-        from apps.notifications.services import EmailService  # noqa: PLC0415
+        from apps.notifications.services import EmailService
 
         result = EmailService.send_payment_reminder(invoice)
         if result.success:
@@ -555,7 +555,7 @@ def run_daily_billing() -> dict[str, Any]:
     Returns:
         Dictionary with billing run statistics
     """
-    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
+    from apps.billing.subscription_service import RecurringBillingService
 
     logger.info("📅 [Billing] Starting daily billing run")
 
@@ -610,7 +610,7 @@ def process_expired_trials() -> dict[str, Any]:
     Returns:
         Dictionary with processing result
     """
-    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
+    from apps.billing.subscription_service import RecurringBillingService
 
     logger.info("⏰ [Trials] Processing expired trials")
 
@@ -653,7 +653,7 @@ def process_grace_period_expirations() -> dict[str, Any]:
     Returns:
         Dictionary with processing result
     """
-    from apps.billing.subscription_service import RecurringBillingService  # noqa: PLC0415
+    from apps.billing.subscription_service import RecurringBillingService
 
     logger.info("⚠️ [Grace] Processing expired grace periods")
 
@@ -694,7 +694,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
     Returns:
         Dictionary with notification result
     """
-    from apps.billing.subscription_service import GrandfatheringService  # noqa: PLC0415
+    from apps.billing.subscription_service import GrandfatheringService
 
     logger.info(f"📢 [Grandfathering] Checking for expiring grandfathering ({days_ahead} days)")
 
@@ -705,7 +705,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
         for gf in expiring:
             try:
                 # Send notification email
-                from apps.notifications.services import (  # noqa: PLC0415
+                from apps.notifications.services import (
                     EmailService,
                 )
 
@@ -769,7 +769,7 @@ def run_payment_collection() -> dict[str, Any]:
     Returns:
         Dictionary with collection result
     """
-    from apps.billing.payment_models import (  # noqa: PLC0415
+    from apps.billing.payment_models import (
         PaymentCollectionRun,
         PaymentRetryAttempt,
     )
@@ -802,7 +802,7 @@ def run_payment_collection() -> dict[str, Any]:
                 retry.save(update_fields=["status", "executed_at"])
 
                 # Attempt payment via Stripe gateway
-                from apps.billing.payment_service import PaymentService  # noqa: PLC0415
+                from apps.billing.payment_service import PaymentService
 
                 logger.info(f"💳 [Collection] Retrying payment {retry.payment_id} (attempt {retry.attempt_number})")
 

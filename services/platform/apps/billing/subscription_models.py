@@ -58,7 +58,7 @@ MAX_PAYMENT_RETRY_ATTEMPTS = _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
 def get_subscription_grace_period_days() -> int:
     """Get grace period days from SettingsService (runtime)."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return max(
             1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", _DEFAULT_GRACE_PERIOD_DAYS)
@@ -70,7 +70,7 @@ def get_subscription_grace_period_days() -> int:
 def get_max_payment_retry_attempts() -> int:
     """Get max payment retry attempts from SettingsService (runtime)."""
     try:
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         return max(
             1,
@@ -393,7 +393,7 @@ class Subscription(models.Model):
         ):
             raise ValidationError(_("Period end must be after period start"))
 
-    def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Generate subscription number if not set."""
         if not self.subscription_number:
             self.subscription_number = self._generate_subscription_number()
@@ -403,7 +403,7 @@ class Subscription(models.Model):
 
     def _generate_subscription_number(self) -> str:
         """Generate unique subscription number."""
-        from .invoice_models import InvoiceSequence  # noqa: PLC0415
+        from .invoice_models import InvoiceSequence
 
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="subscription")
         return sequence.get_next_number("SUB")

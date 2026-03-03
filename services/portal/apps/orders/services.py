@@ -431,6 +431,8 @@ class GDPRCompliantCartSession:
         clean_config = OrderInputValidator.validate_config(config or {}, product_data.get("product_type", ""))
 
         # Create minimal cart item (GDPR/business fields only).
+        # NOTE: product_id (internal platform ID) is intentionally omitted;
+        # product_slug is the stable public identifier used for all API calls.
         try:
             item = {
                 "item_id": self._generate_item_id(product_slug, billing_period),
@@ -521,7 +523,8 @@ class GDPRCompliantCartSession:
         api_items = []
         for item in self.cart.get("items", []):
             api_item = {
-                "product_id": item.get("product_id") or item.get("product_slug"),
+                "product_id": item.get("product_id", ""),
+                "product_slug": item.get("product_slug", ""),
                 "quantity": item["quantity"],
                 "billing_period": item["billing_period"],
                 "config": item.get("config", {}),

@@ -207,7 +207,7 @@ class SIEMIntegrationService:
 
         elif self.config.provider == SIEMProvider.ELASTICSEARCH:
             if self.config.api_key and self.config.api_secret:
-                import base64  # noqa: PLC0415
+                import base64
 
                 credentials = f"{self.config.api_key}:{self.config.api_secret}"
                 encoded = base64.b64encode(credentials.encode()).decode()

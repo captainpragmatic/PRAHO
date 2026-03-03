@@ -83,7 +83,7 @@ def log_product_lifecycle_events(sender: type[Product], instance: Product, creat
     try:
         if created:
             # New product created
-            from apps.common.tax_service import TaxService  # noqa: PLC0415
+            from apps.common.tax_service import TaxService
 
             romanian_context = {
                 "vat_rate_applied": float(TaxService.get_vat_rate("RO", as_decimal=False)),
@@ -164,7 +164,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
     """
     try:
         if created:
-            from apps.common.tax_service import TaxService  # noqa: PLC0415
+            from apps.common.tax_service import TaxService
 
             # New price created - log initial pricing setup
             romanian_context = {

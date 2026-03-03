@@ -43,7 +43,7 @@ class Command(BaseCommand):
             help="Force update existing settings",
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:  # noqa: C901, PLR0912, PLR0915
+    def handle(self, *args: Any, **options: Any) -> None:
         """Execute the command"""
         force = options.get("force", False)
         secret_key = options.get("secret_key")

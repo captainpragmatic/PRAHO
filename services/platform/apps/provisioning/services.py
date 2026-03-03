@@ -39,7 +39,7 @@ class ServiceManagementService:
         Returns:
             Result with operation details or error message
         """
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.provisioning.models import Service
 
         if action not in ServiceManagementService.VALID_ACTIONS:
             return Err(f"Invalid action '{action}'. Valid actions: {ServiceManagementService.VALID_ACTIONS}")
@@ -110,10 +110,10 @@ class ServiceManagementService:
         Returns:
             Result with review details or error message
         """
-        from django.utils import timezone  # noqa: PLC0415
+        from django.utils import timezone
 
-        from apps.audit.services import AuditService  # noqa: PLC0415
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.audit.services import AuditService
+        from apps.provisioning.models import Service
 
         try:
             service = Service.objects.get(id=service_id)
@@ -170,7 +170,7 @@ class ServiceGroupService:
         Returns:
             Result with batch operation results or error message
         """
-        from apps.provisioning.models import Service  # noqa: PLC0415
+        from apps.provisioning.models import Service
 
         if action not in ServiceGroupService.VALID_GROUP_ACTIONS:
             return Err(f"Invalid group action '{action}'. Valid: {ServiceGroupService.VALID_GROUP_ACTIONS}")

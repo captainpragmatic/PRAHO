@@ -95,7 +95,7 @@ class TicketAttachmentSecurityScanner:
     def __init__(self) -> None:
         self.scan_stats: ScanStats = {"files_scanned": 0, "files_rejected": 0, "rejection_reasons": {}}
 
-    def scan_uploaded_file(self, uploaded_file: UploadedFile, original_filename: str | None = None) -> tuple[bool, str]:  # noqa: PLR0911
+    def scan_uploaded_file(self, uploaded_file: UploadedFile, original_filename: str | None = None) -> tuple[bool, str]:
         """
         🔍 Comprehensive security scan of uploaded file
 
@@ -202,7 +202,7 @@ class TicketAttachmentSecurityScanner:
 
         return True
 
-    def _detect_mime_type(self, uploaded_file: UploadedFile) -> str:  # noqa: PLR0911
+    def _detect_mime_type(self, uploaded_file: UploadedFile) -> str:
         """Detect MIME type using magic numbers or fallback to mimetypes"""
         try:
             uploaded_file.seek(0)

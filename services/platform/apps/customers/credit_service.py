@@ -81,7 +81,7 @@ class CustomerCreditService:
         Returns:
             Dictionary with score update details
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         try:
             # Get current credit score
@@ -174,7 +174,7 @@ class CustomerCreditService:
         Returns:
             Dictionary with reversion details
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.audit.services import AuditService
 
         try:
             current_score = CustomerCreditService.calculate_credit_score(customer)
@@ -325,7 +325,7 @@ class CustomerCreditService:
     def _get_payment_statistics(customer: Any) -> dict[str, int]:
         """Get payment statistics for credit calculation."""
         try:
-            from apps.billing.models import Payment  # noqa: PLC0415
+            from apps.billing.models import Payment
 
             payments = Payment.objects.filter(invoice__customer=customer)
 
@@ -353,7 +353,7 @@ class CustomerCreditService:
     def _get_order_statistics(customer: Any) -> dict[str, int]:
         """Get order statistics for credit calculation."""
         try:
-            from apps.orders.models import Order  # noqa: PLC0415
+            from apps.orders.models import Order
 
             orders = Order.objects.filter(customer=customer)
 
@@ -369,7 +369,7 @@ class CustomerCreditService:
     def _get_consecutive_on_time_payments(customer: Any) -> int:
         """Count consecutive on-time payments (for bonus calculation)."""
         try:
-            from apps.billing.models import Payment  # noqa: PLC0415
+            from apps.billing.models import Payment
 
             # Get recent payments ordered by date
             recent_payments = Payment.objects.filter(invoice__customer=customer).order_by("-created_at")[:20]

@@ -71,7 +71,7 @@ MAX_ERROR_DISPLAY = _DEFAULT_MAX_ERROR_DISPLAY
 
 def get_bulk_operation_threshold() -> int:
     """Get bulk operation threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "provisioning.bulk_operation_threshold", _DEFAULT_BULK_OPERATION_THRESHOLD
@@ -80,7 +80,7 @@ def get_bulk_operation_threshold() -> int:
 
 def get_max_concurrent_health_checks() -> int:
     """Get max concurrent health checks from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "provisioning.max_concurrent_health_checks", _DEFAULT_MAX_CONCURRENT_HEALTH_CHECKS
@@ -89,7 +89,7 @@ def get_max_concurrent_health_checks() -> int:
 
 def get_health_check_timeout_seconds() -> int:
     """Get health check timeout seconds from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "provisioning.health_check_timeout_seconds", _DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS
@@ -98,7 +98,7 @@ def get_health_check_timeout_seconds() -> int:
 
 def get_overall_health_check_timeout() -> int:
     """Get overall health check timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting(
         "provisioning.overall_health_check_timeout", _DEFAULT_OVERALL_HEALTH_CHECK_TIMEOUT
@@ -107,7 +107,7 @@ def get_overall_health_check_timeout() -> int:
 
 def get_max_error_display() -> int:
     """Get max error display from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("provisioning.max_error_display", _DEFAULT_MAX_ERROR_DISPLAY)
 
@@ -1713,7 +1713,7 @@ def _format_backup_features(backup: dict[str, Any]) -> str:
 @require_POST
 @audit_service_call("virtualmin_accounts_sync")
 @monitor_performance(max_duration_seconds=30.0, alert_threshold=10.0)
-def virtualmin_accounts_sync(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
+def virtualmin_accounts_sync(request: HttpRequest) -> HttpResponse:
     """🔄 Sync accounts from active Virtualmin servers to PRAHO database."""
 
     # Get all active servers

@@ -127,7 +127,7 @@ class EFacturaSettingKeys:
 
     # OAuth2 credentials
     CLIENT_ID = "efactura.oauth.client_id"
-    CLIENT_SECRET = "efactura.oauth.client_secret"  # noqa: S105
+    CLIENT_SECRET = "efactura.oauth.client_secret"
     REDIRECT_URI = "efactura.oauth.redirect_uri"
 
     # Company information
@@ -369,7 +369,7 @@ class EFacturaSettings:
         """Lazy load SettingsService to avoid circular imports."""
         if self._settings_service is None:
             try:
-                from apps.settings.services import SettingsService  # noqa: PLC0415
+                from apps.settings.services import SettingsService
 
                 self._settings_service = SettingsService  # type: ignore[assignment]
             except ImportError:

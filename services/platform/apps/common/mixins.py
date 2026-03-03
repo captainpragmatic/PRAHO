@@ -27,7 +27,7 @@ DEFAULT_ORPHANS = _DEFAULT_DEFAULT_ORPHANS
 
 def get_orphans() -> int:
     """Get default orphans from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("common.default_orphans", _DEFAULT_DEFAULT_ORPHANS)
 

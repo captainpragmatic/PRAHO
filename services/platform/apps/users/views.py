@@ -786,7 +786,7 @@ def user_profile(request: HttpRequest) -> HttpResponse:
         # Handle language change if present
         if "language" in request.POST:
             selected_language = request.POST.get("language")
-            from django.conf import settings  # noqa: PLC0415
+            from django.conf import settings
 
             # Set the language in session
             session_key = getattr(settings, "LANGUAGE_SESSION_KEY", "django_language")

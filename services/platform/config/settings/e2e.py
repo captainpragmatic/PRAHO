@@ -13,7 +13,7 @@ import os
 os.environ.setdefault("DJANGO_SECRET_KEY", "django-insecure-e2e-key-change-for-production")
 os.environ.setdefault("TESTING", "1")
 
-from .dev import *  # noqa: F403
+from .dev import *
 
 # Explicit E2E defaults
 SECRET_KEY = os.environ.get("E2E_DJANGO_SECRET_KEY", "django-insecure-e2e-key-change-for-production")

@@ -49,7 +49,7 @@
         <div>
           <dt class="text-xs sm:text-sm font-medium text-slate-400">{% trans "Customer" %}</dt>
           <dd class="mt-1 text-sm text-white">
-            {{ invoice.bill_to.name|default:"N/A" }}
+            {{ invoice.bill_to_name|default:"N/A" }}
           </dd>
         </div>
 
@@ -63,7 +63,7 @@
               {% elif invoice.status == 'overdue' %}bg-red-100 text-red-800
               {% elif invoice.status == 'draft' %}bg-gray-100 text-gray-800
               {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-              {{ invoice.get_status_display }}
+              {{ invoice.status_display }}
             </span>
           </dd>
         </div>

@@ -20,7 +20,7 @@ _env_path = Path(__file__).resolve().parents[4] / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
 
-from .base import *  # noqa: E402, F403
+from .base import *
 
 # ===============================================================================
 # DEVELOPMENT FLAGS
@@ -192,7 +192,7 @@ class _ServiceNameFilter(logging.Filter):
         self.service_name = service_name
 
     def filter(self, record: logging.LogRecord) -> bool:
-        setattr(record, "service_name", self.service_name)  # noqa: B010
+        setattr(record, "service_name", self.service_name)
         return True
 
 

@@ -417,7 +417,7 @@ class Service(models.Model):
 
         # Check if there are associated domains through ServiceDomain
         try:
-            from .relationship_models import ServiceDomain  # noqa: PLC0415
+            from .relationship_models import ServiceDomain
 
             service_domain = ServiceDomain.objects.filter(service=self, domain_type="primary").first()
             if service_domain:
@@ -434,7 +434,7 @@ class Service(models.Model):
         Cross-app integration helper for linking services to customer access control.
         """
         try:
-            from apps.users.models import CustomerMembership  # noqa: PLC0415
+            from apps.users.models import CustomerMembership
 
             return CustomerMembership.objects.filter(customer=self.customer, is_primary=True).first()
         except ImportError:

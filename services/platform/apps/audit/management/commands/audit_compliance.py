@@ -33,7 +33,7 @@ MAX_VIOLATIONS_DISPLAYED = _DEFAULT_MAX_VIOLATIONS_DISPLAYED
 
 def get_max_violations_displayed() -> int:
     """Get max violations displayed from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("audit.max_violations_displayed", _DEFAULT_MAX_VIOLATIONS_DISPLAYED)
 
@@ -305,8 +305,8 @@ class Command(BaseCommand):
 
     def handle_export_siem(self, options: dict[str, Any]) -> None:
         """Export audit logs for SIEM"""
-        from apps.audit.models import AuditEvent  # noqa: PLC0415
-        from apps.audit.siem import (  # noqa: PLC0415
+        from apps.audit.models import AuditEvent
+        from apps.audit.siem import (
             CEFFormatter,
             JSONFormatter,
             LEEFFormatter,

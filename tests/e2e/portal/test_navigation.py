@@ -13,7 +13,7 @@ Uses shared utilities from tests.e2e.utils for consistency.
 
 import pytest
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page
+from playwright.sync_api import Locator, Page, expect
 
 # Import shared utilities
 from tests.e2e.helpers import (
@@ -609,3 +609,55 @@ def test_portal_health_check(page: Page) -> None:
 
 
 # Remove old configuration - will be centralized in conftest.py
+
+
+# ===============================================================================
+# QA FIX REGRESSION TESTS
+# ===============================================================================
+
+
+def test_login_shows_error_on_wrong_credentials(page: Page) -> None:
+    """H2: Login form shows inline error on wrong credentials, not a crash or blank page."""
+    print("🧪 Testing login error message on wrong credentials")
+
+    with ComprehensivePageMonitor(
+        page,
+        "login wrong credentials",
+        check_console=False,  # Auth errors expected
+        check_network=False,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        page.goto(f"{BASE_URL}/login/")
+        page.wait_for_load_state("networkidle")
+
+        page.fill('input[name="email"]', "wrong@notauser.invalid")
+        page.fill('input[name="password"]', "definitelywrongpassword")
+        page.click('button[type="submit"]')
+        page.wait_for_load_state("networkidle")
+
+        # Must stay on the login page — not crash to a 500
+        assert "/login/" in page.url, f"Should stay on login page after failed attempt, got: {page.url}"
+        print("    ✅ Stayed on login page (no crash)")
+
+        # An inline error banner must be visible (red background in dark UI)
+        error_banners: Locator = page.locator(".bg-red-900, .bg-red-800, .bg-red-700, [class*='bg-red']")
+        page_text: str = page.text_content("body") or ""
+
+        has_error_banner = error_banners.count() > 0 and error_banners.first.is_visible()
+        has_error_text = any(
+            keyword in page_text.lower()
+            for keyword in ["invalid", "incorrect", "wrong", "failed", "error", "nu este valid", "greșit"]
+        )
+
+        assert has_error_banner or has_error_text, (
+            "Login failure must display an error message or error banner. "
+            f"Page text snippet: {page_text[:300]}"
+        )
+        print("    ✅ Error message/banner visible after failed login attempt")
+
+        print("  ✅ Login error on wrong credentials test completed")

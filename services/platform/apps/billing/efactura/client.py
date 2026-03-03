@@ -65,7 +65,7 @@ class EFacturaConfig:
     @classmethod
     def from_settings(cls) -> EFacturaConfig:
         """Create config from Django settings and SettingsService."""
-        from apps.settings.services import SettingsService  # noqa: PLC0415
+        from apps.settings.services import SettingsService
 
         env_str = getattr(settings, "EFACTURA_ENVIRONMENT", "test")
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
@@ -287,7 +287,7 @@ class EFacturaClient:
     """
 
     # Token cache key prefix
-    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}"  # noqa: S105
+    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}"
 
     def __init__(self, config: EFacturaConfig | None = None):
         self.config = config or EFacturaConfig.from_settings()

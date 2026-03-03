@@ -1468,3 +1468,99 @@ def test_customer_password_reset_form(page: Page) -> None:
     print("    ✅ Uniform success message displayed (email enumeration prevention)")
 
     print("  ✅ Customer password reset form test completed")
+
+
+# ===============================================================================
+# QA FIX REGRESSION TESTS
+# ===============================================================================
+
+
+def test_company_profile_shows_name_not_not_specified(monitored_customer_page: Page) -> None:
+    """M1: Company profile page shows the customer's actual company name, not 'Not specified'."""
+    page = monitored_customer_page
+    print("🧪 Testing company profile shows actual name")
+
+    # Navigate to account/company profile page
+    page.goto(f"{BASE_URL}/profile/")
+    page.wait_for_load_state("networkidle")
+
+    page_text: str = page.text_content("body") or ""
+
+    # The company name field must not show "Not specified" for a seeded customer
+    company_name_field: Locator = page.locator(
+        'input[name="company_name"], input[name="name"], '
+        'dd:has-text("Test Company"), p:has-text("Test Company")'
+    )
+
+    if company_name_field.count() > 0:
+        # If there is an input field, its value should not be empty or "Not specified"
+        for el in company_name_field.all():
+            tag: str = el.evaluate("el => el.tagName.toLowerCase()")
+            if tag == "input":
+                value: str = (el.input_value() or "").strip()
+                assert value not in ("", "Not specified", "Nespecificat"), (
+                    f"Company name input must have a real value, got: '{value}'"
+                )
+                print(f"    ✅ Company name input value: '{value}'")
+                break
+            else:
+                text: str = (el.text_content() or "").strip()
+                assert text not in ("Not specified", "Nespecificat", ""), (
+                    f"Company name display must show a real name, got: '{text}'"
+                )
+                print(f"    ✅ Company name displayed: '{text}'")
+                break
+    else:
+        # Fallback: page body should not say "Not specified" for the company name area
+        not_specified_count = page_text.count("Not specified") + page_text.count("Nespecificat")
+        # A few "Not specified" fields for genuinely optional data are acceptable;
+        # assert the count is not excessive (indicates a data-load failure)
+        assert not_specified_count < 5, (
+            f"Too many 'Not specified' values on profile page ({not_specified_count}), "
+            "suggests company data is not loading correctly"
+        )
+        print(f"    [i] No explicit company name field found; page has {not_specified_count} 'Not specified' values")
+
+    print("  ✅ Company profile name test completed")
+
+
+def test_profile_shows_member_since_date(monitored_customer_page: Page) -> None:
+    """M2: Profile page shows a real 'Member Since' date, not 'N/A' or epoch."""
+    page = monitored_customer_page
+    print("🧪 Testing profile shows Member Since date")
+
+    page.goto(f"{BASE_URL}/profile/")
+    page.wait_for_load_state("networkidle")
+
+    page_text: str = page.text_content("body") or ""
+
+    # Find the Member Since label and its value
+    member_since_label: Locator = page.locator(
+        "text=Member Since, text=Membru din, dt:has-text('Member'), dt:has-text('Membru')"
+    ).first
+
+    if member_since_label.count() > 0:
+        # Look for the adjacent value
+        member_since_value: Locator = member_since_label.locator("xpath=following-sibling::dd[1]")
+        if member_since_value.count() > 0:
+            value_text: str = (member_since_value.first.text_content() or "").strip()
+            assert value_text not in ("N/A", "—", "", "-", "Never"), (
+                f"Member Since must show a real date, got: '{value_text}'"
+            )
+            # Should contain a year (4-digit number)
+            assert re.search(r"\d{4}", value_text), (
+                f"Member Since value should contain a year, got: '{value_text}'"
+            )
+            print(f"    ✅ Member Since shows: '{value_text}'")
+        else:
+            print("    [i] Member Since label found but no adjacent value element")
+    else:
+        # Soft check: if no explicit label, just verify "N/A" doesn't dominate the page
+        na_count = page_text.count("N/A")
+        print(f"    [i] No 'Member Since' label found; page has {na_count} 'N/A' values")
+        # If the profile page has many N/A values, that's a symptom of broken data loading
+        assert na_count < 8, (
+            f"Profile page has {na_count} 'N/A' values — suggests data is not loading (expected < 8)"
+        )
+
+    print("  ✅ Profile Member Since date test completed")

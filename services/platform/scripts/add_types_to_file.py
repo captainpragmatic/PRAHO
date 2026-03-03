@@ -719,9 +719,9 @@ class InteractiveTypeAdder:
     def _format_file(self) -> None:
         """Format the file using ruff"""
         try:
-            import subprocess  # noqa: PLC0415
+            import subprocess
 
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 [sys.executable, "-m", "ruff", "format", str(self.file_path)],
                 capture_output=True,
                 text=True,
@@ -827,7 +827,7 @@ with Romanian business domain types and Result pattern for error handling.
             print(prompt + " a")
             return "a"
 
-        import builtins  # noqa: PLC0415
+        import builtins
 
         builtins.input = mock_input  # type: ignore[assignment]
 

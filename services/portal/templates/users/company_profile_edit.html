@@ -4,7 +4,7 @@
 {% block title %}{% trans "Edit Company Profile" %} - PRAHO{% endblock %}
 
 {% block content %}
-<div class="min-h-screen bg-slate-900 py-8">
+<div class="py-8">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
 
         <!-- Header -->
@@ -39,6 +39,14 @@
             {% csrf_token %}
             {% if request.GET.next %}
             <input type="hidden" name="next" value="{{ request.GET.next }}">
+            {% endif %}
+
+            {% if form.non_field_errors %}
+            <div class="bg-red-900 border border-red-700 rounded-md p-3 mb-4">
+              {% for error in form.non_field_errors %}
+              <p class="text-red-100 text-sm">{{ error }}</p>
+              {% endfor %}
+            </div>
             {% endif %}
 
             <!-- Company Information Section -->

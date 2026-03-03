@@ -611,10 +611,10 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to get MFA status: {e}")
             return None
 
-    def setup_totp_mfa(self, customer_id: str) -> dict[str, Any] | None:
+    def setup_totp_mfa(self, customer_id: str, user_id: int | None = None) -> dict[str, Any] | None:
         """Initialize TOTP MFA setup - returns QR code and secret"""
         try:
-            data = self._make_request("POST", "/users/mfa/setup/", data={"customer_id": customer_id})
+            data = self._make_request("POST", "/users/mfa/setup/", user_id=user_id, data={"customer_id": customer_id})
             if data.get("success") and "setup_data" in data:
                 setup_data = data["setup_data"]
                 return {
@@ -627,10 +627,12 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
 
-    def verify_totp_mfa(self, customer_id: str, token: str) -> bool:
+    def verify_totp_mfa(self, customer_id: str, token: str, user_id: int | None = None) -> bool:
         """Verify TOTP token and enable MFA"""
         try:
-            data = self._make_request("POST", "/users/mfa/verify/", data={"customer_id": customer_id, "token": token})
+            data = self._make_request(
+                "POST", "/users/mfa/verify/", user_id=user_id, data={"customer_id": customer_id, "token": token}
+            )
             return bool(data.get("success", False))
         except PlatformAPIError as e:
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")

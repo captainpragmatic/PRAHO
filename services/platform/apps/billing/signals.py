@@ -93,7 +93,7 @@ E_FACTURA_MINIMUM_AMOUNT = 100  # 100 RON - minimum for mandatory e-Factura
 # ===============================================================================
 
 
-def _log_billing_model_event(  # noqa: PLR0913
+def _log_billing_model_event(
     *,
     event_type: str,
     instance: Any,

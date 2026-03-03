@@ -78,7 +78,7 @@ urlpatterns = [
     # Centralized API endpoints (v1)
     path("api/", include("apps.api.urls")),
     # Background job monitoring (DISABLED - Redis not needed yet)
-    # path('django-rq/', include('django_rq.urls')),  # noqa: ERA001
+    # path('django-rq/', include('django_rq.urls')),
 ]
 
 # ===============================================================================

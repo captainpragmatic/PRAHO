@@ -131,7 +131,7 @@ class Command(BaseCommand):
     def _parse_period(self, options: dict[str, Any]) -> tuple[Any, Any]:
         """Parse the time period from options."""
         if options.get("start") and options.get("end"):
-            from django.utils.dateparse import parse_datetime  # noqa: PLC0415
+            from django.utils.dateparse import parse_datetime
 
             period_start = parse_datetime(options["start"])
             period_end = parse_datetime(options["end"])
@@ -267,7 +267,7 @@ class Command(BaseCommand):
     def _setup_scheduled_tasks(self) -> None:
         """Configure scheduled integrity check tasks using Django-Q2."""
         try:
-            from django_q.models import Schedule  # noqa: PLC0415
+            from django_q.models import Schedule
 
             # Hourly hash verification for critical events
             Schedule.objects.update_or_create(
