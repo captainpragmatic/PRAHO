@@ -647,7 +647,8 @@ class NodeDeployment(models.Model):
         "configuring_backups": ["validating", "failed"],
         "validating": ["registering", "failed"],
         "registering": ["completed", "failed"],
-        "completed": ["destroying"],
+        "completed": ["stopped", "destroying"],
+        "stopped": ["completed", "destroying", "failed"],
         "failed": ["pending", "destroying"],  # Can retry or destroy
         "destroying": ["destroyed", "failed"],
         "destroyed": [],  # Terminal state

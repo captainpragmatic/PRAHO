@@ -78,6 +78,7 @@
                 <!-- Active Status Toggle -->
                 <button class="toggle-switch"
                         hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
+                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                         hx-target="this"
                         hx-swap="outerHTML"
                         title="{% trans 'Toggle Active Status' %}">
@@ -91,6 +92,7 @@
                 <!-- Public Status Toggle -->
                 <button class="toggle-switch"
                         hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
+                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                         hx-target="this"
                         hx-swap="outerHTML"
                         title="{% trans 'Toggle Public Visibility' %}">

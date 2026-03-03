@@ -118,7 +118,7 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     context = {
         "customers": customers_page,
         "search_query": search_query,
-        "total_customers": customers.count(),
+        "total_customers": paginator.count,
     }
 
     return render(request, "customers/list.html", context)
@@ -436,6 +436,14 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
+        # Server-side confirmation: confirm_name must match customer name
+        confirm_name = request.POST.get("confirm_name", "").strip()
+        if confirm_name != customer.name:
+            messages.error(
+                request, _("❌ Customer name does not match. Please type the exact name to confirm deletion.")
+            )
+            return render(request, "customers/delete_confirm.html", {"customer": customer})
+
         # Soft delete preserves all related data
         user = cast(User, request.user)  # Safe due to @staff_required
         customer.soft_delete(user=user)

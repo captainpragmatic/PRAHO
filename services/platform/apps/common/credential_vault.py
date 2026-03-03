@@ -132,6 +132,7 @@ class EncryptedCredential(models.Model):
         ("monitoring", "Monitoring Service"),
         ("email_smtp", "SMTP Email Service"),
         ("domain_registrar", "Domain Registrar"),
+        ("cloud_provider", "Cloud Provider API"),
     ]
 
     # Primary identification
@@ -621,9 +622,11 @@ class CredentialVault:
     def _log_credential_access(self, access_data: AccessLogData) -> None:
         """Log credential access for audit trail"""
         try:
-            username = (
-                access_data.user.username if access_data.user and hasattr(access_data.user, "username") else "system"
-            )
+            username = "system"
+            if access_data.user:
+                username = (
+                    getattr(access_data.user, "email", None) or getattr(access_data.user, "username", None) or "system"
+                )
 
             CredentialAccessLog.objects.create(
                 credential=access_data.credential,

@@ -21,10 +21,12 @@ Usage:
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -157,6 +159,36 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         },
     },
 }
+
+
+# =============================================================================
+# Provider Sync Registry — maps provider_type to sync function location
+# Lazy-loaded via importlib to avoid circular imports.
+# To add a new provider: add an entry here + implement sync_<provider>_provider()
+# =============================================================================
+
+# Type: (token: str, dry_run: bool) -> Result[SyncResult, str]
+ProviderSyncFn = Callable[..., "Result[Any, str]"]
+
+# Each entry: (module_path, function_name) — resolved at call time
+PROVIDER_SYNC_REGISTRY: dict[str, tuple[str, str]] = {
+    "hetzner": ("apps.infrastructure.provider_sync", "sync_hetzner_provider"),
+}
+
+
+def get_provider_sync_fn(provider_type: str) -> ProviderSyncFn | None:
+    """
+    Lazy-load and return the sync function for a provider type.
+
+    Returns None if no sync function is registered for the given provider type.
+    """
+    entry = PROVIDER_SYNC_REGISTRY.get(provider_type)
+    if not entry:
+        return None
+    module_path, fn_name = entry
+    module = importlib.import_module(module_path)
+    fn: ProviderSyncFn = getattr(module, fn_name)
+    return fn
 
 
 # =============================================================================
@@ -518,36 +550,80 @@ def validate_provider_prerequisites(
     return Ok(details)
 
 
-def get_credentials_for_provider(
-    provider: CloudProvider,
-) -> Result[dict[str, str], str]:
+def get_provider_token(provider: CloudProvider) -> Result[str, str]:
     """
-    Get credentials for a provider from the credential vault.
+    Get API token for a cloud provider.
+
+    When credential_identifier is set, the vault is the sole source of truth.
+    Env var fallback is only used for bootstrap / providers without vault credentials.
 
     Args:
         provider: CloudProvider instance
 
     Returns:
-        Result with credentials dict or error
+        Result with token string or error message
     """
-    from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
-
-    vault = get_credential_vault()
     config = get_provider_config(provider.provider_type)
-
     if not config:
         return Err(f"Unknown provider type: {provider.provider_type}")
 
-    credential_key = config.get("credential_key", "api_token")
+    # Primary: credential vault (sole source when credential_identifier is configured)
+    if provider.credential_identifier:
+        from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
 
-    try:
-        # Get credential from vault using provider's credential_identifier
-        secret = vault.get_secret(provider.credential_identifier)  # type: ignore[attr-defined]
-        if not secret:
-            return Err(f"No credentials found for provider: {provider.name}")
+        vault = get_credential_vault()
+        result = vault.get_credential(
+            service_type="cloud_provider",
+            service_identifier=provider.credential_identifier,
+        )
+        if result.is_ok():
+            _username, password, _metadata = result.unwrap()
+            return Ok(password)
+        # Vault is configured but lookup failed — this is an error, not a fallback scenario
+        logger.error(f"⚠️ [CredentialVault] Lookup failed for {provider.name}: {result.unwrap_err()}")
+        return Err(f"Credential vault lookup failed for {provider.name}")
 
-        return Ok({credential_key: secret, "api_token": secret})
+    # Fallback: environment variable (only for bootstrap / providers without vault credentials)
+    env_var = config.get("token_env_var", "")
+    if env_var:
+        token = os.environ.get(env_var, "")
+        if token:
+            return Ok(token)
 
-    except Exception as e:
-        logger.error(f"Failed to get credentials for {provider.name}: {e}")
-        return Err(f"Failed to retrieve credentials: {e}")
+    return Err(f"No credentials found for provider: {provider.name}")
+
+
+def store_provider_token(
+    provider: CloudProvider,
+    api_token: str,
+    user: Any | None = None,
+) -> Result[str, str]:
+    """
+    Store API token for a cloud provider in the credential vault.
+
+    Args:
+        provider: CloudProvider instance
+        api_token: The API token to store
+        user: Optional user performing the action (for audit log)
+
+    Returns:
+        Result with credential_identifier string or error message
+    """
+    from apps.common.credential_vault import CredentialData, get_credential_vault  # noqa: PLC0415
+
+    credential_id = provider.credential_identifier or f"cloud_provider_{provider.code}"
+    vault = get_credential_vault()
+    credential_data = CredentialData(
+        service_type="cloud_provider",
+        service_identifier=credential_id,
+        username=provider.provider_type,
+        password=api_token,
+        metadata={"provider_name": provider.name, "provider_code": provider.code},
+        expires_in_days=365,
+        user=user,
+        reason=f"Provider API token for {provider.name}",
+    )
+    result = vault.store_credential(credential_data)
+    if result.is_ok():
+        return Ok(credential_id)
+    return Err(str(result.unwrap_err()))

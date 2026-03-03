@@ -14,11 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **First-boot provider sync**: Automatic catalog sync on first migration when no providers exist
 - **Periodic provider sync**: Daily 4:00 AM background task for catalog updates
 - **`max_domains` field**: Configurable per-deployment domain limit with size-based defaults (25-500)
+- **Credential vault for cloud providers**: Provider API tokens stored via encrypted `CredentialVault` with `cloud_provider` service type; env-var fallback for bootstrap only
+- **Provider-agnostic sync registry**: `PROVIDER_SYNC_REGISTRY` and `get_provider_sync_fn` decouple sync dispatch from hard-coded Hetzner references
+- **Infrastructure audit trail**: `InfrastructureAuditService` wired into deployment lifecycle (start, complete, fail, retry, destroy) and provider CRUD (create, update, region toggle)
+- **Deployment state machine — `stopped` state**: New intermediate state between `completed` and `destroying`/`failed` with defined transitions
+- **Makefile `check-env` guard**: Fails fast with clear message when `.env` is missing; wired as prerequisite to all dev-server targets
+- **Customer profile sub-form templates**: `address_form.html`, `billing_profile_form.html`, `note_form.html`, `tax_profile_form.html` for inline editing
+- **Staff customer management E2E tests**: Playwright tests for customer list, detail, create/edit, profile sub-forms, and access control
 
 ### Changed
 - **Deployment pipeline**: Replaced 4 Terraform stages (config gen, init, plan, apply) with single hcloud SDK call
-- **Provider config**: Removed Terraform-specific keys from Hetzner provider config
+- **Provider config**: Removed Terraform-specific keys from Hetzner provider config; `get_credentials_for_provider` renamed to `get_provider_token` returning `Result[str, str]`
 - **Makefile**: Added `sync_providers` step to `fixtures` and `fixtures-light` targets
+- **Deployment state machine**: `transition_to` now raises `ValidationError` instead of returning bool; redundant `.save()` calls removed (transition saves internally)
+- **`.env` loading**: Moved `load_dotenv` from `manage.py` into `dev.py` settings (both services) so WSGI/ASGI workers also load `.env` in dev
+- **Provider sync pricing**: Extracted testable `_extract_pricing` helper preferring `fsn1` with fallback for ARM server types
+
+### Fixed
+- **Deployment URL patterns**: Changed `<uuid:pk>` to `<int:pk>` (NodeDeployment uses `BigAutoField`, not UUID)
+- **Customer security**: Replaced `@login_required` with `@staff_required` on all user management views; added `_get_accessible_customer` ACL check
+- **Customer delete confirmation**: Server-side validation that typed name matches actual customer name before soft-delete
+- **Product price authorization**: Added `@admin_required` to `product_price_edit` and `product_price_delete` views
+- **HTMX CSRF headers**: Added `hx-headers='{"X-CSRFToken": ...}'` to all product toggle buttons (active, public, featured)
+- **Product pricing display**: Switched from `prices_by_currency` grouped dict to `active_prices` flat list
+- **Template fixes**: Removed corrupted HTML in `customers/form.html` heading; fixed `blocktrans` variable references in customer list pagination; added `{% load i18n %}` to deployment status partial
+- **Provider list count**: Added `distinct=True` to deployment count annotations to fix over-counting
+- **E2E test selectors**: Updated 5 test files to match SVG icon system (removed emoji from Playwright `:has-text()` selectors); updated proforma form field names from `lines-0-*` to `line_0_*`; narrowed portal ticket heading selectors to match "Tickets" page title
 
 ### Removed
 - **Terraform fields**: Removed `terraform_state_path` and `terraform_state_backend` from NodeDeployment model

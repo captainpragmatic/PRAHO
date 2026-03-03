@@ -176,6 +176,12 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 ENCRYPTION_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
 
 # ===============================================================================
+# CREDENTIAL VAULT (Test key — NOT for production use)
+# ===============================================================================
+
+CREDENTIAL_VAULT_MASTER_KEY = "Lp1_hlEyzfJEnH1nUkylaN9c5YvtvOMrXYnc_CEYoSw="
+
+# ===============================================================================
 # EXTERNAL SERVICES (Disabled in tests)
 # ===============================================================================
 

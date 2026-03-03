@@ -131,12 +131,12 @@ def product_list(request: HttpRequest) -> HttpResponse:
 
 @staff_required_strict
 def product_list_htmx(request: HttpRequest) -> HttpResponse:
-    """HTMX endpoint for dynamic product list updates"""
-    # Reuse the main view logic but always return partial
-    response = product_list(request)
-    if hasattr(response, "context_data"):
-        return render(request, "products/partials/product_table.html", response.context_data)
-    return response
+    """HTMX endpoint for dynamic product list updates.
+
+    Note: product_list already handles HX-Request and returns the partial.
+    This wrapper exists for a separate URL endpoint but delegates directly.
+    """
+    return product_list(request)
 
 
 # ===============================================================================
@@ -229,7 +229,10 @@ def product_create(request: HttpRequest) -> HttpResponse:
                     product = form.save()
                     logger.info(f"✅ [Products] Created product: {product.name} ({product.slug})")
                     log_security_event(event_type="product_created", details={"slug": product.slug})
-                    messages.success(request, _(f"✅ Product '{product.name}' created successfully"))
+                    messages.success(
+                        request,
+                        _("✅ Product '%(name)s' created successfully") % {"name": product.name},
+                    )
                     return redirect("products:product_detail", slug=product.slug)
             except Exception as e:
                 logger.error(f"🔥 [Products] Error creating product: {e}")
@@ -294,7 +297,10 @@ def product_edit(request: HttpRequest, slug: str) -> HttpResponse:
                 with transaction.atomic():
                     updated_product = form.save()
                     logger.info(f"✅ [Products] Updated product: {updated_product.name} ({updated_product.slug})")
-                    messages.success(request, _(f"✅ Product '{updated_product.name}' updated successfully"))
+                    messages.success(
+                        request,
+                        _("✅ Product '%(name)s' updated successfully") % {"name": updated_product.name},
+                    )
                     return redirect("products:product_detail", slug=updated_product.slug)
             except Exception as e:
                 logger.error(f"🔥 [Products] Error updating product: {e}")
@@ -489,6 +495,8 @@ def product_price_create(request: HttpRequest, slug: str) -> HttpResponse:
     return render(request, "products/product_price_form.html", context)
 
 
+@admin_required
+@require_http_methods(["GET", "POST"])
 def product_price_edit(request: HttpRequest, slug: str, price_id: str) -> HttpResponse:
     """💰 Edit existing product price"""
     product = get_object_or_404(Product, slug=slug)
@@ -549,6 +557,8 @@ def product_price_edit(request: HttpRequest, slug: str, price_id: str) -> HttpRe
     return render(request, "products/product_price_form.html", context)
 
 
+@admin_required
+@require_http_methods(["GET", "POST"])
 def product_price_delete(request: HttpRequest, slug: str, price_id: str) -> HttpResponse:
     """💰 Delete product price"""
     product = get_object_or_404(Product, slug=slug)

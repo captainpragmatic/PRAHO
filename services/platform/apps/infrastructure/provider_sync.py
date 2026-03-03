@@ -212,15 +212,8 @@ def _sync_server_types(
 
         seen_type_ids.add(st.name)
 
-        # Extract EUR pricing from the prices list
-        hourly_eur = Decimal("0")
-        monthly_eur = Decimal("0")
-        if st.prices:
-            for price_entry in st.prices:
-                if isinstance(price_entry, dict) and price_entry.get("location") == "fsn1":
-                    hourly_eur = Decimal(str(price_entry.get("price_hourly", {}).get("gross", "0")))
-                    monthly_eur = Decimal(str(price_entry.get("price_monthly", {}).get("gross", "0")))
-                    break
+        # Extract EUR pricing from the prices list (prefer fsn1, fallback to first)
+        hourly_eur, monthly_eur = _extract_pricing(st.prices)
 
         # Determine max_domains based on memory
         memory_gb = int(st.memory or 0)
@@ -269,6 +262,30 @@ def _sync_server_types(
         result.sizes_deactivated = deactivated
 
     return None
+
+
+def _extract_pricing(prices: list[dict[str, object]] | None) -> tuple[Decimal, Decimal]:
+    """Extract hourly/monthly EUR pricing. Prefers fsn1, falls back to first entry."""
+    if not prices:
+        return Decimal("0"), Decimal("0")
+
+    chosen = None
+    for entry in prices:
+        if isinstance(entry, dict):
+            if entry.get("location") == "fsn1":
+                chosen = entry
+                break
+            if chosen is None:
+                chosen = entry
+
+    if chosen is None:
+        return Decimal("0"), Decimal("0")
+
+    price_hourly = chosen.get("price_hourly")
+    price_monthly = chosen.get("price_monthly")
+    hourly = Decimal(str(price_hourly["gross"])) if isinstance(price_hourly, dict) else Decimal("0")
+    monthly = Decimal(str(price_monthly["gross"])) if isinstance(price_monthly, dict) else Decimal("0")
+    return hourly, monthly
 
 
 def _max_domains_for_memory(memory_gb: int) -> int:

@@ -12,17 +12,20 @@ Orchestrates the complete node deployment pipeline:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
+from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.hcloud_service import HcloudResult, get_hcloud_service
 from apps.infrastructure.provider_config import (
     run_provider_command,
@@ -157,10 +160,16 @@ class NodeDeploymentService:
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
 
-            # Transition to provisioning
-            if not deployment.transition_to("provisioning_node"):  # type: ignore[func-returns-value]
-                return Err(f"Invalid state transition from '{deployment.status}' to 'provisioning_node'")
-            deployment.save()
+            # Transition to provisioning (transition_to saves internally)
+            try:
+                deployment.transition_to("provisioning_node")
+            except ValidationError:
+                return Err(f"Cannot transition from '{deployment.status}' to 'provisioning_node'")
+
+            # Audit: deployment started
+            audit_ctx = InfrastructureAuditContext(user=user)
+            with contextlib.suppress(Exception):
+                InfrastructureAuditService.log_deployment_started(deployment, audit_ctx)
 
             # Stage 1: Generate SSH key
             report_progress("ssh_key")
@@ -237,15 +246,21 @@ class NodeDeploymentService:
                 deployment.external_node_id = hcloud_result.server_id
                 deployment.ipv4_address = hcloud_result.ipv4_address
                 deployment.ipv6_address = hcloud_result.ipv6_address or ""
+                deployment.save(
+                    update_fields=[
+                        "external_node_id",
+                        "ipv4_address",
+                        "ipv6_address",
+                        "updated_at",
+                    ]
+                )
                 deployment.transition_to("configuring_dns")
-                deployment.save()
 
             stages_completed.append("update_deployment")
             log_deployment("info", f"Server provisioned with IP: {deployment.ipv4_address}")
 
             # Transition to panel installation phase
             deployment.transition_to("installing_panel")
-            deployment.save()
 
             # Stage 7-10: Run Ansible playbooks (panel-aware)
             panel_type = "virtualmin"
@@ -286,7 +301,6 @@ class NodeDeploymentService:
             # Stage 11: Validation
             report_progress("validation")
             deployment.transition_to("validating")
-            deployment.save()
             log_deployment("info", "Validating node health")
 
             validation_result = self._validation.validate_node(deployment)
@@ -308,7 +322,6 @@ class NodeDeploymentService:
             # Stage 12: Registration
             report_progress("registration")
             deployment.transition_to("registering")
-            deployment.save()
             log_deployment("info", "Registering node as VirtualminServer")
 
             # Generate a random password for Virtualmin admin
@@ -339,14 +352,22 @@ class NodeDeploymentService:
 
             # Stage 13: Complete
             report_progress("complete")
-            deployment.transition_to("completed")
             deployment.deployed_at = timezone.now()
-            deployment.save()
+            deployment.save(update_fields=["deployed_at", "updated_at"])
+            deployment.transition_to("completed")
 
             stages_completed.append("complete")
 
             duration = (timezone.now() - start_time).total_seconds()
             log_deployment("info", f"Deployment completed successfully in {duration:.1f}s")
+
+            # Audit: deployment completed
+            with contextlib.suppress(Exception):
+                InfrastructureAuditService.log_deployment_completed(
+                    deployment,
+                    audit_ctx,
+                    duration_seconds=duration,
+                )
 
             return Ok(
                 DeploymentResult(
@@ -395,10 +416,15 @@ class NodeDeploymentService:
         if deployment.status not in ("completed", "failed", "stopped"):
             return Err(f"Cannot destroy node in status '{deployment.status}'")
 
+        audit_ctx = InfrastructureAuditContext(user=user)
+
         try:
-            # Transition to destroying
+            # Transition to destroying (transition_to saves internally)
             deployment.transition_to("destroying")
-            deployment.save()
+
+            # Audit: destroy started
+            with contextlib.suppress(Exception):
+                InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -436,9 +462,9 @@ class NodeDeploymentService:
             self._ssh_manager.revoke_deployment_key(deployment, user=user)
 
             # Mark as destroyed
-            deployment.transition_to("destroyed")
             deployment.destroyed_at = timezone.now()
-            deployment.save()
+            deployment.save(update_fields=["destroyed_at", "updated_at"])
+            deployment.transition_to("destroyed")
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -447,12 +473,21 @@ class NodeDeploymentService:
                 phase="destroyed",
             )
 
+            # Audit: destroy completed
+            with contextlib.suppress(Exception):
+                InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
+
             logger.info(f"[Destroy:{deployment.hostname}] Node destroyed successfully")
             return Ok(True)
 
         except Exception as e:
             logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
             self._mark_failed(deployment, str(e))
+
+            # Audit: destroy failed
+            with contextlib.suppress(Exception):
+                InfrastructureAuditService.log_destroy_failed(deployment, str(e), audit_ctx)
+
             return Err(f"Destruction failed: {e}")
 
     def retry_deployment(
@@ -485,6 +520,13 @@ class NodeDeploymentService:
         deployment.save()
 
         logger.info(f"[Retry:{deployment.hostname}] Retrying deployment (attempt {deployment.retry_count})")
+
+        # Audit: deployment retry
+        with contextlib.suppress(Exception):
+            InfrastructureAuditService.log_deployment_retry(
+                deployment,
+                InfrastructureAuditContext(user=user),
+            )
 
         return self.deploy_node(
             deployment=deployment,
@@ -866,8 +908,12 @@ class NodeDeploymentService:
         """Mark deployment as failed with error message"""
         from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
-        deployment.status = "failed"
-        deployment.save()
+        try:
+            deployment.transition_to("failed")
+        except ValidationError:
+            # Force-set if transition is somehow invalid (e.g., from destroyed)
+            deployment.status = "failed"
+            deployment.save(update_fields=["status", "updated_at"])
 
         NodeDeploymentLog.objects.create(
             deployment=deployment,
@@ -875,6 +921,14 @@ class NodeDeploymentService:
             message=error_message,
             phase="failed",
         )
+
+        # Audit: deployment failed
+        with contextlib.suppress(Exception):
+            InfrastructureAuditService.log_deployment_failed(
+                deployment,
+                error_message,
+                stage=deployment.status,
+            )
 
         logger.error(f"[Deployment:{deployment.hostname}] Failed: {error_message}")
 

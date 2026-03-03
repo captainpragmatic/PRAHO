@@ -3,22 +3,39 @@ User management views for customers - PRAHO Platform.
 Handles user assignment, role changes, and access management.
 """
 
+from typing import cast
+
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
+from apps.common.decorators import staff_required
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
 
-@login_required
+def _get_accessible_customer(request: HttpRequest, customer_id: int) -> Customer:
+    """Get customer with access control check."""
+    user = cast(User, request.user)
+    accessible_customers = user.get_accessible_customers()
+    accessible_qs = (
+        accessible_customers
+        if isinstance(accessible_customers, QuerySet)
+        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
+        if accessible_customers
+        else Customer.objects.none()
+    )
+    return get_object_or_404(accessible_qs, id=customer_id)
+
+
+@staff_required
 @require_http_methods(["GET", "POST"])
 def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     """Add existing user to customer."""
-    customer = get_object_or_404(Customer, id=customer_id)
+    customer = _get_accessible_customer(request, customer_id)
 
     if request.method == "POST":
         user_email = request.POST.get("user_email", "").strip()
@@ -58,11 +75,11 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, "customers/add_user.html", context)
 
 
-@login_required
+@staff_required
 @require_http_methods(["GET", "POST"])
 def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     """Create new user and assign to customer."""
-    customer = get_object_or_404(Customer, id=customer_id)
+    customer = _get_accessible_customer(request, customer_id)
 
     if request.method == "POST":
         email = request.POST.get("email", "").strip()
@@ -96,11 +113,11 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
     return render(request, "customers/create_user.html", context)
 
 
-@login_required
+@staff_required
 @require_POST
 def change_user_role(request: HttpRequest, customer_id: int, membership_id: int) -> HttpResponse:
     """Change user's role within customer organization."""
-    customer = get_object_or_404(Customer, id=customer_id)
+    customer = _get_accessible_customer(request, customer_id)
     membership = get_object_or_404(CustomerMembership, id=membership_id, customer=customer)
 
     new_role = request.POST.get("role")
@@ -139,11 +156,11 @@ def change_user_role(request: HttpRequest, customer_id: int, membership_id: int)
     return redirect("customers:detail", customer_id=customer.id)
 
 
-@login_required
+@staff_required
 @require_POST
 def toggle_user_status(request: HttpRequest, customer_id: int, user_id: int) -> HttpResponse:
-    """Toggle user's active status."""
-    customer = get_object_or_404(Customer, id=customer_id)
+    """Toggle user's active status. NOTE: This sets User.is_active globally — affects all customer memberships."""
+    customer = _get_accessible_customer(request, customer_id)
     user = get_object_or_404(User, id=user_id)
 
     # Verify user is associated with this customer
@@ -157,15 +174,20 @@ def toggle_user_status(request: HttpRequest, customer_id: int, user_id: int) -> 
 
     action = _("activated") if is_active else _("suspended")
     messages.success(request, _("User '{}' has been {}.").format(user.email, action))
+    if not is_active:
+        messages.warning(
+            request,
+            _("Note: This affects the user's access to ALL customer accounts, not just this one."),
+        )
 
     return redirect("customers:detail", customer_id=customer.id)
 
 
-@login_required
+@staff_required
 @require_POST
 def remove_user(request: HttpRequest, customer_id: int, membership_id: int) -> HttpResponse:
     """Remove user from customer organization."""
-    customer = get_object_or_404(Customer, id=customer_id)
+    customer = _get_accessible_customer(request, customer_id)
     membership = get_object_or_404(CustomerMembership, id=membership_id, customer=customer)
 
     # SAFEGUARD 1: Prevent removing the last user from customer

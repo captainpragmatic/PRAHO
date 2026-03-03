@@ -1,3 +1,4 @@
+{% load i18n %}
 <div id="status-section"
      {% if is_in_progress %}hx-get="{% url 'infrastructure:deployment_status_partial' deployment.id %}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}
      class="bg-slate-800 rounded-lg border border-slate-700 p-6">

@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -146,7 +146,23 @@ install:
 	@echo "🔧 Patching pre-commit hook for cross-platform dynamic resolution..."
 	$(VENV_DIR)/bin/python scripts/patch_precommit_hook.py
 	@echo ""
+	@if [ ! -f .env ]; then \
+		echo ""; \
+		echo "⚠️  No .env file found. Before running services:"; \
+		echo "   cp .env.example .env"; \
+		echo "   Then edit .env with your credentials."; \
+	fi
 	@echo "✅ Environment ready! 🐍 $(VENV_DIR)/ | 🔒 Portal cannot import platform code"
+
+check-env:
+	@if [ ! -f .env ]; then \
+		echo ""; \
+		echo "🚨 Missing .env file!"; \
+		echo "   cp .env.example .env"; \
+		echo "   Then edit .env with your values."; \
+		echo ""; \
+		exit 1; \
+	fi
 
 # ===============================================================================
 # DEVELOPMENT SERVERS 🚀
@@ -157,7 +173,7 @@ install:
 
 RUNSERVER_FLAGS := $(if $(NORELOAD),--noreload,)
 
-dev-platform: build-css
+dev-platform: check-env build-css
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
@@ -179,7 +195,7 @@ dev-platform: build-css
 	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
 	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev $(RUNSERVER_FLAGS)
 
-dev-portal: build-css
+dev-portal: check-env build-css
 	@echo "🌐 [Portal] Starting customer portal service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔒 NO PYTHONPATH - portal cannot import platform code"
@@ -197,12 +213,12 @@ dev-all: build-css
 dev: build-css
 	@$(MAKE) dev-all
 
-dev-e2e: build-css
+dev-e2e: check-env build-css
 	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@RATELIMIT_ENABLE=false $(MAKE) NORELOAD=1 dev-all
 
-dev-e2e-bg: build-css
+dev-e2e-bg: check-env build-css
 	@echo "🎭 [E2E Background] Starting services in background (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@mkdir -p logs
@@ -230,7 +246,7 @@ dev-e2e-bg: build-css
 
 # Start both services and write logs to files via tee
 .PHONY: dev-with-logs
-dev-with-logs: build-css
+dev-with-logs: check-env build-css
 	@echo "🚀 [All Services] Starting platform + portal with logs..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@mkdir -p logs

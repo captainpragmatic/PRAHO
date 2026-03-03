@@ -5,8 +5,8 @@ Staff interface for managing node deployments, providers, and configurations.
 """
 
 import contextlib
+import json
 import logging
-import os
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db import models
+from django.db import models, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -23,8 +23,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from apps.common.credential_vault import get_credential_vault
-from apps.infrastructure.provider_sync import sync_hetzner_provider
+from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
+from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
 from apps.settings.services import SettingsService
 
 from .forms import (
@@ -279,7 +279,8 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
             deployment.save()
 
             # Get API tokens from credential vault
-            api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+            token_result = get_provider_token(deployment.provider)
+            api_token = token_result.unwrap() if token_result.is_ok() else ""
             cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
             if not api_token:
@@ -296,6 +297,11 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
                 cloudflare_api_token=cloudflare_token if cloudflare_token else None,
                 user_id=request.user.id,
             )
+
+            # Audit: deployment created
+            with contextlib.suppress(Exception):
+                audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+                InfrastructureAuditService.log_deployment_created(deployment, audit_ctx)
 
             messages.success(
                 request,
@@ -341,9 +347,9 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         "page_title": "Deploy New Node",
         "breadcrumb_items": breadcrumb_items,
         "form": form,
-        "providers_json": providers,
-        "regions_json": regions,
-        "sizes_json": sizes,
+        "providers_json": json.dumps(providers),
+        "regions_json": json.dumps(regions),
+        "sizes_json": json.dumps(sizes, default=str),
         "dns_zone": SettingsService.get_setting("node_deployment.dns_default_zone", ""),
         "form_action": reverse("infrastructure:deployment_create"),
         "cancel_url": reverse("infrastructure:deployment_list"),
@@ -455,7 +461,8 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API tokens
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+    token_result = get_provider_token(deployment.provider)
+    api_token = token_result.unwrap() if token_result.is_ok() else ""
     cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
     if not api_token:
@@ -493,7 +500,8 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
         form = DeploymentDestroyForm(request.POST, hostname=deployment.hostname)
         if form.is_valid():
             # Get API tokens
-            api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+            token_result = get_provider_token(deployment.provider)
+            api_token = token_result.unwrap() if token_result.is_ok() else ""
             cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
             if not api_token:
@@ -574,7 +582,8 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
                 new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
 
                 # Get API token
-                api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+                token_result = get_provider_token(deployment.provider)
+                api_token = token_result.unwrap() if token_result.is_ok() else ""
                 if not api_token:
                     messages.error(request, f"No API token found for provider {deployment.provider.name}")
                     return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -636,7 +645,8 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+    token_result = get_provider_token(deployment.provider)
+    api_token = token_result.unwrap() if token_result.is_ok() else ""
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -668,7 +678,8 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+    token_result = get_provider_token(deployment.provider)
+    api_token = token_result.unwrap() if token_result.is_ok() else ""
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -700,7 +711,8 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     # Get API token
-    api_token = get_credential_vault().get_credential(deployment.provider.credential_identifier)  # type: ignore[call-arg]
+    token_result = get_provider_token(deployment.provider)
+    api_token = token_result.unwrap() if token_result.is_ok() else ""
     if not api_token:
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
@@ -908,9 +920,9 @@ def provider_list(request: HttpRequest) -> HttpResponse:
     """List cloud providers."""
 
     providers = CloudProvider.objects.annotate(
-        deployment_count=models.Count("deployments"),
-        region_count=models.Count("regions"),
-        size_count=models.Count("sizes"),
+        deployment_count=models.Count("deployments", distinct=True),
+        region_count=models.Count("regions", distinct=True),
+        size_count=models.Count("sizes", distinct=True),
     ).order_by("name")
 
     breadcrumb_items = [
@@ -934,22 +946,34 @@ def provider_list(request: HttpRequest) -> HttpResponse:
 @require_POST
 def sync_providers(request: HttpRequest) -> HttpResponse:
     """Trigger provider catalog sync from APIs (HTMX endpoint)."""
-    token = os.environ.get("HCLOUD_TOKEN", "")
-    if not token:
-        with contextlib.suppress(Exception):
-            vault = get_credential_vault()
-            token = vault.get_secret("hcloud_token") or ""
+    active_providers = CloudProvider.objects.filter(is_active=True)
 
-    if not token:
-        messages.warning(request, _("No HCLOUD_TOKEN found. Set it in environment or credential vault."))
+    if not active_providers.exists():
+        messages.warning(request, _("No active providers configured."))
         return redirect("infrastructure:provider_list")
 
-    result = sync_hetzner_provider(token=token)
-    if result.is_err():
-        messages.error(request, _("Provider sync failed: %(error)s") % {"error": result.unwrap_err()})
-    else:
-        sync_result = result.unwrap()
-        messages.success(request, _("Provider sync complete: %(summary)s") % {"summary": sync_result.summary})
+    for provider in active_providers:
+        sync_fn = get_provider_sync_fn(provider.provider_type)
+        if not sync_fn:
+            continue  # No sync function registered for this provider type
+
+        token_result = get_provider_token(provider)
+        if token_result.is_err():
+            messages.warning(request, _("No credentials for %(name)s.") % {"name": provider.name})
+            continue
+
+        result = sync_fn(token=token_result.unwrap())
+        if result.is_err():
+            messages.error(
+                request,
+                _("Sync failed for %(name)s: %(error)s") % {"name": provider.name, "error": result.unwrap_err()},
+            )
+        else:
+            sync_result = result.unwrap()
+            messages.success(
+                request,
+                _("%(name)s sync: %(summary)s") % {"name": provider.name, "summary": sync_result.summary},
+            )
 
     return redirect("infrastructure:provider_list")
 
@@ -958,24 +982,7 @@ def sync_providers(request: HttpRequest) -> HttpResponse:
 @require_provider_management
 def provider_create(request: HttpRequest) -> HttpResponse:
     """Create new cloud provider."""
-
-    if request.method == "POST":
-        form = CloudProviderForm(request.POST)
-        if form.is_valid():
-            provider = form.save(commit=False)
-
-            # Store API token in credential vault
-            api_token = form.cleaned_data.get("api_token")
-            if api_token:
-                credential_id = f"cloud_provider_{provider.code}"
-                get_credential_vault().store_credential(credential_id, api_token)  # type: ignore[call-arg, arg-type]
-                provider.credential_identifier = credential_id
-
-            provider.save()
-            messages.success(request, f"Provider '{provider.name}' created successfully.")
-            return redirect("infrastructure:provider_list")
-    else:
-        form = CloudProviderForm()
+    form = CloudProviderForm(request.POST) if request.method == "POST" else CloudProviderForm()
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -983,7 +990,6 @@ def provider_create(request: HttpRequest) -> HttpResponse:
         {"text": "Providers", "url": reverse("infrastructure:provider_list")},
         {"text": "Create"},
     ]
-
     context = {
         "page_title": "Create Provider",
         "breadcrumb_items": breadcrumb_items,
@@ -992,6 +998,31 @@ def provider_create(request: HttpRequest) -> HttpResponse:
         "cancel_url": reverse("infrastructure:provider_list"),
     }
 
+    if request.method == "POST" and form.is_valid():
+        provider = form.save(commit=False)
+        api_token = form.cleaned_data.get("api_token")
+
+        try:
+            with transaction.atomic():
+                provider.save()
+                if api_token:
+                    store_result = store_provider_token(provider, api_token, user=request.user)
+                    if store_result.is_err():
+                        raise ValueError(store_result.unwrap_err())
+                    provider.credential_identifier = store_result.unwrap()
+                    provider.save(update_fields=["credential_identifier"])
+        except ValueError as e:
+            messages.error(request, _("Failed to store API token: %(error)s") % {"error": str(e)})
+            return render(request, "infrastructure/provider_form.html", context)
+
+        # Audit: provider created
+        with contextlib.suppress(Exception):
+            audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+            InfrastructureAuditService.log_provider_created(provider, audit_ctx)
+
+        messages.success(request, f"Provider '{provider.name}' created successfully.")
+        return redirect("infrastructure:provider_list")
+
     return render(request, "infrastructure/provider_form.html", context)
 
 
@@ -999,24 +1030,10 @@ def provider_create(request: HttpRequest) -> HttpResponse:
 @require_provider_management
 def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
     """Edit cloud provider."""
-
     provider = get_object_or_404(CloudProvider, id=pk)
 
     if request.method == "POST":
         form = CloudProviderForm(request.POST, instance=provider)
-        if form.is_valid():
-            provider = form.save(commit=False)
-
-            # Update API token if provided
-            api_token = form.cleaned_data.get("api_token")
-            if api_token:
-                credential_id = provider.credential_identifier or f"cloud_provider_{provider.code}"
-                get_credential_vault().store_credential(credential_id, api_token)  # type: ignore[call-arg, arg-type]
-                provider.credential_identifier = credential_id
-
-            provider.save()
-            messages.success(request, f"Provider '{provider.name}' updated successfully.")
-            return redirect("infrastructure:provider_list")
     else:
         form = CloudProviderForm(instance=provider)
 
@@ -1026,7 +1043,6 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
         {"text": "Providers", "url": reverse("infrastructure:provider_list")},
         {"text": provider.name},
     ]
-
     context = {
         "page_title": f"Edit Provider: {provider.name}",
         "breadcrumb_items": breadcrumb_items,
@@ -1035,6 +1051,39 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "form_action": reverse("infrastructure:provider_edit", args=[provider.id]),
         "cancel_url": reverse("infrastructure:provider_list"),
     }
+
+    if request.method == "POST" and form.is_valid():
+        # Capture old values for audit trail
+        old_values = {
+            "name": provider.name,
+            "code": provider.code,
+            "provider_type": provider.provider_type,
+            "is_active": provider.is_active,
+        }
+
+        provider = form.save(commit=False)
+        api_token = form.cleaned_data.get("api_token")
+
+        try:
+            with transaction.atomic():
+                provider.save()
+                if api_token:
+                    store_result = store_provider_token(provider, api_token, user=request.user)
+                    if store_result.is_err():
+                        raise ValueError(store_result.unwrap_err())
+                    provider.credential_identifier = store_result.unwrap()
+                    provider.save(update_fields=["credential_identifier"])
+        except ValueError as e:
+            messages.error(request, _("Failed to store API token: %(error)s") % {"error": str(e)})
+            return render(request, "infrastructure/provider_form.html", context)
+
+        # Audit: provider updated
+        with contextlib.suppress(Exception):
+            audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+            InfrastructureAuditService.log_provider_updated(provider, old_values, audit_ctx)
+
+        messages.success(request, f"Provider '{provider.name}' updated successfully.")
+        return redirect("infrastructure:provider_list")
 
     return render(request, "infrastructure/provider_form.html", context)
 
@@ -1178,6 +1227,11 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     region = get_object_or_404(NodeRegion, id=pk)
     region.is_active = not region.is_active
     region.save()
+
+    # Audit: region toggled
+    with contextlib.suppress(Exception):
+        audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+        InfrastructureAuditService.log_region_toggled(region, audit_ctx)
 
     action = "enabled" if region.is_active else "disabled"
     messages.success(request, f"Region '{region.name}' {action}.")

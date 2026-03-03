@@ -6,12 +6,21 @@ Fast iteration with debugging tools enabled.
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from dotenv import load_dotenv
 
 if TYPE_CHECKING:
     pass
 
-from .base import *  # noqa: F403
+# Dev-only: load project-root .env. Prod/staging must set env vars
+# via deployment platform (Docker, systemd, secrets manager).
+_env_path = Path(__file__).resolve().parents[4] / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+
+from .base import *  # noqa: E402, F403
 
 # ===============================================================================
 # DEVELOPMENT FLAGS

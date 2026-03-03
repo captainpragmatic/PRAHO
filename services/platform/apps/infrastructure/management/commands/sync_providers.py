@@ -9,14 +9,16 @@ Usage:
 
 from __future__ import annotations
 
-import contextlib
-import os
 from argparse import ArgumentParser
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.infrastructure.provider_sync import sync_hetzner_provider
+from apps.infrastructure.provider_config import (
+    PROVIDER_SYNC_REGISTRY,
+    get_provider_sync_fn,
+    get_provider_token,
+)
 
 
 class Command(BaseCommand):
@@ -26,8 +28,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--provider",
             type=str,
-            choices=["hetzner"],
-            help="Sync only a specific provider (default: all)",
+            choices=list(PROVIDER_SYNC_REGISTRY.keys()),
+            help="Sync only a specific provider (default: all registered)",
         )
         parser.add_argument(
             "--dry-run",
@@ -36,46 +38,50 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
-        provider = options.get("provider")
+        provider_filter = options.get("provider")
         dry_run = options.get("dry_run", False)
 
         if dry_run:
             self.stdout.write(self.style.WARNING("DRY RUN — no changes will be made"))
 
-        providers_to_sync = [provider] if provider else ["hetzner"]
+        providers_to_sync = [provider_filter] if provider_filter else list(PROVIDER_SYNC_REGISTRY.keys())
 
-        for p in providers_to_sync:
-            if p == "hetzner":
-                self._sync_hetzner(dry_run=dry_run)
+        for provider_type in providers_to_sync:
+            self._sync_provider(provider_type, dry_run=dry_run)
 
-    def _sync_hetzner(self, dry_run: bool = False) -> None:
-        self.stdout.write("🌐 Syncing Hetzner Cloud provider catalog...")
+    def _sync_provider(self, provider_type: str, dry_run: bool = False) -> None:
+        from apps.infrastructure.models import CloudProvider  # noqa: PLC0415
 
-        # Get token from environment or CredentialVault
-        token = os.environ.get("HCLOUD_TOKEN", "")
-        if not token:
-            with contextlib.suppress(Exception):
-                from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
+        self.stdout.write(f"🌐 Syncing {provider_type} provider catalog...")
 
-                vault = get_credential_vault()
-                token = vault.get_secret("hcloud_token") or ""
+        sync_fn = get_provider_sync_fn(provider_type)
+        if not sync_fn:
+            self.stdout.write(self.style.WARNING(f"⚠️  No sync function registered for {provider_type}"))
+            return
 
-        if not token:
+        # Find active provider of this type to get credentials
+        provider = CloudProvider.objects.filter(provider_type=provider_type, is_active=True).first()
+        if not provider:
+            self.stdout.write(self.style.WARNING(f"⚠️  No active {provider_type} provider configured"))
+            return
+
+        token_result = get_provider_token(provider)
+        if token_result.is_err():
             self.stdout.write(
                 self.style.WARNING(
-                    "⚠️  No HCLOUD_TOKEN found in environment or credential vault. "
-                    "Set HCLOUD_TOKEN env var or add 'hcloud_token' to credential vault."
+                    f"⚠️  No credentials found for {provider.name}. "
+                    f"Store token in credential vault or set environment variable."
                 )
             )
             return
 
-        result = sync_hetzner_provider(token=token, dry_run=dry_run)
+        result = sync_fn(token=token_result.unwrap(), dry_run=dry_run)
 
         if result.is_err():
-            raise CommandError(f"Hetzner sync failed: {result.unwrap_err()}")
+            raise CommandError(f"{provider_type} sync failed: {result.unwrap_err()}")
 
         sync_result = result.unwrap()
-        self.stdout.write(self.style.SUCCESS(f"✅ Hetzner sync complete: {sync_result.summary}"))
+        self.stdout.write(self.style.SUCCESS(f"✅ {provider_type} sync complete: {sync_result.summary}"))
 
         if sync_result.errors:
             for error in sync_result.errors:

@@ -378,16 +378,17 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
 
     for deployment in failed_deployments:
         try:
-            # If server was created in the cloud, attempt cleanup via hcloud SDK
-            if deployment.external_node_id:
+            # If server was created in the cloud, attempt cleanup via provider SDK
+            if deployment.external_node_id and deployment.provider:
                 try:
-                    import os  # noqa: PLC0415
+                    from apps.infrastructure.provider_config import get_provider_token  # noqa: PLC0415
 
-                    from apps.infrastructure.hcloud_service import get_hcloud_service  # noqa: PLC0415
+                    token_result = get_provider_token(deployment.provider)
+                    if token_result.is_ok() and deployment.provider.provider_type == "hetzner":
+                        # Currently only hcloud SDK supports server deletion
+                        from apps.infrastructure.hcloud_service import get_hcloud_service  # noqa: PLC0415
 
-                    token = os.environ.get("HCLOUD_TOKEN", "")
-                    if token:
-                        hcloud_svc = get_hcloud_service(token)
+                        hcloud_svc = get_hcloud_service(token_result.unwrap())
                         hcloud_svc.delete_server(int(deployment.external_node_id))
                         logger.info(f"[Task:cleanup] Deleted cloud server for {deployment.hostname}")
                 except Exception as e:
@@ -1302,35 +1303,41 @@ def sync_providers_task() -> dict[str, Any]:
     """
     Periodic task to sync provider catalog data from APIs.
 
+    Iterates all active providers and calls their registered sync function.
     Scheduled daily at 4:00 AM via Django-Q2 Schedule.
     Can also be triggered manually via management command or UI.
     """
-    import os  # noqa: PLC0415
-
-    from apps.infrastructure.provider_sync import sync_hetzner_provider  # noqa: PLC0415
+    from apps.infrastructure.models import CloudProvider  # noqa: PLC0415
+    from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token  # noqa: PLC0415
 
     logger.info("[Task:sync_providers] Starting provider catalog sync")
+    results: dict[str, dict[str, str]] = {}
 
-    token = os.environ.get("HCLOUD_TOKEN", "")
-    if not token:
-        with contextlib.suppress(Exception):
-            from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
+    for provider in CloudProvider.objects.filter(is_active=True):
+        sync_fn = get_provider_sync_fn(provider.provider_type)
+        if not sync_fn:
+            continue
 
-            vault = get_credential_vault()
-            token = vault.get_secret("hcloud_token") or ""
+        token_result = get_provider_token(provider)
+        if token_result.is_err():
+            logger.warning(f"[Task:sync_providers] No credentials for {provider.name}, skipping")
+            results[provider.name] = {"status": "skipped", "reason": "no_token"}
+            continue
 
-    if not token:
-        logger.warning("[Task:sync_providers] No HCLOUD_TOKEN found, skipping sync")
-        return {"status": "skipped", "reason": "no_token"}
+        result = sync_fn(token=token_result.unwrap())
+        if result.is_err():
+            logger.error(f"[Task:sync_providers] Sync failed for {provider.name}: {result.unwrap_err()}")
+            results[provider.name] = {"status": "error", "error": result.unwrap_err()}
+        else:
+            sync_result = result.unwrap()
+            logger.info(f"[Task:sync_providers] {provider.name} sync complete: {sync_result.summary}")
+            results[provider.name] = {"status": "success", "summary": sync_result.summary}
 
-    result = sync_hetzner_provider(token=token)
-    if result.is_err():
-        logger.error(f"[Task:sync_providers] Sync failed: {result.unwrap_err()}")
-        return {"status": "error", "error": result.unwrap_err()}
+    if not results:
+        logger.warning("[Task:sync_providers] No active providers with sync functions found")
+        return {"status": "skipped", "reason": "no_providers"}
 
-    sync_result = result.unwrap()
-    logger.info(f"[Task:sync_providers] Sync complete: {sync_result.summary}")
-    return {"status": "success", "summary": sync_result.summary}
+    return {"status": "completed", "providers": results}
 
 
 def queue_sync_providers() -> str:
