@@ -402,6 +402,8 @@ fixtures:
 	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
 	@echo "📧 Setting up email templates..."
 	@$(PYTHON_PLATFORM_MANAGE) setup_email_templates --settings=config.settings.dev || echo "⚠️ Email templates setup skipped"
+	@echo "🌐 Syncing infrastructure providers..."
+	@$(PYTHON_PLATFORM_MANAGE) sync_providers --settings=config.settings.dev || echo "⚠️ Provider sync skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --settings=config.settings.dev
 
 fixtures-light:
@@ -412,6 +414,8 @@ fixtures-light:
 	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
 	@echo "📧 Setting up email templates..."
 	@$(PYTHON_PLATFORM_MANAGE) setup_email_templates --settings=config.settings.dev || echo "⚠️ Email templates setup skipped"
+	@echo "🌐 Syncing infrastructure providers..."
+	@$(PYTHON_PLATFORM_MANAGE) sync_providers --settings=config.settings.dev || echo "⚠️ Provider sync skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev
 
 # ===============================================================================

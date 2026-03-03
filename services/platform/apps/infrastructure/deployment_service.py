@@ -23,14 +23,12 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
+from apps.infrastructure.hcloud_service import HcloudResult, get_hcloud_service
 from apps.infrastructure.provider_config import (
-    map_terraform_outputs_to_deployment,
     run_provider_command,
-    validate_provider_prerequisites,
 )
 from apps.infrastructure.registration_service import get_registration_service
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
-from apps.infrastructure.terraform_service import TerraformResult, get_terraform_service
 from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
 from apps.settings.services import SettingsService
 
@@ -61,7 +59,7 @@ class DeploymentResult:
     deployment_id: int
     hostname: str
     stages_completed: list[str]
-    terraform_result: TerraformResult | None = None
+    hcloud_result: HcloudResult | None = None
     ansible_results: list[AnsibleResult] | None = None
     validation_report: NodeValidationReport | None = None
     virtualmin_server_id: Any = None
@@ -86,13 +84,11 @@ class NodeDeploymentService:
     STAGES: ClassVar[dict[str, tuple[int, str]]] = {
         "init": (0, "Initializing deployment"),
         "ssh_key": (5, "Generating SSH key"),
-        "terraform_init": (10, "Initializing Terraform"),
-        "terraform_plan": (20, "Planning infrastructure"),
-        "terraform_apply": (30, "Provisioning infrastructure"),
-        "update_deployment": (50, "Updating deployment records"),
-        "ansible_base": (55, "Running base configuration"),
-        "ansible_panel": (65, "Installing control panel"),
-        "ansible_harden": (75, "Hardening server"),
+        "provision_server": (15, "Creating cloud server"),
+        "update_deployment": (40, "Updating deployment records"),
+        "ansible_base": (50, "Running base configuration"),
+        "ansible_panel": (60, "Installing control panel"),
+        "ansible_harden": (70, "Hardening server"),
         "ansible_backup": (80, "Configuring backups"),
         "validation": (85, "Validating node"),
         "registration": (95, "Registering node"),
@@ -102,7 +98,6 @@ class NodeDeploymentService:
     def __init__(self) -> None:
         """Initialize deployment service with all required sub-services"""
         self._ssh_manager = get_ssh_key_manager()
-        self._terraform = get_terraform_service()
         self._ansible = get_ansible_service()
         self._validation = get_validation_service()
         self._registration = get_registration_service()
@@ -128,13 +123,10 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
-        from pathlib import Path  # noqa: PLC0415
-
         start_time = timezone.now()
         stages_completed: list[str] = []
-        terraform_result: TerraformResult | None = None
+        hcloud_result: HcloudResult | None = None
         ansible_results: list[AnsibleResult] = []
-        deploy_dir: Path | None = None  # Track for cleanup on exception
 
         def report_progress(stage: str) -> None:
             if progress_callback and stage in self.STAGES:
@@ -165,16 +157,6 @@ class NodeDeploymentService:
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
 
-            # Validate provider prerequisites (CLI tools, Terraform, modules)
-            provider_type = deployment.provider.provider_type
-            prereq_result = validate_provider_prerequisites(provider_type)
-            if prereq_result.is_err():
-                self._mark_failed(
-                    deployment,
-                    f"Provider prerequisites check failed: {prereq_result.unwrap_err()}",
-                )
-                return Err(f"Provider prerequisites check failed: {prereq_result.unwrap_err()}")
-
             # Transition to provisioning
             if not deployment.transition_to("provisioning_node"):  # type: ignore[func-returns-value]
                 return Err(f"Invalid state transition from '{deployment.status}' to 'provisioning_node'")
@@ -204,84 +186,65 @@ class NodeDeploymentService:
 
             stages_completed.append("ssh_key")
 
-            # Stage 2: Generate Terraform config
-            report_progress("terraform_init")
-            log_deployment("info", "Generating Terraform configuration")
+            # Stage 2: Provision server via hcloud SDK
+            report_progress("provision_server")
+            log_deployment("info", "Creating server via Hetzner Cloud API")
 
-            config_result = self._terraform.generate_deployment_config(
-                deployment=deployment,
-                ssh_public_key=ssh_public_key,
-                credentials=credentials,
-                cloudflare_api_token=cloudflare_api_token,
+            # Get API token from credentials
+            api_token = credentials.get("hcloud_token") or credentials.get("api_token", "")
+            if not api_token:
+                self._mark_failed(deployment, "No API token provided for Hetzner Cloud")
+                return Err("No API token provided for Hetzner Cloud")
+
+            hcloud_svc = get_hcloud_service(api_token)
+
+            # Upload SSH key to Hetzner
+            ssh_key_name = f"praho-{deployment.hostname}"
+            key_upload_result = hcloud_svc.upload_ssh_key(ssh_key_name, ssh_public_key)
+            if key_upload_result.is_err():
+                self._mark_failed(deployment, f"SSH key upload failed: {key_upload_result.unwrap_err()}")
+                return Err(f"SSH key upload failed: {key_upload_result.unwrap_err()}")
+
+            # Create the server
+            server_result = hcloud_svc.create_server(
+                name=deployment.hostname,
+                server_type=deployment.node_size.provider_type_id if deployment.node_size else "",
+                location=deployment.region.provider_region_id if deployment.region else "",
+                ssh_keys=[ssh_key_name],
+                labels={
+                    "environment": deployment.environment,
+                    "node_type": deployment.node_type,
+                    "managed_by": "praho",
+                },
             )
 
-            if config_result.is_err():
-                self._mark_failed(deployment, f"Terraform config generation failed: {config_result.unwrap_err()}")
-                return Err(f"Terraform config generation failed: {config_result.unwrap_err()}")
+            if server_result.is_err():
+                self._mark_failed(deployment, f"Server creation failed: {server_result.unwrap_err()}")
+                return Err(f"Server creation failed: {server_result.unwrap_err()}")
 
-            deploy_dir = config_result.unwrap()
-            log_deployment("info", f"Terraform config generated at: {deploy_dir}")
+            hcloud_result = server_result.unwrap()
+            stages_completed.append("provision_server")
+            log_deployment("info", "Server created successfully via hcloud SDK")
 
-            # Stage 3: Terraform init
-            init_result = self._terraform.init(deploy_dir)
-            if not init_result.success:
-                self._terraform.cleanup_sensitive_files(deploy_dir)  # SECURITY: Remove credentials
-                self._mark_failed(deployment, f"Terraform init failed: {init_result.stderr[:500]}")
-                return Err(f"Terraform init failed: {init_result.stderr[:500]}")
-
-            stages_completed.append("terraform_init")
-            log_deployment("info", "Terraform initialized successfully")
-
-            # Stage 4: Terraform plan
-            report_progress("terraform_plan")
-            plan_result = self._terraform.plan(deploy_dir)
-            if not plan_result.success:
-                self._terraform.cleanup_sensitive_files(deploy_dir)  # SECURITY: Remove credentials
-                self._mark_failed(deployment, f"Terraform plan failed: {plan_result.stderr[:500]}")
-                return Err(f"Terraform plan failed: {plan_result.stderr[:500]}")
-
-            stages_completed.append("terraform_plan")
-            log_deployment("info", "Terraform plan successful")
-
-            # Stage 5: Terraform apply
-            report_progress("terraform_apply")
-            log_deployment("info", "Applying Terraform configuration")
-
-            apply_result = self._terraform.apply(deploy_dir)
-            terraform_result = apply_result
-
-            if not apply_result.success:
-                self._terraform.cleanup_sensitive_files(deploy_dir)  # SECURITY: Remove credentials
-                self._mark_failed(deployment, f"Terraform apply failed: {apply_result.stderr[:500]}")
-                return Err(f"Terraform apply failed: {apply_result.stderr[:500]}")
-
-            stages_completed.append("terraform_apply")
-            log_deployment("info", "Infrastructure provisioned successfully")
-
-            # SECURITY: Clean up sensitive tfvars file immediately after terraform apply
-            self._terraform.cleanup_sensitive_files(deploy_dir)
-
-            # Stage 6: Update deployment with Terraform outputs
+            # Stage 3: Update deployment with server details
             report_progress("update_deployment")
 
-            outputs = apply_result.outputs
-            if not outputs or "ipv4_address" not in outputs:
-                self._mark_failed(deployment, "Terraform did not return IP address")
-                return Err("Terraform did not return IP address")
+            if not hcloud_result.ipv4_address:
+                self._mark_failed(deployment, "Server creation did not return an IP address")
+                return Err("Server creation did not return an IP address")
 
             with transaction.atomic():
-                # Map terraform outputs to deployment fields using provider config
-                provider_type = deployment.provider.provider_type
-                map_terraform_outputs_to_deployment(provider_type, outputs, deployment)
-                deployment.terraform_state_version = 1
+                deployment.external_node_id = hcloud_result.server_id
+                deployment.ipv4_address = hcloud_result.ipv4_address
+                deployment.ipv6_address = hcloud_result.ipv6_address or ""
                 deployment.transition_to("configuring_dns")
                 deployment.save()
 
             stages_completed.append("update_deployment")
             log_deployment("info", f"Server provisioned with IP: {deployment.ipv4_address}")
 
-            # Transition to Ansible phase
-            deployment.transition_to("running_ansible")
+            # Transition to panel installation phase
+            deployment.transition_to("installing_panel")
             deployment.save()
 
             # Stage 7-10: Run Ansible playbooks (panel-aware)
@@ -391,7 +354,7 @@ class NodeDeploymentService:
                     deployment_id=deployment.id,
                     hostname=deployment.hostname,
                     stages_completed=stages_completed,
-                    terraform_result=terraform_result,
+                    hcloud_result=hcloud_result,
                     ansible_results=ansible_results,
                     validation_report=validation_report,
                     virtualmin_server_id=virtualmin_server_id,
@@ -401,9 +364,6 @@ class NodeDeploymentService:
 
         except Exception as e:
             logger.exception(f"Deployment failed for {deployment.hostname}: {e}")
-            # SECURITY: Clean up sensitive tfvars file on exception
-            if deploy_dir is not None:
-                self._terraform.cleanup_sensitive_files(deploy_dir)
             self._mark_failed(deployment, str(e))
 
             duration = (timezone.now() - start_time).total_seconds()
@@ -457,41 +417,20 @@ class NodeDeploymentService:
                 if unregister_result.is_err():
                     logger.warning(f"Unregistration failed: {unregister_result.unwrap_err()}")
 
-            # Find Terraform deployment directory
-            from pathlib import Path  # noqa: PLC0415
+            # Delete server via hcloud SDK
+            if deployment.external_node_id:
+                api_token = credentials.get("hcloud_token") or credentials.get("api_token", "")
+                if not api_token:
+                    return Err("No API token provided for server deletion")
 
-            deploy_dir = (
-                Path(
-                    str(SettingsService.get_setting("node_deployment.terraform_state_path", "/var/lib/praho/terraform"))
-                )
-                / deployment.hostname
-            )
+                hcloud_svc = get_hcloud_service(api_token)
+                delete_result = hcloud_svc.delete_server(int(deployment.external_node_id))
 
-            if not deploy_dir.exists():
-                # No Terraform state - might have been manually cleaned
-                logger.warning(f"Terraform directory not found: {deploy_dir}")
-                deployment.transition_to("destroyed")
-                deployment.destroyed_at = timezone.now()
-                deployment.save()
-                return Ok(True)
-
-            # Regenerate Terraform config with tokens for destroy
-            config_result = self._terraform.generate_deployment_config(
-                deployment=deployment,
-                ssh_public_key="",  # Not needed for destroy
-                credentials=credentials,
-                cloudflare_api_token=cloudflare_api_token,
-            )
-
-            if config_result.is_err():
-                return Err(f"Could not regenerate Terraform config: {config_result.unwrap_err()}")
-
-            # Run Terraform destroy
-            destroy_result = self._terraform.destroy(deploy_dir)
-
-            if not destroy_result.success:
-                self._mark_failed(deployment, f"Terraform destroy failed: {destroy_result.stderr[:500]}")
-                return Err(f"Terraform destroy failed: {destroy_result.stderr[:500]}")
+                if delete_result.is_err():
+                    self._mark_failed(deployment, f"Server deletion failed: {delete_result.unwrap_err()}")
+                    return Err(f"Server deletion failed: {delete_result.unwrap_err()}")
+            else:
+                logger.warning(f"No external_node_id for {deployment.hostname}, skipping cloud deletion")
 
             # Clean up SSH key from vault
             self._ssh_manager.revoke_deployment_key(deployment, user=user)

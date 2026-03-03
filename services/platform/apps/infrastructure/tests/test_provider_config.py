@@ -33,24 +33,34 @@ class TestProviderConfigData(TestCase):
 
     def test_all_providers_have_required_keys(self):
         """Each provider must have all required configuration keys."""
-        required_keys = [
-            "terraform_module",
-            "terraform_provider",
-            "terraform_provider_version",
+        common_required_keys = [
             "credential_key",
             "token_env_var",
             "cli",
-            "terraform_vars",
             "output_mappings",
+        ]
+        terraform_keys = [
+            "terraform_module",
+            "terraform_provider",
+            "terraform_provider_version",
+            "terraform_vars",
         ]
 
         for provider, config in PROVIDER_CONFIG.items():
-            for key in required_keys:
+            for key in common_required_keys:
                 self.assertIn(
                     key,
                     config,
                     f"Provider '{provider}' missing required key: {key}",
                 )
+            # Terraform keys only required for non-hetzner providers
+            if provider != "hetzner":
+                for key in terraform_keys:
+                    self.assertIn(
+                        key,
+                        config,
+                        f"Provider '{provider}' missing required key: {key}",
+                    )
 
     def test_all_providers_have_required_cli_commands(self):
         """Each provider CLI config must have standard power commands."""
@@ -74,11 +84,13 @@ class TestProviderConfigData(TestCase):
                 )
 
     def test_all_providers_have_required_terraform_vars(self):
-        """Each provider must have required terraform variable mappings."""
+        """Non-hetzner providers must have required terraform variable mappings."""
         required_vars = ["api_token_var", "server_type_var", "region_var", "image_default"]
 
         for provider, config in PROVIDER_CONFIG.items():
-            tf_vars = config.get("terraform_vars", {})
+            if "terraform_vars" not in config:
+                continue  # Hetzner uses hcloud SDK, no terraform_vars
+            tf_vars = config["terraform_vars"]
             for var in required_vars:
                 self.assertIn(
                     var,
@@ -156,11 +168,11 @@ class TestGetProviderConfig(TestCase):
     """Tests for get_provider_config function."""
 
     def test_get_hetzner_config(self):
-        """Test retrieving Hetzner configuration."""
+        """Test retrieving Hetzner configuration (uses hcloud SDK, not Terraform)."""
         config = get_provider_config("hetzner")
         assert config is not None
-        self.assertEqual(config["terraform_module"], "hetzner")
         self.assertEqual(config["credential_key"], "hcloud_token")
+        self.assertNotIn("terraform_module", config)
 
     def test_get_digitalocean_config(self):
         """Test retrieving DigitalOcean configuration."""
@@ -363,11 +375,9 @@ class TestTerraformHelpers(TestCase):
     """Tests for Terraform-related helper functions."""
 
     def test_get_terraform_provider_block_hetzner(self):
-        """Test Terraform provider block generation for Hetzner."""
+        """Hetzner uses hcloud SDK, so terraform provider block is None."""
         block = get_terraform_provider_block("hetzner")
-        assert block is not None
-        self.assertIn("hetznercloud/hcloud", block)
-        self.assertIn("~> 1.45", block)
+        self.assertIsNone(block)
 
     def test_get_terraform_provider_block_digitalocean(self):
         """Test Terraform provider block generation for DigitalOcean."""
@@ -593,14 +603,15 @@ class TestValidateProviderPrerequisites(TestCase):
         self.assertIn("Terraform module not found", result.unwrap_err())
 
     def test_all_configured_providers_have_terraform_modules(self):
-        """All providers in PROVIDER_CONFIG should have terraform module dirs on disk."""
-        import os
+        """Non-hetzner providers in PROVIDER_CONFIG should have terraform module dirs on disk."""
         from pathlib import Path
 
         modules_base = Path(__file__).parent.parent.parent.parent / "infrastructure" / "terraform" / "modules"
 
         for provider_type, config in PROVIDER_CONFIG.items():
-            module_name = config.get("terraform_module", provider_type)
+            if "terraform_module" not in config:
+                continue  # Hetzner uses hcloud SDK, no terraform module
+            module_name = config["terraform_module"]
             module_path = modules_base / module_name
             self.assertTrue(
                 module_path.is_dir(),

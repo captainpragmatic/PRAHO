@@ -1090,6 +1090,19 @@ wheels = [
 ]
 
 [[package]]
+name = "hcloud"
+version = "2.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/86/1b4aae77f953e9408e3feffa6beec111136cb423e95e965b8a268c292628/hcloud-2.16.0.tar.gz", hash = "sha256:eb1acb3115bc0b356b450ad23256873b58311b357a49625a8fe0cbaba2db509b", size = 153827, upload-time = "2026-01-23T12:14:13.015Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/47/9c/e4f662d6576bb0f36aac4b301b5600116ba3cfc68c27a5a2ce51996b7b03/hcloud-2.16.0-py3-none-any.whl", hash = "sha256:37b3ef30be1034299879d1da89b2ed34e907b79796b684e16d8d6f76bd4a3c47", size = 111392, upload-time = "2026-01-23T12:14:11.422Z" },
+]
+
+[[package]]
 name = "identify"
 version = "2.6.16"
 source = { registry = "https://pypi.org/simple" }
@@ -1749,6 +1762,7 @@ platform = [
     { name = "django-ses" },
     { name = "django-storages" },
     { name = "drf-spectacular" },
+    { name = "hcloud" },
     { name = "lxml" },
     { name = "markdown" },
     { name = "paramiko" },
@@ -1852,6 +1866,7 @@ platform = [
     { name = "django-ses", specifier = ">=3.5.0" },
     { name = "django-storages", specifier = ">=1.14.0" },
     { name = "drf-spectacular", specifier = ">=0.26.0" },
+    { name = "hcloud", specifier = ">=2.0.0" },
     { name = "lxml", specifier = ">=4.9.0" },
     { name = "markdown", specifier = ">=3.5.0" },
     { name = "paramiko", specifier = ">=4.0.0" },

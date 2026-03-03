@@ -43,14 +43,11 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
     "hetzner": {
-        # Terraform configuration
-        "terraform_module": "hetzner",
-        "terraform_provider": "hetznercloud/hcloud",
-        "terraform_provider_version": "~> 1.45",
+        # Provisioning: uses hcloud Python SDK (see hcloud_service.py, ADR-0027)
         # Credentials
         "credential_key": "hcloud_token",
         "token_env_var": "HCLOUD_TOKEN",
-        # CLI tool configuration
+        # CLI tool configuration (fallback for power operations)
         "cli": {
             "tool": "hcloud",
             "power_off": ["server", "poweroff", "{server_id}"],
@@ -59,14 +56,7 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             "resize": ["server", "change-type", "--server", "{server_id}", "--type", "{size}"],
             "delete": ["server", "delete", "{server_id}"],
         },
-        # Terraform variable mapping
-        "terraform_vars": {
-            "api_token_var": "hcloud_token",
-            "server_type_var": "server_type",
-            "region_var": "location",
-            "image_default": "ubuntu-22.04",
-        },
-        # Output field mappings (terraform output -> model field)
+        # Output field mappings (SDK response -> model field)
         "output_mappings": {
             "server_id": "external_node_id",
             "ipv4_address": "ipv4_address",
@@ -342,7 +332,8 @@ def run_provider_command(  # noqa: PLR0911
 
 
 # =============================================================================
-# Terraform Configuration Helpers
+# Terraform Configuration Helpers (DEPRECATED — Hetzner uses hcloud SDK now)
+# Kept for potential future use with DigitalOcean, Vultr, Linode.
 # =============================================================================
 
 

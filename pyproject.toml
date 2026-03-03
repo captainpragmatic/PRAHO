@@ -199,6 +199,7 @@ platform = [
 
     # Server provisioning & SSH
     "paramiko>=4.0.0",
+    "hcloud>=2.0.0",
 
     # Monitoring & Logging
     "sentry-sdk[django]>=1.32.0",

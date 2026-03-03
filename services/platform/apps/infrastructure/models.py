@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 # Hostname format validator: prd-sha-het-de-fsn1-001
 HOSTNAME_PATTERN = re.compile(r"^[a-z]{3}-[a-z]{3}-[a-z]{3}-[a-z]{2}-[a-z0-9]{4}-\d{3}$")
 
+# Default max domains for a hosting node (used in NodeSize and NodeDeployment)
+DEFAULT_MAX_DOMAINS = 50
+
 
 def validate_hostname_format(value: str) -> None:
     """Validate hostname matches the expected format."""
@@ -201,7 +204,7 @@ class NodeSize(models.Model):
 
     # Capacity limits for Virtualmin
     max_domains = models.PositiveIntegerField(
-        default=50,
+        default=DEFAULT_MAX_DOMAINS,
         verbose_name=_("Max Domains"),
         help_text=_("Estimated max domains for this size"),
     )
@@ -438,18 +441,11 @@ class NodeDeployment(models.Model):
         verbose_name=_("Virtualmin Server"),
     )
 
-    # Terraform state reference
-    terraform_state_path = models.CharField(
-        max_length=500,
-        blank=True,
-        verbose_name=_("Terraform State Path"),
-    )
-
-    terraform_state_backend = models.CharField(
-        max_length=20,
-        default="local",
-        verbose_name=_("Terraform State Backend"),
-        help_text=_("'local' or 's3'"),
+    # Per-deployment max_domains override (defaults based on server size)
+    max_domains = models.PositiveIntegerField(
+        default=DEFAULT_MAX_DOMAINS,
+        verbose_name=_("Max Domains"),
+        help_text=_("Maximum domains for this deployment. Default based on server size."),
     )
 
     # Backup configuration (snapshot at deployment time)
@@ -547,10 +543,33 @@ class NodeDeployment(models.Model):
             f"{self.node_number:03d}"
         )
 
+    # Size-based max_domains defaults
+    MAX_DOMAINS_BY_MEMORY: ClassVar[list[tuple[int, int]]] = [
+        (2, 25),
+        (4, 50),
+        (8, 100),
+        (16, 200),
+        (32, 500),
+    ]
+
+    def set_max_domains_from_size(self) -> None:
+        """Set max_domains based on node_size memory if not explicitly overridden."""
+        if not self.node_size:
+            return
+        memory_gb = self.node_size.memory_gb
+        for threshold, domains in reversed(self.MAX_DOMAINS_BY_MEMORY):
+            if memory_gb >= threshold:
+                self.max_domains = domains
+                return
+        self.max_domains = 25  # Minimum default
+
     def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
-        """Auto-generate hostname on save"""
+        """Auto-generate hostname and set max_domains on save"""
         if not self.hostname:
             self.hostname = self.generate_hostname()
+        # Set max_domains from size on creation if still at default
+        if not self.pk and self.max_domains == DEFAULT_MAX_DOMAINS and self.node_size:
+            self.set_max_domains_from_size()
         super().save(*args, **kwargs)
 
     @classmethod

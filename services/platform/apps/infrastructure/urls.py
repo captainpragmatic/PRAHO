@@ -45,13 +45,14 @@ urlpatterns = [
     ),
     # Configuration pages
     path("providers/", views.provider_list, name="provider_list"),
+    path("providers/sync/", views.sync_providers, name="sync_providers"),
     path("providers/create/", views.provider_create, name="provider_create"),
-    path("providers/<uuid:pk>/edit/", views.provider_edit, name="provider_edit"),
+    path("providers/<int:pk>/edit/", views.provider_edit, name="provider_edit"),
     path("sizes/", views.size_list, name="size_list"),
     path("sizes/create/", views.size_create, name="size_create"),
-    path("sizes/<uuid:pk>/edit/", views.size_edit, name="size_edit"),
+    path("sizes/<int:pk>/edit/", views.size_edit, name="size_edit"),
     path("regions/", views.region_list, name="region_list"),
-    path("regions/<uuid:pk>/toggle/", views.region_toggle, name="region_toggle"),
+    path("regions/<int:pk>/toggle/", views.region_toggle, name="region_toggle"),
     # Cost tracking
     path("costs/", views.cost_dashboard, name="cost_dashboard"),
     path("costs/history/", views.cost_history, name="cost_history"),

@@ -1,5 +1,9 @@
 """
-Terraform Service
+Terraform Service (DEPRECATED)
+
+⚠️ DEPRECATED: This module is superseded by hcloud_service.py for Hetzner provisioning.
+See ADR-0027 for migration rationale. Kept for potential future use with other providers
+(DigitalOcean, Vultr, Linode) that don't have typed Python SDKs.
 
 Wrapper for executing Terraform commands for node provisioning.
 Generates deployment configurations and manages state.
@@ -135,11 +139,9 @@ class TerraformService:
             )
             (deploy_dir / "terraform.tfvars").write_text(tfvars)
 
-            # Store state path in deployment
-            if state_backend == "local":
-                deployment.terraform_state_path = str(deploy_dir / "terraform.tfstate")
-            deployment.terraform_state_backend = state_backend
-            deployment.save(update_fields=["terraform_state_path", "terraform_state_backend", "updated_at"])
+            # Note: terraform_state_path/terraform_state_backend fields were removed
+            # from NodeDeployment in the hcloud SDK migration (ADR-0027).
+            # State is tracked externally if needed.
 
             logger.info(f"🏗️ [Terraform] Generated config for: {deployment.hostname} at {deploy_dir}")
 

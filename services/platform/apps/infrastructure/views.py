@@ -4,7 +4,9 @@ Infrastructure Views
 Staff interface for managing node deployments, providers, and configurations.
 """
 
+import contextlib
 import logging
+import os
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -22,6 +24,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.common.credential_vault import get_credential_vault
+from apps.infrastructure.provider_sync import sync_hetzner_provider
 from apps.settings.services import SettingsService
 
 from .forms import (
@@ -924,6 +927,31 @@ def provider_list(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "infrastructure/provider_list.html", context)
+
+
+@login_required
+@require_provider_management
+@require_POST
+def sync_providers(request: HttpRequest) -> HttpResponse:
+    """Trigger provider catalog sync from APIs (HTMX endpoint)."""
+    token = os.environ.get("HCLOUD_TOKEN", "")
+    if not token:
+        with contextlib.suppress(Exception):
+            vault = get_credential_vault()
+            token = vault.get_secret("hcloud_token") or ""
+
+    if not token:
+        messages.warning(request, _("No HCLOUD_TOKEN found. Set it in environment or credential vault."))
+        return redirect("infrastructure:provider_list")
+
+    result = sync_hetzner_provider(token=token)
+    if result.is_err():
+        messages.error(request, _("Provider sync failed: %(error)s") % {"error": result.unwrap_err()})
+    else:
+        sync_result = result.unwrap()
+        messages.success(request, _("Provider sync complete: %(summary)s") % {"summary": sync_result.summary})
+
+    return redirect("infrastructure:provider_list")
 
 
 @login_required

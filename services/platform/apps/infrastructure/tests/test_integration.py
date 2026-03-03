@@ -238,30 +238,19 @@ class TestTerraformServiceIntegration(TestCase):
         self.hetzner_infra = create_test_infrastructure("hetzner")
         self.digitalocean_infra = create_test_infrastructure("digitalocean")
 
-    @mock.patch("shutil.which")
-    def test_terraform_config_generation_hetzner(self, mock_which):
-        """Test terraform config is correctly generated for Hetzner."""
-        from apps.infrastructure.terraform_service import TerraformService
+    def test_hetzner_uses_hcloud_sdk_not_terraform(self):
+        """Hetzner provisioning uses hcloud SDK, not Terraform (ADR-0027)."""
+        config = get_provider_config("hetzner")
+        assert config is not None
 
-        mock_which.return_value = "/usr/bin/terraform"
-        deployment = create_test_deployment(self.hetzner_infra)
+        # Hetzner should not have terraform-specific keys
+        self.assertNotIn("terraform_module", config)
+        self.assertNotIn("terraform_provider", config)
+        self.assertNotIn("terraform_vars", config)
 
-        with mock.patch("pathlib.Path.mkdir"), \
-             mock.patch("pathlib.Path.write_text") as mock_write:
-
-            service = TerraformService()
-            result = service.generate_deployment_config(
-                deployment=deployment,
-                ssh_public_key="ssh-ed25519 AAAA... test@example.com",
-                credentials={"hcloud_token": "test-hetzner-token"},
-                cloudflare_api_token="cf-token",
-            )
-
-            # Should succeed
-            self.assertTrue(result.is_ok(), f"Config generation failed: {result}")
-
-            # Check that write_text was called
-            self.assertTrue(mock_write.called, "write_text was not called")
+        # But should still have credential and output mappings
+        self.assertEqual(config["credential_key"], "hcloud_token")
+        self.assertIn("server_id", config["output_mappings"])
 
     @mock.patch("shutil.which")
     def test_terraform_config_generation_digitalocean(self, mock_which):
@@ -272,7 +261,8 @@ class TestTerraformServiceIntegration(TestCase):
         deployment = create_test_deployment(self.digitalocean_infra)
 
         with mock.patch("pathlib.Path.mkdir"), \
-             mock.patch("pathlib.Path.write_text") as mock_write:
+             mock.patch("pathlib.Path.write_text"), \
+             mock.patch.object(type(deployment), "save"):
 
             service = TerraformService()
             result = service.generate_deployment_config(
@@ -316,14 +306,18 @@ class TestTerraformServiceIntegration(TestCase):
 
     def test_terraform_variables_generation_all_providers(self):
         """
-        Test that terraform variables are correctly generated for all providers.
+        Test that terraform variables are correctly generated for providers
+        that use Terraform. Hetzner uses hcloud SDK and has no terraform_vars.
         """
         for provider_type in PROVIDER_CONFIG.keys():
             with self.subTest(provider=provider_type):
                 config = get_provider_config(provider_type)
                 assert config is not None, f"No config for {provider_type}"
 
-                tf_vars = config.get("terraform_vars", {})
+                if "terraform_vars" not in config:
+                    continue  # Hetzner uses hcloud SDK
+
+                tf_vars = config["terraform_vars"]
                 self.assertIn(
                     "api_token_var",
                     tf_vars,
@@ -421,8 +415,8 @@ class TestMultiProviderIntegration(TestCase):
 
     def test_all_configured_providers_have_terraform_modules(self):
         """
-        Test that all providers in PROVIDER_CONFIG have corresponding
-        terraform modules defined.
+        Test that non-hetzner providers in PROVIDER_CONFIG have corresponding
+        terraform modules defined. Hetzner uses hcloud SDK directly.
         """
         from apps.infrastructure.provider_config import get_terraform_module_path
 
@@ -430,6 +424,11 @@ class TestMultiProviderIntegration(TestCase):
 
         for provider_type, config in PROVIDER_CONFIG.items():
             with self.subTest(provider=provider_type):
+                if "terraform_module" not in config:
+                    # Hetzner uses hcloud SDK, no terraform module
+                    module_path = get_terraform_module_path(provider_type, base_path)
+                    self.assertIsNone(module_path)
+                    continue
                 module_path = get_terraform_module_path(provider_type, base_path)
                 assert module_path is not None, f"No terraform module path for {provider_type}"
                 self.assertIn(

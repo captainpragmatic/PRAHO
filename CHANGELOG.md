@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **hcloud Python SDK integration (ADR-0027)**: Replace Terraform with typed Python SDK for Hetzner Cloud server provisioning
+- **Provider catalog sync**: Live sync of regions, server types, and pricing from Hetzner API via `sync_providers` management command
+- **Sync providers UI**: "Sync Providers" button on Cloud Providers page
+- **First-boot provider sync**: Automatic catalog sync on first migration when no providers exist
+- **Periodic provider sync**: Daily 4:00 AM background task for catalog updates
+- **`max_domains` field**: Configurable per-deployment domain limit with size-based defaults (25-500)
+
+### Changed
+- **Deployment pipeline**: Replaced 4 Terraform stages (config gen, init, plan, apply) with single hcloud SDK call
+- **Provider config**: Removed Terraform-specific keys from Hetzner provider config
+- **Makefile**: Added `sync_providers` step to `fixtures` and `fixtures-light` targets
+
+### Removed
+- **Terraform fields**: Removed `terraform_state_path` and `terraform_state_backend` from NodeDeployment model
+- **Terraform dependency** for Hetzner: No longer required for server provisioning (kept deprecated for other providers)
+
+---
+
+### Added
 - **Portal Frontend Architecture (ADR-0026)**: Unified list page design system for Tickets, Invoices, and Services portal pages
 - **Shared template components**: `list_page_header.html`, `list_page_filters.html`, `list_page_skeleton.html` — composable includes for consistent list page layout
 - **Shared pagination utility**: `apps.common.pagination.PaginatorData` and `build_pagination_params` replace ~20 lines of duplicated pagination math per view
