@@ -16,6 +16,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import models, transaction
+from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -35,6 +36,9 @@ from .forms import (
 )
 from .models import (
     CloudProvider,
+    DriftCheck,
+    DriftRemediationRequest,
+    DriftReport,
     NodeDeployment,
     NodeDeploymentLog,
     NodeRegion,
@@ -262,44 +266,43 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
             deployment = form.save(commit=False)
             deployment.initiated_by = request.user
 
-            # Auto-generate node number
-            deployment.node_number = NodeDeployment.get_next_node_number(
-                environment=deployment.environment,
-                node_type=deployment.node_type,
-                provider=deployment.provider,
-                region=deployment.region,
-            )
+            # Atomic block to prevent race conditions on node number assignment
+            with transaction.atomic():
+                # Auto-generate node number
+                deployment.node_number = NodeDeployment.get_next_node_number(
+                    environment=deployment.environment,
+                    node_type=deployment.node_type,
+                    provider=deployment.provider,
+                    region=deployment.region,
+                )
 
-            # Generate hostname
-            deployment.hostname = deployment.generate_hostname()
+                # Generate hostname
+                deployment.hostname = deployment.generate_hostname()
 
-            # Set DNS zone from settings
-            deployment.dns_zone = SettingsService.get_setting("node_deployment.dns_default_zone", "")
+                # Set DNS zone from settings
+                deployment.dns_zone = SettingsService.get_setting("node_deployment.dns_default_zone", "")
 
-            deployment.save()
+                deployment.save()
 
-            # Get API tokens from credential vault
+            # Verify provider token exists before queueing
             token_result = get_provider_token(deployment.provider)
-            api_token = token_result.unwrap() if token_result.is_ok() else ""
-            cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
-
-            if not api_token:
+            if token_result.is_err():
                 messages.error(request, f"No API token found for provider {deployment.provider.name}")
                 deployment.status = "failed"
                 deployment.save()
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-            # Queue deployment task with provider-agnostic credentials
-            credentials: dict[str, str] = {"api_token": str(api_token)}
+            # Queue deployment task — token fetched from vault at execution time (not serialized)
             task_id = queue_deploy_node(
                 deployment_id=deployment.id,
-                credentials=credentials,
-                cloudflare_api_token=cloudflare_token if cloudflare_token else None,
+                provider_id=deployment.provider.id,
                 user_id=request.user.id,
             )
 
             # Audit: deployment created
             with contextlib.suppress(Exception):
+                if not request.user.is_authenticated:
+                    return redirect("infrastructure:deployment_list")
                 audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
                 InfrastructureAuditService.log_deployment_created(deployment, audit_ctx)
 
@@ -396,12 +399,17 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         {"text": deployment.hostname},
     ]
 
+    # Pre-compute progress step for template (0-6 range matching 6 stages)
+    progress_step = min(progress_percentage // 16, 6)
+
     context = {
         "page_title": f"Deployment: {deployment.hostname}",
         "breadcrumb_items": breadcrumb_items,
         "deployment": deployment,
         "logs": logs,
         "progress_percentage": progress_percentage,
+        "progress_step": progress_step,
+        "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
         "can_retry": deployment.status == "failed",
@@ -460,21 +468,16 @@ def deployment_retry(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only retry failed deployments."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get API tokens
+    # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
-    api_token = token_result.unwrap() if token_result.is_ok() else ""
-    cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
-    if not api_token:
+    if token_result.is_err():
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Queue retry task with provider-agnostic credentials
-    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_retry_deployment(
         deployment_id=deployment.id,
-        credentials=credentials,
-        cloudflare_api_token=cloudflare_token if cloudflare_token else None,
+        provider_id=deployment.provider_id,
         user_id=request.user.id,
     )
 
@@ -499,21 +502,16 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = DeploymentDestroyForm(request.POST, hostname=deployment.hostname)
         if form.is_valid():
-            # Get API tokens
+            # Validate token exists before queuing (fail fast)
             token_result = get_provider_token(deployment.provider)
-            api_token = token_result.unwrap() if token_result.is_ok() else ""
-            cloudflare_token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token", "") or "")
 
-            if not api_token:
+            if token_result.is_err():
                 messages.error(request, f"No API token found for provider {deployment.provider.name}")
                 return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-            # Queue destroy task with provider-agnostic credentials
-            credentials: dict[str, str] = {"api_token": str(api_token)}
             task_id = queue_destroy_node(
                 deployment_id=deployment.id,
-                credentials=credentials,
-                cloudflare_api_token=cloudflare_token if cloudflare_token else None,
+                provider_id=deployment.provider_id,
                 user_id=request.user.id,
             )
 
@@ -581,19 +579,16 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
             try:
                 new_size = NodeSize.objects.get(id=new_size_id, provider=deployment.provider)
 
-                # Get API token
+                # Validate token exists before queuing (fail fast)
                 token_result = get_provider_token(deployment.provider)
-                api_token = token_result.unwrap() if token_result.is_ok() else ""
-                if not api_token:
+                if token_result.is_err():
                     messages.error(request, f"No API token found for provider {deployment.provider.name}")
                     return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-                # Queue upgrade task with provider-agnostic credentials
-                credentials: dict[str, str] = {"api_token": str(api_token)}
                 task_id = queue_upgrade_node(
                     deployment_id=deployment.id,
                     new_size_id=new_size.id,
-                    credentials=credentials,
+                    provider_id=deployment.provider_id,
                     user_id=request.user.id,
                 )
 
@@ -644,18 +639,15 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only stop running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get API token
+    # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
-    api_token = token_result.unwrap() if token_result.is_ok() else ""
-    if not api_token:
+    if token_result.is_err():
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Queue stop task with provider-agnostic credentials
-    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_stop_node(
         deployment_id=deployment.id,
-        credentials=credentials,
+        provider_id=deployment.provider_id,
         user_id=request.user.id,
     )
 
@@ -677,18 +669,15 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only start stopped nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get API token
+    # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
-    api_token = token_result.unwrap() if token_result.is_ok() else ""
-    if not api_token:
+    if token_result.is_err():
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Queue start task with provider-agnostic credentials
-    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_start_node(
         deployment_id=deployment.id,
-        credentials=credentials,
+        provider_id=deployment.provider_id,
         user_id=request.user.id,
     )
 
@@ -710,18 +699,15 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("Can only reboot running nodes."))
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Get API token
+    # Validate token exists before queuing (fail fast)
     token_result = get_provider_token(deployment.provider)
-    api_token = token_result.unwrap() if token_result.is_ok() else ""
-    if not api_token:
+    if token_result.is_err():
         messages.error(request, f"No API token found for provider {deployment.provider.name}")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    # Queue reboot task with provider-agnostic credentials
-    credentials: dict[str, str] = {"api_token": str(api_token)}
     task_id = queue_reboot_node(
         deployment_id=deployment.id,
-        credentials=credentials,
+        provider_id=deployment.provider_id,
         user_id=request.user.id,
     )
 
@@ -826,9 +812,15 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
         "destroyed": 100,
     }
 
+    progress_percentage = progress_stages.get(deployment.status, 0)
+    # Pre-compute progress step for template (0-6 range matching 6 stages)
+    progress_step = min(progress_percentage // 16, 6)
+
     context = {
         "deployment": deployment,
-        "progress_percentage": progress_stages.get(deployment.status, 0),
+        "progress_percentage": progress_percentage,
+        "progress_step": progress_step,
+        "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
         "is_in_progress": deployment.status
@@ -910,7 +902,7 @@ def hostname_preview_api(request: HttpRequest) -> JsonResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: PROVIDERS  # noqa: ERA001
+# CONFIGURATION: PROVIDERS
 # ===============================================================================
 
 
@@ -1017,6 +1009,8 @@ def provider_create(request: HttpRequest) -> HttpResponse:
 
         # Audit: provider created
         with contextlib.suppress(Exception):
+            if not request.user.is_authenticated:
+                return redirect("infrastructure:provider_list")
             audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
             InfrastructureAuditService.log_provider_created(provider, audit_ctx)
 
@@ -1079,6 +1073,8 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
         # Audit: provider updated
         with contextlib.suppress(Exception):
+            if not request.user.is_authenticated:
+                return redirect("infrastructure:provider_list")
             audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
             InfrastructureAuditService.log_provider_updated(provider, old_values, audit_ctx)
 
@@ -1089,7 +1085,7 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: SIZES  # noqa: ERA001
+# CONFIGURATION: SIZES
 # ===============================================================================
 
 
@@ -1184,7 +1180,7 @@ def size_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 # ===============================================================================
-# CONFIGURATION: REGIONS  # noqa: ERA001
+# CONFIGURATION: REGIONS
 # ===============================================================================
 
 
@@ -1230,6 +1226,8 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
 
     # Audit: region toggled
     with contextlib.suppress(Exception):
+        if not request.user.is_authenticated:
+            return redirect("infrastructure:region_list")
         audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
         InfrastructureAuditService.log_region_toggled(region, audit_ctx)
 
@@ -1252,10 +1250,10 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
 @require_infrastructure_view
 def cost_dashboard(request: HttpRequest) -> HttpResponse:
     """Cost tracking dashboard with summary and trends."""
-    from datetime import datetime  # noqa: PLC0415
-    from decimal import Decimal  # noqa: PLC0415
+    from datetime import datetime
+    from decimal import Decimal
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
+    from apps.infrastructure.cost_service import get_cost_tracking_service
 
     service = get_cost_tracking_service()
 
@@ -1323,9 +1321,9 @@ def cost_dashboard(request: HttpRequest) -> HttpResponse:
 @require_infrastructure_view
 def cost_history(request: HttpRequest) -> HttpResponse:
     """Monthly cost history view."""
-    from calendar import month_name  # noqa: PLC0415
+    from calendar import month_name
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
+    from apps.infrastructure.cost_service import get_cost_tracking_service
 
     service = get_cost_tracking_service()
     now = timezone.now()
@@ -1371,7 +1369,7 @@ def cost_history(request: HttpRequest) -> HttpResponse:
 @require_GET
 def cost_api_summary(request: HttpRequest) -> JsonResponse:
     """API endpoint for cost summary data."""
-    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
+    from apps.infrastructure.cost_service import get_cost_tracking_service
 
     year_str = request.GET.get("year")
     month_str = request.GET.get("month")
@@ -1398,3 +1396,261 @@ def cost_api_summary(request: HttpRequest) -> JsonResponse:
             "node_count": summary.node_count,
         }
     )
+
+
+# =============================================================================
+# Drift Detection & Remediation Views
+# =============================================================================
+
+
+@login_required
+@require_infrastructure_view
+@require_GET
+def drift_dashboard(request: HttpRequest) -> HttpResponse:
+    """Summary of all deployments with drift status."""
+    deployments = (
+        NodeDeployment.objects.filter(status="completed")
+        .select_related("provider", "node_size", "region")
+        .annotate(
+            unresolved_count=Count("drift_reports", filter=Q(drift_reports__resolved=False), distinct=True),
+            pending_remediations=Count(
+                "remediation_requests",
+                filter=Q(remediation_requests__status="pending_approval"),
+                distinct=True,
+            ),
+        )
+    )
+
+    # Prefetch latest drift check per deployment (2 queries instead of N+1)
+    latest_check_ids = (
+        DriftCheck.objects.filter(deployment__in=deployments)
+        .values("deployment_id")
+        .annotate(latest_id=models.Max("id"))
+        .values_list("latest_id", flat=True)
+    )
+    latest_checks = {check.deployment_id: check for check in DriftCheck.objects.filter(id__in=latest_check_ids)}
+
+    deployment_data = [
+        {
+            "deployment": deployment,
+            "latest_check": latest_checks.get(deployment.pk),
+            "unresolved_count": deployment.unresolved_count,
+            "pending_remediations": deployment.pending_remediations,
+        }
+        for deployment in deployments
+    ]
+
+    return render(
+        request,
+        "infrastructure/drift/dashboard.html",
+        {
+            "deployment_data": deployment_data,
+            "total_unresolved": sum(d["unresolved_count"] for d in deployment_data),
+            "total_pending": sum(d["pending_remediations"] for d in deployment_data),
+        },
+    )
+
+
+@login_required
+@require_infrastructure_view
+@require_GET
+def drift_deployment_detail(request: HttpRequest, deployment_pk: int) -> HttpResponse:
+    """Drift history for a single deployment."""
+    deployment = get_object_or_404(NodeDeployment, pk=deployment_pk)
+
+    checks = DriftCheck.objects.filter(deployment=deployment).order_by("-created_at")[:50]
+    reports = DriftReport.objects.filter(deployment=deployment).order_by("-created_at")[:100]
+    remediations = DriftRemediationRequest.objects.filter(deployment=deployment).order_by("-created_at")[:50]
+
+    return render(
+        request,
+        "infrastructure/drift/deployment_detail.html",
+        {
+            "deployment": deployment,
+            "checks": checks,
+            "reports": reports,
+            "remediations": remediations,
+        },
+    )
+
+
+@login_required
+@require_infrastructure_view
+@require_GET
+def drift_remediation_list(request: HttpRequest) -> HttpResponse:
+    """Pending remediation requests."""
+    status_filter = request.GET.get("status", "pending_approval")
+    remediations = (
+        DriftRemediationRequest.objects.filter(status=status_filter)
+        .select_related("deployment", "report", "requested_by")
+        .order_by("-created_at")
+    )
+
+    paginator = Paginator(remediations, 25)
+    page = paginator.get_page(request.GET.get("page"))
+
+    return render(
+        request,
+        "infrastructure/drift/remediation_list.html",
+        {
+            "page_obj": page,
+            "status_filter": status_filter,
+            "status_options": DriftRemediationRequest.STATUS_CHOICES,
+        },
+    )
+
+
+def _execute_remediation_async(request_pk: int) -> dict[str, Any]:
+    """Async task helper: execute an approved remediation."""
+    from apps.infrastructure.drift_remediation import get_drift_remediation_service
+
+    req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_pk)
+    service = get_drift_remediation_service()
+    result = service.execute_remediation(req)
+    if result.is_ok():
+        return {"status": "completed"}
+    return {"error": result.unwrap_err()}
+
+
+@login_required
+@require_deployment_management
+@require_POST
+def drift_remediation_approve(request: HttpRequest, pk: int) -> HttpResponse:
+    """Approve a remediation request and queue execution asynchronously."""
+    from django_q.tasks import async_task
+
+    user = cast("User", request.user)
+
+    # Validate the request exists and is approvable
+    req_obj = get_object_or_404(DriftRemediationRequest, pk=pk)
+    if req_obj.status != "pending_approval":
+        messages.error(request, _("Cannot approve request in status '%(status)s'.") % {"status": req_obj.status})
+        return redirect("infrastructure:drift_remediation_list")
+
+    # Wrap status change + task queueing in one transaction to prevent TOCTOU:
+    # if async_task() fails, the status change rolls back too.
+    with transaction.atomic():
+        req_obj.status = "approved"
+        req_obj.approved_by = user
+        req_obj.approved_at = timezone.now()
+        req_obj.save(update_fields=["status", "approved_by", "approved_at"])
+
+        # Queue the slow execution part (Django-Q2 writes to django_q_task table,
+        # so it participates in the same transaction)
+        async_task(
+            _execute_remediation_async,
+            pk,
+            task_name=f"remediation_{pk}",
+        )
+
+    messages.success(request, _("Remediation approved. Execution queued."))
+    return redirect("infrastructure:drift_remediation_list")
+
+
+@login_required
+@require_deployment_management
+@require_POST
+def drift_remediation_reject(request: HttpRequest, pk: int) -> HttpResponse:
+    """Reject a remediation request."""
+    from apps.infrastructure.drift_remediation import get_drift_remediation_service
+
+    user = cast("User", request.user)
+    reason = request.POST.get("reason", "")
+    service = get_drift_remediation_service()
+    result = service.reject_remediation(pk, user, reason)
+
+    if result.is_ok():
+        messages.success(request, _("Remediation rejected."))
+    else:
+        messages.error(request, str(result.unwrap_err()))
+
+    return redirect("infrastructure:drift_remediation_list")
+
+
+@login_required
+@require_deployment_management
+@require_POST
+def drift_remediation_schedule(request: HttpRequest, pk: int) -> HttpResponse:
+    """Schedule a remediation for a maintenance window."""
+    from apps.infrastructure.drift_remediation import get_drift_remediation_service
+
+    user = cast("User", request.user)
+    scheduled_for_str = request.POST.get("scheduled_for", "")
+
+    if not scheduled_for_str:
+        messages.error(request, _("Scheduled time is required."))
+        return redirect("infrastructure:drift_remediation_list")
+
+    from django.utils.dateparse import parse_datetime
+
+    try:
+        scheduled_for = parse_datetime(scheduled_for_str)
+        if scheduled_for is None:
+            raise ValueError("Could not parse datetime")
+        if scheduled_for.tzinfo is None:
+            from django.utils import timezone as tz
+
+            scheduled_for = tz.make_aware(scheduled_for)
+    except ValueError:
+        messages.error(request, _("Invalid date format."))
+        return redirect("infrastructure:drift_remediation_list")
+
+    service = get_drift_remediation_service()
+    result = service.schedule_remediation(pk, user, scheduled_for)
+
+    if result.is_ok():
+        messages.success(request, _("Remediation scheduled."))
+    else:
+        messages.error(request, str(result.unwrap_err()))
+
+    return redirect("infrastructure:drift_remediation_list")
+
+
+@login_required
+@require_deployment_management
+@require_POST
+def drift_remediation_accept(request: HttpRequest, pk: int) -> HttpResponse:
+    """Accept drift (update DB to match actual state)."""
+    from apps.infrastructure.drift_remediation import get_drift_remediation_service
+
+    user = cast("User", request.user)
+    service = get_drift_remediation_service()
+    result = service.accept_drift(pk, user)
+
+    if result.is_ok():
+        messages.success(request, _("Drift accepted. Database updated to match actual state."))
+    else:
+        messages.error(request, str(result.unwrap_err()))
+
+    return redirect("infrastructure:drift_remediation_list")
+
+
+def _run_single_drift_scan(deployment_pk: int) -> dict[str, Any]:
+    """Async task helper: scan a single deployment for drift."""
+    from apps.infrastructure.drift_scanner import get_drift_scanner_service
+
+    deployment = NodeDeployment.objects.get(pk=deployment_pk)
+    scanner = get_drift_scanner_service()
+    result = scanner.scan_deployment(deployment)
+    if result.is_ok():
+        return {"findings": len(result.unwrap())}
+    return {"error": result.unwrap_err()}
+
+
+@login_required
+@require_deployment_management
+@require_POST
+def drift_scan_trigger(request: HttpRequest, deployment_pk: int) -> HttpResponse:
+    """Manually trigger a drift scan for a deployment."""
+    from django_q.tasks import async_task
+
+    deployment = get_object_or_404(NodeDeployment, pk=deployment_pk)
+
+    # Queue async instead of blocking the request
+    async_task(
+        _run_single_drift_scan,
+        deployment_pk,
+        task_name=f"drift_scan_{deployment.hostname}",
+    )
+    messages.info(request, _("Drift scan queued. Results will appear shortly."))
+    return redirect("infrastructure:drift_deployment_detail", deployment_pk=deployment_pk)

@@ -1,0 +1,19 @@
+{% load i18n %}
+<div class="space-y-2">
+    {% for check in checks %}
+    <div class="flex items-center justify-between px-4 py-2 bg-slate-800/50 rounded">
+        <div class="flex items-center space-x-3">
+            <span class="text-xs font-mono text-slate-400">{{ check.get_check_type_display }}</span>
+            <span class="{% if check.status == 'completed' %}text-green-400{% elif check.status == 'failed' %}text-red-400{% else %}text-amber-400{% endif %} text-xs">
+                {{ check.get_status_display }}
+            </span>
+            {% if check.findings_count > 0 %}
+            <span class="text-amber-400 text-xs">{{ check.findings_count }} {% trans "findings" %}</span>
+            {% endif %}
+        </div>
+        <span class="text-slate-500 text-xs">{{ check.created_at|timesince }} {% trans "ago" %}</span>
+    </div>
+    {% empty %}
+    <p class="text-slate-400 text-sm">{% trans "No drift checks recorded yet." %}</p>
+    {% endfor %}
+</div>

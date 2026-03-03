@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import IntegrityError, models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
@@ -344,7 +345,7 @@ class NodeDeployment(models.Model):
     )
 
     # Node identity (auto-generated from naming convention)
-    # Format: {env}-{type}-{provider.code}-{region.country_code}-{region.normalized_code}-{number}  # noqa: ERA001
+    # Format: {env}-{type}-{provider.code}-{region.country_code}-{region.normalized_code}-{number}
     # Example: prd-sha-het-de-fsn1-001
     hostname = models.CharField(
         max_length=23,
@@ -563,7 +564,7 @@ class NodeDeployment(models.Model):
                 return
         self.max_domains = 25  # Minimum default
 
-    def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Auto-generate hostname and set max_domains on save"""
         if not self.hostname:
             self.hostname = self.generate_hostname()
@@ -580,18 +581,33 @@ class NodeDeployment(models.Model):
         provider: CloudProvider,
         region: NodeRegion,
     ) -> int:
-        """Get the next available node number for the given env/type/provider/region"""
-        last = (
-            cls.objects.filter(
-                environment=environment,
-                node_type=node_type,
-                provider=provider,
-                region=region,
-            )
-            .order_by("-node_number")
-            .first()
-        )
-        return (last.node_number + 1) if last else 1
+        """Get the next available node number for the given env/type/provider/region.
+
+        Uses select_for_update() to prevent concurrent allocations. When no rows
+        exist yet (first deployment), two concurrent callers could both get 1.
+        The caller's unique constraint on (environment, node_type, provider,
+        region, node_number) catches this — we retry once on IntegrityError.
+        """
+        for attempt in range(2):
+            try:
+                with transaction.atomic():
+                    last = (
+                        cls.objects.select_for_update()
+                        .filter(
+                            environment=environment,
+                            node_type=node_type,
+                            provider=provider,
+                            region=region,
+                        )
+                        .order_by("-node_number")
+                        .first()
+                    )
+                    return (last.node_number + 1) if last else 1
+            except IntegrityError:
+                if attempt == 0:
+                    continue
+                raise
+        raise IntegrityError("get_next_node_number: exhausted retries")
 
     @property
     def fqdn(self) -> str:
@@ -631,7 +647,7 @@ class NodeDeployment(models.Model):
     @property
     def can_be_destroyed(self) -> bool:
         """Check if deployment can be destroyed"""
-        return self.status in ("completed", "failed")
+        return self.status in ("completed", "failed", "stopped")
 
     @property
     def can_retry(self) -> bool:
@@ -670,7 +686,7 @@ class NodeDeployment(models.Model):
 
     def calculate_running_hours(self) -> float:
         """Calculate hours the node has been running"""
-        from django.utils import timezone  # noqa: PLC0415
+        from django.utils import timezone
 
         if not self.started_at:
             return 0.0
@@ -719,7 +735,7 @@ class NodeDeploymentLog(models.Model):
     phase = models.CharField(
         max_length=50,
         verbose_name=_("Phase"),
-        help_text=_("'terraform', 'ansible', 'dns', 'backup', etc."),
+        help_text=_("'provision', 'ansible', 'dns', 'backup', etc."),
     )
 
     message = models.TextField(verbose_name=_("Message"))
@@ -806,3 +822,238 @@ class NodeDeploymentCostRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.deployment.hostname}: {self.cost_eur} EUR ({self.period_start.date()})"
+
+
+class DriftCheck(models.Model):
+    """Represents a single drift scan execution for one deployment."""
+
+    CHECK_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("cloud", _("Cloud Provider")),
+        ("network", _("Network")),
+        ("application", _("Application")),
+    ]
+    STATUS_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("running", _("Running")),
+        ("completed", _("Completed")),
+        ("failed", _("Failed")),
+    ]
+
+    deployment = models.ForeignKey(
+        NodeDeployment,
+        on_delete=models.CASCADE,
+        related_name="drift_checks",
+        verbose_name=_("Deployment"),
+    )
+    check_type = models.CharField(max_length=20, choices=CHECK_TYPE_CHOICES, verbose_name=_("Check Type"))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="running", verbose_name=_("Status"))
+    started_at = models.DateTimeField(default=timezone.now, verbose_name=_("Started At"))
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Completed At"))
+    error_message = models.TextField(blank=True, verbose_name=_("Error Message"))
+    findings_count = models.PositiveIntegerField(default=0, verbose_name=_("Findings Count"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Drift Check")
+        verbose_name_plural = _("Drift Checks")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["deployment", "check_type", "-created_at"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"DriftCheck({self.deployment.hostname}, {self.check_type}, {self.status})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # started_at defaults to timezone.now at field level, so bulk_create works too
+        super().save(*args, **kwargs)
+
+
+class DriftReport(models.Model):
+    """Individual drift finding within a check."""
+
+    SEVERITY_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("critical", _("Critical")),
+        ("high", _("High")),
+        ("moderate", _("Moderate")),
+        ("low", _("Low")),
+        ("info", _("Info")),
+    ]
+    CATEGORY_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("server_state", _("Server State")),
+        ("network", _("Network")),
+        ("firewall", _("Firewall")),
+        ("application", _("Application")),
+        ("capacity", _("Capacity")),
+    ]
+    RESOLUTION_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("auto_sync", _("Auto Sync")),
+        ("remediated", _("Remediated")),
+        ("accepted", _("Accepted")),
+        ("ignored", _("Ignored")),
+    ]
+
+    drift_check = models.ForeignKey(
+        "DriftCheck",
+        on_delete=models.CASCADE,
+        related_name="reports",
+        verbose_name=_("Drift Check"),
+    )
+    deployment = models.ForeignKey(
+        NodeDeployment,
+        on_delete=models.CASCADE,
+        related_name="drift_reports",
+        verbose_name=_("Deployment"),
+    )
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, verbose_name=_("Severity"))
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, verbose_name=_("Category"))
+    field_name = models.CharField(max_length=100, verbose_name=_("Field Name"))
+    expected_value = models.TextField(verbose_name=_("Expected Value"))
+    actual_value = models.TextField(verbose_name=_("Actual Value"))
+    auto_resolvable = models.BooleanField(default=False, verbose_name=_("Auto Resolvable"))
+    resolved = models.BooleanField(default=False, verbose_name=_("Resolved"))
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Resolved At"))
+    resolved_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name=_("Resolved By"),
+    )
+    resolution_type = models.CharField(
+        max_length=20, choices=RESOLUTION_CHOICES, blank=True, verbose_name=_("Resolution Type")
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Drift Report")
+        verbose_name_plural = _("Drift Reports")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["deployment", "severity", "-created_at"]),
+            models.Index(fields=["resolved", "severity"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"DriftReport({self.deployment.hostname}, {self.field_name}, {self.severity})"
+
+
+class DriftRemediationRequest(models.Model):
+    """Tracks the approval workflow for fixing HIGH/CRITICAL drift."""
+
+    ACTION_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("apply_desired", _("Apply Desired State")),
+        ("accept_actual", _("Accept Actual State")),
+        ("schedule", _("Schedule")),
+        ("ignore", _("Ignore")),
+    ]
+    STATUS_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("pending_approval", _("Pending Approval")),
+        ("approved", _("Approved")),
+        ("rejected", _("Rejected")),
+        ("scheduled", _("Scheduled")),
+        ("in_progress", _("In Progress")),
+        ("completed", _("Completed")),
+        ("failed", _("Failed")),
+        ("rolled_back", _("Rolled Back")),
+        ("rollback_failed", _("Rollback Failed")),
+    ]
+
+    report = models.ForeignKey(
+        "DriftReport",
+        on_delete=models.CASCADE,
+        related_name="remediation_requests",
+        verbose_name=_("Drift Report"),
+    )
+    deployment = models.ForeignKey(
+        NodeDeployment,
+        on_delete=models.CASCADE,
+        related_name="remediation_requests",
+        verbose_name=_("Deployment"),
+    )
+    action_type = models.CharField(max_length=20, choices=ACTION_TYPE_CHOICES, verbose_name=_("Action Type"))
+    action_details = models.JSONField(default=dict, verbose_name=_("Action Details"))
+    requires_approval = models.BooleanField(default=True, verbose_name=_("Requires Approval"))
+    requires_restart = models.BooleanField(default=False, verbose_name=_("Requires Restart"))
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="pending_approval", verbose_name=_("Status")
+    )
+    requested_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="drift_requests_created",
+        verbose_name=_("Requested By"),
+    )
+    approved_by = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="drift_requests_approved",
+        verbose_name=_("Approved By"),
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Approved At"))
+    rejected_reason = models.TextField(blank=True, verbose_name=_("Rejected Reason"))
+    scheduled_for = models.DateTimeField(null=True, blank=True, verbose_name=_("Scheduled For"))
+    snapshot_id = models.CharField(max_length=100, blank=True, verbose_name=_("Snapshot ID"))
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Completed At"))
+    error_message = models.TextField(blank=True, verbose_name=_("Error Message"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Drift Remediation Request")
+        verbose_name_plural = _("Drift Remediation Requests")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["deployment", "status"]),
+            models.Index(fields=["scheduled_for"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Remediation({self.deployment.hostname}, {self.action_type}, {self.status})"
+
+
+class DriftSnapshot(models.Model):
+    """Tracks cloud snapshots created for rollback safety."""
+
+    SNAPSHOT_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("pre_remediation", _("Pre-Remediation")),
+        ("scheduled", _("Scheduled")),
+        ("manual", _("Manual")),
+    ]
+    STATUS_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
+        ("creating", _("Creating")),
+        ("available", _("Available")),
+        ("restoring", _("Restoring")),
+        ("deleted", _("Deleted")),
+        ("failed", _("Failed")),
+    ]
+
+    deployment = models.ForeignKey(
+        NodeDeployment,
+        on_delete=models.CASCADE,
+        related_name="drift_snapshots",
+        verbose_name=_("Deployment"),
+    )
+    provider_snapshot_id = models.CharField(max_length=100, verbose_name=_("Provider Snapshot ID"))
+    snapshot_type = models.CharField(max_length=20, choices=SNAPSHOT_TYPE_CHOICES, verbose_name=_("Snapshot Type"))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="creating", verbose_name=_("Status"))
+    size_gb = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name=_("Size (GB)"))
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Expires At"))
+
+    class Meta:
+        verbose_name = _("Drift Snapshot")
+        verbose_name_plural = _("Drift Snapshots")
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["deployment", "status"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Snapshot({self.deployment.hostname}, {self.snapshot_type}, {self.status})"

@@ -88,6 +88,10 @@ common.EncryptedCredential      # audited via CredentialVault service layer
 
 # ── 8. Derived artifacts & operational data ──────────────────────────────────
 billing.EFacturaDocument        # e-Factura XML documents (audited via Invoice lifecycle, document generation is a derived artifact)
+infrastructure.DriftCheck                # IS the drift scan audit trail (append-only execution log per scan)
+infrastructure.DriftRemediationRequest   # operational remediation workflow (resolution captured in DriftReport)
+infrastructure.DriftReport               # child of DriftCheck (individual findings, audited via parent scan)
+infrastructure.DriftSnapshot             # cloud snapshot tracking (operational/derived artifact, append-only)
 infrastructure.NodeDeploymentCostRecord  # append-only cost records (operational data)
 infrastructure.NodeDeploymentLog         # IS the deployment audit trail (append-only log)
 infrastructure.PanelType        # static panel type definitions (reference data, rarely changes)

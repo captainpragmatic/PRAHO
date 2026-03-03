@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Drift Remediations" %}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-white">{% trans "Remediation Requests" %}</h1>
+                <p class="text-slate-400 mt-1">{% trans "Review and approve drift remediations" %}</p>
+            </div>
+            <a href="{% url 'infrastructure:drift_dashboard' %}" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors">
+                {% trans "Back to Dashboard" %}
+            </a>
+        </div>
+
+        <div class="flex space-x-2 mb-6">
+            {% for status_val, status_label in status_options %}
+            <a href="?status={{ status_val }}" class="px-3 py-1 rounded-lg text-sm {% if status_filter == status_val %}bg-blue-600 text-white{% else %}bg-slate-800 text-slate-400 hover:bg-slate-700{% endif %}">
+                {{ status_label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="bg-slate-800 rounded-lg border border-slate-700">
+            <div class="divide-y divide-slate-700">
+                {% for req in page_obj %}
+                <div class="px-6 py-4">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <a href="{% url 'infrastructure:drift_deployment_detail' req.deployment.pk %}" class="text-blue-400 hover:text-blue-300 font-medium">
+                                {{ req.deployment.hostname }}
+                            </a>
+                            <p class="text-slate-300 text-sm mt-1">
+                                {{ req.get_action_type_display }} &mdash;
+                                <span class="font-mono">{{ req.report.field_name }}</span>
+                            </p>
+                            <p class="text-slate-400 text-xs mt-1">
+                                {% trans "Expected" %}: {{ req.report.expected_value|truncatechars:60 }}
+                                &rarr; {% trans "Actual" %}: {{ req.report.actual_value|truncatechars:60 }}
+                            </p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            {% if req.status == "pending_approval" %}
+                            <form method="post" action="{% url 'infrastructure:drift_remediation_approve' req.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors" onclick="return confirm('{% trans "Approve this remediation?" %}')">
+                                    {% trans "Approve" %}
+                                </button>
+                            </form>
+                            <form method="post" action="{% url 'infrastructure:drift_remediation_accept' req.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded transition-colors">
+                                    {% trans "Accept" %}
+                                </button>
+                            </form>
+                            <form method="post" action="{% url 'infrastructure:drift_remediation_reject' req.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="reason" value="Rejected by admin">
+                                <button type="submit" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors">
+                                    {% trans "Reject" %}
+                                </button>
+                            </form>
+                            {% else %}
+                            <span class="px-2 py-1 text-xs font-medium rounded-full
+                                {% if req.status == 'completed' %}bg-green-500/10 text-green-400
+                                {% elif req.status == 'failed' or req.status == 'rolled_back' %}bg-red-500/10 text-red-400
+                                {% else %}bg-slate-500/10 text-slate-400{% endif %}">
+                                {{ req.get_status_display }}
+                            </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="px-6 py-8 text-center text-slate-400">
+                    {% trans "No remediation requests." %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if page_obj.has_other_pages %}
+        <div class="flex justify-center mt-6 space-x-2">
+            {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}" class="px-3 py-1 bg-slate-800 text-slate-400 rounded hover:bg-slate-700">&laquo;</a>
+            {% endif %}
+            <span class="px-3 py-1 text-slate-400">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}" class="px-3 py-1 bg-slate-800 text-slate-400 rounded hover:bg-slate-700">&raquo;</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

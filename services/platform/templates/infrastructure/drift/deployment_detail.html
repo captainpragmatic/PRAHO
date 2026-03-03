@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Drift History" %} - {{ deployment.hostname }}{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 min-h-screen">
+    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-white">{{ deployment.hostname }}</h1>
+                <p class="text-slate-400 mt-1">{% trans "Drift detection history" %}</p>
+            </div>
+            <div class="flex space-x-3">
+                <form method="post" action="{% url 'infrastructure:drift_scan_trigger' deployment.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                        {% trans "Run Scan" %}
+                    </button>
+                </form>
+                <a href="{% url 'infrastructure:drift_dashboard' %}" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors">
+                    {% trans "Back" %}
+                </a>
+            </div>
+        </div>
+
+        {% if reports %}
+        <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-lg font-semibold text-white">{% trans "Drift Reports" %}</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-left text-slate-400 text-sm border-b border-slate-700">
+                            <th class="px-6 py-3">{% trans "Field" %}</th>
+                            <th class="px-6 py-3">{% trans "Severity" %}</th>
+                            <th class="px-6 py-3">{% trans "Expected" %}</th>
+                            <th class="px-6 py-3">{% trans "Actual" %}</th>
+                            <th class="px-6 py-3">{% trans "Status" %}</th>
+                            <th class="px-6 py-3">{% trans "Detected" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700">
+                        {% for report in reports %}
+                        <tr>
+                            <td class="px-6 py-3 text-white font-mono text-sm">{{ report.field_name }}</td>
+                            <td class="px-6 py-3">
+                                <span class="px-2 py-1 text-xs font-medium rounded-full
+                                    {% if report.severity == 'critical' %}bg-red-500/10 text-red-400
+                                    {% elif report.severity == 'high' %}bg-orange-500/10 text-orange-400
+                                    {% elif report.severity == 'moderate' %}bg-amber-500/10 text-amber-400
+                                    {% else %}bg-slate-500/10 text-slate-400{% endif %}">
+                                    {{ report.get_severity_display }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-3 text-slate-300 text-sm font-mono">{{ report.expected_value|truncatechars:40 }}</td>
+                            <td class="px-6 py-3 text-slate-300 text-sm font-mono">{{ report.actual_value|truncatechars:40 }}</td>
+                            <td class="px-6 py-3">
+                                {% if report.resolved %}
+                                <span class="text-green-400 text-sm">{{ report.get_resolution_type_display }}</span>
+                                {% else %}
+                                <span class="text-amber-400 text-sm">{% trans "Open" %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-3 text-slate-400 text-sm">{{ report.created_at|timesince }} {% trans "ago" %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if remediations %}
+        <div class="bg-slate-800 rounded-lg border border-slate-700">
+            <div class="px-6 py-4 border-b border-slate-700">
+                <h2 class="text-lg font-semibold text-white">{% trans "Remediation Requests" %}</h2>
+            </div>
+            <div class="divide-y divide-slate-700">
+                {% for req in remediations %}
+                <div class="px-6 py-4">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <span class="text-white font-medium">{{ req.get_action_type_display }}</span>
+                            <span class="text-slate-400 text-sm ml-2">{{ req.get_status_display }}</span>
+                        </div>
+                        <span class="text-slate-500 text-sm">{{ req.created_at|timesince }} {% trans "ago" %}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

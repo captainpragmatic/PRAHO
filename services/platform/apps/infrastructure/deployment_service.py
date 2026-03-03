@@ -3,7 +3,7 @@ Node Deployment Service
 
 Orchestrates the complete node deployment pipeline:
 1. SSH key generation
-2. Terraform provisioning
+2. Cloud provider provisioning (hcloud SDK)
 3. DNS configuration
 4. Ansible configuration
 5. Validation
@@ -12,7 +12,6 @@ Orchestrates the complete node deployment pipeline:
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -26,7 +25,13 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
-from apps.infrastructure.hcloud_service import HcloudResult, get_hcloud_service
+from apps.infrastructure.cloud_gateway import (
+    STANDARD_FIREWALL_RULES,
+    CloudProviderGateway,
+    ServerCreateRequest,
+    ServerCreateResult,
+    get_cloud_gateway,
+)
 from apps.infrastructure.provider_config import (
     run_provider_command,
 )
@@ -62,7 +67,7 @@ class DeploymentResult:
     deployment_id: int
     hostname: str
     stages_completed: list[str]
-    hcloud_result: HcloudResult | None = None
+    cloud_result: ServerCreateResult | None = None
     ansible_results: list[AnsibleResult] | None = None
     validation_report: NodeValidationReport | None = None
     virtualmin_server_id: Any = None
@@ -75,7 +80,7 @@ class NodeDeploymentService:
     Main Deployment Orchestrator
 
     Manages the complete lifecycle of node deployments:
-    - Initial deployment (Terraform + Ansible)
+    - Initial deployment (hcloud SDK + Ansible)
     - Validation and registration
     - Upgrade operations
     - Destruction
@@ -105,7 +110,7 @@ class NodeDeploymentService:
         self._validation = get_validation_service()
         self._registration = get_registration_service()
 
-    def deploy_node(  # noqa: C901, PLR0911, PLR0912, PLR0915
+    def deploy_node(
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -128,8 +133,12 @@ class NodeDeploymentService:
         """
         start_time = timezone.now()
         stages_completed: list[str] = []
-        hcloud_result: HcloudResult | None = None
+        _cloud_result: ServerCreateResult | None = None  # unused; actual tracking via server_create_result
         ansible_results: list[AnsibleResult] = []
+        # Track created cloud resources for cleanup on failure: (resource_type, resource_id)
+        created_resources: list[tuple[str, str]] = []
+        # gateway is captured here so the except block can access it for cleanup
+        gateway: CloudProviderGateway | None = None
 
         def report_progress(stage: str) -> None:
             if progress_callback and stage in self.STAGES:
@@ -138,7 +147,7 @@ class NodeDeploymentService:
 
         def log_deployment(level: str, message: str) -> None:
             """Log to both logger and deployment log"""
-            from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+            from apps.infrastructure.models import NodeDeploymentLog
 
             getattr(logger, level)(f"[Deployment:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(
@@ -152,42 +161,64 @@ class NodeDeploymentService:
             report_progress("init")
             log_deployment("info", "Starting node deployment")
 
-            # Validate deployment is in correct state
-            if deployment.status not in ("pending", "failed"):
-                return Err(f"Cannot deploy node in status '{deployment.status}'")
-
             # Check if deployment is enabled
             if not SettingsService.get_setting("node_deployment.enabled", True):
                 return Err("Node deployment is disabled in settings")
 
-            # Transition to provisioning (transition_to saves internally)
-            try:
-                deployment.transition_to("provisioning_node")
-            except ValidationError:
-                return Err(f"Cannot transition from '{deployment.status}' to 'provisioning_node'")
+            # Atomic lock to prevent concurrent deployments of the same node
+            with transaction.atomic():
+                from apps.infrastructure.models import NodeDeployment as NDModel
+
+                locked = NDModel.objects.select_for_update().filter(pk=deployment.pk).first()
+                if not locked or locked.status not in ("pending", "failed"):
+                    return Err(f"Cannot deploy node in status '{locked.status if locked else 'unknown'}'")
+
+                # Transition to provisioning (transition_to saves internally)
+                try:
+                    locked.transition_to("provisioning_node")
+                except ValidationError:
+                    return Err(f"Cannot transition from '{locked.status}' to 'provisioning_node'")
+
+            # Refresh local instance after atomic block
+            deployment.refresh_from_db()
 
             # Audit: deployment started
             audit_ctx = InfrastructureAuditContext(user=user)
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_deployment_started(deployment, audit_ctx)
+            except Exception:
+                logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment started")
 
             # Stage 1: Generate SSH key
             report_progress("ssh_key")
             log_deployment("info", "Generating deployment SSH key")
 
-            key_result = self._ssh_manager.generate_deployment_key(  # type: ignore[call-arg]
+            key_result = self._ssh_manager.generate_deployment_key(
                 deployment,
                 user=user,
-                reason=f"Node deployment: {deployment.hostname}",
             )
 
             if key_result.is_err():
                 # Try master key fallback
                 master_result = self._ssh_manager.get_master_key()
                 if master_result.is_err():
-                    self._mark_failed(deployment, f"SSH key generation failed: {key_result.unwrap_err()}")
+                    self._mark_failed(
+                        deployment,
+                        f"SSH key generation failed: {key_result.unwrap_err()}",
+                        stage="ssh_key",
+                        audit_ctx=audit_ctx,
+                    )
                     return Err(f"SSH key generation failed: {key_result.unwrap_err()}")
-                ssh_public_key = self._ssh_manager.get_master_public_key().unwrap()
+                master_pub_result = self._ssh_manager.get_master_public_key()
+                if master_pub_result.is_err():
+                    self._mark_failed(
+                        deployment,
+                        f"SSH key generation failed and master public key unavailable: {master_pub_result.unwrap_err()}",
+                        stage="ssh_key",
+                        audit_ctx=audit_ctx,
+                    )
+                    return Err(f"SSH key generation failed: {key_result.unwrap_err()}")
+                ssh_public_key = master_pub_result.unwrap()
                 log_deployment("warning", "Using master SSH key (fallback)")
             else:
                 ssh_public_key = key_result.unwrap().public_key
@@ -195,57 +226,144 @@ class NodeDeploymentService:
 
             stages_completed.append("ssh_key")
 
-            # Stage 2: Provision server via hcloud SDK
+            # Stage 2: Provision server via cloud provider gateway
             report_progress("provision_server")
-            log_deployment("info", "Creating server via Hetzner Cloud API")
 
             # Get API token from credentials
-            api_token = credentials.get("hcloud_token") or credentials.get("api_token", "")
+            api_token = credentials.get("api_token", "")
             if not api_token:
-                self._mark_failed(deployment, "No API token provided for Hetzner Cloud")
-                return Err("No API token provided for Hetzner Cloud")
+                self._mark_failed(deployment, "No API token provided", stage="provision_server", audit_ctx=audit_ctx)
+                return Err("No API token provided")
 
-            hcloud_svc = get_hcloud_service(api_token)
+            provider_type = deployment.provider.provider_type
+            gateway = get_cloud_gateway(provider_type, api_token)
 
-            # Upload SSH key to Hetzner
-            ssh_key_name = f"praho-{deployment.hostname}"
-            key_upload_result = hcloud_svc.upload_ssh_key(ssh_key_name, ssh_public_key)
-            if key_upload_result.is_err():
-                self._mark_failed(deployment, f"SSH key upload failed: {key_upload_result.unwrap_err()}")
-                return Err(f"SSH key upload failed: {key_upload_result.unwrap_err()}")
+            # Idempotent: skip server creation if external_node_id already set (retry scenario)
+            server_create_result: ServerCreateResult | None = None
+            if deployment.external_node_id:
+                log_deployment("info", f"Server already exists (id={deployment.external_node_id}), skipping creation")
+                server_info_result = gateway.get_server(deployment.external_node_id)
+                if server_info_result.is_err():
+                    # Transient error — do NOT clear external_node_id
+                    self._mark_failed(
+                        deployment,
+                        f"Cannot verify existing server: {server_info_result.unwrap_err()}",
+                        stage="provision_server",
+                        audit_ctx=audit_ctx,
+                    )
+                    return Err(f"Cannot verify existing server: {server_info_result.unwrap_err()}")
+                elif server_info_result.unwrap() is not None:
+                    info = server_info_result.unwrap()
+                    assert info is not None  # narrowed by elif above
+                    server_create_result = ServerCreateResult(
+                        server_id=info.server_id,
+                        ipv4_address=info.ipv4_address,
+                        ipv6_address=info.ipv6_address,
+                    )
+                else:
+                    log_deployment("warning", "Previously created server not found, creating new one")
+                    deployment.external_node_id = ""
+                    deployment.save(update_fields=["external_node_id", "updated_at"])
 
-            # Create the server
-            server_result = hcloud_svc.create_server(
-                name=deployment.hostname,
-                server_type=deployment.node_size.provider_type_id if deployment.node_size else "",
-                location=deployment.region.provider_region_id if deployment.region else "",
-                ssh_keys=[ssh_key_name],
-                labels={
-                    "environment": deployment.environment,
-                    "node_type": deployment.node_type,
-                    "managed_by": "praho",
-                },
-            )
+            if not deployment.external_node_id:
+                log_deployment("info", f"Creating server via {provider_type} API")
 
-            if server_result.is_err():
-                self._mark_failed(deployment, f"Server creation failed: {server_result.unwrap_err()}")
-                return Err(f"Server creation failed: {server_result.unwrap_err()}")
+                # Upload SSH key to provider
+                ssh_key_name = f"praho-{deployment.hostname}"
+                key_upload_result = gateway.upload_ssh_key(ssh_key_name, ssh_public_key)
+                if key_upload_result.is_err():
+                    if gateway is not None and created_resources:
+                        self._cleanup_resources(gateway, created_resources, deployment)
+                    self._mark_failed(
+                        deployment,
+                        f"SSH key upload failed: {key_upload_result.unwrap_err()}",
+                        stage="provision_server",
+                    )
+                    return Err(f"SSH key upload failed: {key_upload_result.unwrap_err()}")
 
-            hcloud_result = server_result.unwrap()
+                created_resources.append(("ssh_key", ssh_key_name))
+                log_deployment("info", f"SSH key '{ssh_key_name}' uploaded to provider")
+
+                # Create firewall before server — attach during provisioning
+                firewall_name = f"praho-fw-{deployment.hostname}"
+                log_deployment("info", f"Creating firewall '{firewall_name}'")
+                firewall_result = gateway.create_firewall(
+                    name=firewall_name,
+                    rules=STANDARD_FIREWALL_RULES,
+                    labels={
+                        "managed-by": "praho",
+                        "deployment-id": str(deployment.correlation_id),
+                        "hostname": deployment.hostname,
+                    },
+                )
+                if firewall_result.is_err():
+                    if gateway is not None and created_resources:
+                        self._cleanup_resources(gateway, created_resources, deployment)
+                    self._mark_failed(
+                        deployment,
+                        f"Firewall creation failed: {firewall_result.unwrap_err()}",
+                        stage="provision_server",
+                    )
+                    return Err(f"Firewall creation failed: {firewall_result.unwrap_err()}")
+
+                firewall_id = firewall_result.unwrap()
+                created_resources.append(("firewall", firewall_id))
+                log_deployment("info", f"Firewall '{firewall_name}' created (id={firewall_id})")
+                # Persist firewall_id in a structured log entry so destroy_node can retrieve it by ID
+                from apps.infrastructure.models import NodeDeploymentLog
+
+                NodeDeploymentLog.objects.create(
+                    deployment=deployment,
+                    level="INFO",
+                    message=f"Firewall resource recorded: {firewall_name}",
+                    phase="provision_server",
+                    details={"firewall_id": firewall_id, "firewall_name": firewall_name},
+                )
+
+                # Create the server via gateway
+                create_request = ServerCreateRequest(
+                    name=deployment.hostname,
+                    server_type=deployment.node_size.provider_type_id if deployment.node_size else "",
+                    location=deployment.region.provider_region_id if deployment.region else "",
+                    ssh_keys=[ssh_key_name],
+                    firewall_ids=[firewall_id],
+                    labels={
+                        "managed-by": "praho",
+                        "praho-deployment": str(deployment.correlation_id),
+                        "hostname": deployment.hostname,
+                        "environment": deployment.environment,
+                    },
+                )
+                server_result = gateway.create_server(create_request)
+
+                if server_result.is_err():
+                    if gateway is not None and created_resources:
+                        self._cleanup_resources(gateway, created_resources, deployment)
+                    self._mark_failed(
+                        deployment,
+                        f"Server creation failed: {server_result.unwrap_err()}",
+                        stage="provision_server",
+                    )
+                    return Err(f"Server creation failed: {server_result.unwrap_err()}")
+
+                server_create_result = server_result.unwrap()
+                created_resources.append(("server", server_create_result.server_id))
             stages_completed.append("provision_server")
-            log_deployment("info", "Server created successfully via hcloud SDK")
+            log_deployment("info", f"Server created successfully via {provider_type} gateway")
 
             # Stage 3: Update deployment with server details
             report_progress("update_deployment")
 
-            if not hcloud_result.ipv4_address:
-                self._mark_failed(deployment, "Server creation did not return an IP address")
+            if not server_create_result or not server_create_result.ipv4_address:
+                if gateway is not None and created_resources:
+                    self._cleanup_resources(gateway, created_resources, deployment)
+                self._mark_failed(deployment, "Server creation did not return an IP address", stage="update_deployment")
                 return Err("Server creation did not return an IP address")
 
             with transaction.atomic():
-                deployment.external_node_id = hcloud_result.server_id
-                deployment.ipv4_address = hcloud_result.ipv4_address
-                deployment.ipv6_address = hcloud_result.ipv6_address or ""
+                deployment.external_node_id = server_create_result.server_id
+                deployment.ipv4_address = server_create_result.ipv4_address
+                deployment.ipv6_address = server_create_result.ipv6_address or ""
                 deployment.save(
                     update_fields=[
                         "external_node_id",
@@ -285,14 +403,20 @@ class NodeDeploymentService:
                 )
 
                 if playbook_result.is_err():
-                    self._mark_failed(deployment, f"Ansible {playbook} failed: {playbook_result.unwrap_err()}")
+                    if gateway is not None and created_resources:
+                        self._cleanup_resources(gateway, created_resources, deployment)
+                    self._mark_failed(
+                        deployment, f"Ansible {playbook} failed: {playbook_result.unwrap_err()}", stage=stage_name
+                    )
                     return Err(f"Ansible {playbook} failed: {playbook_result.unwrap_err()}")
 
                 result = playbook_result.unwrap()
                 ansible_results.append(result)
 
                 if not result.success:
-                    self._mark_failed(deployment, f"Ansible {playbook} failed: {result.stderr[:500]}")
+                    if gateway is not None and created_resources:
+                        self._cleanup_resources(gateway, created_resources, deployment)
+                    self._mark_failed(deployment, f"Ansible {playbook} failed: {result.stderr[:500]}", stage=stage_name)
                     return Err(f"Ansible {playbook} failed: {result.stderr[:500]}")
 
                 stages_completed.append(stage_name)
@@ -306,7 +430,11 @@ class NodeDeploymentService:
             validation_result = self._validation.validate_node(deployment)
 
             if validation_result.is_err():
-                self._mark_failed(deployment, f"Validation failed: {validation_result.unwrap_err()}")
+                if gateway is not None and created_resources:
+                    self._cleanup_resources(gateway, created_resources, deployment)
+                self._mark_failed(
+                    deployment, f"Validation failed: {validation_result.unwrap_err()}", stage="validation"
+                )
                 return Err(f"Validation failed: {validation_result.unwrap_err()}")
 
             validation_report = validation_result.unwrap()
@@ -325,8 +453,8 @@ class NodeDeploymentService:
             log_deployment("info", "Registering node as VirtualminServer")
 
             # Generate a random password for Virtualmin admin
-            import secrets  # noqa: PLC0415
-            import string  # noqa: PLC0415
+            import secrets
+            import string
 
             admin_password = "".join(
                 secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
@@ -352,8 +480,8 @@ class NodeDeploymentService:
 
             # Stage 13: Complete
             report_progress("complete")
-            deployment.deployed_at = timezone.now()
-            deployment.save(update_fields=["deployed_at", "updated_at"])
+            deployment.completed_at = timezone.now()
+            deployment.save(update_fields=["completed_at", "updated_at"])
             deployment.transition_to("completed")
 
             stages_completed.append("complete")
@@ -362,12 +490,14 @@ class NodeDeploymentService:
             log_deployment("info", f"Deployment completed successfully in {duration:.1f}s")
 
             # Audit: deployment completed
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_deployment_completed(
                     deployment,
                     audit_ctx,
                     duration_seconds=duration,
                 )
+            except Exception:
+                logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment completed")
 
             return Ok(
                 DeploymentResult(
@@ -375,7 +505,7 @@ class NodeDeploymentService:
                     deployment_id=deployment.id,
                     hostname=deployment.hostname,
                     stages_completed=stages_completed,
-                    hcloud_result=hcloud_result,
+                    cloud_result=server_create_result,
                     ansible_results=ansible_results,
                     validation_report=validation_report,
                     virtualmin_server_id=virtualmin_server_id,
@@ -385,7 +515,10 @@ class NodeDeploymentService:
 
         except Exception as e:
             logger.exception(f"Deployment failed for {deployment.hostname}: {e}")
-            self._mark_failed(deployment, str(e))
+            # Best-effort cleanup of any cloud resources created before the failure
+            if gateway is not None and created_resources:
+                self._cleanup_resources(gateway, created_resources, deployment)
+            self._mark_failed(deployment, str(e), audit_ctx=audit_ctx)
 
             duration = (timezone.now() - start_time).total_seconds()
             return Err(f"Deployment failed: {e}")
@@ -409,22 +542,30 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
 
         logger.info(f"[Destroy:{deployment.hostname}] Starting node destruction")
-
-        if deployment.status not in ("completed", "failed", "stopped"):
-            return Err(f"Cannot destroy node in status '{deployment.status}'")
 
         audit_ctx = InfrastructureAuditContext(user=user)
 
         try:
-            # Transition to destroying (transition_to saves internally)
-            deployment.transition_to("destroying")
+            # Atomic check-and-transition to prevent TOCTOU race
+            with transaction.atomic():
+                from apps.infrastructure.models import NodeDeployment as NDModel
+
+                locked = NDModel.objects.select_for_update().get(pk=deployment.pk)
+                if locked.status not in ("completed", "failed", "stopped"):
+                    return Err(f"Cannot destroy node in status '{locked.status}'")
+                locked.transition_to("destroying")
+
+            # Refresh local instance after atomic block
+            deployment.refresh_from_db()
 
             # Audit: destroy started
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_destroy_started(deployment, audit_ctx)
+            except Exception:
+                logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy started")
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -443,18 +584,68 @@ class NodeDeploymentService:
                 if unregister_result.is_err():
                     logger.warning(f"Unregistration failed: {unregister_result.unwrap_err()}")
 
-            # Delete server via hcloud SDK
+            # Delete server via cloud provider gateway
             if deployment.external_node_id:
-                api_token = credentials.get("hcloud_token") or credentials.get("api_token", "")
+                api_token = credentials.get("api_token", "")
                 if not api_token:
                     return Err("No API token provided for server deletion")
 
-                hcloud_svc = get_hcloud_service(api_token)
-                delete_result = hcloud_svc.delete_server(int(deployment.external_node_id))
+                provider_type = deployment.provider.provider_type
+                gateway = get_cloud_gateway(provider_type, api_token)
+                delete_result = gateway.delete_server(deployment.external_node_id)
 
                 if delete_result.is_err():
-                    self._mark_failed(deployment, f"Server deletion failed: {delete_result.unwrap_err()}")
+                    self._mark_failed(
+                        deployment,
+                        f"Server deletion failed: {delete_result.unwrap_err()}",
+                        stage="destroying",
+                        audit_ctx=audit_ctx,
+                    )
                     return Err(f"Server deletion failed: {delete_result.unwrap_err()}")
+
+                # Clean up SSH key from provider
+                ssh_key_name = f"praho-{deployment.hostname}"
+                ssh_delete_result = gateway.delete_ssh_key(ssh_key_name)
+                if ssh_delete_result.is_err():
+                    logger.warning(
+                        f"[Destroy:{deployment.hostname}] SSH key cleanup failed: {ssh_delete_result.unwrap_err()}"
+                    )
+
+                # Clean up firewall from provider (best-effort — may not exist on older deployments)
+                # Look up firewall_id from deployment log (stored during deploy_node)
+                firewall_name = f"praho-fw-{deployment.hostname}"
+                fw_log = (
+                    NodeDeploymentLog.objects.filter(
+                        deployment=deployment,
+                        phase="provision_server",
+                        message__startswith="Firewall resource recorded:",
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+                firewall_id_to_delete: str | None = (
+                    fw_log.details.get("firewall_id") if fw_log and isinstance(fw_log.details, dict) else None
+                )
+                if firewall_id_to_delete:
+                    logger.info(f"[Destroy:{deployment.hostname}] Deleting firewall id={firewall_id_to_delete}")
+                    try:
+                        fw_delete_result = gateway.delete_firewall(str(firewall_id_to_delete))
+                        if fw_delete_result.is_err():
+                            logger.warning(
+                                f"[Destroy:{deployment.hostname}] Firewall deletion failed (best-effort): "
+                                f"{fw_delete_result.unwrap_err()}"
+                            )
+                        else:
+                            logger.info(f"[Destroy:{deployment.hostname}] Firewall '{firewall_name}' deleted")
+                    except Exception as fw_exc:
+                        logger.warning(
+                            f"[Destroy:{deployment.hostname}] Firewall deletion raised exception (best-effort): "
+                            f"{fw_exc}"
+                        )
+                else:
+                    logger.warning(
+                        f"[Destroy:{deployment.hostname}] No firewall_id found in logs, skipping firewall cleanup"
+                    )
             else:
                 logger.warning(f"No external_node_id for {deployment.hostname}, skipping cloud deletion")
 
@@ -474,19 +665,23 @@ class NodeDeploymentService:
             )
 
             # Audit: destroy completed
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_destroy_completed(deployment, audit_ctx)
+            except Exception:
+                logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy completed")
 
             logger.info(f"[Destroy:{deployment.hostname}] Node destroyed successfully")
             return Ok(True)
 
         except Exception as e:
             logger.exception(f"Destruction failed for {deployment.hostname}: {e}")
-            self._mark_failed(deployment, str(e))
+            self._mark_failed(deployment, str(e), stage="destroying", audit_ctx=audit_ctx)
 
             # Audit: destroy failed
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_destroy_failed(deployment, str(e), audit_ctx)
+            except Exception:
+                logger.warning(f"[Destroy:{deployment.hostname}] Failed to log audit: destroy failed")
 
             return Err(f"Destruction failed: {e}")
 
@@ -514,19 +709,21 @@ class NodeDeploymentService:
 
         # Increment retry count
         deployment.retry_count += 1
+        deployment.save(update_fields=["retry_count", "updated_at"])
 
-        # Reset to pending for fresh start
-        deployment.status = "pending"
-        deployment.save()
+        # Reset to pending via state machine (failed -> pending is a valid transition)
+        deployment.transition_to("pending")
 
         logger.info(f"[Retry:{deployment.hostname}] Retrying deployment (attempt {deployment.retry_count})")
 
         # Audit: deployment retry
-        with contextlib.suppress(Exception):
+        try:
             InfrastructureAuditService.log_deployment_retry(
                 deployment,
                 InfrastructureAuditContext(user=user),
             )
+        except Exception:
+            logger.warning(f"[Retry:{deployment.hostname}] Failed to log audit: deployment retry")
 
         return self.deploy_node(
             deployment=deployment,
@@ -535,7 +732,7 @@ class NodeDeploymentService:
             user=user,
         )
 
-    def upgrade_node_size(  # noqa: PLR0911
+    def upgrade_node_size(
         self,
         deployment: NodeDeployment,
         new_size: NodeSize,
@@ -554,7 +751,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
 
         logger.info(f"[Upgrade:{deployment.hostname}] Starting node resize to {new_size.name}")
 
@@ -568,6 +765,7 @@ class NodeDeploymentService:
             return Err("New size must be from the same provider")
 
         old_size = deployment.node_size
+        audit_ctx = InfrastructureAuditContext(user=user)
 
         try:
             # Log the upgrade start
@@ -577,6 +775,12 @@ class NodeDeploymentService:
                 message=f"Starting upgrade from {old_size.name} to {new_size.name}",
                 phase="upgrading",
             )
+
+            # Audit: upgrade started
+            try:
+                InfrastructureAuditService.log_node_upgrade_started(deployment, old_size, new_size, audit_ctx)
+            except Exception:
+                logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade started")
 
             # Use provider-agnostic command execution
             provider_type = deployment.provider.provider_type
@@ -597,6 +801,10 @@ class NodeDeploymentService:
                     message=error_msg,
                     phase="upgrading",
                 )
+                try:
+                    InfrastructureAuditService.log_node_upgrade_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
                 return Err(error_msg)
 
             cmd_result = result.unwrap()
@@ -608,6 +816,10 @@ class NodeDeploymentService:
                     message=error_msg,
                     phase="upgrading",
                 )
+                try:
+                    InfrastructureAuditService.log_node_upgrade_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
                 return Err(error_msg)
 
             # Update deployment with new size
@@ -621,6 +833,12 @@ class NodeDeploymentService:
                 phase="completed",
             )
 
+            # Audit: upgrade completed
+            try:
+                InfrastructureAuditService.log_node_upgrade_completed(deployment, old_size, new_size, audit_ctx)
+            except Exception:
+                logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade completed")
+
             logger.info(f"[Upgrade:{deployment.hostname}] Node upgraded successfully")
             return Ok(True)
 
@@ -632,6 +850,10 @@ class NodeDeploymentService:
                 message=str(e),
                 phase="upgrading",
             )
+            try:
+                InfrastructureAuditService.log_node_upgrade_failed(deployment, str(e), audit_ctx)
+            except Exception:
+                logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
             return Err(f"Upgrade failed: {e}")
 
     def run_maintenance(
@@ -653,7 +875,7 @@ class NodeDeploymentService:
         Returns:
             Result with list of AnsibleResult or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
 
         if deployment.status != "completed":
             return Err(f"Can only run maintenance on completed deployments, current status: {deployment.status}")
@@ -674,6 +896,14 @@ class NodeDeploymentService:
             phase="maintenance",
         )
 
+        audit_ctx = InfrastructureAuditContext(user=user)
+
+        # Audit: maintenance started
+        try:
+            InfrastructureAuditService.log_node_maintenance_started(deployment, playbooks, audit_ctx)
+        except Exception:
+            logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance started")
+
         results = []
         try:
             for playbook in playbooks:
@@ -691,6 +921,12 @@ class NodeDeploymentService:
                         message=error_msg,
                         phase="maintenance",
                     )
+                    try:
+                        InfrastructureAuditService.log_node_maintenance_failed(
+                            deployment, playbooks, error_msg, audit_ctx
+                        )
+                    except Exception:
+                        logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance failed")
                     return Err(error_msg)
 
                 ansible_result = result.unwrap()
@@ -704,6 +940,12 @@ class NodeDeploymentService:
                         message=error_msg,
                         phase="maintenance",
                     )
+                    try:
+                        InfrastructureAuditService.log_node_maintenance_failed(
+                            deployment, playbooks, error_msg, audit_ctx
+                        )
+                    except Exception:
+                        logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance failed")
                     return Err(error_msg)
 
                 NodeDeploymentLog.objects.create(
@@ -720,6 +962,12 @@ class NodeDeploymentService:
                 phase="completed",
             )
 
+            # Audit: maintenance completed
+            try:
+                InfrastructureAuditService.log_node_maintenance_completed(deployment, playbooks, audit_ctx)
+            except Exception:
+                logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance completed")
+
             logger.info(f"[Maintenance:{deployment.hostname}] All playbooks completed")
             return Ok(results)
 
@@ -731,6 +979,10 @@ class NodeDeploymentService:
                 message=str(e),
                 phase="maintenance",
             )
+            try:
+                InfrastructureAuditService.log_node_maintenance_failed(deployment, playbooks, str(e), audit_ctx)
+            except Exception:
+                logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance failed")
             return Err(f"Maintenance failed: {e}")
 
     def stop_node(
@@ -750,7 +1002,7 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
 
         logger.info(f"[Stop:{deployment.hostname}] Stopping node")
 
@@ -759,6 +1011,14 @@ class NodeDeploymentService:
 
         if deployment.status == "stopped":
             return Ok(True)  # Already stopped
+
+        audit_ctx = InfrastructureAuditContext(user=user)
+
+        # Audit: stop started
+        try:
+            InfrastructureAuditService.log_node_stop_started(deployment, audit_ctx)
+        except Exception:
+            logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop started")
 
         try:
             provider_type = deployment.provider.provider_type
@@ -770,14 +1030,23 @@ class NodeDeploymentService:
             )
 
             if result.is_err():
-                return Err(f"Failed to stop node: {result.unwrap_err()}")
+                error_msg = f"Failed to stop node: {result.unwrap_err()}"
+                try:
+                    InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop failed")
+                return Err(error_msg)
 
             cmd_result = result.unwrap()
             if not cmd_result.success:
-                return Err(f"Failed to stop node: {cmd_result.stderr}")
+                error_msg = f"Failed to stop node: {cmd_result.stderr}"
+                try:
+                    InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop failed")
+                return Err(error_msg)
 
-            deployment.status = "stopped"
-            deployment.save()
+            deployment.transition_to("stopped")
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -786,11 +1055,21 @@ class NodeDeploymentService:
                 phase="stopped",
             )
 
+            # Audit: stop completed
+            try:
+                InfrastructureAuditService.log_node_stop_completed(deployment, audit_ctx)
+            except Exception:
+                logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop completed")
+
             logger.info(f"[Stop:{deployment.hostname}] Node stopped successfully")
             return Ok(True)
 
         except Exception as e:
             logger.exception(f"Stop failed for {deployment.hostname}: {e}")
+            try:
+                InfrastructureAuditService.log_node_stop_failed(deployment, str(e), audit_ctx)
+            except Exception:
+                logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop failed")
             return Err(f"Stop failed: {e}")
 
     def start_node(
@@ -810,12 +1089,14 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
 
         logger.info(f"[Start:{deployment.hostname}] Starting node")
 
         if deployment.status != "stopped":
             return Err(f"Can only start stopped nodes, current status: {deployment.status}")
+
+        audit_ctx = InfrastructureAuditContext(user=user)
 
         try:
             provider_type = deployment.provider.provider_type
@@ -827,14 +1108,23 @@ class NodeDeploymentService:
             )
 
             if result.is_err():
-                return Err(f"Failed to start node: {result.unwrap_err()}")
+                error_msg = f"Failed to start node: {result.unwrap_err()}"
+                try:
+                    InfrastructureAuditService.log_node_start_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start failed")
+                return Err(error_msg)
 
             cmd_result = result.unwrap()
             if not cmd_result.success:
-                return Err(f"Failed to start node: {cmd_result.stderr}")
+                error_msg = f"Failed to start node: {cmd_result.stderr}"
+                try:
+                    InfrastructureAuditService.log_node_start_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start failed")
+                return Err(error_msg)
 
-            deployment.status = "completed"
-            deployment.save()
+            deployment.transition_to("completed")
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -843,11 +1133,21 @@ class NodeDeploymentService:
                 phase="completed",
             )
 
+            # Audit: start completed
+            try:
+                InfrastructureAuditService.log_node_start_completed(deployment, audit_ctx)
+            except Exception:
+                logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start completed")
+
             logger.info(f"[Start:{deployment.hostname}] Node started successfully")
             return Ok(True)
 
         except Exception as e:
             logger.exception(f"Start failed for {deployment.hostname}: {e}")
+            try:
+                InfrastructureAuditService.log_node_start_failed(deployment, str(e), audit_ctx)
+            except Exception:
+                logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start failed")
             return Err(f"Start failed: {e}")
 
     def reboot_node(
@@ -867,12 +1167,14 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
 
         logger.info(f"[Reboot:{deployment.hostname}] Rebooting node")
 
         if deployment.status != "completed":
             return Err(f"Can only reboot running nodes, current status: {deployment.status}")
+
+        audit_ctx = InfrastructureAuditContext(user=user)
 
         try:
             provider_type = deployment.provider.provider_type
@@ -884,11 +1186,21 @@ class NodeDeploymentService:
             )
 
             if result.is_err():
-                return Err(f"Failed to reboot node: {result.unwrap_err()}")
+                error_msg = f"Failed to reboot node: {result.unwrap_err()}"
+                try:
+                    InfrastructureAuditService.log_node_reboot_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Reboot:{deployment.hostname}] Failed to log audit: reboot failed")
+                return Err(error_msg)
 
             cmd_result = result.unwrap()
             if not cmd_result.success:
-                return Err(f"Failed to reboot node: {cmd_result.stderr}")
+                error_msg = f"Failed to reboot node: {cmd_result.stderr}"
+                try:
+                    InfrastructureAuditService.log_node_reboot_failed(deployment, error_msg, audit_ctx)
+                except Exception:
+                    logger.warning(f"[Reboot:{deployment.hostname}] Failed to log audit: reboot failed")
+                return Err(error_msg)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -897,16 +1209,97 @@ class NodeDeploymentService:
                 phase="completed",
             )
 
+            # Audit: reboot completed
+            try:
+                InfrastructureAuditService.log_node_reboot_completed(deployment, audit_ctx)
+            except Exception:
+                logger.warning(f"[Reboot:{deployment.hostname}] Failed to log audit: reboot completed")
+
             logger.info(f"[Reboot:{deployment.hostname}] Node rebooted successfully")
             return Ok(True)
 
         except Exception as e:
             logger.exception(f"Reboot failed for {deployment.hostname}: {e}")
+            try:
+                InfrastructureAuditService.log_node_reboot_failed(deployment, str(e), audit_ctx)
+            except Exception:
+                logger.warning(f"[Reboot:{deployment.hostname}] Failed to log audit: reboot failed")
             return Err(f"Reboot failed: {e}")
 
-    def _mark_failed(self, deployment: NodeDeployment, error_message: str) -> None:
+    def _cleanup_resources(
+        self,
+        gateway: CloudProviderGateway,
+        resources: list[tuple[str, str]],
+        deployment: NodeDeployment,
+    ) -> None:
+        """
+        Best-effort cleanup of cloud resources created during a failed deployment.
+
+        Processes resources in reverse creation order (server → firewall → ssh_key)
+        so dependencies are respected. Never raises; logs all outcomes.
+
+        Args:
+            gateway: The cloud provider gateway to use for deletions
+            resources: List of (resource_type, resource_id) tuples in creation order
+            deployment: The NodeDeployment instance (used for logging only)
+        """
+        hostname = deployment.hostname
+        logger.info(f"[Deployment:{hostname}] Starting best-effort cleanup of {len(resources)} resource(s)")
+
+        for resource_type, resource_id in reversed(resources):
+            try:
+                if resource_type == "server":
+                    logger.info(f"[Deployment:{hostname}] Cleanup: deleting server id={resource_id}")
+                    result = gateway.delete_server(resource_id)
+                    if result.is_err():
+                        logger.warning(
+                            f"[Deployment:{hostname}] Cleanup: server deletion failed: {result.unwrap_err()}"
+                        )
+                    else:
+                        logger.info(f"[Deployment:{hostname}] Cleanup: server id={resource_id} deleted ✅")
+
+                elif resource_type == "firewall":
+                    logger.info(f"[Deployment:{hostname}] Cleanup: deleting firewall id={resource_id}")
+                    result = gateway.delete_firewall(resource_id)
+                    if result.is_err():
+                        logger.warning(
+                            f"[Deployment:{hostname}] Cleanup: firewall deletion failed: {result.unwrap_err()}"
+                        )
+                    else:
+                        logger.info(f"[Deployment:{hostname}] Cleanup: firewall id={resource_id} deleted ✅")
+
+                elif resource_type == "ssh_key":
+                    logger.info(f"[Deployment:{hostname}] Cleanup: deleting SSH key name={resource_id}")
+                    result = gateway.delete_ssh_key(resource_id)
+                    if result.is_err():
+                        logger.warning(
+                            f"[Deployment:{hostname}] Cleanup: SSH key deletion failed: {result.unwrap_err()}"
+                        )
+                    else:
+                        logger.info(f"[Deployment:{hostname}] Cleanup: SSH key name={resource_id} deleted ✅")
+
+                else:
+                    logger.warning(f"[Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
+
+            except Exception as exc:
+                logger.warning(
+                    f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
+                )
+
+        logger.info(f"[Deployment:{hostname}] Cleanup complete")
+
+    def _mark_failed(
+        self,
+        deployment: NodeDeployment,
+        error_message: str,
+        stage: str = "",
+        audit_ctx: InfrastructureAuditContext | None = None,
+    ) -> None:
         """Mark deployment as failed with error message"""
-        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog
+
+        # Capture the current stage before transitioning to failed
+        failed_stage = stage or deployment.status
 
         try:
             deployment.transition_to("failed")
@@ -919,18 +1312,21 @@ class NodeDeploymentService:
             deployment=deployment,
             level="ERROR",
             message=error_message,
-            phase="failed",
+            phase=failed_stage,
         )
 
-        # Audit: deployment failed
-        with contextlib.suppress(Exception):
+        # Audit: deployment failed (with user context if available)
+        try:
             InfrastructureAuditService.log_deployment_failed(
                 deployment,
                 error_message,
-                stage=deployment.status,
+                stage=failed_stage,
+                context=audit_ctx,
             )
+        except Exception:
+            logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment failed")
 
-        logger.error(f"[Deployment:{deployment.hostname}] Failed: {error_message}")
+        logger.error(f"[Deployment:{deployment.hostname}] Failed at stage '{failed_stage}': {error_message}")
 
 
 # Module-level singleton
@@ -939,7 +1335,7 @@ _deployment_service: NodeDeploymentService | None = None
 
 def get_deployment_service() -> NodeDeploymentService:
     """Get global deployment service instance"""
-    global _deployment_service  # noqa: PLW0603
+    global _deployment_service
     if _deployment_service is None:
         _deployment_service = NodeDeploymentService()
     return _deployment_service

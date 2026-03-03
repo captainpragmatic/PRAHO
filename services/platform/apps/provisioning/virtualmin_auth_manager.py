@@ -3,13 +3,12 @@ Virtualmin Authentication Fallback System - PRAHO Platform
 Multi-path authentication with ACL risk mitigation.
 
 ACL authentication potentially being "fixed" by Virtualmin updates.
-
-#TODO - review later to see if this is over-engineered.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from types import TracebackType
@@ -20,44 +19,10 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-# TODO: Replace with proper Result types when circular dependency is resolved
+from apps.common.types import Err, Ok, Result
+
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
-
-
-# Temporary Result type implementation
-class Result:
-    def __init__(self, success: bool, value: Any = None, error: str | None = None):
-        self._success = success
-        self._value = value
-        self._error = error
-
-    def is_ok(self) -> bool:
-        return self._success
-
-    def unwrap(self) -> Any:
-        if not self._success:
-            raise RuntimeError(self._error)
-        return self._value
-
-    def unwrap_err(self) -> str:
-        if self._success:
-            raise RuntimeError("Cannot unwrap error from successful result")
-        return self._error or "Unknown error"
-
-    def is_err(self) -> bool:
-        return not self._success
-
-
-def create_ok_result(value: Any) -> Result:
-    """Create a successful result."""
-    return Result(True, value)
-
-
-def create_error_result(error: str) -> Result:
-    """Create an error result."""
-    return Result(False, error=error)
-
 
 logger = logging.getLogger(__name__)
 
@@ -82,21 +47,21 @@ SUDO_COMMAND_TIMEOUT = _DEFAULT_SUDO_COMMAND_TIMEOUT
 
 def get_cache_timeout() -> int:
     """Get cache timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("provisioning.cache_timeout", _DEFAULT_CACHE_TIMEOUT)
 
 
 def get_ssh_timeout() -> int:
     """Get ssh timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("provisioning.ssh_timeout", _DEFAULT_SSH_TIMEOUT)
 
 
 def get_sudo_command_timeout() -> int:
     """Get sudo command timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415
+    from apps.settings.services import SettingsService
 
     return SettingsService.get_integer_setting("provisioning.sudo_command_timeout", _DEFAULT_SUDO_COMMAND_TIMEOUT)
 
@@ -148,7 +113,7 @@ class VirtualminAuthenticationManager:
 
     def execute_virtualmin_command(
         self, program: str, parameters: dict[str, Any], force_method: AuthMethod | None = None
-    ) -> Result[Any, Any]:  # type: ignore[type-arg]
+    ) -> Result[Any, str]:
         """
         Execute Virtualmin command with fallback authentication.
 
@@ -198,19 +163,21 @@ class VirtualminAuthenticationManager:
 
         # All methods failed
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
-        return create_error_result(f"All authentication methods failed. Last error: {last_error}")
+        return Err(f"All authentication methods failed. Last error: {last_error}")
 
-    def _execute_with_method(self, method: AuthMethod, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
-        """Execute command with specific authentication method"""
+    def _execute_with_method(self, method: AuthMethod, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
+        """Execute command with specific authentication method."""
+        handlers: dict[AuthMethod, Callable[[str, dict[str, Any]], Result[Any, str]]] = {
+            AuthMethod.ACL: self._execute_acl_auth,
+            AuthMethod.MASTER_PROXY: self._execute_master_proxy,
+            AuthMethod.SSH_SUDO: self._execute_ssh_sudo,
+        }
+        handler = handlers.get(method)
+        if handler is None:
+            return Err(f"Unknown auth method: {method}")
+        return handler(program, parameters)
 
-        if method == AuthMethod.ACL:
-            return self._execute_acl_auth(program, parameters)
-        elif method == AuthMethod.MASTER_PROXY:
-            return self._execute_master_proxy(program, parameters)
-        elif method == AuthMethod.SSH_SUDO:
-            return self._execute_ssh_sudo(program, parameters)
-
-    def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
+    def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
         """Execute using current ACL user authentication"""
         try:
             # Use existing gateway with ACL credentials
@@ -225,12 +192,14 @@ class VirtualminAuthenticationManager:
             )
 
             gateway = VirtualminGateway(config)
-            return gateway.call(program, parameters)  # type: ignore[return-value]
-
+            result = gateway.call(program, parameters)
+            if result.is_err():
+                return Err(str(result.unwrap_err()))
+            return Ok(result.unwrap())
         except Exception as e:
-            return create_error_result(f"ACL authentication failed: {e!s}")
+            return Err(f"ACL authentication failed: {e!s}")
 
-    def _execute_master_proxy(self, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
+    def _execute_master_proxy(self, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
         """Execute using master admin credentials via proxy service"""
         try:
             # Get master admin credentials from environment
@@ -238,7 +207,7 @@ class VirtualminAuthenticationManager:
             master_password = getattr(settings, "VIRTUALMIN_MASTER_PASSWORD", None)
 
             if not master_username or not master_password:
-                return create_error_result("Master admin credentials not configured")
+                return Err("Master admin credentials not configured")
 
             # Use master credentials with same gateway
             config = VirtualminConfig.from_credentials(
@@ -259,13 +228,13 @@ class VirtualminAuthenticationManager:
                     f"🚨 [Security] Using master admin credentials for {program} "
                     f"on {self.server.hostname} - ACL auth appears broken!"
                 )
+                return Ok(result.unwrap())
 
-            return result  # type: ignore[return-value]
-
+            return Err(str(result.unwrap_err()))
         except Exception as e:
-            return create_error_result(f"Master proxy authentication failed: {e!s}")
+            return Err(f"Master proxy authentication failed: {e!s}")
 
-    def _execute_ssh_sudo(self, program: str, parameters: dict[str, Any]) -> Result[Any, Any]:  # type: ignore[type-arg]
+    def _execute_ssh_sudo(self, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
         """Execute using SSH + sudo to virtualmin CLI"""
         try:
             # Build virtualmin CLI command
@@ -290,23 +259,23 @@ class VirtualminAuthenticationManager:
 
             # Parse CLI output (simpler than API response)
             if "successfully" in output.lower() or "created" in output.lower():
-                return create_ok_result({"success": True, "message": output.strip()})
+                return Ok({"success": True, "message": output.strip()})
             elif "error" in output.lower() or "failed" in output.lower():
-                return create_error_result(f"CLI command failed: {output.strip()}")
+                return Err(f"CLI command failed: {output.strip()}")
             else:
-                return create_ok_result({"success": True, "message": output.strip()})
+                return Ok({"success": True, "message": output.strip()})
 
         except Exception as e:
-            return create_error_result(f"SSH sudo authentication failed: {e!s}")
+            return Err(f"SSH sudo authentication failed: {e!s}")
 
-    def _execute_ssh_command(self, command: str) -> Result[Any, Any]:  # type: ignore[type-arg]
+    def _execute_ssh_command(self, command: str) -> Result[Any, str]:
         """Execute command via SSH"""
         try:
             if not self._ssh_client:
                 self._connect_ssh()
 
             if not self._ssh_client:
-                return create_error_result("Failed to establish SSH connection")
+                return Err("Failed to establish SSH connection")
 
             _stdin, stdout, stderr = self._ssh_client.exec_command(command, timeout=SUDO_COMMAND_TIMEOUT)
 
@@ -316,14 +285,14 @@ class VirtualminAuthenticationManager:
             exit_code = stdout.channel.recv_exit_status()
 
             if exit_code != 0:
-                return create_error_result(f"Command failed (exit {exit_code}): {error}")
+                return Err(f"Command failed (exit {exit_code}): {error}")
 
-            return create_ok_result(output)
+            return Ok(output)
 
         except Exception as e:
             # Try to reconnect on failure
             self._disconnect_ssh()
-            return create_error_result(f"SSH command execution failed: {e!s}")
+            return Err(f"SSH command execution failed: {e!s}")
 
     def _connect_ssh(self) -> None:
         """Establish SSH connection"""

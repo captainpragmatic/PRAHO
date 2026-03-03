@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 
@@ -126,10 +127,14 @@ class VirtualminDisasterRecoveryService:
                         if account.status == "suspended":
                             provisioning_service.suspend_account(new_account, "Restored as suspended from PRAHO data")
 
-                        # Apply quotas if they existed
-                        if account.disk_quota_mb or account.bandwidth_quota_mb:
-                            # TODO: Implement quota restoration via gateway
-                            pass
+                        # Apply quotas if they existed (use `is not None` to allow zero = unlimited)
+                        if account.disk_quota_mb is not None or account.bandwidth_quota_mb is not None:
+                            self._restore_quotas(
+                                target_server,
+                                account.domain,
+                                account.disk_quota_mb,
+                                account.bandwidth_quota_mb,
+                            )
 
                         rebuild_results.append(
                             {
@@ -267,6 +272,34 @@ class VirtualminDisasterRecoveryService:
         except Exception as e:
             logger.exception(f"Data integrity check failed: {e}")
             return Err(str(e))
+
+    def _restore_quotas(
+        self,
+        server: VirtualminServer,
+        domain: str,
+        disk_quota_mb: int | None,
+        bandwidth_quota_mb: int | None,
+    ) -> None:
+        """Restore disk and bandwidth quotas for a rebuilt domain via Virtualmin API."""
+        params: dict[str, str] = {"domain": domain}
+        if disk_quota_mb is not None:
+            params["quota"] = str(disk_quota_mb)
+        if bandwidth_quota_mb is not None:
+            params["bw"] = str(bandwidth_quota_mb)
+
+        try:
+            config = VirtualminConfig(server=server)
+            gateway = VirtualminGateway(config)
+            result = gateway.call("modify-domain", params)
+            if result.is_ok():
+                logger.info(
+                    f"✅ [DisasterRecovery] Restored quotas for {domain}: "
+                    f"disk={disk_quota_mb}MB, bandwidth={bandwidth_quota_mb}MB"
+                )
+            else:
+                logger.warning(f"⚠️ [DisasterRecovery] Failed to restore quotas for {domain}: {result.unwrap_err()}")
+        except Exception as e:
+            logger.warning(f"⚠️ [DisasterRecovery] Quota restoration error for {domain}: {e}")
 
     def _get_integrity_recommendations(self, issues: list[dict[str, Any]]) -> list[str]:
         """Get recommendations based on integrity issues"""

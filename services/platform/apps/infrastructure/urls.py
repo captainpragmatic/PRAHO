@@ -57,4 +57,13 @@ urlpatterns = [
     path("costs/", views.cost_dashboard, name="cost_dashboard"),
     path("costs/history/", views.cost_history, name="cost_history"),
     path("api/costs/summary/", views.cost_api_summary, name="cost_api_summary"),
+    # Drift Detection & Remediation
+    path("drift/", views.drift_dashboard, name="drift_dashboard"),
+    path("drift/<int:deployment_pk>/", views.drift_deployment_detail, name="drift_deployment_detail"),
+    path("drift/remediations/", views.drift_remediation_list, name="drift_remediation_list"),
+    path("drift/remediations/<int:pk>/approve/", views.drift_remediation_approve, name="drift_remediation_approve"),
+    path("drift/remediations/<int:pk>/reject/", views.drift_remediation_reject, name="drift_remediation_reject"),
+    path("drift/remediations/<int:pk>/schedule/", views.drift_remediation_schedule, name="drift_remediation_schedule"),
+    path("drift/remediations/<int:pk>/accept/", views.drift_remediation_accept, name="drift_remediation_accept"),
+    path("drift/<int:deployment_pk>/scan/", views.drift_scan_trigger, name="drift_scan_trigger"),
 ]

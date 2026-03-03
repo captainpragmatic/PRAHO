@@ -28,13 +28,12 @@ import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from apps.infrastructure.models import CloudProvider, NodeDeployment
+    from apps.infrastructure.models import CloudProvider
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +65,8 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         },
     },
     "digitalocean": {
-        # Terraform configuration
-        "terraform_module": "digitalocean",
-        "terraform_provider": "digitalocean/digitalocean",
-        "terraform_provider_version": "~> 2.34",
+        # Provisioning: uses pydo Python SDK (see digitalocean_service.py)
+        "image_default": "ubuntu-22-04-x64",
         # Credentials
         "credential_key": "do_token",
         "token_env_var": "DIGITALOCEAN_TOKEN",
@@ -82,13 +79,6 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             "resize": ["compute", "droplet-action", "resize", "{server_id}", "--size", "{size}", "--wait"],
             "delete": ["compute", "droplet", "delete", "{server_id}", "--force"],
         },
-        # Terraform variable mapping
-        "terraform_vars": {
-            "api_token_var": "do_token",
-            "server_type_var": "size",
-            "region_var": "region",
-            "image_default": "ubuntu-22-04-x64",
-        },
         # Output field mappings
         "output_mappings": {
             "droplet_id": "external_node_id",
@@ -97,10 +87,8 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
         },
     },
     "vultr": {
-        # Terraform configuration
-        "terraform_module": "vultr",
-        "terraform_provider": "vultr/vultr",
-        "terraform_provider_version": "~> 2.19",
+        # Provisioning: uses Vultr REST API v2 (see vultr_service.py)
+        "image_default": "ubuntu-22-04-x64",
         # Credentials
         "credential_key": "vultr_api_key",
         "token_env_var": "VULTR_API_KEY",
@@ -113,13 +101,6 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             "resize": ["instance", "update", "{server_id}", "--plan", "{size}"],
             "delete": ["instance", "delete", "{server_id}"],
         },
-        # Terraform variable mapping
-        "terraform_vars": {
-            "api_token_var": "vultr_api_key",
-            "server_type_var": "plan",
-            "region_var": "region",
-            "image_default": "ubuntu-22-04-x64",
-        },
         # Output field mappings
         "output_mappings": {
             "instance_id": "external_node_id",
@@ -127,35 +108,25 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
             "v6_main_ip": "ipv6_address",
         },
     },
-    "linode": {
-        # Terraform configuration
-        "terraform_module": "linode",
-        "terraform_provider": "linode/linode",
-        "terraform_provider_version": "~> 2.12",
-        # Credentials
-        "credential_key": "linode_token",
-        "token_env_var": "LINODE_TOKEN",
-        # CLI tool configuration
+    "aws": {
+        # Provisioning: uses boto3 EC2 SDK (see aws_service.py)
+        # Credentials: JSON with access_key_id, secret_access_key, region
+        "credential_key": "aws_credentials",
+        "token_env_var": "AWS_ACCESS_KEY_ID",
+        # CLI tool configuration (fallback)
         "cli": {
-            "tool": "linode-cli",
-            "power_off": ["linodes", "shutdown", "{server_id}"],
-            "power_on": ["linodes", "boot", "{server_id}"],
-            "reboot": ["linodes", "reboot", "{server_id}"],
-            "resize": ["linodes", "resize", "{server_id}", "--type", "{size}"],
-            "delete": ["linodes", "delete", "{server_id}"],
-        },
-        # Terraform variable mapping
-        "terraform_vars": {
-            "api_token_var": "linode_token",
-            "server_type_var": "type",
-            "region_var": "region",
-            "image_default": "linode/ubuntu22.04",
+            "tool": "aws",
+            "power_off": ["ec2", "stop-instances", "--instance-ids", "{server_id}"],
+            "power_on": ["ec2", "start-instances", "--instance-ids", "{server_id}"],
+            "reboot": ["ec2", "reboot-instances", "--instance-ids", "{server_id}"],
+            "resize": ["ec2", "modify-instance-attribute", "--instance-id", "{server_id}", "--instance-type", "{size}"],
+            "delete": ["ec2", "terminate-instances", "--instance-ids", "{server_id}"],
         },
         # Output field mappings
         "output_mappings": {
-            "id": "external_node_id",
-            "ip_address": "ipv4_address",
-            "ipv6": "ipv6_address",
+            "InstanceId": "external_node_id",
+            "PublicIpAddress": "ipv4_address",
+            "Ipv6Address": "ipv6_address",
         },
     },
 }
@@ -173,6 +144,9 @@ ProviderSyncFn = Callable[..., "Result[Any, str]"]
 # Each entry: (module_path, function_name) — resolved at call time
 PROVIDER_SYNC_REGISTRY: dict[str, tuple[str, str]] = {
     "hetzner": ("apps.infrastructure.provider_sync", "sync_hetzner_provider"),
+    "digitalocean": ("apps.infrastructure.provider_sync", "sync_digitalocean_provider"),
+    "vultr": ("apps.infrastructure.provider_sync", "sync_vultr_provider"),
+    "aws": ("apps.infrastructure.provider_sync", "sync_aws_provider"),
 }
 
 
@@ -255,7 +229,7 @@ class ProviderCommandResult:
     command: str
 
 
-def run_provider_command(  # noqa: PLR0911
+def run_provider_command(
     provider_type: str,
     operation: str,
     credentials: dict[str, str],
@@ -331,7 +305,7 @@ def run_provider_command(  # noqa: PLR0911
 
     # Execute command
     try:
-        result = subprocess.run(  # noqa: PLW1510, S603
+        result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -364,139 +338,12 @@ def run_provider_command(  # noqa: PLR0911
 
 
 # =============================================================================
-# Terraform Configuration Helpers (DEPRECATED — Hetzner uses hcloud SDK now)
-# Kept for potential future use with DigitalOcean, Vultr, Linode.
-# =============================================================================
-
-
-def get_terraform_module_path(provider_type: str, base_path: str) -> str | None:
-    """
-    Get the Terraform module path for a provider.
-
-    Args:
-        provider_type: Provider type
-        base_path: Base path to terraform modules directory
-
-    Returns:
-        Full path to the provider's terraform module or None
-    """
-    config = get_provider_config(provider_type)
-    if not config:
-        return None
-
-    module_name = config.get("terraform_module")
-    if not module_name:
-        return None
-
-    return f"{base_path}/{module_name}"
-
-
-def get_terraform_provider_block(provider_type: str) -> str | None:
-    """
-    Generate Terraform provider configuration block.
-
-    Args:
-        provider_type: Provider type
-
-    Returns:
-        Terraform HCL string for required_providers block or None
-    """
-    config = get_provider_config(provider_type)
-    if not config:
-        return None
-
-    provider = config.get("terraform_provider")
-    version = config.get("terraform_provider_version")
-
-    if not provider:
-        return None
-
-    # Extract provider name (e.g., "hcloud" from "hetznercloud/hcloud")
-    provider_name = provider.split("/")[-1] if "/" in provider else provider
-
-    return f"""
-    {provider_name} = {{
-      source  = "{provider}"
-      version = "{version}"
-    }}"""
-
-
-def get_terraform_variables_for_deployment(
-    deployment: NodeDeployment,
-    credentials: dict[str, str],
-    ssh_public_key: str,
-) -> dict[str, Any]:
-    """
-    Get Terraform variables for a deployment based on provider config.
-
-    Args:
-        deployment: NodeDeployment instance
-        credentials: Provider credentials
-        ssh_public_key: SSH public key for the server
-
-    Returns:
-        Dict of Terraform variables
-    """
-    provider_type = deployment.provider.provider_type
-    config = get_provider_config(provider_type)
-
-    if not config:
-        return {}
-
-    tf_vars = config.get("terraform_vars", {})
-
-    return {
-        tf_vars.get("api_token_var", "api_token"): credentials.get(config.get("credential_key", "api_token"), ""),
-        "deployment_id": str(deployment.id),
-        "hostname": deployment.hostname,
-        "fqdn": deployment.fqdn,
-        "environment": deployment.environment,
-        "node_type": deployment.node_type,
-        tf_vars.get("server_type_var", "server_type"): (
-            deployment.node_size.provider_type_id if deployment.node_size else ""
-        ),
-        tf_vars.get("region_var", "region"): (deployment.region.provider_region_id if deployment.region else ""),
-        "server_image": tf_vars.get("image_default", "ubuntu-22.04"),
-        "ssh_public_key": ssh_public_key,
-    }
-
-
-def map_terraform_outputs_to_deployment(
-    provider_type: str,
-    outputs: dict[str, Any],
-    deployment: NodeDeployment,
-) -> None:
-    """
-    Map Terraform outputs to deployment model fields based on provider config.
-
-    Args:
-        provider_type: Provider type
-        outputs: Terraform outputs dict
-        deployment: NodeDeployment to update
-    """
-    config = get_provider_config(provider_type)
-    if not config:
-        return
-
-    mappings = config.get("output_mappings", {})
-
-    for tf_output, model_field in mappings.items():
-        if tf_output in outputs:
-            value = outputs[tf_output]
-            # Handle nested output format from terraform
-            if isinstance(value, dict) and "value" in value:
-                value = value["value"]
-            setattr(deployment, model_field, value)
-
-
-# =============================================================================
 # Credential Helpers
 # =============================================================================
 
 
 def validate_provider_prerequisites(
     provider_type: str,
-    base_terraform_path: str | None = None,
 ) -> Result[dict[str, Any], str]:
     """
     Validate all prerequisites for a provider deployment.
@@ -504,12 +351,9 @@ def validate_provider_prerequisites(
     Checks:
     - Provider config exists
     - CLI tool is installed and accessible
-    - Terraform binary is available
-    - Provider terraform module exists on disk
 
     Args:
         provider_type: Provider type key (e.g., "hetzner", "digitalocean")
-        base_terraform_path: Base path to terraform modules. If None, uses default.
 
     Returns:
         Result with validation details dict or error message
@@ -530,21 +374,6 @@ def validate_provider_prerequisites(
         )
     details["cli_tool"] = cli_tool
     details["cli_path"] = cli_path
-
-    # 3. Check terraform is available
-    terraform_path = shutil.which("terraform")
-    if not terraform_path:
-        return Err("Terraform binary not found. Please install Terraform >= 1.5.0.")
-    details["terraform_path"] = terraform_path
-
-    # 4. Check terraform module directory exists
-    if base_terraform_path is None:
-        base_terraform_path = str(Path(__file__).parent.parent.parent / "infrastructure" / "terraform" / "modules")
-    module_name = config.get("terraform_module", provider_type)
-    module_path = Path(base_terraform_path) / module_name
-    if not module_path.is_dir():
-        return Err(f"Terraform module not found at '{module_path}' for provider '{provider_type}'.")
-    details["module_path"] = str(module_path)
 
     logger.info(f"✅ [Provider:{provider_type}] All prerequisites validated")
     return Ok(details)
@@ -569,7 +398,7 @@ def get_provider_token(provider: CloudProvider) -> Result[str, str]:
 
     # Primary: credential vault (sole source when credential_identifier is configured)
     if provider.credential_identifier:
-        from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
+        from apps.common.credential_vault import get_credential_vault
 
         vault = get_credential_vault()
         result = vault.get_credential(
@@ -609,7 +438,7 @@ def store_provider_token(
     Returns:
         Result with credential_identifier string or error message
     """
-    from apps.common.credential_vault import CredentialData, get_credential_vault  # noqa: PLC0415
+    from apps.common.credential_vault import CredentialData, get_credential_vault
 
     credential_id = provider.credential_identifier or f"cloud_provider_{provider.code}"
     vault = get_credential_vault()

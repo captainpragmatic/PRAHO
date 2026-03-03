@@ -11,6 +11,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.core.cache import cache
 from django.utils import timezone
 
 from apps.infrastructure.deployment_service import get_deployment_service
@@ -21,30 +22,43 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Module-level constants for scheduled tasks
+_STUCK_TIMEOUT_HOURS = 2
+_INTERMEDIATE_STATUSES = [
+    "provisioning_node",
+    "configuring_dns",
+    "installing_panel",
+    "configuring_server",
+    "validating",
+]
+_DRIFT_SCAN_LOCK_ID = "drift_scan_running"
+_DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
+
 
 def deploy_node_task(
     deployment_id: int,
-    credentials: dict[str, str],
-    cloudflare_api_token: str | None = None,
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to deploy a node.
 
     This task is queued via Django-Q2 and executes the complete
-    deployment pipeline in the background.
+    deployment pipeline in the background. Credentials are fetched
+    at execution time from the credential vault (never serialized to task queue).
 
     Args:
         deployment_id: ID of the NodeDeployment to deploy
-        credentials: Provider credentials dict (e.g., {"api_token": "xxx"})
-        cloudflare_api_token: Cloudflare API token (optional)
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the deployment
 
     Returns:
         dict with deployment result information
     """
-    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.models import CloudProvider, NodeDeployment
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.settings.services import SettingsService
+    from apps.users.models import User
 
     logger.info(f"[Task:deploy_node] Starting deployment for deployment_id={deployment_id}")
 
@@ -53,6 +67,24 @@ def deploy_node_task(
     except NodeDeployment.DoesNotExist:
         logger.error(f"[Task:deploy_node] Deployment {deployment_id} not found")
         return {"success": False, "error": f"Deployment {deployment_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:deploy_node] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:deploy_node] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
+
+    # Fetch Cloudflare token at execution time (never serialized to queue)
+    _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
+    cloudflare_api_token: str | None = str(_cf_raw) if _cf_raw else None
 
     user = None
     if user_id:
@@ -88,24 +120,27 @@ def deploy_node_task(
 
 def destroy_node_task(
     deployment_id: int,
-    credentials: dict[str, str],
-    cloudflare_api_token: str | None = None,
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to destroy a node.
 
+    Credentials are fetched at execution time from the credential vault
+    (never serialized to task queue).
+
     Args:
         deployment_id: ID of the NodeDeployment to destroy
-        credentials: Provider credentials dict
-        cloudflare_api_token: Cloudflare API token
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the destruction
 
     Returns:
         dict with destruction result information
     """
-    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.models import CloudProvider, NodeDeployment
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.settings.services import SettingsService
+    from apps.users.models import User
 
     logger.info(f"[Task:destroy_node] Starting destruction for deployment_id={deployment_id}")
 
@@ -114,6 +149,24 @@ def destroy_node_task(
     except NodeDeployment.DoesNotExist:
         logger.error(f"[Task:destroy_node] Deployment {deployment_id} not found")
         return {"success": False, "error": f"Deployment {deployment_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:destroy_node] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:destroy_node] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
+
+    # Fetch Cloudflare token at execution time (never serialized to queue)
+    _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
+    cloudflare_api_token: str | None = str(_cf_raw) if _cf_raw else None
 
     user = None
     if user_id:
@@ -146,24 +199,27 @@ def destroy_node_task(
 
 def retry_deployment_task(
     deployment_id: int,
-    credentials: dict[str, str],
-    cloudflare_api_token: str | None = None,
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to retry a failed deployment.
 
+    Credentials are fetched at execution time from the credential vault
+    (never serialized to task queue).
+
     Args:
         deployment_id: ID of the failed NodeDeployment to retry
-        credentials: Provider credentials dict
-        cloudflare_api_token: Cloudflare API token
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the retry
 
     Returns:
         dict with retry result information
     """
-    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.models import CloudProvider, NodeDeployment
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.settings.services import SettingsService
+    from apps.users.models import User
 
     logger.info(f"[Task:retry_deployment] Retrying deployment_id={deployment_id}")
 
@@ -172,6 +228,24 @@ def retry_deployment_task(
     except NodeDeployment.DoesNotExist:
         logger.error(f"[Task:retry_deployment] Deployment {deployment_id} not found")
         return {"success": False, "error": f"Deployment {deployment_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:retry_deployment] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:retry_deployment] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
+
+    # Fetch Cloudflare token at execution time (never serialized to queue)
+    _cf_raw = SettingsService.get_setting("node_deployment.dns_cloudflare_api_token")
+    cloudflare_api_token: str | None = str(_cf_raw) if _cf_raw else None
 
     user = None
     if user_id:
@@ -219,7 +293,7 @@ def validate_node_task(deployment_id: int) -> dict[str, Any]:
     Returns:
         dict with validation result information
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
         NodeDeployment,
         NodeDeploymentLog,
     )
@@ -288,7 +362,7 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     Returns:
         dict with overall validation summary
     """
-    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+    from apps.infrastructure.models import NodeDeployment
 
     logger.info("[Task:bulk_validate] Starting bulk validation of all nodes")
 
@@ -351,7 +425,7 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     """
     Async task to clean up old failed deployments.
 
-    Removes Terraform state and temporary files for deployments
+    Cleans up cloud resources and temporary files for deployments
     that have been failed for longer than max_age_hours.
 
     Args:
@@ -360,9 +434,9 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     Returns:
         dict with cleanup summary
     """
-    from datetime import timedelta  # noqa: PLC0415
+    from datetime import timedelta
 
-    from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415
+    from apps.infrastructure.models import NodeDeployment
 
     logger.info(f"[Task:cleanup] Cleaning up failed deployments older than {max_age_hours}h")
 
@@ -381,15 +455,14 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
             # If server was created in the cloud, attempt cleanup via provider SDK
             if deployment.external_node_id and deployment.provider:
                 try:
-                    from apps.infrastructure.provider_config import get_provider_token  # noqa: PLC0415
+                    from apps.infrastructure.provider_config import get_provider_token
 
                     token_result = get_provider_token(deployment.provider)
-                    if token_result.is_ok() and deployment.provider.provider_type == "hetzner":
-                        # Currently only hcloud SDK supports server deletion
-                        from apps.infrastructure.hcloud_service import get_hcloud_service  # noqa: PLC0415
+                    if token_result.is_ok():
+                        from apps.infrastructure.cloud_gateway import get_cloud_gateway
 
-                        hcloud_svc = get_hcloud_service(token_result.unwrap())
-                        hcloud_svc.delete_server(int(deployment.external_node_id))
+                        gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
+                        gateway.delete_server(deployment.external_node_id)
                         logger.info(f"[Task:cleanup] Deleted cloud server for {deployment.hostname}")
                 except Exception as e:
                     logger.warning(f"[Task:cleanup] Could not delete cloud server for {deployment.hostname}: {e}")
@@ -409,6 +482,61 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     }
 
 
+def recover_stuck_deployments_task() -> dict[str, Any]:
+    """
+    Scheduled every 30 minutes. Recovers deployments stuck in intermediate statuses.
+
+    Finds deployments that have been in an intermediate status for more than 2 hours
+    and transitions them to failed to unblock the pipeline.
+
+    Returns:
+        dict with recovery summary
+    """
+    from datetime import timedelta
+
+    from apps.infrastructure.models import NodeDeployment
+
+    stuck_timeout_hours = _STUCK_TIMEOUT_HOURS
+
+    logger.info(f"🚀 [Task:recover_stuck] Checking for deployments stuck for >{stuck_timeout_hours}h")
+
+    cutoff = timezone.now() - timedelta(hours=stuck_timeout_hours)
+
+    stuck_deployments = NodeDeployment.objects.filter(
+        status__in=_INTERMEDIATE_STATUSES,
+        updated_at__lt=cutoff,
+    )
+
+    recovered_count = 0
+    errors: list[dict[str, str]] = []
+
+    for deployment in stuck_deployments:
+        try:
+            stuck_duration = (timezone.now() - deployment.updated_at).total_seconds() / 3600
+            error_msg = (
+                f"Deployment stuck in '{deployment.status}' for {stuck_duration:.1f}h — auto-recovered to failed"
+            )
+            logger.warning(
+                f"⚠️ [Task:recover_stuck] {deployment.hostname} stuck in '{deployment.status}' "
+                f"for {stuck_duration:.1f}h, marking failed"
+            )
+            deployment.status = "failed"
+            deployment.error_message = error_msg
+            deployment.save(update_fields=["status", "error_message", "updated_at"])
+            recovered_count += 1
+        except Exception as e:
+            logger.error(f"🔥 [Task:recover_stuck] Error recovering {deployment.hostname}: {e}")
+            errors.append({"hostname": deployment.hostname, "error": str(e)})
+
+    logger.info(f"✅ [Task:recover_stuck] Recovered {recovered_count} stuck deployments, {len(errors)} errors")
+
+    return {
+        "success": len(errors) == 0,
+        "recovered_count": recovered_count,
+        "errors": errors,
+    }
+
+
 # ===============================================================================
 # LIFECYCLE TASKS
 # ===============================================================================
@@ -417,27 +545,32 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
 def upgrade_node_task(
     deployment_id: int,
     new_size_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to upgrade a node to a new size.
 
+    Credentials are fetched at execution time from the credential vault
+    (never serialized to task queue).
+
     Args:
         deployment_id: ID of the NodeDeployment to upgrade
         new_size_id: ID of the new NodeSize
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the upgrade
 
     Returns:
         dict with upgrade result information
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
+        CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
         NodeSize,
     )
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.users.models import User
 
     logger.info(f"[Task:upgrade_node] Upgrading deployment_id={deployment_id} to size_id={new_size_id}")
 
@@ -452,6 +585,20 @@ def upgrade_node_task(
     except NodeSize.DoesNotExist:
         logger.error(f"[Task:upgrade_node] Size {new_size_id} not found")
         return {"success": False, "error": f"Size {new_size_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:upgrade_node] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:upgrade_node] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
 
     user = None
     if user_id:
@@ -514,11 +661,11 @@ def maintenance_task(
     Returns:
         dict with maintenance result information
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.users.models import User
 
     logger.info(f"[Task:maintenance] Running maintenance on deployment_id={deployment_id}")
 
@@ -577,25 +724,30 @@ def maintenance_task(
 
 def stop_node_task(
     deployment_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to stop (power off) a node.
 
+    Credentials are fetched at execution time from the credential vault
+    (never serialized to task queue).
+
     Args:
         deployment_id: ID of the NodeDeployment to stop
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the stop
 
     Returns:
         dict with stop result information
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
+        CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.users.models import User
 
     logger.info(f"[Task:stop_node] Stopping deployment_id={deployment_id}")
 
@@ -604,6 +756,20 @@ def stop_node_task(
     except NodeDeployment.DoesNotExist:
         logger.error(f"[Task:stop_node] Deployment {deployment_id} not found")
         return {"success": False, "error": f"Deployment {deployment_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:stop_node] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:stop_node] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
 
     user = None
     if user_id:
@@ -649,25 +815,30 @@ def stop_node_task(
 
 def start_node_task(
     deployment_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to start (power on) a node.
 
+    Credentials are fetched at execution time from the credential vault
+    (never serialized to task queue).
+
     Args:
         deployment_id: ID of the NodeDeployment to start
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the start
 
     Returns:
         dict with start result information
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
+        CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.users.models import User
 
     logger.info(f"[Task:start_node] Starting deployment_id={deployment_id}")
 
@@ -676,6 +847,20 @@ def start_node_task(
     except NodeDeployment.DoesNotExist:
         logger.error(f"[Task:start_node] Deployment {deployment_id} not found")
         return {"success": False, "error": f"Deployment {deployment_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:start_node] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:start_node] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
 
     user = None
     if user_id:
@@ -721,25 +906,30 @@ def start_node_task(
 
 def reboot_node_task(
     deployment_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Async task to reboot a node.
 
+    Credentials are fetched at execution time from the credential vault
+    (never serialized to task queue).
+
     Args:
         deployment_id: ID of the NodeDeployment to reboot
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the reboot
 
     Returns:
         dict with reboot result information
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
+        CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.users.models import User  # noqa: PLC0415
+    from apps.infrastructure.provider_config import get_provider_token
+    from apps.users.models import User
 
     logger.info(f"[Task:reboot_node] Rebooting deployment_id={deployment_id}")
 
@@ -748,6 +938,20 @@ def reboot_node_task(
     except NodeDeployment.DoesNotExist:
         logger.error(f"[Task:reboot_node] Deployment {deployment_id} not found")
         return {"success": False, "error": f"Deployment {deployment_id} not found"}
+
+    # Fetch credentials at execution time from vault
+    try:
+        provider = CloudProvider.objects.get(id=provider_id)
+    except CloudProvider.DoesNotExist:
+        logger.error(f"[Task:reboot_node] Provider {provider_id} not found")
+        return {"success": False, "error": f"Provider {provider_id} not found"}
+
+    token_result = get_provider_token(provider)
+    if token_result.is_err():
+        logger.error(f"[Task:reboot_node] Failed to get token for provider {provider.name}")
+        return {"success": False, "error": f"Failed to get provider token: {token_result.unwrap_err()}"}
+
+    credentials: dict[str, str] = {"api_token": token_result.unwrap()}
 
     user = None
     if user_id:
@@ -798,29 +1002,29 @@ def reboot_node_task(
 
 def queue_deploy_node(
     deployment_id: int,
-    credentials: dict[str, str],
-    cloudflare_api_token: str | None = None,
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
     Queue a node deployment task.
 
+    Tokens are NOT passed to the queue — they are fetched from the credential
+    vault at task execution time, preventing cleartext secrets in the DB.
+
     Args:
         deployment_id: ID of the NodeDeployment to deploy
-        credentials: Provider credentials dict
-        cloudflare_api_token: Cloudflare API token
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the deployment
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.deploy_node_task",
         deployment_id,
-        credentials,
-        cloudflare_api_token,
+        provider_id,
         user_id,
         task_name=f"deploy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
@@ -832,8 +1036,7 @@ def queue_deploy_node(
 
 def queue_destroy_node(
     deployment_id: int,
-    credentials: dict[str, str],
-    cloudflare_api_token: str | None = None,
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
@@ -841,20 +1044,18 @@ def queue_destroy_node(
 
     Args:
         deployment_id: ID of the NodeDeployment to destroy
-        credentials: Provider credentials dict
-        cloudflare_api_token: Cloudflare API token
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the destruction
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
         deployment_id,
-        credentials,
-        cloudflare_api_token,
+        provider_id,
         user_id,
         task_name=f"destroy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.destruction_complete_hook",
@@ -866,8 +1067,7 @@ def queue_destroy_node(
 
 def queue_retry_deployment(
     deployment_id: int,
-    credentials: dict[str, str],
-    cloudflare_api_token: str | None = None,
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
@@ -875,20 +1075,18 @@ def queue_retry_deployment(
 
     Args:
         deployment_id: ID of the failed NodeDeployment to retry
-        credentials: Provider credentials dict
-        cloudflare_api_token: Cloudflare API token
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the retry
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.retry_deployment_task",
         deployment_id,
-        credentials,
-        cloudflare_api_token,
+        provider_id,
         user_id,
         task_name=f"retry_deployment_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
@@ -901,7 +1099,7 @@ def queue_retry_deployment(
 def queue_upgrade_node(
     deployment_id: int,
     new_size_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
@@ -910,19 +1108,19 @@ def queue_upgrade_node(
     Args:
         deployment_id: ID of the NodeDeployment to upgrade
         new_size_id: ID of the new NodeSize
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the upgrade
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.upgrade_node_task",
         deployment_id,
         new_size_id,
-        credentials,
+        provider_id,
         user_id,
         task_name=f"upgrade_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
@@ -950,7 +1148,7 @@ def queue_maintenance(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.maintenance_task",
@@ -968,7 +1166,7 @@ def queue_maintenance(
 
 def queue_stop_node(
     deployment_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
@@ -976,18 +1174,18 @@ def queue_stop_node(
 
     Args:
         deployment_id: ID of the NodeDeployment to stop
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the stop
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.stop_node_task",
         deployment_id,
-        credentials,
+        provider_id,
         user_id,
         task_name=f"stop_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
@@ -999,7 +1197,7 @@ def queue_stop_node(
 
 def queue_start_node(
     deployment_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
@@ -1007,18 +1205,18 @@ def queue_start_node(
 
     Args:
         deployment_id: ID of the NodeDeployment to start
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the start
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.start_node_task",
         deployment_id,
-        credentials,
+        provider_id,
         user_id,
         task_name=f"start_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
@@ -1030,7 +1228,7 @@ def queue_start_node(
 
 def queue_reboot_node(
     deployment_id: int,
-    credentials: dict[str, str],
+    provider_id: int,
     user_id: int | None = None,
 ) -> str:
     """
@@ -1038,18 +1236,18 @@ def queue_reboot_node(
 
     Args:
         deployment_id: ID of the NodeDeployment to reboot
-        credentials: Provider credentials dict
+        provider_id: ID of the CloudProvider (token fetched at execution time)
         user_id: ID of the user initiating the reboot
 
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.reboot_node_task",
         deployment_id,
-        credentials,
+        provider_id,
         user_id,
         task_name=f"reboot_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
@@ -1070,7 +1268,7 @@ def deployment_complete_hook(task: Any) -> None:
 
     Used for notifications and audit logging.
     """
-    from apps.infrastructure.models import (  # noqa: PLC0415
+    from apps.infrastructure.models import (
         NodeDeployment,
         NodeDeploymentLog,
     )
@@ -1152,17 +1350,16 @@ def calculate_daily_costs_task() -> dict[str, Any]:
     Returns:
         dict with calculation results
     """
-    from datetime import timedelta  # noqa: PLC0415
+    from datetime import timedelta
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
+    from apps.infrastructure.cost_service import get_cost_tracking_service
 
     logger.info("[Task:calculate_daily_costs] Starting daily cost calculation")
 
     now = timezone.now()
-    yesterday_start = timezone.make_aware(now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1))
-    yesterday_end = timezone.make_aware(
-        now.replace(hour=23, minute=59, second=59, microsecond=999999) - timedelta(days=1)
-    )
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    yesterday_end = today_start - timedelta(microseconds=1)
 
     service = get_cost_tracking_service()
     results = service.calculate_all_deployment_costs(yesterday_start, yesterday_end)
@@ -1198,10 +1395,10 @@ def calculate_monthly_costs_task(year: int, month: int) -> dict[str, Any]:
     Returns:
         dict with calculation results
     """
-    from calendar import monthrange  # noqa: PLC0415
-    from datetime import datetime  # noqa: PLC0415
+    from calendar import monthrange
+    from datetime import datetime
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
+    from apps.infrastructure.cost_service import get_cost_tracking_service
 
     logger.info(f"[Task:calculate_monthly_costs] Calculating costs for {year}-{month:02d}")
 
@@ -1247,10 +1444,10 @@ def generate_cost_report_task(year: int, month: int) -> dict[str, Any]:
     Returns:
         dict with cost report data
     """
-    from calendar import monthrange  # noqa: PLC0415
-    from datetime import datetime  # noqa: PLC0415
+    from calendar import monthrange
+    from datetime import datetime
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service  # noqa: PLC0415
+    from apps.infrastructure.cost_service import get_cost_tracking_service
 
     logger.info(f"[Task:generate_cost_report] Generating report for {year}-{month:02d}")
 
@@ -1307,8 +1504,8 @@ def sync_providers_task() -> dict[str, Any]:
     Scheduled daily at 4:00 AM via Django-Q2 Schedule.
     Can also be triggered manually via management command or UI.
     """
-    from apps.infrastructure.models import CloudProvider  # noqa: PLC0415
-    from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token  # noqa: PLC0415
+    from apps.infrastructure.models import CloudProvider
+    from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token
 
     logger.info("[Task:sync_providers] Starting provider catalog sync")
     results: dict[str, dict[str, str]] = {}
@@ -1342,7 +1539,7 @@ def sync_providers_task() -> dict[str, Any]:
 
 def queue_sync_providers() -> str:
     """Queue a provider catalog sync task."""
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.sync_providers_task",
@@ -1363,7 +1560,7 @@ def queue_calculate_monthly_costs(year: int, month: int) -> str:
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task  # noqa: PLC0415
+    from django_q.tasks import async_task
 
     task_id = async_task(
         "apps.infrastructure.tasks.calculate_monthly_costs_task",
@@ -1374,3 +1571,176 @@ def queue_calculate_monthly_costs(year: int, month: int) -> str:
 
     logger.info(f"[Queue] Monthly cost calculation queued: {year}-{month:02d}, task_id={task_id}")
     return task_id
+
+
+# =============================================================================
+# Drift Detection & Remediation Tasks
+# =============================================================================
+
+
+def run_drift_scan_task() -> dict[str, Any]:
+    """Scheduled every 15 min. Scans all active (status=completed) deployments."""
+    if not cache.add(_DRIFT_SCAN_LOCK_ID, "1", timeout=_DRIFT_SCAN_LOCK_TIMEOUT):
+        logger.info("⚠️ [Task:drift_scan] Scan already in progress, skipping")
+        return {"skipped": True, "reason": "concurrent scan in progress"}
+
+    try:
+        from apps.infrastructure.drift_scanner import get_drift_scanner_service
+        from apps.infrastructure.models import NodeDeployment
+
+        logger.info("🚀 [Task:drift_scan] Starting drift scan for all active deployments")
+
+        scanner = get_drift_scanner_service()
+        deployments = NodeDeployment.objects.filter(status="completed")
+        total = deployments.count()
+        scanned = 0
+        findings = 0
+        errors = 0
+
+        for deployment in deployments:
+            try:
+                result = scanner.scan_deployment(deployment)
+                if result.is_ok():
+                    findings += len(result.unwrap())
+                else:
+                    errors += 1
+                    logger.warning(f"⚠️ [Task:drift_scan] Scan failed for {deployment.hostname}: {result.unwrap_err()}")
+                scanned += 1
+            except Exception as e:
+                errors += 1
+                logger.error(f"🔥 [Task:drift_scan] Error scanning {deployment.hostname}: {e}")
+
+        logger.info(f"✅ [Task:drift_scan] Complete: {scanned}/{total} scanned, {findings} findings, {errors} errors")
+        return {"total": total, "scanned": scanned, "findings": findings, "errors": errors}
+    finally:
+        cache.delete(_DRIFT_SCAN_LOCK_ID)
+
+
+def apply_scheduled_remediations_task() -> dict[str, Any]:
+    """Scheduled every 5 min. Finds requests with status=scheduled and scheduled_for <= now."""
+    from django.db import transaction
+
+    from apps.infrastructure.drift_remediation import get_drift_remediation_service
+    from apps.infrastructure.models import DriftRemediationRequest
+
+    logger.info("🚀 [Task:scheduled_remediations] Checking for due scheduled remediations")
+
+    now = timezone.now()
+
+    # Atomic claim: lock and update status to prevent concurrent workers from double-executing
+    with transaction.atomic():
+        due_pks = list(
+            DriftRemediationRequest.objects.select_for_update()
+            .filter(status="scheduled", scheduled_for__lte=now)
+            .values_list("pk", flat=True)
+        )
+        if due_pks:
+            DriftRemediationRequest.objects.filter(pk__in=due_pks).update(status="approved")
+
+    service = get_drift_remediation_service()
+    applied = 0
+    failed = 0
+
+    for pk in due_pks:
+        try:
+            req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=pk)
+            result = service.execute_remediation(req)
+            if result.is_ok():
+                applied += 1
+            else:
+                failed += 1
+                logger.warning(f"⚠️ [Task:scheduled_remediations] Failed: {result.unwrap_err()}")
+        except Exception as e:
+            failed += 1
+            logger.error(f"🔥 [Task:scheduled_remediations] Error: {e}")
+
+    logger.info(f"✅ [Task:scheduled_remediations] Applied: {applied}, Failed: {failed}")
+    return {"applied": applied, "failed": failed}
+
+
+def check_remediation_health_task() -> dict[str, Any]:
+    """Scheduled every 5 min. Re-checks deployments remediated in last hour."""
+    from datetime import timedelta
+
+    from apps.infrastructure.drift_scanner import get_drift_scanner_service
+    from apps.infrastructure.models import DriftRemediationRequest
+
+    logger.info("🚀 [Task:remediation_health] Checking recently remediated deployments")
+
+    one_hour_ago = timezone.now() - timedelta(hours=1)
+    recent = (
+        DriftRemediationRequest.objects.filter(
+            status="completed",
+            completed_at__gte=one_hour_ago,
+        )
+        .select_related("deployment")
+        .values_list("deployment", flat=True)
+        .distinct()
+    )
+
+    from apps.infrastructure.models import NodeDeployment
+
+    scanner = get_drift_scanner_service()
+    checked = 0
+    issues = 0
+
+    deployment_ids = list(recent)
+    deployments = {d.pk: d for d in NodeDeployment.objects.filter(pk__in=deployment_ids)}
+
+    for deployment_id in deployment_ids:
+        try:
+            deployment = deployments.get(deployment_id)
+            if not deployment:
+                continue
+            result = scanner.scan_deployment(deployment, check_types=["network"])
+            if result.is_ok() and len(result.unwrap()) > 0:
+                issues += 1
+            checked += 1
+        except Exception as e:
+            logger.error(f"🔥 [Task:remediation_health] Error checking deployment {deployment_id}: {e}")
+
+    logger.info(f"✅ [Task:remediation_health] Checked: {checked}, Issues: {issues}")
+    return {"checked": checked, "issues": issues}
+
+
+def cleanup_old_snapshots_task() -> dict[str, Any]:
+    """Scheduled daily. Deletes snapshots with expires_at < now via gateway + DB."""
+    from apps.infrastructure.cloud_gateway import get_cloud_gateway
+    from apps.infrastructure.models import DriftSnapshot
+    from apps.infrastructure.provider_config import get_provider_token
+
+    logger.info("🚀 [Task:cleanup_snapshots] Cleaning up expired snapshots")
+
+    now = timezone.now()
+    expired = DriftSnapshot.objects.filter(
+        expires_at__lte=now,
+        status="available",
+    ).select_related("deployment__provider")
+
+    deleted = 0
+    failed = 0
+
+    for snapshot in expired:
+        try:
+            provider = snapshot.deployment.provider
+            token_result = get_provider_token(provider)
+            if token_result.is_err():
+                failed += 1
+                continue
+
+            gateway = get_cloud_gateway(provider.provider_type, token_result.unwrap())
+            result = gateway.delete_snapshot(snapshot.provider_snapshot_id)
+
+            if result.is_ok():
+                snapshot.status = "deleted"
+                snapshot.save(update_fields=["status"])
+                deleted += 1
+            else:
+                failed += 1
+                logger.warning(f"⚠️ [Task:cleanup_snapshots] Delete failed: {result.unwrap_err()}")
+        except Exception as e:
+            failed += 1
+            logger.error(f"🔥 [Task:cleanup_snapshots] Error: {e}")
+
+    logger.info(f"✅ [Task:cleanup_snapshots] Deleted: {deleted}, Failed: {failed}")
+    return {"deleted": deleted, "failed": failed}

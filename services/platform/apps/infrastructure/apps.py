@@ -3,8 +3,11 @@ Django app configuration for Infrastructure app
 """
 
 import contextlib
+import logging
 
 from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class InfrastructureConfig(AppConfig):
@@ -17,9 +20,62 @@ class InfrastructureConfig(AppConfig):
         # Import signals to register them
         from . import signals  # noqa: F401
 
+        # Import provider modules so register_cloud_gateway() fires at startup
+        from . import aws_service, digitalocean_service, hcloud_service, vultr_service  # noqa: F401
+
         from django.db.models.signals import post_migrate
 
         post_migrate.connect(self._sync_providers_on_first_boot, sender=self)
+        post_migrate.connect(self._schedule_infrastructure_tasks, sender=self)
+
+    @staticmethod
+    def _schedule_infrastructure_tasks(sender: type, **kwargs: object) -> None:
+        """Register infrastructure scheduled tasks with Django-Q2."""
+        try:
+            from django_q.models import Schedule
+        except ImportError:
+            return
+
+        schedules = [
+            ("drift_scan", "apps.infrastructure.tasks.run_drift_scan_task", 15, Schedule.MINUTES),
+            (
+                "scheduled_remediations",
+                "apps.infrastructure.tasks.apply_scheduled_remediations_task",
+                5,
+                Schedule.MINUTES,
+            ),
+            ("remediation_health", "apps.infrastructure.tasks.check_remediation_health_task", 5, Schedule.MINUTES),
+            ("cleanup_snapshots", "apps.infrastructure.tasks.cleanup_old_snapshots_task", 1, Schedule.DAILY),
+            (
+                "cleanup_failed_deployments",
+                "apps.infrastructure.tasks.cleanup_failed_deployments_task",
+                360,
+                Schedule.MINUTES,
+            ),
+            ("bulk_validate_nodes", "apps.infrastructure.tasks.bulk_validate_nodes_task", 1, Schedule.DAILY),
+            ("calculate_daily_costs", "apps.infrastructure.tasks.calculate_daily_costs_task", 1, Schedule.DAILY),
+            ("sync_providers", "apps.infrastructure.tasks.sync_providers_task", 7, Schedule.WEEKLY),
+            (
+                "recover_stuck_deployments",
+                "apps.infrastructure.tasks.recover_stuck_deployments_task",
+                30,
+                Schedule.MINUTES,
+            ),
+        ]
+
+        for name, func, interval, schedule_type in schedules:
+            try:
+                Schedule.objects.update_or_create(
+                    name=f"infra_{name}",
+                    defaults={
+                        "func": func,
+                        "schedule_type": schedule_type,
+                        "minutes": interval if schedule_type == Schedule.MINUTES else None,
+                        "repeats": -1,
+                    },
+                )
+            except Exception:
+                logger.error("Failed to register schedule: infra_%s", name, exc_info=True)
 
     @staticmethod
     def _sync_providers_on_first_boot(sender: type, **kwargs: object) -> None:

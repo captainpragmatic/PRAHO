@@ -351,7 +351,7 @@ class VirtualminConfig:
     use_credential_vault: bool = True
 
     @classmethod
-    def from_credentials(  # noqa: PLR0913
+    def from_credentials(
         cls,
         hostname: str,
         username: str,
@@ -564,7 +564,7 @@ class VirtualminGateway:
         """Lazy load authentication manager"""
         if not self._auth_manager:
             # Import here to avoid circular imports
-            from .virtualmin_auth_manager import VirtualminAuthenticationManager  # noqa: PLC0415
+            from .virtualmin_auth_manager import VirtualminAuthenticationManager
 
             self._auth_manager = VirtualminAuthenticationManager(self.server)
         return self._auth_manager
@@ -572,7 +572,7 @@ class VirtualminGateway:
     def _get_credential_vault(self) -> CredentialVault:
         """Lazy load credential vault"""
         if not self._credential_vault:
-            from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415
+            from apps.common.credential_vault import get_credential_vault
 
             self._credential_vault = get_credential_vault()
         return self._credential_vault
@@ -651,7 +651,7 @@ class VirtualminGateway:
         """
         if use_fallback_auth:
             # Use multi-path authentication manager
-            return self._get_auth_manager().execute_virtualmin_command(program, parameters or {})  # type: ignore[return-value]
+            return self._get_auth_manager().execute_virtualmin_command(program, parameters or {})
         else:
             # Use direct API call (legacy path)
             return self._call_direct_api(program, parameters or {})
@@ -1044,9 +1044,17 @@ class VirtualminGateway:
         return result.is_ok()
 
     def call_api(self, command: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Generic API call method"""
-        # TODO: Implement generic API call
-        return {"status": "ok", "command": command}
+        """
+        Generic API call method that delegates to the core call() method.
+
+        Returns raw response data as a dict, or raises RuntimeError on failure.
+        """
+        result = self.call(command, params or {})
+        if result.is_err():
+            error = result.unwrap_err()
+            raise RuntimeError(f"Virtualmin API call '{command}' failed: {error}")
+        response = result.unwrap()
+        return {"status": "ok", "command": command, "data": response.data}
 
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
         """

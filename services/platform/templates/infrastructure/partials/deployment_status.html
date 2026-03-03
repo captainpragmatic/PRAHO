@@ -42,13 +42,11 @@
 
     <!-- Progress Steps -->
     <div class="grid grid-cols-6 gap-2 mt-4 text-xs text-center">
-        {% with stages="SSH Key,Terraform,DNS,Ansible,Validate,Register" %}
-        {% for stage in stages.split %}
-        <div class="{% if forloop.counter <= progress_percentage|divisibleby:16 %}text-green-400{% else %}text-slate-500{% endif %}">
+        {% for stage in stages %}
+        <div class="{% if forloop.counter <= progress_step %}text-green-400{% else %}text-slate-500{% endif %}">
             {{ stage }}
         </div>
         {% endfor %}
-        {% endwith %}
     </div>
     {% endif %}
 
