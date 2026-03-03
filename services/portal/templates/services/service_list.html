@@ -7,16 +7,7 @@
 {% block content %}
 <div class="space-y-6">
   {# Shared Header Card #}
-  {% include "components/list_page_header.html" with list_icon_bg="bg-green-600" list_icon_svg_path="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" list_title=page_title list_title_mobile=page_title_mobile list_subtitle=page_subtitle list_stats=header_stats list_action_include="services/partials/header_action.html" %}
-
-  {# Messages #}
-  {% if messages %}
-  <div class="space-y-2">
-    {% for message in messages %}
-    {% alert message variant=message.tags dismissible=True %}
-    {% endfor %}
-  </div>
-  {% endif %}
+  {% include "components/list_page_header.html" with list_icon_bg="bg-green-600" list_icon_name="services" list_icon_svg_path="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" list_title=page_title list_title_mobile=page_title_mobile list_subtitle=page_subtitle list_stats=header_stats list_action_include="services/partials/header_action.html" %}
 
   {# Shared Filters with Tabs (status) + Search #}
   {% url 'services:search_api' as services_search_url %}

@@ -45,14 +45,14 @@
                     <td class="px-6 py-4 whitespace-nowrap">
                         <div class="flex items-center">
                             <div class="flex-shrink-0 w-8 h-8">
-                                <span class="text-lg">🌐</span>
+                                <span class="text-lg">{% icon "globe" %}</span>
                             </div>
                             <div class="ml-3">
                                 <div class="text-sm font-medium text-slate-100">
                                     <a href="{{ account.get_absolute_url }}" class="hover:text-blue-400 transition-colors">
                                         {{ account.virtualmin_username }}
                                         {% if account.protected_from_deletion %}
-                                            <span class="ml-1 text-xs text-orange-400" title="{% trans 'Protected from deletion' %}">🔒</span>
+                                            <span class="ml-1 text-xs text-orange-400" title="{% trans 'Protected from deletion' %}">{% icon "lock" %}</span>
                                         {% endif %}
                                     </a>
                                 </div>
@@ -171,7 +171,7 @@
 {% else %}
 <!-- Empty State -->
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
-    <span class="text-slate-400 text-6xl">🌐</span>
+    <span class="text-slate-400">{% icon "globe" size="2xl" %}</span>
     <h3 class="mt-4 text-lg font-medium text-slate-100">{% trans "No accounts found" %}</h3>
     <p class="mt-2 text-sm text-slate-400">
         {% if request.GET.search or request.GET.status or request.GET.plan %}

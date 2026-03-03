@@ -33,7 +33,7 @@
         <!-- Email Field -->
         <div>
           <label for="id_email" class="block text-sm font-medium text-slate-300">
-            📧 {% trans 'Email Address' %}
+            {% icon "mail" size="sm" css_class="text-slate-300" %} {% trans 'Email Address' %}
           </label>
           <div class="mt-1">
             {{ form.email }}
@@ -46,7 +46,7 @@
         <!-- Password Field -->
         <div>
           <label for="id_password" class="block text-sm font-medium text-slate-300">
-            🔐 {% trans 'Password' %}
+            {% icon "lock" size="sm" css_class="text-slate-300" %} {% trans 'Password' %}
           </label>
           <div class="mt-1">
             {{ form.password }}
@@ -76,7 +76,7 @@
         {% if form.non_field_errors %}
         <div class="bg-red-900 border border-red-700 rounded-md p-3">
           {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          <p class="text-red-100 text-sm">{% icon "x" size="sm" css_class="text-red-400" %} {{ error }}</p>
           {% endfor %}
         </div>
         {% endif %}
@@ -108,7 +108,7 @@
 
     <!-- Security Notice -->
     <div class="text-center text-xs text-slate-500">
-      <p>🔒 {% trans 'Secure Connection' %} | {% trans 'GDPR Compliance' %}</p>
+      <p>{% icon "lock" size="xs" css_class="text-slate-500" %} {% trans 'Secure Connection' %} | {% trans 'GDPR Compliance' %}</p>
     </div>
   </div>
 </div>

@@ -5,7 +5,7 @@
 <!-- Order Items Section with HTMX for real-time updates -->
 <div id="order-items-section" class="bg-slate-800 rounded-lg border border-slate-700">
   <div class="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
-    <h3 class="text-lg font-semibold text-white">📦 {% trans "Order Items" %}</h3>
+    <h3 class="text-lg font-semibold text-white">{% icon "orders" %} {% trans "Order Items" %}</h3>
     {% comment %}
     Add Item button removed from order detail view to keep it truly read-only.
     Items should be added from the order edit page for better UX flow.
@@ -18,7 +18,7 @@
       <div class="overflow-x-auto">
         <!-- Mobile scroll hint -->
         <div class="block sm:hidden text-xs text-slate-500 mb-2 px-6">
-          <span class="mr-1">👈</span>{% trans "Swipe left to see actions" %}
+          <span class="mr-1">{% icon "arrow-left" %}</span>{% trans "Swipe left to see actions" %}
         </div>
         <table class="min-w-full divide-y divide-slate-700">
         <thead class="bg-slate-900">
@@ -45,7 +45,7 @@
             Actions column will be included in each row based on edit_mode context variable
             {% endcomment %}
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider sticky right-0 bg-slate-900 border-l border-slate-700">
-              <span class="block sm:hidden">🔧</span>
+              <span class="block sm:hidden">{% icon "settings" %}</span>
               <span class="hidden sm:block">{% trans "Actions" %}</span>
             </th>
           </tr>
@@ -67,7 +67,7 @@
                 {% endif %}
                 {% if item.domain_name %}
                   <div class="text-blue-400 text-xs mt-1">
-                    🌐 {{ item.domain_name }}
+                    {% icon "globe" %} {{ item.domain_name }}
                   </div>
                 {% endif %}
               </div>
@@ -95,17 +95,17 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
               {% if item.provisioning_status == "pending" %}
-                {% trans "⏳ Pending" as bt1 %}{% badge bt1 variant="warning" size="sm" %}
+                {% trans "Pending" as bt1 %}{% badge bt1 icon="clock" variant="warning" size="sm" %}
               {% elif item.provisioning_status == "in_progress" %}
-                {% trans "⚙️ Provisioning" as bt2 %}{% badge bt2 variant="primary" size="sm" %}
+                {% trans "Provisioning" as bt2 %}{% badge bt2 icon="settings" variant="primary" size="sm" %}
               {% elif item.provisioning_status == "completed" %}
-                {% trans "✅ Active" as bt3 %}{% badge bt3 variant="success" size="sm" %}
+                {% trans "Active" as bt3 %}{% badge bt3 icon="check" variant="success" size="sm" %}
               {% elif item.provisioning_status == "failed" %}
-                {% trans "🔥 Failed" as bt4 %}{% badge bt4 variant="danger" size="sm" %}
+                {% trans "Failed" as bt4 %}{% badge bt4 variant="danger" size="sm" %}
               {% elif item.provisioning_status == "cancelled" %}
-                {% trans "❌ Cancelled" as bt5 %}{% badge bt5 variant="secondary" size="sm" %}
+                {% trans "Cancelled" as bt5 %}{% badge bt5 icon="x" variant="secondary" size="sm" %}
               {% else %}
-                {% trans "📋 Not Started" as bt6 %}{% badge bt6 variant="secondary" size="sm" %}
+                {% trans "Not Started" as bt6 %}{% badge bt6 icon="clipboard" variant="secondary" size="sm" %}
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm sticky right-0 bg-slate-800 border-l border-slate-700">
@@ -117,7 +117,7 @@
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
                           title="{% trans 'Edit item inline' %}"
                           id="edit-btn-{{ item.id }}">
-                    <span class="mr-1">✏️</span>
+                    <span class="mr-1">{% icon "document" %}</span>
                     <span class="block sm:hidden">{% trans "Edit" %}</span>
                     <span class="hidden sm:block">{% trans "Edit" %}</span>
                   </button>
@@ -125,7 +125,7 @@
                           onclick="deleteOrderItem('{{ item.id }}')"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
                           title="{% trans 'Delete item' %}">
-                    <span class="mr-1">🗑️</span>
+                    <span class="mr-1">{% icon "x" %}</span>
                     <span class="block sm:hidden">{% trans "Delete" %}</span>
                     <span class="hidden sm:block">{% trans "Delete" %}</span>
                   </button>
@@ -135,7 +135,7 @@
                 <div class="text-sm">
                   <a href="{% url 'orders:order_edit' pk=order.id %}"
                      class="text-blue-400 hover:text-blue-300 text-xs">
-                    ✏️ {% trans "Edit Order" %}
+                    {% icon "document" %} {% trans "Edit Order" %}
                   </a>
                 </div>
               {% else %}
@@ -152,12 +152,12 @@
               <div class="bg-slate-800 rounded-lg border border-slate-600 p-4">
                 <div class="flex items-center justify-between mb-4">
                   <h4 class="text-sm font-medium text-white">
-                    <span class="mr-2">✏️</span>{% trans "Edit Item" %}: {{ item.product.name|default:"Custom Item" }}
+                    <span class="mr-2">{% icon "document" %}</span>{% trans "Edit Item" %}: {{ item.product.name|default:"Custom Item" }}
                   </h4>
                   <button type="button"
                           onclick="cancelExpandableEdit('{{ item.id }}')"
                           class="text-slate-400 hover:text-white text-sm">
-                    <span class="mr-1">❌</span>{% trans "Cancel" %}
+                    <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
                   </button>
                 </div>
 
@@ -221,7 +221,7 @@
                     onclick="toggleAddItemForm()"
                     id="add-item-btn"
                     class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border border-green-600 text-green-400 hover:bg-green-600 hover:text-white transition-colors">
-              <span class="mr-1">➕</span> {% trans "Add Item" %}
+              <span class="mr-1">{% icon "plus" %}</span> {% trans "Add Item" %}
             </button>
           </div>
         </div>
@@ -231,12 +231,12 @@
           <div class="bg-slate-800 rounded-lg border border-slate-600 p-4">
             <div class="flex items-center justify-between mb-4">
               <h4 class="text-sm font-medium text-white">
-                <span class="mr-2">➕</span>{% trans "Add New Item" %}
+                <span class="mr-2">{% icon "plus" %}</span>{% trans "Add New Item" %}
               </h4>
               <button type="button"
                       onclick="cancelAddItemForm()"
                       class="text-slate-400 hover:text-white text-sm">
-                <span class="mr-1">❌</span>{% trans "Cancel" %}
+                <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
               </button>
             </div>
 
@@ -254,7 +254,7 @@
     {% else %}
       <div class="p-6 text-center text-slate-400">
         <div class="mb-4">
-          <span class="text-4xl">📦</span>
+          <span class="">{% icon "orders" size="2xl" %}</span>
         </div>
         <p class="text-lg font-medium mb-2">{% trans "No items in this order yet" %}</p>
         <p class="text-sm">{% trans "Order items will appear here once added" %}</p>
@@ -263,7 +263,7 @@
             <button type="button"
                     onclick="toggleAddItemForm()"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-              <span class="mr-1">➕</span> {% trans "Add First Item" %}
+              <span class="mr-1">{% icon "plus" %}</span> {% trans "Add First Item" %}
             </button>
           </div>
         {% endif %}
@@ -275,12 +275,12 @@
         <div class="bg-slate-800 rounded-lg border border-slate-600 p-4">
           <div class="flex items-center justify-between mb-4">
             <h4 class="text-sm font-medium text-white">
-              <span class="mr-2">➕</span>{% trans "Add First Item" %}
+              <span class="mr-2">{% icon "plus" %}</span>{% trans "Add First Item" %}
             </h4>
             <button type="button"
                     onclick="cancelAddItemForm()"
                     class="text-slate-400 hover:text-white text-sm">
-              <span class="mr-1">❌</span>{% trans "Cancel" %}
+              <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
             </button>
           </div>
 
@@ -332,7 +332,7 @@ function toggleExpandableEdit(itemId) {
     if (editRow.classList.contains('hidden')) {
         // Show the edit row
         editRow.classList.remove('hidden');
-        editBtn.innerHTML = '<span class="mr-1">📝</span> {% trans "Editing..." %}';
+        editBtn.innerHTML = '<span class="mr-1">{% icon "document" %}</span> {% trans "Editing..." %}';
         editBtn.disabled = true;
         activeEditRowId = itemId;
 
@@ -355,10 +355,10 @@ function toggleExpandableEdit(itemId) {
             console.error('Error loading edit form:', error);
             formContainer.innerHTML = `
                 <div class="text-center text-red-400 py-4">
-                    <span class="mr-2">❌</span>{% trans "Error loading edit form. Please try again." %}
+                    <span class="mr-2">{% icon "x" %}</span>{% trans "Error loading edit form. Please try again." %}
                 </div>
             `;
-            editBtn.innerHTML = '<span class="mr-1">✏️</span> {% trans "Edit" %}';
+            editBtn.innerHTML = '<span class="mr-1"></span> {% trans "Edit" %}';
             editBtn.disabled = false;
         });
     } else {
@@ -376,7 +376,7 @@ function cancelExpandableEdit(itemId) {
         editRow.classList.add('hidden');
     }
     if (editBtn) {
-        editBtn.innerHTML = '<span class="mr-1">✏️</span> {% trans "Edit" %}';
+        editBtn.innerHTML = '<span class="mr-1"></span> {% trans "Edit" %}';
         editBtn.disabled = false;
     }
 
@@ -400,7 +400,7 @@ function toggleAddItemForm() {
         // Show the add form
         formSection.classList.remove('hidden');
         if (addButton) {
-            addButton.innerHTML = '<span class="mr-1">⏳</span> {% trans "Loading..." %}';
+            addButton.innerHTML = '<span class="mr-1">{% icon "clock" %}</span> {% trans "Loading..." %}';
             addButton.disabled = true;
         }
 
@@ -423,11 +423,11 @@ function toggleAddItemForm() {
             console.error('Error loading add form:', error);
             formContainer.innerHTML = `
                 <div class="text-center text-red-400 py-4">
-                    <span class="mr-2">❌</span>{% trans "Error loading form. Please try again." %}
+                    <span class="mr-2">{% icon "x" %}</span>{% trans "Error loading form. Please try again." %}
                 </div>
             `;
             if (addButton) {
-                addButton.innerHTML = '<span class="mr-1">➕</span> {% trans "Add Item" %}';
+                addButton.innerHTML = '<span class="mr-1"></span> {% trans "Add Item" %}';
                 addButton.disabled = false;
             }
         });
@@ -446,7 +446,7 @@ function cancelAddItemForm() {
         formSection.classList.add('hidden');
     }
     if (addButton) {
-        addButton.innerHTML = '<span class="mr-1">➕</span> {% trans "Add Item" %}';
+        addButton.innerHTML = '<span class="mr-1"></span> {% trans "Add Item" %}';
         addButton.disabled = false;
     }
 }
@@ -643,7 +643,7 @@ function showNotification(type, message) {
         // For now, use a simple approach - could be enhanced later
         const notification = document.createElement('div');
         notification.className = 'fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity';
-        notification.innerHTML = `<span class="mr-2">✅</span>${message}`;
+        notification.innerHTML = `<span class="mr-2">{% icon "check" %}</span>${message}`;
         document.body.appendChild(notification);
 
         setTimeout(() => {
@@ -724,7 +724,7 @@ document.addEventListener('keydown', function(e) {
 
 // Initialize expandable row system when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 [Orders] Expandable row system initialized');
+    console.log('[Orders] Expandable row system initialized');
 });
 </script>
 {% endif %}

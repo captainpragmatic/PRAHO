@@ -10,7 +10,7 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
-        🧾 {% trans "Billing Management" %}
+        {% icon "receipt" %} {% trans "Billing Management" %}
       </h1>
       <p class="mt-2 text-slate-400">
         {% trans "Manage proformas and invoices following Romanian business practices" %}
@@ -18,7 +18,7 @@
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
       {% url 'billing:proforma_create' as create_proforma_url %}
-      {% trans "📄 New Proforma" as bt1 %}{% button bt1 variant="primary" href=create_proforma_url %}
+      {% trans "New Proforma" as bt1 %}{% button bt1 variant="primary" href=create_proforma_url %}
     </div>
   </div>
 
@@ -42,7 +42,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">📄</div>
+          <div class="w-8 h-8">{% icon "document" size="lg" %}</div>
         </div>
         <div class="ml-4">
             <p class="text-sm font-medium text-slate-400">{% trans 'Active Proformas' %}</p>
@@ -54,7 +54,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">🧾</div>
+          <div class="w-8 h-8">{% icon "receipt" size="lg" %}</div>
         </div>
         <div class="ml-4">
             <p class="text-sm font-medium text-slate-400">{% trans 'Total Invoices' %}</p>
@@ -66,7 +66,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">💰</div>
+          <div class="w-8 h-8">{% icon "currency" size="lg" %}</div>
         </div>
         <div class="ml-4">
             <p class="text-sm font-medium text-slate-400">{% trans 'Proforma Value' %}</p>
@@ -78,7 +78,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">💳</div>
+          <div class="w-8 h-8">{% icon "credit-card" size="lg" %}</div>
         </div>
         <div class="ml-4">
             <p class="text-sm font-medium text-slate-400">{% trans 'Invoice Revenue' %}</p>
@@ -118,9 +118,9 @@
 
       <!-- Filter Buttons -->
       <div class="flex gap-2">
-        {% trans "🔍 Filter" as bt2 %}{% button bt2 variant="primary" type="submit" %}
+        {% trans "Filter" as bt2 %}{% button bt2 variant="primary" type="submit" %}
         <a href="{% url 'billing:invoice_list' %}" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-          ❌ {% trans 'Clear' %}
+          {% icon "x" %} {% trans 'Clear' %}
         </a>
       </div>
     </form>
@@ -130,7 +130,7 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700">
     <div class="px-6 py-4 border-b border-slate-700">
       <h3 class="text-lg font-medium text-white">
-        📋 {% trans 'Documents' %}
+        {% icon "clipboard" %} {% trans 'Documents' %}
         <span class="text-slate-400" id="document-count">
           {% if documents %}
             {% with start=documents.start_index end=documents.end_index total=documents.paginator.count %}

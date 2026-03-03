@@ -8,7 +8,7 @@
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 py-6">
 
-    <!-- 🚀 Hero Section with Status -->
+    <!-- {% icon "services" %} Hero Section with Status -->
     <div class="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-6 mb-6 border border-slate-600">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between">
             <div class="flex-1">
@@ -17,17 +17,17 @@
                         {{ service.service_name|default:service.domain }}
                     </h1>
                     {% if service.status == 'active' %}
-                      {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="✅" %}
+                      {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="check" %}
                     {% elif service.status == 'suspended' %}
-                      {% trans "Suspended" as bt2 %}{% badge bt2 variant="danger" icon="⏸️" %}
+                      {% trans "Suspended" as bt2 %}{% badge bt2 variant="danger" icon="clock" %}
                     {% elif service.status == 'cancelled' %}
-                      {% trans "Cancelled" as bt3 %}{% badge bt3 variant="secondary" icon="❌" %}
+                      {% trans "Cancelled" as bt3 %}{% badge bt3 variant="secondary" icon="x" %}
                     {% elif service.status == 'pending' %}
-                      {% trans "Pending" as bt4 %}{% badge bt4 variant="warning" icon="⏳" %}
+                      {% trans "Pending" as bt4 %}{% badge bt4 variant="warning" icon="clock" %}
                     {% elif service.status == 'provisioning' %}
-                      {% trans "Provisioning" as bt5 %}{% badge bt5 variant="info" icon="🔄" %}
+                      {% trans "Provisioning" as bt5 %}{% badge bt5 variant="info" icon="refresh" %}
                     {% elif service.status == 'failed' %}
-                      {% trans "Provisioning Failed" as bt6 %}{% badge bt6 variant="danger" icon="💥" %}
+                      {% trans "Provisioning Failed" as bt6 %}{% badge bt6 variant="danger" icon="warning" %}
                     {% else %}
                       {% badge service.status|title variant="default" %}
                     {% endif %}
@@ -67,14 +67,14 @@
                     {% if service.status == 'active' %}
                         {% url 'provisioning:service_suspend' service.pk as suspend_url %}
                         {% trans "Suspend this service?" as confirm_suspend %}
-                        {% trans "⏸️ Suspend" as bt7 %}{% button bt7 variant="danger" hx_post=suspend_url hx_confirm=confirm_suspend hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                        {% trans "Suspend" as bt7 %}{% button bt7 variant="danger" hx_post=suspend_url hx_confirm=confirm_suspend hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
                     {% elif service.status == 'suspended' %}
                         {% url 'provisioning:service_activate' service.pk as activate_url %}
                         {% trans "Reactivate this service?" as confirm_activate %}
-                        {% trans "▶️ Activate" as bt8 %}{% button bt8 variant="success" hx_post=activate_url hx_confirm=confirm_activate hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
+                        {% trans "Activate" as bt8 %}{% button bt8 variant="success" hx_post=activate_url hx_confirm=confirm_activate hx_target="#service-status" class="sm:text-sm mobile-full-width" %}
                     {% endif %}
                     {% url 'provisioning:service_edit' service.pk as edit_url %}
-                    {% trans "✏️ Edit" as bt9 %}{% button bt9 variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
+                    {% trans "Edit" as bt9 %}{% button bt9 variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
                 {% endif %}
                 {% url 'provisioning:services' as services_url %}
                 {% trans "← Back to Services" as bt10 %}{% button bt10 variant="secondary" href=services_url class="sm:text-sm mobile-full-width" %}
@@ -82,12 +82,12 @@
         </div>
     </div>
 
-    <!-- 💥 Provisioning Error Alert (shown only for failed services) -->
+    <!--  Provisioning Error Alert (shown only for failed services) -->
     {% if service.status == 'failed' and service.provisioning_errors %}
     <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
         <div class="flex items-start">
             <div class="flex-shrink-0">
-                <span class="text-red-300 text-xl">💥</span>
+                <span class="text-red-300 text-xl">{% icon "warning" %}</span>
             </div>
             <div class="ml-3 flex-1">
                 <h3 class="text-sm font-medium text-red-200">{% trans 'Provisioning Failed' %}</h3>
@@ -108,10 +108,10 @@
                 {% if can_manage %}
                 <div class="mt-3">
                     <button class="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded transition-colors">
-                        🔄 {% trans 'Retry Provisioning' %}
+                        {% icon "refresh" %} {% trans 'Retry Provisioning' %}
                     </button>
                     <button class="text-sm text-red-300 hover:text-red-200 ml-2 underline">
-                        📝 {% trans 'Add Admin Notes' %}
+                        {% icon "document" %} {% trans 'Add Admin Notes' %}
                     </button>
                 </div>
                 {% endif %}
@@ -120,16 +120,16 @@
     </div>
     {% endif %}
 
-    <!-- 📊 Main Content Grid -->
+    <!-- {% icon "chart" %} Main Content Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
 
-        <!-- 🏢 Customer Information (Left Column) -->
+        <!-- {% icon "building" %} Customer Information (Left Column) -->
         <div class="lg:col-span-1 space-y-6">
             <!-- Customer Card -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 hover-lift transition-all duration-300">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold text-white flex items-center">
-                        🏢 {% trans 'Customer' %}
+                        {% icon "building" %} {% trans 'Customer' %}
                     </h3>
                     <span class="text-xs bg-green-600 text-white px-2 py-1 rounded-full">
                         🇷🇴 RO
@@ -147,7 +147,7 @@
                         <div class="flex items-center space-x-2">
                             <p class="font-mono text-white">{{ service.customer.cui|cui_format }}</p>
                             <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">
-                                ✅ Valid
+                                {% icon "check" %} Valid
                             </span>
                         </div>
                     </div>
@@ -172,7 +172,7 @@
             <!-- Billing Overview -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 hover-lift transition-all duration-300">
                 <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
-                    💰 {% trans 'Billing' %}
+                    {% icon "currency" %} {% trans 'Billing' %}
                 </h3>
 
                 <div class="space-y-3">
@@ -205,13 +205,13 @@
             </div>
         </div>
 
-        <!-- ⚙️ Service Details (Right Column) -->
+        <!-- {% icon "settings" %} Service Details (Right Column) -->
         <div class="lg:col-span-2 space-y-6">
             <!-- Service Plan Card -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 hover-lift transition-all duration-300">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold text-white flex items-center">
-                        📦 {% trans 'Service Plan' %}
+                        {% icon "orders" %} {% trans 'Service Plan' %}
                     </h3>
                     <span class="text-sm bg-purple-600 text-white px-3 py-1 rounded-full">
                         {{ service.service_plan.get_plan_type_display }}
@@ -259,7 +259,7 @@
             <!-- Technical Configuration -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                 <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
-                    ⚙️ {% trans 'Configuration' %}
+                    {% icon "settings" %} {% trans 'Configuration' %}
                 </h3>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
@@ -313,7 +313,7 @@
             <!-- Status Timeline -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                 <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
-                    📈 {% trans 'Status Timeline' %}
+                    {% icon "chart" %} {% trans 'Status Timeline' %}
                 </h3>
 
                 <div class="space-y-4">
@@ -355,7 +355,7 @@
         </div>
     </div>
 
-    <!-- 🔄 HTMX Status Update Target -->
+    <!-- {% icon "refresh" %} HTMX Status Update Target -->
     <div id="service-status" class="hidden">
         <!-- HTMX will replace this content -->
     </div>
@@ -430,7 +430,7 @@
 .status-cancelled { background-color: #dc2626; }
 .status-pending { background-color: #d97706; }
 
-/* 📱 Progressive Enhancement - Skeleton Loading */
+/*  Progressive Enhancement - Skeleton Loading */
 .skeleton {
     background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
     background-size: 200% 100%;
@@ -454,7 +454,7 @@
     width: 75%;
 }
 
-/* 🎯 Touch-friendly improvements */
+/*  Touch-friendly improvements */
 @media (hover: none) and (pointer: coarse) {
     .mobile-nav-item {
         min-height: 44px;
@@ -466,13 +466,13 @@
     }
 }
 
-/* 🌈 Enhanced focus states for accessibility */
+/*  Enhanced focus states for accessibility */
 .focus-visible:focus-visible {
     outline: 2px solid #3b82f6;
     outline-offset: 2px;
 }
 
-/* 📊 Progress bars for loading */
+/* {% icon "chart" %} Progress bars for loading */
 .progress-bar {
     width: 100%;
     height: 4px;
@@ -493,7 +493,7 @@
     100% { width: 100%; }
 }
 
-/* 🌐 Network indicator */
+/* {% icon "globe" %} Network indicator */
 .network-indicator {
     position: fixed;
     top: 1rem;
@@ -515,7 +515,7 @@
     color: white;
 }
 
-/* 📱 Mobile loading states */
+/*  Mobile loading states */
 @media (max-width: 768px) {
     .mobile-loading {
         flex-direction: column;
@@ -528,20 +528,20 @@
 }
 </style>
 
-<!-- 🚀 Progressive Enhancement Scripts -->
+<!-- {% icon "services" %} Progressive Enhancement Scripts -->
 <script>
-    // 📱 Mobile touch improvements
+    //  Mobile touch improvements
     if ('ontouchstart' in window) {
         document.body.classList.add('touch-device');
     }
 
-    // 🎯 Enhanced HTMX event handling
+    //  Enhanced HTMX event handling
     document.addEventListener('htmx:afterRequest', function(event) {
-        console.log('✅ HTMX Request completed:', event.detail);
+        console.log('HTMX Request completed:', event.detail);
     });
 
     document.addEventListener('htmx:beforeRequest', function(event) {
-        console.log('🔄 HTMX Request started:', event.detail);
+        console.log('HTMX Request started:', event.detail);
     });
 </script>
 {% endblock %}

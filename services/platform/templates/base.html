@@ -104,14 +104,14 @@
               <!-- Dashboard is always available -->
               <a href="{% url 'dashboard' %}"
                 class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-1">📊</span> {% trans 'Dashboard' %}
+                {% icon "dashboard" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Dashboard' %}
               </a>
 
               <!-- Staff/Admin Navigation with Dropdowns -->
               {% if user.is_staff or user.staff_role %}
 
-              {% dropdown "Business" business_items icon="🏢" %}
-              {% dropdown "Support" support_items icon="🎫" %}
+              {% dropdown "Business" business_items icon="building" %}
+              {% dropdown "Support" support_items icon="tickets" %}
 
               {% else %}
               <!-- Customer User Navigation with Direct Links -->
@@ -120,19 +120,19 @@
               <!-- My Invoices -->
               <a href="{% url 'billing:invoice_list' %}"
                 class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-1">📄</span> {% trans 'My Invoices' %}
+                {% icon "invoices" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'My Invoices' %}
               </a>
 
               <!-- My Services -->
               <a href="{% url 'provisioning:services' %}"
                 class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-1">🚀</span> {% trans 'My Services' %}
+                {% icon "services" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'My Services' %}
               </a>
 
               <!-- My Tickets -->
               <a href="{% url 'tickets:list' %}"
                 class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                <span class="mr-1">🎫</span> {% trans 'My Tickets' %}
+                {% icon "tickets" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'My Tickets' %}
               </a>
 
               {% else %}
@@ -149,7 +149,7 @@
           <div class="w-72 flex items-center justify-end space-x-2 flex-shrink-0">
             <a href="{% url 'users:user_profile' %}"
               class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
-              <span class="mr-1">⚙️</span> {% trans 'Profile' %}
+              {% icon "settings" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Profile' %}
             </a>
             {% url 'users:logout' as logout_url %}
             {% trans "Logout" as bt1 %}{% button bt1 variant="danger" href=logout_url size="sm" %}
@@ -314,7 +314,7 @@
 
     // HTMX Error Handling
     document.body.addEventListener('htmx:responseError', function (event) {
-      console.error('🚨 HTMX Error:', event.detail);
+      console.error(' HTMX Error:', event.detail);
       {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "An error occurred. Please try again." as htmx_error_msg %}
       alert('{{ htmx_error_msg|escapejs }}');

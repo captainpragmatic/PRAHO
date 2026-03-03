@@ -12,7 +12,7 @@
         <ol class="inline-flex items-center space-x-1 md:space-x-3">
             <li class="inline-flex items-center">
                 <a href="{% url 'domains:list' %}" class="inline-flex items-center text-sm font-medium text-slate-700 hover:text-primary-600 dark:text-slate-400 dark:hover:text-white">
-                    🌍 {% trans "Domains" %}
+                    {% icon "globe" %} {% trans "Domains" %}
                 </a>
             </li>
             <li>
@@ -33,20 +33,20 @@
                     {% badge domain.get_status_display variant="success" %}
                     {% badge domain.tld.extension variant="secondary" %}
                     {% if domain.whois_privacy %}
-                        {% trans "🔒 WHOIS Privacy" as bt1 %}{% badge bt1 variant="info" size="sm" %}
+                        {% trans "WHOIS Privacy" as bt1 %}{% badge bt1 icon="lock" variant="info" size="sm" %}
                     {% endif %}
                     {% if domain.auto_renew %}
-                        {% trans "🔄 Auto-Renew" as bt2 %}{% badge bt2 variant="success" size="sm" %}
+                        {% trans "Auto-Renew" as bt2 %}{% badge bt2 icon="refresh" variant="success" size="sm" %}
                     {% endif %}
                 </div>
             </div>
             <div class="mt-4 sm:mt-0 flex gap-2">
                 {% if can_renew %}
                     {% url 'domains:renew' domain.id as renew_url %}
-                    {% trans "🔄 Renew" as bt3 %}{% button bt3 variant="primary" href=renew_url %}
+                    {% trans "Renew" as bt3 %}{% button bt3 variant="primary" href=renew_url %}
                 {% endif %}
                 {% if can_modify_dns %}
-                    {% trans "⚙️ DNS" as bt4 %}{% button bt4 variant="secondary" href="#" %}
+                    {% trans "DNS" as bt4 %}{% button bt4 variant="secondary" href="#" %}
                 {% endif %}
             </div>
         </div>
@@ -73,7 +73,7 @@
             <!-- Domain Information -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">📋 {% trans "Domain Information" %}</h2>
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% icon "clipboard" %} {% trans "Domain Information" %}</h2>
                 </div>
                 <div class="px-6 py-4">
                     <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -112,9 +112,9 @@
                             <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Auto-Renew" %}</dt>
                             <dd class="mt-1">
                                 {% if domain.auto_renew %}
-                                    <span class="text-green-600 dark:text-green-400">✅ {% trans "Enabled" %}</span>
+                                    <span class="text-green-600 dark:text-green-400">{% icon "check" %} {% trans "Enabled" %}</span>
                                 {% else %}
-                                    <span class="text-red-600 dark:text-red-400">❌ {% trans "Disabled" %}</span>
+                                    <span class="text-red-600 dark:text-red-400">{% icon "x" %} {% trans "Disabled" %}</span>
                                 {% endif %}
                             </dd>
                         </div>
@@ -122,7 +122,7 @@
                             <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "WHOIS Privacy" %}</dt>
                             <dd class="mt-1">
                                 {% if domain.whois_privacy %}
-                                    <span class="text-green-600 dark:text-green-400">🔒 {% trans "Protected" %}</span>
+                                    <span class="text-green-600 dark:text-green-400">{% icon "lock" %} {% trans "Protected" %}</span>
                                 {% else %}
                                     <span class="text-slate-500 dark:text-slate-400">{% trans "Public" %}</span>
                                 {% endif %}
@@ -136,7 +136,7 @@
             {% if nameservers %}
                 <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                     <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">🌐 {% trans "Nameservers" %}</h2>
+                        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% icon "globe" %} {% trans "Nameservers" %}</h2>
                     </div>
                     <div class="px-6 py-4">
                         <ul class="space-y-2">
@@ -155,7 +155,7 @@
             {% if order_items %}
                 <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                     <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">📦 {% trans "Order History" %}</h2>
+                        <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% icon "orders" %} {% trans "Order History" %}</h2>
                     </div>
                     <div class="divide-y divide-slate-200 dark:divide-slate-700">
                         {% for item in order_items %}
@@ -163,7 +163,7 @@
                                 <div class="flex items-center justify-between">
                                     <div>
                                         <p class="text-sm font-medium text-slate-900 dark:text-white">
-                                            {% if item.action == 'register' %}🆕{% elif item.action == 'renew' %}🔄{% elif item.action == 'transfer' %}📥{% endif %}
+                                            {% if item.action == 'register' %}{% icon "plus" %}{% elif item.action == 'renew' %}{% icon "refresh" %}{% elif item.action == 'transfer' %}{% icon "download" %}{% endif %}
                                             {{ item.get_action_display }} - {{ item.years }} {% trans "year" %}{{ item.years|pluralize }}
                                         </p>
                                         <p class="text-sm text-slate-500 dark:text-slate-400">
@@ -193,7 +193,7 @@
             <!-- Customer Information -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">👤 {% trans "Customer" %}</h2>
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% icon "user" %} {% trans "Customer" %}</h2>
                 </div>
                 <div class="px-6 py-4">
                     <div class="flex items-start">
@@ -220,7 +220,7 @@
             <!-- Registrar Information -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">🏢 {% trans "Registrar" %}</h2>
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% icon "building" %} {% trans "Registrar" %}</h2>
                 </div>
                 <div class="px-6 py-4">
                     <p class="text-sm font-medium text-slate-900 dark:text-white">{{ domain.registrar.display_name }}</p>
@@ -236,20 +236,20 @@
             <!-- Quick Actions -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">⚡ {% trans "Quick Actions" %}</h2>
+                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white">{% icon "lightning" %} {% trans "Quick Actions" %}</h2>
                 </div>
                 <div class="px-6 py-4 space-y-3">
                     {% if can_renew %}
                         {% url 'domains:renew' domain.id as renew_url_2 %}
-                        {% trans "🔄 Renew Domain" as bt5 %}{% button bt5 variant="primary" size="sm" href=renew_url_2 class="w-full" %}
+                        {% trans "Renew Domain" as bt5 %}{% button bt5 variant="primary" size="sm" href=renew_url_2 class="w-full" %}
                     {% endif %}
                     {% if can_transfer %}
-                        {% trans "📥 Transfer Out" as bt6 %}{% button bt6 variant="secondary" size="sm" href="#" class="w-full" %}
+                        {% trans "Transfer Out" as bt6 %}{% button bt6 variant="secondary" size="sm" href="#" class="w-full" %}
                     {% endif %}
                     {% if can_modify_dns %}
-                        {% trans "⚙️ Manage DNS" as bt7 %}{% button bt7 variant="secondary" size="sm" href="#" class="w-full" %}
+                        {% trans "Manage DNS" as bt7 %}{% button bt7 variant="secondary" size="sm" href="#" class="w-full" %}
                     {% endif %}
-                    {% trans "📊 View Analytics" as bt8 %}{% button bt8 variant="secondary" size="sm" href="#" class="w-full" %}
+                    {% trans "View Analytics" as bt8 %}{% button bt8 variant="secondary" size="sm" href="#" class="w-full" %}
                 </div>
             </div>
         </div>

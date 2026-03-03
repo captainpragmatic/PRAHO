@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-🔥 ENHANCED TABLE COMPONENT - PRAHO Platform
+{% icon "warning" %} ENHANCED TABLE COMPONENT - PRAHO Platform
 ===============================================================================
 Modern, standardized enhanced table component with:
 - Clickable rows with navigation
@@ -84,7 +84,7 @@ Modern, standardized enhanced table component with:
         <!-- Empty State -->
         <tr>
           <td colspan="{% widthratio columns|length 1 1 %}{% if show_actions %}1{% endif %}" class="px-6 py-12 text-center text-slate-400">
-            <div class="text-4xl mb-4">{{ empty_icon|default:'📋' }}</div>
+            <div class="mb-4">{{ empty_icon|default:'' }}</div>
             <h3 class="text-lg font-medium mb-2">{{ empty_title|default:_('No data found') }}</h3>
             <p class="text-sm">{{ empty_message|default:_('No items available.') }}</p>
             {% if empty_action_url %}

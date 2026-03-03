@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📄 MODERN PAGINATION COMPONENT - PRAHO Platform
+{% icon "document" %} MODERN PAGINATION COMPONENT - PRAHO Platform
 ===============================================================================
 Adapted from modern Shadcn/UI pagination with PRAHO Platform integration.
 Clean, accessible, and responsive pagination following 2024 UI best practices.
@@ -21,17 +21,18 @@ Optional Parameters:
 - htmx_url: Base URL for HTMX requests (defaults to current page if not provided)
 
 Features:
-- ✅ Modern Shadcn UI design
-- ✅ Responsive (mobile + desktop)
-- ✅ Full accessibility (ARIA, keyboard nav)
-- ✅ Romanian translations
-- ✅ Smart page range with ellipsis
-- ✅ HTMX integration ready
-- ✅ Preserves query parameters
+- {% icon "check" %} Modern Shadcn UI design
+- {% icon "check" %} Responsive (mobile + desktop)
+- {% icon "check" %} Full accessibility (ARIA, keyboard nav)
+- {% icon "check" %} Romanian translations
+- {% icon "check" %} Smart page range with ellipsis
+- {% icon "check" %} HTMX integration ready
+- {% icon "check" %} Preserves query parameters
 ===============================================================================
 {% endcomment %}
 
 {% load i18n %}
+{% load ui_components %}
 
 {# Always show pagination for now #}
 {% if page_obj or paginator_data %}

@@ -15,9 +15,9 @@
         <span>{{ product.name }}</span>
       </div>
       <h1 class="text-3xl font-bold text-white flex items-center">
-        🔍 {{ product.name }}
+        {% icon "search" %} {{ product.name }}
         {% if product.is_featured %}
-          <span class="ml-3 text-yellow-400" title="{% trans 'Featured Product' %}">⭐</span>
+          <span class="ml-3 text-yellow-400" title="{% trans 'Featured Product' %}">{% icon "check" %}</span>
         {% endif %}
       </h1>
       <p class="mt-2 text-slate-400">{{ product.slug }}</p>
@@ -25,9 +25,9 @@
 
     <div class="flex space-x-3">
       {% url 'products:product_edit' slug=product.slug as edit_url %}
-      {% trans "✏️ Edit" as bt1 %}{% button bt1 variant="secondary" href=edit_url %}
+      {% trans "Edit" as bt1 %}{% button bt1 variant="secondary" href=edit_url %}
       {% url 'products:product_prices' slug=product.slug as prices_url %}
-      {% trans "💰 Pricing" as bt2 %}{% button bt2 variant="primary" href=prices_url %}
+      {% trans "Pricing" as bt2 %}{% button bt2 variant="primary" href=prices_url %}
     </div>
   </div>
 
@@ -36,7 +36,7 @@
     <div class="lg:col-span-2 space-y-6">
       <!-- Basic Information Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">📋 {% trans 'Basic Information' %}</h2>
+        <h2 class="font-semibold text-white mb-4">{% icon "clipboard" size="lg" %} {% trans 'Basic Information' %}</h2>
 
         <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -112,7 +112,7 @@
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <div class="flex justify-between items-center mb-4">
           {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-          <h2 class="text-xl font-semibold text-white">💰 {% trans 'Pricing' %}</h2>
+          <h2 class="font-semibold text-white">{% icon "currency" size="lg" %} {% trans 'Pricing' %}</h2>
           {% url 'products:product_prices' slug=product.slug as manage_prices_url %}
           <a href="{{ manage_prices_url }}" class="text-blue-400 hover:text-blue-300 text-sm">
             {% trans 'Manage Pricing' %} →
@@ -122,7 +122,7 @@
         {% for currency_code, prices in prices_by_currency.items %}
         <div class="mb-6 last:mb-0">
           <h3 class="text-lg font-medium text-white mb-3 flex items-center">
-            <span class="mr-2">💱</span>
+            <span class="mr-2">{% icon "currency" %}</span>
             {{ currency_code }}
             {% if currency_code == 'RON' %}
               <span class="ml-2 text-xs text-green-400">(Romanian Lei)</span>
@@ -172,7 +172,7 @@
       <!-- Product Relationships -->
       {% if relationships_from or relationships_to %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">🔗 {% trans 'Product Relationships' %}</h2>
+        <h2 class="font-semibold text-white mb-4">{% icon "external" size="lg" %} {% trans 'Product Relationships' %}</h2>
 
         {% if relationships_from %}
         <div class="mb-6">
@@ -219,7 +219,7 @@
       <!-- Bundle Memberships -->
       {% if bundle_memberships %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">📦 {% trans 'Bundle Memberships' %}</h2>
+        <h2 class="font-semibold text-white mb-4">{% icon "orders" size="lg" %} {% trans 'Bundle Memberships' %}</h2>
         <div class="space-y-3">
           {% for membership in bundle_memberships %}
           <div class="flex items-center justify-between bg-slate-700 rounded-lg p-4 border border-slate-600">
@@ -251,7 +251,7 @@
     <div class="space-y-6">
       <!-- Status Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">⚙️ {% trans 'Status & Settings' %}</h2>
+        <h2 class="font-semibold text-white mb-4">{% icon "settings" size="lg" %} {% trans 'Status & Settings' %}</h2>
 
         <div class="space-y-4">
           <!-- Active Status -->
@@ -303,14 +303,14 @@
 
       <!-- Quick Actions Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">🚀 {% trans 'Quick Actions' %}</h2>
+        <h2 class="font-semibold text-white mb-4">{% icon "services" size="lg" %} {% trans 'Quick Actions' %}</h2>
 
         <div class="space-y-3">
           {% url 'products:product_edit' slug=product.slug as edit_url %}
-          {% trans "✏️ Edit Product" as bt15 %}{% button bt15 variant="primary" href=edit_url class="w-full" %}
+          {% trans "Edit Product" as bt15 %}{% button bt15 variant="primary" href=edit_url class="w-full" %}
 
           {% url 'products:product_prices' slug=product.slug as prices_url %}
-          {% trans "💰 Manage Pricing" as bt16 %}{% button bt16 variant="secondary" href=prices_url class="w-full" %}
+          {% trans "Manage Pricing" as bt16 %}{% button bt16 variant="secondary" href=prices_url class="w-full" %}
 
           {% url 'products:product_list' as list_url %}
           {% trans "← Back to Products" as bt17 %}{% button bt17 variant="outline" href=list_url class="w-full" %}
@@ -320,7 +320,7 @@
       <!-- SEO Information -->
       {% if product.meta_title or product.meta_description %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-4">🔍 {% trans 'SEO Information' %}</h2>
+        <h2 class="font-semibold text-white mb-4">{% icon "search" size="lg" %} {% trans 'SEO Information' %}</h2>
 
         {% if product.meta_title %}
         <div class="mb-4">

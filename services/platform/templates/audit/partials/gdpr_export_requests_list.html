@@ -14,17 +14,17 @@
                         <div class="flex items-center space-x-2 mb-2 flex-wrap">
                             <!-- Status Badge -->
                             {% if request.status == 'pending' %}
-                                {% trans "⏳ Pending" as bt1 %}{% badge bt1 variant="warning" size="sm" %}
+                                {% trans "Pending" as bt1 %}{% badge bt1 icon="clock" variant="warning" size="sm" %}
                             {% elif request.status == 'processing' %}
-                                {% trans "⚙️ Processing" as bt2 %}{% badge bt2 variant="info" size="sm" %}
+                                {% trans "Processing" as bt2 %}{% badge bt2 icon="settings" variant="info" size="sm" %}
                             {% elif request.status == 'completed' %}
                                 {% if current_time > request.expires_at %}
-                                    {% trans "⏰ Expired" as bt3 %}{% badge bt3 variant="danger" size="sm" %}
+                                    {% trans "Expired" as bt3 %}{% badge bt3 variant="danger" size="sm" %}
                                 {% else %}
-                                    {% trans "✅ Completed" as bt4 %}{% badge bt4 variant="success" size="sm" %}
+                                    {% trans "Completed" as bt4 %}{% badge bt4 icon="check" variant="success" size="sm" %}
                                 {% endif %}
                             {% elif request.status == 'failed' %}
-                                {% trans "❌ Failed" as bt5 %}{% badge bt5 variant="danger" size="sm" %}
+                                {% trans "Failed" as bt5 %}{% badge bt5 icon="x" variant="danger" size="sm" %}
                             {% endif %}
 
                             <!-- Export Type -->
@@ -51,21 +51,21 @@
                         <!-- File and Size Info -->
                         <div class="text-xs text-slate-400 space-x-3 flex flex-wrap items-center">
                             {% if request.file_size %}
-                                <span class="text-slate-300">📁 {{ request.file_size|filesizeformat }}</span>
+                                <span class="text-slate-300">{% icon "folder" %} {{ request.file_size|filesizeformat }}</span>
                             {% endif %}
 
                             {% if request.download_count > 0 %}
-                                <span class="text-slate-300">📥 {{ request.download_count }} {% trans "download" %}{% if request.download_count != 1 %}s{% endif %}</span>
+                                <span class="text-slate-300">{% icon "download" %} {{ request.download_count }} {% trans "download" %}{% if request.download_count != 1 %}s{% endif %}</span>
                             {% endif %}
 
                             {% if request.status == 'completed' %}
                                 <span class="{% if current_time > request.expires_at %}text-red-400{% else %}text-green-400{% endif %}">
-                                    ⏰ {% trans "Expires:" %} {{ request.expires_at|date:"M d, Y H:i" }}
+                                    {% icon "clock" %} {% trans "Expires:" %} {{ request.expires_at|date:"M d, Y H:i" }}
                                 </span>
                             {% endif %}
 
                             {% if request.error_message %}
-                                <span class="text-red-400">❌ {{ request.error_message|truncatewords:8 }}</span>
+                                <span class="text-red-400">{% icon "x" %} {{ request.error_message|truncatewords:8 }}</span>
                             {% endif %}
                         </div>
 
@@ -109,21 +109,21 @@
                                 <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="process_now">
-                                    {% trans "⚡" as bt6 %}{% button bt6 variant="success" size="xs" type="submit" title="Process Now" %}
+                                    {% trans "" as bt6 %}{% button bt6 variant="success" size="xs" type="submit" title="Process Now" %}
                                 </form>
                             {% elif request.status == 'completed' and current_time <= request.expires_at %}
-                                {% trans "📥" as bt7 %}{% button bt7 variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:request.id|add:"/" title="Download Export" %}
+                                {% trans "" as bt7 %}{% button bt7 variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:request.id|add:"/" title="Download Export" %}
                             {% elif request.status == 'completed' and current_time > request.expires_at %}
                                 <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="delete_expired">
                                     {% trans "Delete this expired export?" as confirm_delete %}
-                                    {% trans "🗑️" as bt8 %}{% button bt8 variant="danger" size="xs" type="submit" hx_confirm=confirm_delete title="Delete Expired" %}
+                                    {% trans "" as bt8 %}{% button bt8 variant="danger" size="xs" type="submit" hx_confirm=confirm_delete title="Delete Expired" %}
                                 </form>
                             {% elif request.status == 'processing' %}
-                                <span class="text-blue-400 text-xs animate-pulse">⚙️</span>
+                                <span class="text-blue-400 text-xs animate-pulse">{% icon "settings" %}</span>
                             {% elif request.status == 'failed' %}
-                                <span class="text-red-400 text-xs">❌</span>
+                                <span class="text-red-400 text-xs">{% icon "x" %}</span>
                             {% endif %}
                         </div>
                     </div>
@@ -150,7 +150,7 @@
     <!-- Empty State -->
     <div class="text-center py-12">
         <div class="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span class="text-4xl">🔒</span>
+            <span class="">{% icon "lock" size="2xl" %}</span>
         </div>
         <h3 class="text-lg font-medium text-white mb-2">{% trans "No GDPR export requests found" %}</h3>
         <p class="text-slate-400 mb-4">{% trans "No export requests match the current filters." %}</p>

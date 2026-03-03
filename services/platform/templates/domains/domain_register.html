@@ -4,7 +4,7 @@
 {% load i18n %}
 {% load settings_tags %}
 
-{% block title %}🆕 Register Domain - PRAHO{% endblock %}
+{% block title %}{% icon "plus" %} Register Domain - PRAHO{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -13,7 +13,7 @@
         <ol class="inline-flex items-center space-x-1 md:space-x-3">
             <li class="inline-flex items-center">
                 <a href="{% url 'domains:list' %}" class="inline-flex items-center text-sm font-medium text-slate-700 hover:text-primary-600 dark:text-slate-400 dark:hover:text-white">
-                    🌍 {% trans "Domains" %}
+                    {% icon "globe" %} {% trans "Domains" %}
                 </a>
             </li>
             <li>
@@ -27,7 +27,7 @@
 
     <!-- Page Header -->
     <div class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-slate-900 dark:text-white">🆕 {% trans "Register New Domain" %}</h1>
+        <h1 class="text-3xl font-bold text-slate-900 dark:text-white">{% icon "plus" %} {% trans "Register New Domain" %}</h1>
         <p class="mt-2 text-lg text-slate-600 dark:text-slate-300">
             {% trans "Find and register the perfect domain for your business" %}
         </p>
@@ -38,7 +38,7 @@
         <div class="lg:col-span-2">
             <!-- Domain Search -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 mb-6">
-                <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">🔍 {% trans "Domain Search" %}</h2>
+                <h2 class="font-semibold text-slate-900 dark:text-white mb-4">{% icon "search" size="lg" %} {% trans "Domain Search" %}</h2>
 
                 <form id="domain-search-form" class="space-y-4">
                     <div>
@@ -58,7 +58,7 @@
                                 type="submit"
                                 class="inline-flex items-center px-4 py-2 border border-l-0 border-slate-300 dark:border-slate-600 rounded-r-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                             >
-                                🔍 {% trans "Search" %}
+                                {% icon "search" %} {% trans "Search" %}
                             </button>
                         </div>
                         <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
@@ -75,7 +75,7 @@
 
             <!-- Featured TLDs -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
-                <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">⭐ {% trans "Popular Extensions" %}</h2>
+                <h2 class="text-xl font-semibold text-slate-900 dark:text-white mb-4">{% icon "check" %} {% trans "Popular Extensions" %}</h2>
 
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     {% for tld_price in tld_pricing %}
@@ -98,7 +98,7 @@
         <div>
             <!-- Registration Form -->
             <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6 sticky top-6">
-                <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-4">📝 {% trans "Registration Details" %}</h3>
+                <h3 class="text-lg font-semibold text-slate-900 dark:text-white mb-4">{% icon "document" %} {% trans "Registration Details" %}</h3>
 
                 <form method="post" id="registration-form" class="hidden">
                     {% csrf_token %}
@@ -118,7 +118,7 @@
                         <!-- Customer Selection -->
                         <div>
                             <label for="customer_id" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                                👤 {% trans "Customer" %}
+                                {% icon "user" %} {% trans "Customer" %}
                             </label>
                             <select
                                 name="customer_id"
@@ -138,7 +138,7 @@
                         <!-- Registration Period -->
                         <div>
                             <label for="years" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                                📅 {% trans "Registration Period" %}
+                                {% icon "clock" %} {% trans "Registration Period" %}
                             </label>
                             <select
                                 name="years"
@@ -155,7 +155,7 @@
 
                         <!-- Domain Options -->
                         <div class="space-y-3">
-                            <h4 class="text-sm font-medium text-slate-700 dark:text-slate-300">⚙️ {% trans "Domain Options" %}</h4>
+                            <h4 class="text-sm font-medium text-slate-700 dark:text-slate-300">{% icon "settings" %} {% trans "Domain Options" %}</h4>
 
                             <div class="flex items-center">
                                 <input
@@ -166,7 +166,7 @@
                                 >
                                 {% setting_int "domains.whois_privacy_price_cents" default=500 as whois_price_cents %}
                                 <label for="whois_privacy" class="ml-2 block text-sm text-slate-900 dark:text-white">
-                                    🔒 {% trans "WHOIS Privacy Protection" %}
+                                    {% icon "lock" %} {% trans "WHOIS Privacy Protection" %}
                                     <span class="text-slate-500 dark:text-slate-400">(+{% widthratio whois_price_cents 100 1 %} RON/{% trans "year" %})</span>
                                 </label>
                             </div>
@@ -180,7 +180,7 @@
                                     class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-slate-300 dark:border-slate-600 rounded"
                                 >
                                 <label for="auto_renew" class="ml-2 block text-sm text-slate-900 dark:text-white">
-                                    🔄 {% trans "Enable Auto-Renewal" %}
+                                    {% icon "refresh" %} {% trans "Enable Auto-Renewal" %}
                                 </label>
                             </div>
                         </div>
@@ -195,7 +195,7 @@
 
                         <!-- Submit Button -->
                         <div>
-                            {% trans "🆕 Register Domain" as bt1 %}{% button bt1 type="submit" variant="primary" size="lg" class="w-full" %}
+                            {% trans "Register Domain" as bt1 %}{% button bt1 type="submit" variant="primary" size="lg" class="w-full" %}
                         </div>
                     </div>
                 </form>
@@ -203,7 +203,7 @@
                 <!-- Initial State -->
                 <div id="initial-state">
                     <div class="text-center text-slate-500 dark:text-slate-400">
-                        <span class="text-4xl mb-4 block">🔍</span>
+                        <span class="mb-4 block">{% icon "search" size="2xl" %}</span>
                         <p class="text-sm">
                             {% trans "Search for a domain to begin registration" %}
                         </p>
@@ -269,7 +269,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="flex items-center justify-between">
                                 <div>
                                     <h3 class="font-mono text-lg font-bold text-slate-900 dark:text-white">${data.domain_name}</h3>
-                                    <p class="text-sm text-green-600 dark:text-green-400">✅ {% trans "Available for registration" %}</p>
+                                    <p class="text-sm text-green-600 dark:text-green-400">{% icon "check" %} {% trans "Available for registration" %}</p>
                                     <p class="text-sm text-slate-500 dark:text-slate-400">${data.registrar}</p>
                                 </div>
                                 <div class="text-right">
@@ -289,7 +289,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     searchResults.innerHTML = `
                         <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
                             <div class="flex items-center">
-                                <span class="text-red-600 dark:text-red-400 mr-3">❌</span>
+                                <span class="text-red-600 dark:text-red-400 mr-3">{% icon "x" %}</span>
                                 <div>
                                     <h3 class="font-mono text-lg font-bold text-slate-900 dark:text-white">${data.domain_name}</h3>
                                     <p class="text-sm text-red-600 dark:text-red-400">${data.message}</p>
@@ -301,14 +301,14 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 searchResults.innerHTML = `
                     <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
-                        <p class="text-red-600 dark:text-red-400">❌ ${data.error}</p>
+                        <p class="text-red-600 dark:text-red-400">{% icon "x" %} ${data.error}</p>
                     </div>
                 `;
             }
         } catch (error) {
             searchResults.innerHTML = `
                 <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
-                    <p class="text-red-600 dark:text-red-400">❌ {% trans "Error checking availability. Please try again." %}</p>
+                    <p class="text-red-600 dark:text-red-400">{% icon "x" %} {% trans "Error checking availability. Please try again." %}</p>
                 </div>
             `;
         }

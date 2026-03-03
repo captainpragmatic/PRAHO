@@ -13,19 +13,19 @@
                         <div class="flex items-center space-x-2 mb-1 flex-wrap">
                             <!-- Action Badge using Component -->
                             {% if event.action == 'create' %}
-                                {% include 'components/badge.html' with text='✅ '|add:event.get_action_display variant='success' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='success' size='sm' %}
                             {% elif event.action == 'update' %}
-                                {% include 'components/badge.html' with text='🔄 '|add:event.get_action_display variant='info' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='info' size='sm' %}
                             {% elif event.action == 'delete' %}
-                                {% include 'components/badge.html' with text='❌ '|add:event.get_action_display variant='danger' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='danger' size='sm' %}
                             {% elif event.action == 'login' %}
-                                {% include 'components/badge.html' with text='🔐 '|add:event.get_action_display variant='primary' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='primary' size='sm' %}
                             {% elif event.action == 'logout' %}
-                                {% include 'components/badge.html' with text='👋 '|add:event.get_action_display variant='secondary' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='secondary' size='sm' %}
                             {% elif 'mfa' in event.action %}
-                                {% include 'components/badge.html' with text='🔒 '|add:event.get_action_display variant='warning' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='warning' size='sm' %}
                             {% else %}
-                                {% include 'components/badge.html' with text='📋 '|add:event.get_action_display variant='secondary' size='sm' %}
+                                {% include 'components/badge.html' with text=event.get_action_display variant='secondary' size='sm' %}
                             {% endif %}
 
                             <!-- Content Type -->

@@ -1,6 +1,7 @@
+{% load ui_components %}
 {% comment %}
 ===============================================================================
-🎯 HTMX-POWERED BUTTON COMPONENT
+{% icon "check" %} HTMX-POWERED BUTTON COMPONENT
 ===============================================================================
 Button component with full HTMX support and loading states
 Usage: {% trans "Label" as bt1 %}{% button bt1 variant="primary" href="/url" hx_get="/endpoint" size="sm" %}
@@ -39,7 +40,7 @@ Usage: {% trans "Label" as bt1 %}{% button bt1 variant="primary" href="/url" hx_
 {% endif %}
 
 <style>
-  /* 🔄 HTMX loading indicator styles */
+  /* {% icon "refresh" %} HTMX loading indicator styles */
   .htmx-request .htmx-indicator {
     display: inline-flex !important;
   }

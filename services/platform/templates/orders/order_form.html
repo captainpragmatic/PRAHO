@@ -17,9 +17,9 @@
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
         {% if order %}
-          ✏️ {% trans "Edit Order" %} {{ order.order_number }}
+          {% icon "document" %} {% trans "Edit Order" %} {{ order.order_number }}
         {% else %}
-          📦 {% trans "Create New Order" %}
+          {% icon "orders" %} {% trans "Create New Order" %}
         {% endif %}
       </h1>
       <p class="mt-2 text-slate-400">
@@ -45,9 +45,9 @@
     <div class="px-6 py-4 border-b border-slate-700">
       <h3 class="text-lg font-semibold text-white">
         {% if order %}
-          📝 {% trans "Order Details" %}
+          {% icon "document" %} {% trans "Order Details" %}
         {% else %}
-          📋 {% trans "New Order Information" %}
+          {% icon "clipboard" %} {% trans "New Order Information" %}
         {% endif %}
       </h3>
     </div>
@@ -153,14 +153,14 @@
           {% trans "Cancel" as bt2 %}{% button bt2 variant="outline" href=cancel_url %}
 
           {% if order %}
-            {% trans "💾 Update Order" as bt3 %}{% button bt3 type="submit" variant="primary" %}
+            {% trans "Update Order" as bt3 %}{% button bt3 type="submit" variant="primary" %}
           {% else %}
             {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-            {% trans "📦 Create Order" as bt4 %}{% button bt4 type="submit" variant="outline" %}
+            {% trans "Create Order" as bt4 %}{% button bt4 type="submit" variant="outline" %}
             {% url 'orders:order_create_with_item' as create_with_item_url %}
             <button type="submit" formaction="{{ create_with_item_url }}"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 bg-green-700 text-white hover:bg-green-600 focus:ring-2 focus:ring-green-500">
-              🚀 {% trans "Create Order with Item" %}
+              {% icon "services" %} {% trans "Create Order with Item" %}
             </button>
           {% endif %}
         </div>
@@ -190,7 +190,7 @@
     <div class="p-6">
       <!-- First Item (Optional) -->
       <div class="mb-8">
-        <h4 class="text-md font-semibold text-white mb-3">🧩 {% trans "First Item (optional)" %}</h4>
+        <h4 class="text-md font-semibold text-white mb-3">{% icon "orders" %} {% trans "First Item (optional)" %}</h4>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-slate-400 mb-2">{% trans "Product" %}</label>
@@ -254,29 +254,29 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="space-y-2">
           <div class="flex items-center text-sm">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans "Customer billing address snapshot" %}</span>
           </div>
           <div class="flex items-center text-sm">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans "VAT ID (CUI) validation and storage" %}</span>
           </div>
           <div class="flex items-center text-sm">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans "Sequential order numbering" %}</span>
           </div>
         </div>
         <div class="space-y-2">
           <div class="flex items-center text-sm">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans "Multi-currency support (RON, EUR, USD)" %}</span>
           </div>
           <div class="flex items-center text-sm">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans "Automatic conversion to proforma/invoice" %}</span>
           </div>
           <div class="flex items-center text-sm">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans "Complete audit trail for GDPR" %}</span>
           </div>
         </div>

@@ -22,7 +22,7 @@
         </div>
         {% if can_add_server %}
         <div class="mt-4 sm:mt-0">
-            {% trans "➕ Add Server" as bt1 %}{% button bt1 href=add_server_url variant="primary" %}
+            {% trans "Add Server" as bt1 %}{% button bt1 href=add_server_url variant="primary" %}
         </div>
         {% endif %}
     </div>
@@ -41,7 +41,7 @@
             </div>
             <div class="mt-4 flex items-center">
                 <div class="w-10 h-10 bg-green-600 rounded-lg flex items-center justify-center mr-4">
-                    <span class="text-white text-lg">✅</span>
+                    <span class="text-white text-lg">{% icon "check" %}</span>
                 </div>
                 <div>
                     <p class="text-2xl font-bold text-slate-100">{{ servers|length|default:"0" }}</p>
@@ -60,7 +60,7 @@
             </div>
             <div class="mt-4 flex items-center">
                 <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center mr-4">
-                    <span class="text-white text-lg">🌐</span>
+                    <span class="text-white text-lg">{% icon "globe" %}</span>
                 </div>
                 <div>
                     <p class="text-2xl font-bold text-slate-100">{{ total_domains|default:"0" }}</p>
@@ -79,7 +79,7 @@
             </div>
             <div class="mt-4 flex items-center">
                 <div class="w-10 h-10 bg-yellow-600 rounded-lg flex items-center justify-center mr-4">
-                    <span class="text-white text-lg">🏥</span>
+                    <span class="text-white text-lg">{% icon "services" %}</span>
                 </div>
                 <div>
                     <p class="text-2xl font-bold text-slate-100">{% trans "Monitoring" %}</p>
@@ -137,15 +137,15 @@
                             <td class="px-6 py-4 whitespace-nowrap">
                                 {% if server.status == 'active' %}
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                        ✅ {{ server.get_status_display }}
+                                        {% icon "check" %} {{ server.get_status_display }}
                                     </span>
                                 {% elif server.status == 'maintenance' %}
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                        🔧 {{ server.get_status_display }}
+                                        {% icon "settings" %} {{ server.get_status_display }}
                                     </span>
                                 {% else %}
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                        ❌ {{ server.get_status_display }}
+                                        {% icon "x" %} {{ server.get_status_display }}
                                     </span>
                                 {% endif %}
                             </td>
@@ -196,7 +196,7 @@
             </div>
             <div class="p-6">
                 <div class="text-center">
-                    <span class="text-slate-400 text-6xl">🖥️</span>
+                    <span class="text-slate-400">{% icon "server" size="2xl" %}</span>
                     <h3 class="mt-4 text-lg font-medium text-slate-100">{% trans "No Virtualmin Servers" %}</h3>
                     <p class="mt-2 text-sm text-slate-400">
                         {% trans "Get started by adding your first Virtualmin server." %}

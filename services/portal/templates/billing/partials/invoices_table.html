@@ -32,9 +32,9 @@
         <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
           <td class="px-6 py-4 whitespace-nowrap text-center">
             {% if invoice.document_type == 'proforma' %}
-              {% trans "📄 Proforma" as bt1 %}{% badge bt1 variant="primary" %}
+              {% trans "Proforma" as bt1 %}{% badge bt1 variant="primary" icon="document" css_class="w-24 justify-center" %}
             {% else %}
-              {% trans "🧾 Invoice" as bt2 %}{% badge bt2 variant="success" %}
+              {% trans "Invoice" as bt2 %}{% badge bt2 variant="success" icon="receipt" css_class="w-24 justify-center" %}
             {% endif %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
@@ -48,31 +48,31 @@
           <td class="px-6 py-4 whitespace-nowrap text-center">
             {% if invoice.document_type == 'proforma' %}
               {% if invoice.status == 'draft' %}
-                {% trans "📝 Draft" as bt3 %}{% badge bt3 variant="secondary" %}
+                {% trans "Draft" as bt3 %}{% badge bt3 variant="secondary" icon="document" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'sent' %}
-                {% trans "📧 Sent" as bt4 %}{% badge bt4 variant="primary" %}
+                {% trans "Sent" as bt4 %}{% badge bt4 variant="primary" icon="mail" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'accepted' %}
-                {% trans "✅ Accepted" as bt5 %}{% badge bt5 variant="success" %}
+                {% trans "Accepted" as bt5 %}{% badge bt5 variant="success" icon="check" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'expired' %}
-                {% trans "❌ Expired" as bt6 %}{% badge bt6 variant="danger" %}
+                {% trans "Expired" as bt6 %}{% badge bt6 variant="danger" icon="x" css_class="w-28 justify-center" %}
               {% else %}
-                {% badge invoice.status_display variant="secondary" %}
+                {% badge invoice.status_display variant="secondary" css_class="w-28 justify-center" %}
               {% endif %}
             {% else %}
               {% if invoice.status == 'paid' %}
-                {% trans "✅ Paid" as bt7 %}{% badge bt7 variant="success" %}
+                {% trans "Paid" as bt7 %}{% badge bt7 variant="success" icon="check" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'overdue' %}
-                {% trans "❌ Overdue" as bt8 %}{% badge bt8 variant="danger" %}
+                {% trans "Overdue" as bt8 %}{% badge bt8 variant="danger" icon="x" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
-                {% trans "📧 Sent" as bt9 %}{% badge bt9 variant="primary" %}
+                {% trans "Sent" as bt9 %}{% badge bt9 variant="primary" icon="mail" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'pending' %}
-                {% trans "⏳ Pending" as bt10 %}{% badge bt10 variant="warning" %}
+                {% trans "Pending" as bt10 %}{% badge bt10 variant="warning" icon="clock" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
-                {% trans "❌ Cancelled" as bt11 %}{% badge bt11 variant="danger" %}
+                {% trans "Cancelled" as bt11 %}{% badge bt11 variant="danger" icon="x" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'refunded' %}
-                {% trans "↩️ Refunded" as bt12 %}{% badge bt12 variant="warning" %}
+                {% trans "Refunded" as bt12 %}{% badge bt12 variant="warning" icon="refresh" css_class="w-28 justify-center" %}
               {% else %}
-                {% trans "📝 Draft" as bt13 %}{% badge bt13 variant="secondary" %}
+                {% trans "Draft" as bt13 %}{% badge bt13 variant="secondary" icon="document" css_class="w-28 justify-center" %}
               {% endif %}
             {% endif %}
           </td>
@@ -93,40 +93,40 @@
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center space-x-2">
         {% if invoice.document_type == 'proforma' %}
-          {% trans "📄 Proforma" as bt14 %}{% badge bt14 variant="primary" %}
+          {% trans "Proforma" as bt14 %}{% badge bt14 variant="primary" icon="document" css_class="w-24 justify-center" %}
         {% else %}
-          {% trans "🧾 Invoice" as bt15 %}{% badge bt15 variant="success" %}
+          {% trans "Invoice" as bt15 %}{% badge bt15 variant="success" icon="receipt" css_class="w-24 justify-center" %}
         {% endif %}
         <span class="text-white font-medium text-sm font-mono truncate">{{ invoice.number }}</span>
       </div>
       <div class="text-right">
         {% if invoice.document_type == 'proforma' %}
           {% if invoice.status == 'draft' %}
-            {% trans "Draft" as bt16 %}{% badge bt16 variant="secondary" %}
+            {% trans "Draft" as bt16 %}{% badge bt16 variant="secondary" icon="document" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'sent' %}
-            {% trans "Sent" as bt17 %}{% badge bt17 variant="primary" %}
+            {% trans "Sent" as bt17 %}{% badge bt17 variant="primary" icon="mail" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'accepted' %}
-            {% trans "Accepted" as bt18 %}{% badge bt18 variant="success" %}
+            {% trans "Accepted" as bt18 %}{% badge bt18 variant="success" icon="check" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'expired' %}
-            {% trans "Expired" as bt19 %}{% badge bt19 variant="danger" %}
+            {% trans "Expired" as bt19 %}{% badge bt19 variant="danger" icon="x" css_class="w-28 justify-center" %}
           {% else %}
-            {% badge invoice.status_display variant="secondary" %}
+            {% badge invoice.status_display variant="secondary" css_class="w-28 justify-center" %}
           {% endif %}
         {% else %}
           {% if invoice.status == 'paid' %}
-            {% trans "Paid" as bt20 %}{% badge bt20 variant="success" %}
+            {% trans "Paid" as bt20 %}{% badge bt20 variant="success" icon="check" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'overdue' %}
-            {% trans "Overdue" as bt21 %}{% badge bt21 variant="danger" %}
+            {% trans "Overdue" as bt21 %}{% badge bt21 variant="danger" icon="x" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'sent' or invoice.status == 'issued' %}
-            {% trans "Sent" as bt22 %}{% badge bt22 variant="primary" %}
+            {% trans "Sent" as bt22 %}{% badge bt22 variant="primary" icon="mail" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'pending' %}
-            {% trans "Pending" as bt23 %}{% badge bt23 variant="warning" %}
+            {% trans "Pending" as bt23 %}{% badge bt23 variant="warning" icon="clock" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'cancelled' or invoice.status == 'void' %}
-            {% trans "Cancelled" as bt24 %}{% badge bt24 variant="danger" %}
+            {% trans "Cancelled" as bt24 %}{% badge bt24 variant="danger" icon="x" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'refunded' %}
-            {% trans "Refunded" as bt25 %}{% badge bt25 variant="warning" %}
+            {% trans "Refunded" as bt25 %}{% badge bt25 variant="warning" icon="refresh" css_class="w-28 justify-center" %}
           {% else %}
-            {% trans "Draft" as bt26 %}{% badge bt26 variant="secondary" %}
+            {% trans "Draft" as bt26 %}{% badge bt26 variant="secondary" icon="document" css_class="w-28 justify-center" %}
           {% endif %}
         {% endif %}
       </div>

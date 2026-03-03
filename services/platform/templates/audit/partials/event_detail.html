@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load ui_components %}
 
 <!-- Event Detail View using Card Component -->
 <div class="bg-slate-700/50 rounded-lg p-4 space-y-4">
@@ -31,19 +32,19 @@
             <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Action" %}</h4>
             <!-- Action Badge -->
             {% if event.action == 'create' %}
-                {% include 'components/badge.html' with text='✅ '|add:event.get_action_display variant='success' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='success' size='xs' %}
             {% elif event.action == 'update' %}
-                {% include 'components/badge.html' with text='🔄 '|add:event.get_action_display variant='info' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='info' size='xs' %}
             {% elif event.action == 'delete' %}
-                {% include 'components/badge.html' with text='❌ '|add:event.get_action_display variant='danger' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='danger' size='xs' %}
             {% elif event.action == 'login' %}
-                {% include 'components/badge.html' with text='🔐 '|add:event.get_action_display variant='primary' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='primary' size='xs' %}
             {% elif event.action == 'logout' %}
-                {% include 'components/badge.html' with text='👋 '|add:event.get_action_display variant='secondary' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='secondary' size='xs' %}
             {% elif 'mfa' in event.action %}
-                {% include 'components/badge.html' with text='🔒 '|add:event.get_action_display variant='warning' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='warning' size='xs' %}
             {% else %}
-                {% include 'components/badge.html' with text='📋 '|add:event.get_action_display variant='secondary' size='xs' %}
+                {% include 'components/badge.html' with text=event.get_action_display variant='secondary' size='xs' %}
             {% endif %}
         </div>
 

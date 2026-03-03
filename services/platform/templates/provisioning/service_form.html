@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}
 {% if is_edit %}
@@ -21,9 +22,9 @@
       </div>
       <h1 class="text-2xl font-semibold text-white mt-4 romanian-flag">
         {% if is_edit %}
-        ✏️ {% trans "Edit Service" %}: {{ service.domain|default:"Service" }}
+        {% icon "document" %} {% trans "Edit Service" %}: {{ service.domain|default:"Service" }}
         {% else %}
-        ➕ {% trans "Create New Service" %}
+        {% icon "plus" %} {% trans "Create New Service" %}
         {% endif %}
       </h1>
       <p class="mt-2 text-sm text-slate-400">
@@ -45,14 +46,14 @@
         <!-- Customer & Basic Info -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            👤 {% trans 'Service Information' %}
+            {% icon "user" %} {% trans 'Service Information' %}
           </h3>
 
           <div class="space-y-4">
             <!-- Customer -->
             <div>
               <label for="customer_id" class="block text-sm font-medium text-slate-300 mb-1">
-                👤 {% trans 'Customer' %}
+                {% icon "user" %} {% trans 'Customer' %}
               </label>
               <select name="customer_id" id="customer_id" required
                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
@@ -68,7 +69,7 @@
             <!-- Service Plan -->
             <div>
               <label for="plan_id" class="block text-sm font-medium text-slate-300 mb-1">
-                📦 {% trans 'Service Plan' %}
+                {% icon "orders" %} {% trans 'Service Plan' %}
               </label>
               <select name="plan_id" id="plan_id" required
                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
@@ -84,7 +85,7 @@
             <!-- Domain -->
             <div>
               <label for="domain" class="block text-sm font-medium text-slate-300 mb-1">
-                🌍 {% trans 'Domain' %}
+                {% icon "globe" %} {% trans 'Domain' %}
               </label>
               <input type="text" name="domain" id="domain" required
                      value="{% if is_edit %}{{ service.domain }}{% endif %}"
@@ -107,9 +108,9 @@
           <button type="submit"
                   class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors">
             {% if is_edit %}
-            ✅ {% trans 'Update Service' %}
+            {% icon "check" %} {% trans 'Update Service' %}
             {% else %}
-            ➕ {% trans 'Create Service' %}
+            {% icon "plus" %} {% trans 'Create Service' %}
             {% endif %}
           </button>
         </div>

@@ -11,7 +11,7 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
-        📄 {% trans "Proforma" %} {{ proforma.number }}
+        {% icon "document" %} {% trans "Proforma" %} {{ proforma.number }}
       </h1>
       <p class="mt-2 text-slate-400">
         {% trans "Created on" %} {{ proforma.created_at|date:"d.m.Y H:i" }}
@@ -31,20 +31,20 @@
         {% if can_edit %}
           <a href="{% url 'billing:proforma_edit' proforma.pk %}"
              class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
-            ✏️ {% trans 'Edit' %}
+            {% icon "document" %} {% trans 'Edit' %}
           </a>
         {% endif %}
 
         {% if can_convert %}
           <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}"
              class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
-            🔄 {% trans 'Convert to Invoice' %}
+            {% icon "refresh" %} {% trans 'Convert to Invoice' %}
           </a>
         {% endif %}
 
         <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
            class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-          📄 {% trans 'Download PDF' %}
+          {% icon "document" %} {% trans 'Download PDF' %}
         </a>
       </div>
   </div>
@@ -55,7 +55,7 @@
   <div class="bg-red-900 border border-red-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-red-300 text-xl">❌</span>
+        <span class="text-red-300">{% icon "x" size="lg" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-red-200">{% trans 'Proforma Expired' %}</h3>
@@ -69,7 +69,7 @@
   <div class="bg-green-900 border border-green-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-green-300 text-xl">✅</span>
+        <span class="text-green-300">{% icon "check" size="lg" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-green-200">{% trans 'Proforma Valid' %}</h3>
@@ -88,7 +88,7 @@
       <!-- Customer Information -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          👤 {% trans 'Customer Information' %}
+          {% icon "user" %} {% trans 'Customer Information' %}
         </h3>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -136,7 +136,7 @@
       <!-- Line Items -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          📋 {% trans 'Proforma Lines' %}
+          {% icon "clipboard" %} {% trans 'Proforma Lines' %}
         </h3>
 
         <div class="overflow-hidden">
@@ -192,7 +192,7 @@
       {% if proforma.public_notes or proforma.internal_notes %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          📝 {% trans 'Additional Information' %}
+          {% icon "document" %} {% trans 'Additional Information' %}
         </h3>
 
         {% if proforma.public_notes %}
@@ -222,7 +222,7 @@
       <!-- Proforma Summary -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 sticky top-4">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          💰 {% trans 'Summary' %}
+          {% icon "currency" %} {% trans 'Summary' %}
         </h3>
 
         <div class="space-y-3">
@@ -265,15 +265,15 @@
 
         <div class="space-y-3 text-sm">
           <div class="flex items-center space-x-2">
-            <span class="text-blue-400">ℹ️</span>
+            <span class="text-blue-400">{% icon "info" %}</span>
             <span class="text-slate-300">{% trans 'Proforma for customer approval' %}</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-green-400">✅</span>
+            <span class="text-green-400">{% icon "check" %}</span>
             <span class="text-slate-300">{% trans 'Converts to official invoice when paid' %}</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-yellow-400">📋</span>
+            <span class="text-yellow-400">{% icon "clipboard" %}</span>
             <span class="text-slate-300">{% trans 'Sequential numbering maintained' %}</span>
           </div>
           <div class="flex items-center space-x-2">
@@ -286,35 +286,35 @@
       <!-- Actions -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          ⚡ {% trans 'Actions' %}
+          {% icon "lightning" %} {% trans 'Actions' %}
         </h3>
 
         <div class="space-y-3">
           {% if can_convert %}
             <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}"
                class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
-              🔄 {% trans 'Convert to Invoice' %}
+              {% icon "refresh" %} {% trans 'Convert to Invoice' %}
             </a>
           {% endif %}
 
           <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
              class="block w-full text-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors">
-            📄 {% trans 'Download PDF' %}
+            {% icon "document" %} {% trans 'Download PDF' %}
           </a>
 
           <button onclick="sendProforma({{ proforma.pk }})"
                   class="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md font-medium transition-colors">
             {% if is_staff_user %}
-              📧 {% trans 'Send to Customer' %}
+              {% icon "mail" %} {% trans 'Send to Customer' %}
             {% else %}
-              📧 {% trans 'Send to Email' %}
+              {% icon "mail" %} {% trans 'Send to Email' %}
             {% endif %}
           </button>
 
           {% if can_edit %}
             <a href="{% url 'billing:proforma_edit' proforma.pk %}"
                class="block w-full text-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-              ✏️ {% trans 'Edit Proforma' %}
+              {% icon "document" %} {% trans 'Edit Proforma' %}
             </a>
           {% endif %}
         </div>

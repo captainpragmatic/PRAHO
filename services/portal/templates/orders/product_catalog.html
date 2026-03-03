@@ -4,7 +4,7 @@
 {% block title %}{% trans "Product Catalog" %}{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
   <!-- Breadcrumbs -->
   {% include "orders/partials/order_breadcrumbs.html" with current_step="products" %}
@@ -13,7 +13,7 @@
   <div class="mb-6 sm:mb-8">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6">
       <div>
-        <h1 class="text-2xl sm:text-3xl font-bold text-white mb-2">📦 {% trans "Product Catalog" %}</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold text-white mb-2">{% icon "orders" size="lg" css_class="text-white" %} {% trans "Product Catalog" %}</h1>
         <p class="text-slate-400 text-sm sm:text-base">{% trans "Choose from our complete range of hosting services" %}</p>
       </div>
 
@@ -23,7 +23,7 @@
           <button onclick="toggleMiniCart()"
                   class="flex items-center justify-center sm:justify-start space-x-2 bg-slate-700 hover:bg-slate-600 text-white px-3 sm:px-4 py-2 rounded-lg transition-colors w-full sm:w-auto text-sm sm:text-base"
                   aria-label="{% trans 'Shopping Cart' %}">
-            <span>🛒</span>
+            <span>{% icon "orders" size="sm" css_class="text-white" %}</span>
             <span>{% trans "Cart" %}</span>
             {% if cart_count > 0 %}
             <span id="cart-count" class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full ml-1">
@@ -79,7 +79,7 @@
       {% if product.is_featured %}
       <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10">
         <span class="bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 text-xs font-medium rounded-full">
-          ⭐ RECOMMENDED
+          RECOMMENDED
         </span>
       </div>
       {% endif %}
@@ -148,7 +148,7 @@
         <ul class="space-y-2 mb-6 text-sm">
           {% for feature in product.meta.features|slice:":3" %}
           <li class="flex items-center text-green-400">
-            <span class="mr-2">✅</span>
+            <span class="mr-2">{% icon "check" size="sm" css_class="text-green-400" %}</span>
             <span class="text-slate-300">{{ feature }}</span>
           </li>
           {% endfor %}
@@ -179,7 +179,7 @@
           {% if product.requires_domain %}
           <div class="mb-3">
             <label for="domain-{{ product.slug }}" class="block text-sm font-medium text-slate-300 mb-2">
-              🌐 {% trans "Domain name (required)" %}
+              {% icon "globe" size="sm" css_class="text-slate-300" %} {% trans "Domain name (required)" %}
             </label>
             <input type="text"
                    name="domain_name"
@@ -192,14 +192,14 @@
 
           <button type="submit"
                   class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 sm:py-3 px-4 rounded-lg transition-colors text-sm sm:text-base mb-2">
-            🛒 {% trans "Add to Cart" %}
+            {% trans "Add to Cart" %}
           </button>
         </form>
 
         <!-- View Details Link -->
         <a href="{% url 'orders:product_detail' product_slug=product.slug %}"
            class="text-center text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors block py-2">
-          📋 {% trans "View Details" %}
+          {% icon "clipboard" size="sm" css_class="text-blue-400" %} {% trans "View Details" %}
         </a>
       </div>
     </div>
@@ -208,7 +208,7 @@
   {% else %}
   <!-- Empty State -->
   <div class="text-center py-16">
-    <div class="text-6xl mb-4">📦</div>
+    <div class="text-6xl mb-4">{% icon "orders" size="2xl" css_class="text-slate-400" %}</div>
     <h3 class="text-xl font-medium text-white mb-2">
       {% if product_type_filter %}
         {% trans "No products found for selected filter" %}
@@ -222,7 +222,7 @@
 
     {% if product_type_filter %}
     <a href="{% url 'orders:catalog' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
-      📋 {% trans "View all products" %}
+      {% icon "clipboard" size="sm" css_class="text-slate-300" %} {% trans "View all products" %}
     </a>
     {% endif %}
   </div>
@@ -240,7 +240,7 @@
         {% endblocktrans %}{% endfilter %}
       </p>
       <a href="{% url 'orders:cart_review' %}" class="inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
-        👀 {% trans "Review cart" %}
+        {% trans "Review cart" %}
         <svg class="ml-2 -mr-1 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
           <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path>
         </svg>
@@ -335,7 +335,7 @@ function updateProductPricing(productSlug, billingPeriod, monthlyPrice, semiannu
     }
   }
 
-  console.log(`✅ Updated pricing for ${productSlug}: ${price} RON (${periodText})`);
+  console.log(`Updated pricing for ${productSlug}: ${price} RON (${periodText})`);
 }
 </script>
 {% endblock %}

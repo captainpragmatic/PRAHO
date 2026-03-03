@@ -3,7 +3,7 @@
 {% load ui_components %}
 
 <!-- ===============================================================================
-     MOBILE HEADER & NAVIGATION 📱
+     MOBILE HEADER & NAVIGATION {% icon "server" %}
      ===============================================================================
      Mobile-first responsive header with hamburger menu navigation.
      Hidden on desktop (lg:hidden), visible on mobile devices.
@@ -167,7 +167,7 @@
 
 <style>
 /* ===============================================================================
-   ENHANCED MOBILE NAVIGATION STYLES 📱
+   ENHANCED MOBILE NAVIGATION STYLES {% icon "server" %}
    =============================================================================== */
 
 .mobile-nav-item {
@@ -257,7 +257,7 @@ body.mobile-menu-open {
 
 <script>
 // ===============================================================================
-// MOBILE MENU FUNCTIONALITY 📱
+// MOBILE MENU FUNCTIONALITY
 // ===============================================================================
 
 function toggleMobileMenu() {
@@ -267,21 +267,21 @@ function toggleMobileMenu() {
 
     if (menu && hamburger && close) {
         if (menu.classList.contains('hidden')) {
-            // 📱 Opening menu
+            //  Opening menu
             menu.classList.remove('hidden');
             menu.removeAttribute('inert');
             hamburger.classList.add('hidden');
             close.classList.remove('hidden');
             document.body.classList.add('mobile-menu-open');
-            console.log('📱 [Mobile Nav] Menu opened');
+            console.log(' [Mobile Nav] Menu opened');
         } else {
-            // 📱 Closing menu
+            //  Closing menu
             menu.classList.add('hidden');
             menu.setAttribute('inert', '');
             hamburger.classList.remove('hidden');
             close.classList.add('hidden');
             document.body.classList.remove('mobile-menu-open');
-            console.log('📱 [Mobile Nav] Menu closed');
+            console.log(' [Mobile Nav] Menu closed');
         }
     }
 }

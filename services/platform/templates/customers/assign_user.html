@@ -17,7 +17,7 @@
         </nav>
 
         <h1 class="text-2xl font-bold text-white romanian-flag">
-            👥 {% trans 'Assign User to' %} {{ customer.name }}
+            {% icon "users" %} {% trans 'Assign User to' %} {{ customer.name }}
         </h1>
         <p class="mt-1 text-sm text-slate-400">
             {% trans 'Create a new user account or link an existing user to this customer organization' %}
@@ -27,7 +27,7 @@
     <!-- Customer context card -->
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 mb-6">
         <h2 class="text-lg font-semibold text-white mb-4">
-            🏢 {% trans 'Customer Information' %}
+            {% icon "building" %} {% trans 'Customer Information' %}
         </h2>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -66,7 +66,7 @@
 
             <div class="mb-6">
                 <h2 class="text-lg font-semibold text-white mb-4">
-                    🔗 {% trans 'User Assignment Options' %}
+                    {% icon "external" %} {% trans 'User Assignment Options' %}
                 </h2>
 
                 <!-- User Action Radio Buttons -->
@@ -80,16 +80,16 @@
                             <div class="flex items-center">
                                 <div class="font-medium text-white">{% trans "Create new user account" %}</div>
                                 <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900 text-green-200">
-                                    ✅ {% trans "RECOMMENDED" %}
+                                    {% icon "check" %} {% trans "RECOMMENDED" %}
                                 </span>
                             </div>
                             <div class="text-sm text-slate-400 mt-1">
                                 {% trans "Automatically create a user account using the customer's email address" %}
                             </div>
                             <div class="text-xs text-green-400 mt-2">
-                                ✅ {% trans "User gets password reset email" %}<br>
-                                ✅ {% trans "Instant access to customer portal" %}<br>
-                                ✅ {% trans "Full ownership permissions" %}
+                                {% icon "check" %} {% trans "User gets password reset email" %}<br>
+                                {% icon "check" %} {% trans "Instant access to customer portal" %}<br>
+                                {% icon "check" %} {% trans "Full ownership permissions" %}
                             </div>
                         </div>
                     </label>
@@ -105,9 +105,9 @@
                                 {% trans "Connect an existing user account to this customer" %}
                             </div>
                             <div class="text-xs text-blue-400 mt-2">
-                                ⚠️ {% trans "User must already exist in the system" %}<br>
-                                ℹ️ {% trans "Useful for multi-customer users" %}<br>
-                                🔧 {% trans "Configurable role permissions" %}
+                                {% icon "warning" %} {% trans "User must already exist in the system" %}<br>
+                                {% icon "info" %} {% trans "Useful for multi-customer users" %}<br>
+                                {% icon "settings" %} {% trans "Configurable role permissions" %}
                             </div>
                         </div>
                     </label>
@@ -123,9 +123,9 @@
                                 {% trans "Leave customer without user assignment (can be done later)" %}
                             </div>
                             <div class="text-xs text-yellow-400 mt-2">
-                                ⚠️ {% trans "Customer cannot access portal" %}<br>
-                                ⚠️ {% trans "No automated email notifications" %}<br>
-                                ⚠️ {% trans "Manual user creation required later" %}
+                                {% icon "warning" %} {% trans "Customer cannot access portal" %}<br>
+                                {% icon "warning" %} {% trans "No automated email notifications" %}<br>
+                                {% icon "warning" %} {% trans "Manual user creation required later" %}
                             </div>
                         </div>
                     </label>
@@ -135,7 +135,7 @@
             <!-- Conditional Fields -->
             <div x-show="userAction === 'create'" x-cloak class="mb-6 pl-4 border-l-2 border-green-500">
                 <h3 class="text-md font-semibold text-white mb-4">
-                    👤 {% trans "New User Details" %}
+                    {% icon "user" %} {% trans "New User Details" %}
                 </h3>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -184,7 +184,7 @@
 
                 <div class="p-3 bg-green-900/20 rounded-lg border border-green-800 mt-4">
                     <p class="text-sm text-green-300">
-                        ℹ️ {% trans "A user account will be created using" %} <strong>{{ customer.primary_email }}</strong>.
+                        {% icon "info" %} {% trans "A user account will be created using" %} <strong>{{ customer.primary_email }}</strong>.
                         {% trans "They will receive a password reset link to set their password." %}
                     </p>
                 </div>
@@ -192,7 +192,7 @@
 
             <div x-show="userAction === 'link'" x-cloak class="mb-6 pl-4 border-l-2 border-blue-500">
                 <h3 class="text-md font-semibold text-white mb-4">
-                    🔗 {% trans "Existing User Selection" %}
+                    {% icon "external" %} {% trans "Existing User Selection" %}
                 </h3>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -222,7 +222,7 @@
 
                 <div class="p-3 bg-blue-900/20 rounded-lg border border-blue-800 mt-4">
                     <p class="text-sm text-blue-300">
-                        ℹ️ {% trans "The selected user will gain access to this customer organization with the specified role." %}
+                        {% icon "info" %} {% trans "The selected user will gain access to this customer organization with the specified role." %}
                     </p>
                 </div>
             </div>
@@ -230,7 +230,7 @@
             <div x-show="userAction === 'skip'" x-cloak class="mb-6 pl-4 border-l-2 border-yellow-500">
                 <div class="p-3 bg-yellow-900/20 rounded-lg border border-yellow-800">
                     <p class="text-sm text-yellow-300">
-                        ⚠️ {% trans "This customer will remain without user access. You can assign users later through this same interface or the admin panel." %}
+                        {% icon "warning" %} {% trans "This customer will remain without user access. You can assign users later through this same interface or the admin panel." %}
                     </p>
                 </div>
             </div>

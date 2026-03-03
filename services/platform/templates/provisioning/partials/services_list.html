@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load ui_components %}
 
 <!-- =============================================================================== -->
 <!-- PROVISIONING SERVICES LIST - STANDARD TABLE -->
@@ -10,7 +11,7 @@
     <!-- Desktop Layout -->
     <div class="hidden sm:flex items-center justify-between">
       <div class="flex items-center space-x-4">
-        <h3 class="text-lg font-medium text-white">📦 {% trans 'Services' %}</h3>
+        <h3 class="text-lg font-medium text-white">{% icon "orders" %} {% trans 'Services' %}</h3>
 
         <!-- Service Count Badge -->
         <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
@@ -31,12 +32,12 @@
       <!-- Quick Stats -->
       <div class="flex items-center space-x-4 text-sm">
         <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% elif display_status == 'provisioning' %}text-blue-400{% elif display_status == 'terminated' %}text-gray-400{% elif display_status == 'expired' %}text-orange-400{% else %}text-blue-400{% endif %}">
-          {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'provisioning' %}🔄{% elif display_status == 'terminated' %}💀{% elif display_status == 'expired' %}⏰{% else %}📊{% endif %}
+          {% if display_status == 'active' %}{% icon "check" %}{% elif display_status == 'suspended' %}{% icon "clock" %}{% elif display_status == 'pending' %}{% icon "clock" %}{% elif display_status == 'provisioning' %}{% icon "refresh" %}{% elif display_status == 'terminated' %}{% icon "x" %}{% elif display_status == 'expired' %}{% icon "clock" %}{% else %}{% icon "chart" %}{% endif %}
           {{ active_count }}
           {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'provisioning' %}{% trans 'provisioning' %}{% elif display_status == 'terminated' %}{% trans 'terminated' %}{% elif display_status == 'expired' %}{% trans 'expired' %}{% else %}{% trans 'services' %}{% endif %}
         </div>
         <div class="text-slate-400">
-          📊 {{ total_count }} {% trans 'total' %}
+          {% icon "chart" %} {{ total_count }} {% trans 'total' %}
         </div>
       </div>
     </div>
@@ -44,7 +45,7 @@
     <!-- Mobile Layout -->
     <div class="sm:hidden">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-medium text-white">📦 {% trans 'Services' %}</h3>
+        <h3 class="text-lg font-medium text-white">{% icon "orders" %} {% trans 'Services' %}</h3>
         <div class="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-sm font-medium">
           {% if services.paginator.count == 1 %}
             1 {% trans 'service' %}
@@ -57,11 +58,11 @@
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3 text-sm">
           <div class="{% if display_status == 'active' %}text-green-400{% elif display_status == 'suspended' %}text-red-400{% elif display_status == 'pending' %}text-yellow-400{% elif display_status == 'provisioning' %}text-blue-400{% elif display_status == 'terminated' %}text-gray-400{% elif display_status == 'expired' %}text-orange-400{% else %}text-blue-400{% endif %}">
-            {% if display_status == 'active' %}✅{% elif display_status == 'suspended' %}⏸️{% elif display_status == 'pending' %}⏳{% elif display_status == 'provisioning' %}🔄{% elif display_status == 'terminated' %}💀{% elif display_status == 'expired' %}⏰{% else %}📊{% endif %}
+            {% if display_status == 'active' %}{% icon "check" %}{% elif display_status == 'suspended' %}{% icon "clock" %}{% elif display_status == 'pending' %}{% icon "clock" %}{% elif display_status == 'provisioning' %}{% icon "refresh" %}{% elif display_status == 'terminated' %}{% icon "x" %}{% elif display_status == 'expired' %}{% icon "clock" %}{% else %}{% icon "chart" %}{% endif %}
             {{ active_count }}
             {% if display_status == 'active' %}{% trans 'active' %}{% elif display_status == 'suspended' %}{% trans 'suspended' %}{% elif display_status == 'pending' %}{% trans 'pending' %}{% elif display_status == 'provisioning' %}{% trans 'provisioning' %}{% elif display_status == 'terminated' %}{% trans 'terminated' %}{% elif display_status == 'expired' %}{% trans 'expired' %}{% else %}{% trans 'services' %}{% endif %}
           </div>
-          <div class="text-slate-400">📊 {{ total_count }} {% trans 'total' %}</div>
+          <div class="text-slate-400">{% icon "chart" %} {{ total_count }} {% trans 'total' %}</div>
         </div>
 
         {% if status_filter %}
@@ -162,17 +163,17 @@
             <div class="flex space-x-2">
               <a href="{% url 'provisioning:service_edit' service.pk %}"
                  class="text-blue-400 hover:text-blue-300 transition-colors">
-                ✏️
+                {% icon "document" %}
               </a>
               {% if service.status == 'active' %}
               <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
                       class="text-red-400 hover:text-red-300 transition-colors">
-                ⏸️
+                {% icon "clock" %}
               </button>
               {% elif service.status == 'suspended' %}
               <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name }}')"
                       class="text-green-400 hover:text-green-300 transition-colors">
-                ▶️
+                {% icon "services" %}
               </button>
               {% endif %}
             </div>
@@ -250,17 +251,17 @@
         <div class="flex space-x-2" onclick="event.stopPropagation();">
           <a href="{% url 'provisioning:service_edit' service.pk %}"
              class="text-blue-400 hover:text-blue-300 transition-colors text-sm">
-            ✏️
+            {% icon "document" %}
           </a>
           {% if service.status == 'active' %}
           <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
                   class="text-red-400 hover:text-red-300 transition-colors text-sm">
-            ⏸️
+            {% icon "clock" %}
           </button>
           {% elif service.status == 'suspended' %}
           <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name }}')"
                   class="text-green-400 hover:text-green-300 transition-colors text-sm">
-            ▶️
+            {% icon "services" %}
           </button>
           {% endif %}
         </div>
@@ -274,15 +275,15 @@
   <div class="text-center py-12">
     <div class="text-slate-400 text-lg mb-4">
       {% if status_filter %}
-        📋 {% trans 'No services found for the selected filter' %}
+        {% icon "clipboard" %} {% trans 'No services found for the selected filter' %}
       {% else %}
-        📦 {% trans 'No services yet' %}
+        {% icon "orders" %} {% trans 'No services yet' %}
       {% endif %}
     </div>
     {% if not status_filter and can_manage_services %}
     <a href="{% url 'provisioning:service_create' %}"
        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-md inline-flex items-center transition-colors">
-      <span class="mr-2">➕</span>
+      <span class="mr-2">{% icon "plus" %}</span>
       {% trans 'Create the first service' %}
     </a>
     {% endif %}

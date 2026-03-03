@@ -20,7 +20,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        👤 {% trans 'Personal Information' %}
+        {% icon "user" %} {% trans 'Personal Information' %}
       </h3>
 
       <form method="post" class="space-y-6">
@@ -30,7 +30,7 @@
         {% if form.non_field_errors %}
         <div class="bg-red-900 border border-red-700 rounded-md p-3">
           {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          <p class="text-red-100 text-sm">{% icon "x" %} {{ error }}</p>
           {% endfor %}
         </div>
         {% endif %}
@@ -81,7 +81,7 @@
         <!-- Language & Preferences -->
         <div class="border-t border-slate-600 pt-6">
           <h4 class="text-md font-medium text-white mb-4">
-            🌐 {% trans 'Preferences' %}
+            {% icon "globe" %} {% trans 'Preferences' %}
           </h4>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -124,7 +124,7 @@
         <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
           <button type="submit"
                   class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
-            💾 {% trans 'Save Changes' %}
+            {% icon "check" %} {% trans 'Save Changes' %}
           </button>
         </div>
       </form>
@@ -136,7 +136,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        🔐 {% trans 'Account Information' %}
+        {% icon "lock" %} {% trans 'Account Information' %}
       </h3>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -145,11 +145,11 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'User Role' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if user.is_superuser %}
-                {% trans "Superuser" as bt1 %}{% badge bt1 variant="primary" icon="👑" %}
+                {% trans "Superuser" as bt1 %}{% badge bt1 variant="primary" icon="user" %}
               {% elif user.is_staff %}
-                {% trans "Staff" as bt2 %}{% badge bt2 variant="info" icon="⚙️" %}
+                {% trans "Staff" as bt2 %}{% badge bt2 variant="info" icon="settings" %}
               {% else %}
-                {% trans "User" as bt3 %}{% badge bt3 variant="success" icon="👤" %}
+                {% trans "User" as bt3 %}{% badge bt3 variant="success" icon="user" %}
               {% endif %}
             </dd>
           </div>
@@ -158,9 +158,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if user.is_active %}
-                {% trans "Active" as bt4 %}{% badge bt4 variant="success" icon="✅" %}
+                {% trans "Active" as bt4 %}{% badge bt4 variant="success" icon="check" %}
               {% else %}
-                {% trans "Inactive" as bt5 %}{% badge bt5 variant="danger" icon="❌" %}
+                {% trans "Inactive" as bt5 %}{% badge bt5 variant="danger" icon="x" %}
               {% endif %}
             </dd>
           </div>
@@ -187,7 +187,7 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
               {% if user.mfa_enabled %}
-                <span class="text-green-400">🔒 {% trans 'Enabled' %}</span>
+                <span class="text-green-400">{% icon "lock" %} {% trans 'Enabled' %}</span>
                 <div class="mt-2 space-x-4">
                   <a href="{% url 'users:mfa_regenerate_backup_codes' %}" class="text-blue-400 hover:text-blue-300 text-xs">
                     {% trans 'Regenerate Backup Codes' %}
@@ -197,7 +197,7 @@
                   </a>
                 </div>
               {% else %}
-                {% trans "Disabled" as bt6 %}{% badge bt6 variant="warning" icon="⚠️" %}
+                {% trans "Disabled" as bt6 %}{% badge bt6 variant="warning" icon="warning" %}
                 <a href="{% url 'users:mfa_setup' %}" class="ml-2 text-blue-400 hover:text-blue-300 text-xs">
                   {% trans 'Enable MFA' %}
                 </a>
@@ -210,7 +210,7 @@
             <dd class="mt-1 text-sm">
               <a href="{% url 'users:password_change' %}"
                  class="text-blue-400 hover:text-blue-300">
-                🔑 {% trans 'Change Password' %}
+                {% icon "lock" %} {% trans 'Change Password' %}
               </a>
             </dd>
           </div>
@@ -223,7 +223,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        🛡️ {% trans 'Privacy & Data Protection' %}
+        {% icon "lock" %} {% trans 'Privacy & Data Protection' %}
       </h3>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -235,32 +235,32 @@
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-green-400 mr-2">🔒</span>
+                <span class="text-green-400 mr-2">{% icon "lock" %}</span>
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
                 </div>
               </div>
               {% if user.gdpr_consent_date %}
-                {% trans "Given" as bt7 %}{% badge bt7 variant="success" icon="✅" %}
+                {% trans "Given" as bt7 %}{% badge bt7 variant="success" icon="check" %}
               {% else %}
-                {% trans "Not Given" as bt8 %}{% badge bt8 variant="danger" icon="❌" %}
+                {% trans "Not Given" as bt8 %}{% badge bt8 variant="danger" icon="x" %}
               {% endif %}
             </div>
 
             <!-- Marketing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-blue-400 mr-2">📧</span>
+                <span class="text-blue-400 mr-2">{% icon "mail" %}</span>
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
                 </div>
               </div>
               {% if user.accepts_marketing %}
-                {% trans "Enabled" as bt9 %}{% badge bt9 variant="success" icon="✅" %}
+                {% trans "Enabled" as bt9 %}{% badge bt9 variant="success" icon="check" %}
               {% else %}
-                {% trans "Disabled" as bt10 %}{% badge bt10 variant="secondary" icon="📛" %}
+                {% trans "Disabled" as bt10 %}{% badge bt10 variant="secondary" icon="ban" %}
               {% endif %}
             </div>
           </div>
@@ -279,7 +279,7 @@
           <div class="space-y-3">
             <a href="{% url 'audit:gdpr_dashboard' %}"
                class="flex items-center p-3 bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors group">
-              <span class="text-blue-400 mr-3 text-lg">🛡️</span>
+              <span class="text-blue-400 mr-3 text-lg">{% icon "lock" %}</span>
               <div>
                 <div class="text-sm font-medium text-white group-hover:text-blue-100">
                   {% trans 'Privacy Dashboard' %}
@@ -293,7 +293,7 @@
 
             <a href="{% url 'audit:gdpr_dashboard' %}#export"
                class="flex items-center p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
-              <span class="text-green-400 mr-3">📄</span>
+              <span class="text-green-400 mr-3">{% icon "document" %}</span>
               <div>
                 <div class="text-sm font-medium text-white group-hover:text-slate-100">
                   {% trans 'Export My Data' %}
@@ -307,7 +307,7 @@
 
             <a href="{% url 'audit:gdpr_dashboard' %}#consent-history"
                class="flex items-center p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors group">
-              <span class="text-yellow-400 mr-3">📜</span>
+              <span class="text-yellow-400 mr-3">{% icon "document" %}</span>
               <div>
                 <div class="text-sm font-medium text-white group-hover:text-slate-100">
                   {% trans 'Consent History' %}
@@ -336,7 +336,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        🏢 {% trans 'Customer Access' %}
+        {% icon "building" %} {% trans 'Customer Access' %}
       </h3>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

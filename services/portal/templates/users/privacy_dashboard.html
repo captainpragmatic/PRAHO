@@ -1,14 +1,15 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Privacy Dashboard' %} - PragmaticHost{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6 max-w-4xl mx-auto">
+<div class="px-4 max-w-4xl mx-auto">
   <!-- Header -->
   <div class="mb-6">
     <h1 class="text-2xl font-bold text-white romanian-flag">
-      🛡️ {% trans 'Privacy Dashboard' %}
+      {% icon "lock" size="lg" css_class="text-white" %} {% trans 'Privacy Dashboard' %}
     </h1>
     <p class="mt-2 text-sm text-slate-400">
       {% trans 'Manage your privacy settings and data preferences in compliance with GDPR' %}
@@ -19,7 +20,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        📋 {% trans 'Privacy Settings Overview' %}
+        {% icon "clipboard" size="md" css_class="text-white" %} {% trans 'Privacy Settings Overview' %}
       </h3>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -31,7 +32,7 @@
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-green-400 mr-2">🔒</span>
+                <span class="text-green-400 mr-2">{% icon "lock" size="sm" %}</span>
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Required for service operation' %}</div>
@@ -39,11 +40,11 @@
               </div>
               {% if profile.gdpr_consent_date %}
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  ✅ {% trans 'Active' %}
+                  {% icon "check" size="xs" %} {% trans 'Active' %}
                 </span>
               {% else %}
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                  ❌ {% trans 'Inactive' %}
+                  {% icon "x" size="xs" %} {% trans 'Inactive' %}
                 </span>
               {% endif %}
             </div>
@@ -51,7 +52,7 @@
             <!-- Marketing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-blue-400 mr-2">📧</span>
+                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" %}</span>
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Newsletters and promotional content' %}</div>
@@ -59,11 +60,11 @@
               </div>
               {% if profile.accepts_marketing %}
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  ✅ {% trans 'Enabled' %}
+                  {% icon "check" size="xs" %} {% trans 'Enabled' %}
                 </span>
               {% else %}
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                  📛 {% trans 'Disabled' %}
+                  {% icon "ban" size="xs" %} {% trans 'Disabled' %}
                 </span>
               {% endif %}
             </div>
@@ -76,7 +77,7 @@
 
           <div class="space-y-3">
             <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
-              <span class="text-blue-400 mr-3">📄</span>
+              <span class="text-blue-400 mr-3">{% icon "document" size="md" %}</span>
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-blue-200">
                   {% trans 'Export My Data' %}
@@ -89,7 +90,7 @@
             </a>
 
             <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-yellow-400 mr-3">📜</span>
+              <span class="text-yellow-400 mr-3">{% icon "document" size="md" %}</span>
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-yellow-200">
                   {% trans 'Consent History' %}
@@ -117,10 +118,10 @@
       </p>
       <div class="flex flex-wrap gap-3">
         <button onclick="if(window.showCookiePreferences){window.showCookiePreferences()}" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors">
-          ⚙️ {% trans 'Manage Cookie Preferences' %}
+          {% icon "settings" size="sm" css_class="text-white" %} {% trans 'Manage Cookie Preferences' %}
         </button>
         <a href="/cookie-policy/" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors inline-block">
-          📄 {% trans 'Cookie Policy' %}
+          {% icon "document" size="sm" css_class="text-white" %} {% trans 'Cookie Policy' %}
         </a>
       </div>
     </div>
@@ -135,37 +136,37 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-green-400 text-2xl mb-2">👁️</div>
+          <div class="text-green-400 mb-2">{% icon "search" size="xl" %}</div>
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Access' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'View what personal data we hold about you' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-blue-400 text-2xl mb-2">✏️</div>
+          <div class="text-blue-400 mb-2">{% icon "document" size="xl" %}</div>
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Rectification' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Correct any inaccurate personal data' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-red-400 text-2xl mb-2">🗑️</div>
+          <div class="text-red-400 mb-2">{% icon "x" size="xl" %}</div>
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Erasure' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Request deletion of your data ("Right to be forgotten")' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-yellow-400 text-2xl mb-2">📦</div>
+          <div class="text-yellow-400 mb-2">{% icon "download" size="xl" %}</div>
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Portability' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Export your data in machine-readable format' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-purple-400 text-2xl mb-2">🚫</div>
+          <div class="text-purple-400 mb-2">{% icon "ban" size="xl" %}</div>
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Object' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Object to processing for direct marketing' %}</p>
         </div>
 
         <div class="p-4 bg-slate-700 rounded-lg">
-          <div class="text-orange-400 text-2xl mb-2">⏸️</div>
+          <div class="text-orange-400 mb-2">{% icon "clock" size="xl" %}</div>
           <h4 class="text-white font-medium mb-1">{% trans 'Right to Restrict' %}</h4>
           <p class="text-xs text-slate-400">{% trans 'Limit how we process your data' %}</p>
         </div>
@@ -177,7 +178,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-4">
-        📞 {% trans 'Data Protection Contact' %}
+        {% icon "phone" size="md" css_class="text-white" %} {% trans 'Data Protection Contact' %}
       </h3>
 
       <div class="bg-slate-700 rounded-lg p-4">

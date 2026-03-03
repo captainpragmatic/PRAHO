@@ -5,7 +5,7 @@
 {% block title %}{% trans 'Account Settings' %} - PragmaticHost{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6 max-w-4xl mx-auto">
+<div class="px-4 max-w-4xl mx-auto">
   <!-- Header -->
   <div class="mb-6">
     <h1 class="text-2xl font-bold text-white romanian-flag">
@@ -27,7 +27,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        👤 {% trans 'Personal Information' %}
+        {% icon "user" size="md" css_class="text-white" %} {% trans 'Personal Information' %}
       </h3>
 
       <form method="post" class="space-y-6">
@@ -37,7 +37,7 @@
         {% if form.non_field_errors %}
         <div class="bg-red-900 border border-red-700 rounded-md p-3">
           {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          <p class="text-red-100 text-sm">{% icon "x" size="sm" css_class="text-red-100" %} {{ error }}</p>
           {% endfor %}
         </div>
         {% endif %}
@@ -88,7 +88,7 @@
         <!-- Language & Preferences -->
         <div class="border-t border-slate-600 pt-6">
           <h4 class="text-md font-medium text-white mb-4">
-            🌐 {% trans 'Preferences' %}
+            {% icon "globe" size="sm" css_class="text-white" %} {% trans 'Preferences' %}
           </h4>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -122,7 +122,7 @@
         <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
           <button type="submit"
                   class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
-            💾 {% trans 'Save Changes' %}
+            {% trans 'Save Changes' %}
           </button>
         </div>
       </form>
@@ -133,7 +133,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        🔐 {% trans 'Account Information' %}
+        {% icon "lock" size="md" css_class="text-white" %} {% trans 'Account Information' %}
       </h3>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -142,9 +142,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if profile.is_active|default:True %}
-                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="✅" %}
+                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="check" %}
               {% else %}
-                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="❌" %}
+                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="x" %}
               {% endif %}
             </dd>
           </div>
@@ -171,19 +171,19 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
               {% if profile.mfa_enabled %}
-                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="🔒" %}
+                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="lock" %}
                 <div class="mt-2">
                   <a href="{% url 'users:mfa_management' %}"
                      class="text-blue-400 hover:text-blue-300 text-xs">
-                    🔧 {% trans 'Manage MFA Settings' %}
+                    {% icon "settings" size="sm" css_class="text-blue-400" %} {% trans 'Manage MFA Settings' %}
                   </a>
                 </div>
               {% else %}
-                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="⚠️" %}
+                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="warning" %}
                 <div class="mt-2">
                   <a href="{% url 'users:mfa_management' %}"
                      class="text-yellow-400 hover:text-yellow-300 text-xs">
-                    ⚡ {% trans 'Enable MFA Now' %}
+                    {% icon "lightning" size="sm" css_class="text-yellow-400" %} {% trans 'Enable MFA Now' %}
                   </a>
                 </div>
               {% endif %}
@@ -195,7 +195,7 @@
             <dd class="mt-1 text-sm">
               <a href="{% url 'users:change_password' %}"
                  class="text-blue-400 hover:text-blue-300">
-                🔑 {% trans 'Change Password' %}
+                {% icon "lock" size="sm" css_class="text-blue-400" %} {% trans 'Change Password' %}
               </a>
             </dd>
           </div>
@@ -211,7 +211,7 @@
         <!-- Header - Mobile Stacked, Desktop Side-by-Side -->
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
           <h3 class="text-lg font-medium text-white">
-            🏢 {% trans 'Company Profiles' %}
+            {% icon "building" size="md" css_class="text-white" %} {% trans 'Company Profiles' %}
           </h3>
 
           <!-- Customer Context Summary - Mobile Full Width -->
@@ -247,7 +247,7 @@
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <!-- Customer Info -->
           <div class="flex items-start sm:items-center space-x-3 min-w-0 flex-1">
-            <span class="text-blue-400 mt-0.5 sm:mt-0 flex-shrink-0">🏢</span>
+            <span class="text-blue-400 mt-0.5 sm:mt-0 flex-shrink-0">{% icon "building" size="sm" css_class="text-blue-400" %}</span>
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium text-white truncate">
                 {% trans 'Currently viewing:' %} {{ selected_customer_name }}
@@ -260,10 +260,10 @@
                   {% elif selected_customer_role == 'tech' %}bg-purple-600 text-white
                   {% elif selected_customer_role == 'viewer' %}bg-gray-600 text-white
                   {% else %}bg-slate-600 text-white{% endif %}">
-                  {% if selected_customer_role == "owner" %}👑 {% trans "Owner" %}
-                  {% elif selected_customer_role == "billing" %}💳 {% trans "Billing" %}
-                  {% elif selected_customer_role == "tech" %}⚙️ {% trans "Technical" %}
-                  {% elif selected_customer_role == "viewer" %}👁️ {% trans "Viewer" %}
+                  {% if selected_customer_role == "owner" %}{% icon "users" size="xs" css_class="text-white" %} {% trans "Owner" %}
+                  {% elif selected_customer_role == "billing" %}{% icon "credit-card" size="xs" css_class="text-white" %} {% trans "Billing" %}
+                  {% elif selected_customer_role == "tech" %}{% icon "settings" size="xs" css_class="text-white" %} {% trans "Technical" %}
+                  {% elif selected_customer_role == "viewer" %}{% icon "search" size="xs" css_class="text-white" %} {% trans "Viewer" %}
                   {% else %}{{ selected_customer_role|title }}{% endif %}
                 </span>
               </div>
@@ -274,12 +274,12 @@
           <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <a href="{% url 'users:company_profile' %}"
                class="flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-              👁️ {% trans 'View' %}
+              {% icon "search" size="xs" css_class="text-white" %} {% trans 'View' %}
             </a>
             {% if can_edit_profile %}
             <a href="{% url 'users:company_profile_edit' %}"
                class="flex items-center justify-center px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
-              ✏️ {% trans 'Edit' %}
+              {% icon "document" size="xs" css_class="text-white" %} {% trans 'Edit' %}
             </a>
             {% endif %}
           </div>
@@ -298,7 +298,7 @@
           <!-- Company Header -->
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center space-x-2">
-              <span class="text-blue-400">🏢</span>
+              <span class="text-blue-400">{% icon "building" size="sm" css_class="text-blue-400" %}</span>
               <h4 class="font-medium text-white text-sm truncate">{{ membership.customer_name }}</h4>
             </div>
 
@@ -309,7 +309,7 @@
               {% elif membership.role == 'tech' %}bg-purple-600 text-white
               {% elif membership.role == 'viewer' %}bg-gray-600 text-white
               {% else %}bg-slate-600 text-white{% endif %}">
-              {% if membership.role == "owner" %}👑{% elif membership.role == "billing" %}💳{% elif membership.role == "tech" %}⚙️{% elif membership.role == "viewer" %}👁️{% endif %}
+              {% if membership.role == "owner" %}{% icon "users" size="xs" %}{% elif membership.role == "billing" %}{% icon "credit-card" size="xs" %}{% elif membership.role == "tech" %}{% icon "settings" size="xs" %}{% elif membership.role == "viewer" %}{% icon "search" size="xs" %}{% endif %}
               {{ membership.role|title }}
             </span>
           </div>
@@ -332,19 +332,19 @@
               <!-- Current customer - direct actions -->
               <a href="{% url 'users:company_profile' %}"
                  class="flex-1 px-3 py-2 bg-blue-600 text-white text-xs text-center font-medium rounded-lg hover:bg-blue-700 transition-colors">
-                👁️ {% trans 'View' %}
+                {% icon "search" size="xs" css_class="text-white" %} {% trans 'View' %}
               </a>
               {% if membership.role in 'owner,billing' %}
               <a href="{% url 'users:company_profile_edit' %}"
                  class="flex-1 px-3 py-2 bg-green-600 text-white text-xs text-center font-medium rounded-lg hover:bg-green-700 transition-colors">
-                ✏️ {% trans 'Edit' %}
+                {% icon "document" size="xs" css_class="text-white" %} {% trans 'Edit' %}
               </a>
               {% endif %}
             {% else %}
               <!-- Other customer - switch first -->
               <button onclick="switchToCustomer('{{ membership.customer_id }}')"
                       class="w-full px-3 py-2 bg-slate-600 text-white text-xs font-medium rounded-lg hover:bg-slate-500 transition-colors">
-                🔄 {% trans 'Switch & View' %}
+                {% icon "refresh" size="xs" css_class="text-white" %} {% trans 'Switch & View' %}
               </button>
             {% endif %}
           </div>
@@ -353,7 +353,7 @@
         <!-- No companies message - Mobile Friendly -->
         <div class="sm:col-span-2 xl:col-span-3 text-center py-8 px-4">
           <div class="text-slate-400 mb-4">
-            <span class="text-4xl">🏢</span>
+            {% icon "building" size="2xl" css_class="text-slate-400" %}
           </div>
           <p class="text-slate-400 mb-2 text-sm sm:text-base">{% trans 'No company profiles found' %}</p>
           <p class="text-xs text-slate-500">{% trans 'Create your first company profile to get started' %}</p>
@@ -364,7 +364,7 @@
         <div class="bg-slate-700/30 border-2 border-dashed border-slate-600 rounded-lg p-4 hover:border-slate-500 hover:bg-slate-700/40 transition-colors group">
           <div class="text-center">
             <div class="text-slate-400 group-hover:text-slate-300 mb-3">
-              <span class="text-2xl sm:text-3xl">➕</span>
+              {% icon "plus" size="xl" css_class="text-slate-400 group-hover:text-slate-300" %}
             </div>
             <h4 class="font-medium text-slate-400 group-hover:text-slate-300 mb-2 text-sm">
               {% trans 'Add New Company' %}
@@ -374,7 +374,7 @@
             </p>
             <a href="{% url 'users:create_company' %}"
                class="inline-flex items-center justify-center w-full px-4 py-2.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-              🏢 {% trans 'Create Company' %}
+              {% icon "building" size="sm" css_class="text-white" %} {% trans 'Create Company' %}
             </a>
           </div>
         </div>
@@ -437,7 +437,7 @@
   <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
     <div class="p-6">
       <h3 class="text-lg font-medium text-white mb-6">
-        🛡️ {% trans 'Privacy & Data Protection' %}
+        {% icon "lock" size="md" css_class="text-white" %} {% trans 'Privacy & Data Protection' %}
       </h3>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -449,32 +449,32 @@
             <!-- Data Processing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-green-400 mr-2">🔒</span>
+                <span class="text-green-400 mr-2">{% icon "lock" size="sm" css_class="text-green-400" %}</span>
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
                 </div>
               </div>
               {% if profile.gdpr_consent_date %}
-                {% trans "Given" as bt5 %}{% badge bt5 variant="success" icon="✅" %}
+                {% trans "Given" as bt5 %}{% badge bt5 variant="success" icon="check" %}
               {% else %}
-                {% trans "Not Given" as bt6 %}{% badge bt6 variant="danger" icon="❌" %}
+                {% trans "Not Given" as bt6 %}{% badge bt6 variant="danger" icon="x" %}
               {% endif %}
             </div>
 
             <!-- Marketing Consent -->
             <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
               <div class="flex items-center">
-                <span class="text-blue-400 mr-2">📧</span>
+                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" css_class="text-blue-400" %}</span>
                 <div>
                   <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
                   <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
                 </div>
               </div>
               {% if profile.accepts_marketing %}
-                {% trans "Enabled" as bt7 %}{% badge bt7 variant="success" icon="✅" %}
+                {% trans "Enabled" as bt7 %}{% badge bt7 variant="success" icon="check" %}
               {% else %}
-                {% trans "Disabled" as bt8 %}{% badge bt8 variant="secondary" icon="📛" %}
+                {% trans "Disabled" as bt8 %}{% badge bt8 variant="secondary" icon="ban" %}
               {% endif %}
             </div>
           </div>
@@ -492,7 +492,7 @@
 
           <div class="space-y-3">
             <a href="{% url 'users:privacy_dashboard' %}" class="flex items-center p-3 bg-blue-900/50 hover:bg-blue-800/60 rounded-lg transition-colors group">
-              <span class="text-blue-400 mr-3 text-lg">🛡️</span>
+              <span class="text-blue-400 mr-3 text-lg">{% icon "lock" size="md" css_class="text-blue-400" %}</span>
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-blue-200">
                   {% trans 'Privacy Dashboard' %}
@@ -505,7 +505,7 @@
             </a>
 
             <a href="{% url 'users:data_export' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-green-400 mr-3">📄</span>
+              <span class="text-green-400 mr-3">{% icon "document" size="md" css_class="text-green-400" %}</span>
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-green-200">
                   {% trans 'Export My Data' %}
@@ -518,7 +518,7 @@
             </a>
 
             <a href="{% url 'users:consent_history' %}" class="flex items-center p-3 bg-slate-700/50 hover:bg-slate-600/60 rounded-lg transition-colors group">
-              <span class="text-yellow-400 mr-3">📜</span>
+              <span class="text-yellow-400 mr-3">{% icon "document" size="md" css_class="text-yellow-400" %}</span>
               <div class="flex-1">
                 <div class="text-sm font-medium text-white group-hover:text-yellow-200">
                   {% trans 'Consent History' %}

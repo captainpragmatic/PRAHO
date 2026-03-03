@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Services' %} - {{ block.super }}{% endblock %}
 
@@ -17,7 +18,7 @@
         {% if can_manage_services %}
         <a href="{% url 'provisioning:service_create' %}"
            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
-          <span class="mr-2">➕</span>
+          <span class="mr-2">{% icon "plus" %}</span>
           {% trans 'New Service' %}
         </a>
         {% endif %}
@@ -31,37 +32,37 @@
       <nav class="-mb-px flex space-x-8">
         <a href="{% url 'provisioning:services' %}"
            class="{% if not status_filter %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          📊 {% trans 'All Services' %}
+          {% icon "chart" %} {% trans 'All Services' %}
         </a>
 
         <a href="{% url 'provisioning:services' %}?status=active"
            class="{% if status_filter == 'active' %}border-green-500 text-green-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ✅ {% trans 'Active' %}
+          {% icon "check" %} {% trans 'Active' %}
         </a>
 
         <a href="{% url 'provisioning:services' %}?status=suspended"
            class="{% if status_filter == 'suspended' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ⏸️ {% trans 'Suspended' %}
+          {% icon "clock" %} {% trans 'Suspended' %}
         </a>
 
         <a href="{% url 'provisioning:services' %}?status=pending"
            class="{% if status_filter == 'pending' %}border-yellow-500 text-yellow-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ⏳ {% trans 'Pending' %}
+          {% icon "clock" %} {% trans 'Pending' %}
         </a>
 
         <a href="{% url 'provisioning:services' %}?status=provisioning"
            class="{% if status_filter == 'provisioning' %}border-blue-500 text-blue-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          🔄 {% trans 'Provisioning' %}
+          {% icon "refresh" %} {% trans 'Provisioning' %}
         </a>
 
         <a href="{% url 'provisioning:services' %}?status=failed"
            class="{% if status_filter == 'failed' %}border-red-500 text-red-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          💥 {% trans 'Failed' %}
+          {% icon "warning" %} {% trans 'Failed' %}
         </a>
 
         <a href="{% url 'provisioning:services' %}?status=cancelled"
            class="{% if status_filter == 'cancelled' %}border-slate-500 text-slate-400{% else %}border-transparent text-slate-400 hover:text-slate-300{% endif %} whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors">
-          ❌ {% trans 'Cancelled' %}
+          {% icon "x" %} {% trans 'Cancelled' %}
         </a>
       </nav>
     </div>
@@ -74,13 +75,13 @@
   <div class="mt-6 flex space-x-4">
     <a href="{% url 'provisioning:servers' %}"
       class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
-      <span class="mr-2">🖥️</span>
+      <span class="mr-2">{% icon "server" %}</span>
       {% trans 'Servers' %}
     </a>
 
     <a href="{% url 'provisioning:plans' %}"
       class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
-      <span class="mr-2">📦</span>
+      <span class="mr-2">{% icon "orders" %}</span>
       {% trans 'Plans' %}
     </a>
   </div>

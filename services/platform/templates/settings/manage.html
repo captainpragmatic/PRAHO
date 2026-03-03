@@ -9,7 +9,7 @@
 <div class="px-4 py-6">
     <!-- Header -->
     <div class="mb-8">
-        <h1 class="text-3xl font-bold text-white">⚙️ {% trans "Settings Management" %}</h1>
+        <h1 class="font-bold text-white">{% icon "settings" size="xl" %} {% trans "Settings Management" %}</h1>
         <p class="mt-2 text-slate-400">
             {% trans "Configure and manage platform settings across different categories" %}
         </p>
@@ -20,7 +20,7 @@
         <div class="p-6">
             <div class="flex">
                 <div class="flex-shrink-0">
-                    <div class="text-xl">⚠️</div>
+                    <div class="">{% icon "warning" size="lg" %}</div>
                 </div>
                 <div class="ml-3">
                     <h3 class="text-lg font-medium text-red-400">{% trans "Error Loading Settings" %}</h3>
@@ -52,17 +52,17 @@
                 >
                     <div class="flex items-center">
                         <div class="text-lg mr-2">
-                            {% if category.key == 'billing' %}💰
-                            {% elif category.key == 'users' %}👥
-                            {% elif category.key == 'domains' %}🌐
-                            {% elif category.key == 'provisioning' %}🚀
-                            {% elif category.key == 'virtualmin' %}🖥️
-                            {% elif category.key == 'node_deployment' %}☁️
-                            {% elif category.key == 'security' %}🔒
-                            {% elif category.key == 'notifications' %}📧
-                            {% elif category.key == 'integrations' %}🔗
-                            {% elif category.key == 'system' %}⚙️
-                            {% else %}📋{% endif %}
+                            {% if category.key == 'billing' %}{% icon "currency" %}
+                            {% elif category.key == 'users' %}{% icon "users" %}
+                            {% elif category.key == 'domains' %}{% icon "globe" %}
+                            {% elif category.key == 'provisioning' %}{% icon "services" %}
+                            {% elif category.key == 'virtualmin' %}{% icon "server" %}
+                            {% elif category.key == 'node_deployment' %}{% icon "globe" %}
+                            {% elif category.key == 'security' %}{% icon "lock" %}
+                            {% elif category.key == 'notifications' %}{% icon "mail" %}
+                            {% elif category.key == 'integrations' %}{% icon "external" %}
+                            {% elif category.key == 'system' %}{% icon "settings" %}
+                            {% else %}{% icon "clipboard" %}{% endif %}
                         </div>
                         {{ category.name }}
                     </div>
@@ -97,7 +97,7 @@
                     </div>
                 {% else %}
                     <div class="text-center py-12">
-                        <div class="text-slate-400 text-6xl mb-4">⚙️</div>
+                        <div class="text-slate-400  mb-4">{% icon "settings" size="2xl" %}</div>
                         <h3 class="text-lg font-medium text-white mb-2">{% trans "Select a Category" %}</h3>
                         <p class="text-slate-400">{% trans "Choose a settings category from the tabs above to begin." %}</p>
                     </div>
@@ -109,25 +109,25 @@
     <!-- Quick Actions -->
     <div class="bg-slate-800 rounded-lg border border-slate-700">
         <div class="p-6">
-            <h3 class="text-lg font-medium text-white mb-4">⚡ {% trans "Quick Actions" %}</h3>
+            <h3 class="text-lg font-medium text-white mb-4">{% icon "lightning" %} {% trans "Quick Actions" %}</h3>
             <div class="flex flex-wrap gap-3">
                 <button
                     onclick="refreshCache()"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition-all duration-200"
                 >
-                    🔄 {% trans "Refresh Cache" %}
+                    {% icon "refresh" %} {% trans "Refresh Cache" %}
                 </button>
                 <a
                     href="{% url 'settings:export_settings' %}"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200"
                 >
-                    📥 {% trans "Export Settings" %}
+                    {% icon "download" %} {% trans "Export Settings" %}
                 </a>
                 <a
                     href="{% url 'settings:dashboard' %}"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200"
                 >
-                    📊 {% trans "View Dashboard" %}
+                    {% icon "chart" %} {% trans "View Dashboard" %}
                 </a>
             </div>
         </div>
@@ -151,17 +151,17 @@ async function refreshCache() {
 
         if (data.success) {
             // Show success message and reload current tab content
-            showToast('✅ Cache refreshed successfully!', 'success');
+            showToast('[OK] Cache refreshed successfully!', 'success');
             // Trigger reload of current category
             const activeTab = document.querySelector('.tab-button.text-blue-400');
             if (activeTab) {
                 activeTab.click();
             }
         } else {
-            showToast('❌ Error refreshing cache: ' + (data.error || 'Unknown error'), 'error');
+            showToast('[Error] Error refreshing cache: ' + (data.error || 'Unknown error'), 'error');
         }
     } catch (error) {
-        showToast('❌ Network error: ' + error.message, 'error');
+        showToast('[Error] Network error: ' + error.message, 'error');
     }
 }
 

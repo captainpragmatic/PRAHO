@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Create Account' %} - PragmaticHost{% endblock %}
 
@@ -13,7 +14,7 @@
         <img src="{% static 'img/favicon.svg' %}" alt="PRAHO" class="h-full w-full">
       </div>
       <h1 class="mt-6 text-3xl font-extrabold text-white">
-        🚀 {% trans 'Create Your PragmaticHost Account' %}
+        {% icon "lightning" size="lg" css_class="text-white" %} {% trans 'Create Your PragmaticHost Account' %}
       </h1>
       <p class="mt-2 text-sm text-slate-400">
         {% trans 'Start your hosting journey with Romanian compliance built-in' %}
@@ -48,7 +49,7 @@
         <!-- Step 1: Personal Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            👤 {% trans 'Personal Information' %}
+            {% icon "user" size="md" css_class="text-white" %} {% trans 'Personal Information' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -107,7 +108,7 @@
         <!-- Step 2: Business Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🏢 {% trans 'Business Information' %}
+            {% icon "building" size="md" css_class="text-white" %} {% trans 'Business Information' %}
           </h3>
 
           <!-- Customer Type -->
@@ -170,7 +171,7 @@
         <!-- Step 3: Address Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            📍 {% trans 'Address Information' %}
+            {% icon "home" size="md" css_class="text-white" %} {% trans 'Address Information' %}
           </h3>
 
           <!-- Address -->
@@ -226,7 +227,7 @@
         <!-- Step 4: Password -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🔒 {% trans 'Account Security' %}
+            {% icon "lock" size="md" css_class="text-white" %} {% trans 'Account Security' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -257,7 +258,7 @@
         <!-- Step 5: GDPR Compliance -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🛡️ {% trans 'Privacy & Consent' %}
+            {% icon "lock" size="md" css_class="text-white" %} {% trans 'Privacy & Consent' %}
           </h3>
 
           <!-- Data Processing Consent -->
@@ -288,7 +289,7 @@
         <!-- Submit Button -->
         <div class="pt-6">
           <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-            🚀 Create Account
+            Create Account
           </button>
         </div>
 

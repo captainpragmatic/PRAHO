@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📄 BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform (COMPONENT VERSION)
+{% icon "document" %} BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform (COMPONENT VERSION)
 ===============================================================================
 HTMX-loaded partial using the standardized clickable_data_table component.
 This demonstrates how to use our reusable table component across the platform.
@@ -35,7 +35,7 @@ This demonstrates how to use our reusable table component across the platform.
     <!-- Empty State -->
     <div class="text-center py-12">
       <div class="text-slate-400">
-        <div class="text-4xl mb-4">📋</div>
+        <div class="mb-4">{% icon "clipboard" size="2xl" %}</div>
         <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
         <p class="text-sm">
           {% if user.is_staff %}
@@ -47,7 +47,7 @@ This demonstrates how to use our reusable table component across the platform.
         {% if user.is_staff %}
           <div class="mt-4">
             {% url 'billing:proforma_create' as create_proforma_url %}
-            {% trans "📄 Create First Proforma" as bt1 %}{% button bt1 variant="primary" href=create_proforma_url %}
+            {% trans "Create First Proforma" as bt1 %}{% button bt1 variant="primary" href=create_proforma_url %}
           </div>
         {% endif %}
       </div>

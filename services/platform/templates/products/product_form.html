@@ -28,9 +28,9 @@
     </div>
     <h1 class="text-3xl font-bold text-white">
       {% if action == 'create' %}
-        ✨ {% trans "Create New Product" %}
+        {% icon "lightning" %} {% trans "Create New Product" %}
       {% else %}
-        ✏️ {% trans "Edit Product" %}
+        {% icon "document" %} {% trans "Edit Product" %}
       {% endif %}
     </h1>
     <p class="mt-2 text-slate-400">
@@ -63,7 +63,7 @@
 
     <!-- Basic Information -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-      <h2 class="text-xl font-semibold text-white mb-6">📋 {% trans 'Basic Information' %}</h2>
+      <h2 class="font-semibold text-white mb-6">{% icon "clipboard" size="lg" %} {% trans 'Basic Information' %}</h2>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Product Name -->
@@ -95,7 +95,7 @@
 
     <!-- Provisioning Settings -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-      <h2 class="text-xl font-semibold text-white mb-6">⚙️ {% trans 'Provisioning Settings' %}</h2>
+      <h2 class="font-semibold text-white mb-6">{% icon "settings" size="lg" %} {% trans 'Provisioning Settings' %}</h2>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Default Service Plan -->
@@ -157,7 +157,7 @@
 
     <!-- Status & Visibility -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-      <h2 class="text-xl font-semibold text-white mb-6">👁️ {% trans 'Status & Visibility' %}</h2>
+      <h2 class="font-semibold text-white mb-6">{% icon "user" size="lg" %} {% trans 'Status & Visibility' %}</h2>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {% checkbox_field "is_active" label="Active (available for purchase)" html_id="id_is_active" checked=form.is_active.value %}
@@ -177,7 +177,7 @@
 
     <!-- SEO Settings -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-      <h2 class="text-xl font-semibold text-white mb-6">🔍 {% trans 'SEO Settings' %}</h2>
+      <h2 class="font-semibold text-white mb-6">{% icon "search" size="lg" %} {% trans 'SEO Settings' %}</h2>
 
       <div class="space-y-6">
         <div>
@@ -226,12 +226,12 @@
     <div class="flex justify-end space-x-3">
       <a href="{% if action == 'edit' %}{% url 'products:product_detail' slug=product.slug %}{% else %}{% url 'products:product_list' %}{% endif %}"
          class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-        ❌ {% trans 'Cancel' %}
+        {% icon "x" %} {% trans 'Cancel' %}
       </a>
       {% if action == 'create' %}
-        {% trans "✨ Create Product" as bt1 %}{% button bt1 variant="primary" type="submit" %}
+        {% trans "Create Product" as bt1 %}{% button bt1 variant="primary" type="submit" %}
       {% else %}
-        {% trans "💾 Save Changes" as bt2 %}{% button bt2 variant="primary" type="submit" %}
+        {% trans "Save Changes" as bt2 %}{% button bt2 variant="primary" type="submit" %}
       {% endif %}
     </div>
   </form>

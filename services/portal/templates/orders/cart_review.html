@@ -4,14 +4,14 @@
 {% block title %}{% trans "Cart Review" %}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
 
   <!-- Breadcrumbs -->
   {% include "orders/partials/order_breadcrumbs.html" with current_step="cart" %}
 
   <!-- Page Header -->
   <div class="mb-8">
-    <h1 class="text-3xl font-bold text-white mb-2">🛒 {% trans "Cart Review" %}</h1>
+    <h1 class="text-3xl font-bold text-white mb-2">{% icon "orders" size="lg" css_class="text-white" %} {% trans "Cart Review" %}</h1>
     <p class="text-slate-400">{% trans "Review selected products and proceed to checkout" %}</p>
   </div>
 
@@ -51,7 +51,7 @@
 
                   {% if item.domain_name %}
                   <span class="flex items-center">
-                    <span class="mr-1">🌐</span>
+                    <span class="mr-1">{% icon "globe" size="xs" css_class="text-slate-400" %}</span>
                     {{ item.domain_name }}
                   </span>
                   {% endif %}
@@ -112,7 +112,7 @@
                         hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}"
                         class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700"
                         aria-label="{% trans 'Remove from cart' %}">
-                  <span>🗑️</span>
+                  <span>{% icon "x" size="sm" css_class="text-slate-400" %}</span>
                   <span class="ml-1 text-sm hidden sm:inline">{% trans "Remove" %}</span>
                 </button>
               </div>
@@ -121,7 +121,7 @@
           {% empty %}
           <!-- Empty cart fallback -->
           <div class="p-8 text-center">
-            <div class="text-4xl mb-4">🛒</div>
+            <div class="mb-4">{% icon "orders" size="2xl" css_class="text-slate-400" %}</div>
             <h3 class="text-lg font-medium text-white mb-2">
               {% trans "Your cart is empty" %}
             </h3>
@@ -129,7 +129,7 @@
               {% trans "Add products to continue" %}
             </p>
             <a href="{% url 'orders:catalog' %}" class="ui-btn inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-300">
-              📦 {% trans "Explore Products" %}
+              {% icon "orders" size="sm" css_class="text-white" %} {% trans "Explore Products" %}
             </a>
           </div>
           {% endfor %}

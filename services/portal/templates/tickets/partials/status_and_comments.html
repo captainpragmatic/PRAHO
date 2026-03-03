@@ -14,13 +14,13 @@
             <p class="text-slate-400 text-sm">{% trans 'Status' %}:</p>
             <div class="flex items-center space-x-2">
               {% if ticket.status == 'open' %}
-                {% trans "Open" as bt1 %}{% badge bt1 variant="info" icon="📂" %}
+                {% trans "Open" as bt1 %}{% badge bt1 variant="info" icon="folder-open" %}
               {% elif ticket.status == 'in_progress' %}
-                {% trans "In Progress" as bt2 %}{% badge bt2 variant="primary" icon="⚡" %}
+                {% trans "In Progress" as bt2 %}{% badge bt2 variant="primary" icon="lightning" %}
               {% elif ticket.status == 'waiting_on_customer' %}
-                {% trans "Waiting on You" as bt3 %}{% badge bt3 variant="warning" icon="⏳" %}
+                {% trans "Waiting on You" as bt3 %}{% badge bt3 variant="warning" icon="clock" %}
               {% elif ticket.status == 'closed' %}
-                {% trans "Closed" as bt4 %}{% badge bt4 variant="secondary" icon="📁" %}
+                {% trans "Closed" as bt4 %}{% badge bt4 variant="secondary" icon="folder" %}
                 {% if ticket.resolution_code %}
                   {% badge ticket.resolution_code|title variant="outline" size="xs" %}
                 {% endif %}
@@ -31,7 +31,7 @@
               <!-- Customer replied badge -->
               {% if ticket.customer_replied_recently %}
                 <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
-                  💬
+                  {% icon "chat" size="xs" %}
                 </span>
               {% endif %}
             </div>
@@ -39,15 +39,15 @@
         <div>
             <p class="text-slate-400 text-sm">{% trans 'Priority' %}:</p>
             {% if ticket.priority == 'critical' %}
-              {% trans "Critical" as bt5 %}{% badge bt5 variant="danger" icon="🚨" %}
+              {% trans "Critical" as bt5 %}{% badge bt5 variant="danger" icon="warning" %}
             {% elif ticket.priority == 'urgent' %}
-              {% trans "Urgent" as bt6 %}{% badge bt6 variant="danger" icon="🔴" %}
+              {% trans "Urgent" as bt6 %}{% badge bt6 variant="danger" icon="warning" %}
             {% elif ticket.priority == 'high' %}
-              {% trans "High" as bt7 %}{% badge bt7 variant="warning" icon="🟡" %}
+              {% trans "High" as bt7 %}{% badge bt7 variant="warning" icon="warning" %}
             {% elif ticket.priority == 'normal' %}
-              {% trans "Normal" as bt8 %}{% badge bt8 variant="info" icon="🔵" %}
+              {% trans "Normal" as bt8 %}{% badge bt8 variant="info" icon="info" %}
             {% elif ticket.priority == 'low' %}
-              {% trans "Low" as bt9 %}{% badge bt9 variant="success" icon="🟢" %}
+              {% trans "Low" as bt9 %}{% badge bt9 variant="success" icon="check" %}
             {% else %}
               {% badge ticket.priority|capfirst variant="default" %}
             {% endif %}

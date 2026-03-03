@@ -30,9 +30,9 @@
                     }
                 })">
             {% if account.protected_from_deletion %}
-                🔓 {% trans "Disable Protection" %}
+                {% icon "lock" %} {% trans "Disable Protection" %}
             {% else %}
-                🔒 {% trans "Enable Protection" %}
+                {% icon "lock" %} {% trans "Enable Protection" %}
             {% endif %}
         </button>
 
@@ -50,12 +50,12 @@
                         });
                     }
                 })">
-            🗑️ {% trans "Delete Account" %}
+            {% icon "x" %} {% trans "Delete Account" %}
         </button>
         {% else %}
         <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed"
                 disabled>
-            🗑️ {% trans "Delete Account" %} <span class="text-xs">({% trans "Protected" %})</span>
+            {% icon "x" %} {% trans "Delete Account" %} <span class="text-xs">({% trans "Protected" %})</span>
         </button>
         {% endif %}
     </div>

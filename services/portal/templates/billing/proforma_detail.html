@@ -11,7 +11,7 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-2xl sm:text-3xl font-bold text-white">
-        📄 {% trans "Proforma" %} <span class="block sm:inline mt-1 sm:mt-0">{{ proforma.number }}</span>
+        {% icon "document" size="lg" css_class="text-white" %} {% trans "Proforma" %} <span class="block sm:inline mt-1 sm:mt-0">{{ proforma.number }}</span>
       </h1>
       <p class="mt-2 text-slate-400 text-sm sm:text-base">
         {% trans "Created on" %} {{ proforma.created_at|date:"d.m.Y H:i" }}
@@ -23,7 +23,7 @@
         <!-- PDF Download Button -->
         <a href="{% url 'billing:proforma_pdf_export' proforma.number %}"
            class="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700">
-          📄 {% trans "Download PDF" %}
+          {% icon "download" size="sm" css_class="text-white" %} {% trans "Download PDF" %}
         </a>
 
         <a href="{% url 'billing:invoices_list' %}"
@@ -39,7 +39,7 @@
   <div class="bg-red-900 border border-red-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-red-300 text-xl">❌</span>
+        <span class="text-red-300 text-xl">{% icon "x" size="lg" css_class="text-red-300" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-red-200">{% trans 'Proforma Expired' %}</h3>
@@ -53,7 +53,7 @@
   <div class="bg-green-900 border border-green-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-green-300 text-xl">✅</span>
+        <span class="text-green-300 text-xl">{% icon "check" size="lg" css_class="text-green-300" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-green-200">{% trans 'Proforma Valid' %}</h3>
@@ -72,7 +72,7 @@
       <!-- Customer Information -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          👤 {% trans 'Bill To Information' %}
+          {% icon "user" size="md" css_class="text-white" %} {% trans 'Bill To Information' %}
         </h3>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -120,7 +120,7 @@
       <!-- Line Items -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
         <h3 class="text-base sm:text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          📋 {% trans 'Quote Items' %}
+          {% icon "clipboard" size="md" css_class="text-white" %} {% trans 'Quote Items' %}
         </h3>
 
         <!-- Desktop Table (hidden on mobile) -->
@@ -211,7 +211,7 @@
       {% if proforma.notes %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          📝 {% trans 'Additional Information' %}
+          {% icon "document" size="md" css_class="text-white" %} {% trans 'Additional Information' %}
         </h3>
 
         <div class="text-sm text-white bg-slate-700 rounded-lg p-3">
@@ -227,7 +227,7 @@
       <!-- Proforma Summary -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 sticky top-4">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          💰 {% trans 'Summary' %}
+          {% icon "currency" size="md" css_class="text-white" %} {% trans 'Summary' %}
         </h3>
 
         <div class="space-y-3">
@@ -265,13 +265,13 @@
         <div class="mt-4 pt-4 border-t border-slate-700">
           <div class="text-center">
             {% if proforma.status == 'draft' %}
-              {% trans "📝 Draft" as bt1 %}{% badge bt1 variant="secondary" %}
+              {% trans "Draft" as bt1 %}{% badge bt1 variant="secondary" icon="document" %}
             {% elif proforma.status == 'sent' %}
-              {% trans "📧 Sent" as bt2 %}{% badge bt2 variant="primary" %}
+              {% trans "Sent" as bt2 %}{% badge bt2 variant="primary" icon="mail" %}
             {% elif proforma.status == 'accepted' %}
-              {% trans "✅ Accepted" as bt3 %}{% badge bt3 variant="success" %}
+              {% trans "Accepted" as bt3 %}{% badge bt3 variant="success" icon="check" %}
             {% elif proforma.status == 'expired' %}
-              {% trans "❌ Expired" as bt4 %}{% badge bt4 variant="danger" %}
+              {% trans "Expired" as bt4 %}{% badge bt4 variant="danger" icon="x" %}
             {% else %}
               {% badge proforma.status|title variant="secondary" %}
             {% endif %}
@@ -287,19 +287,19 @@
 
         <div class="space-y-3 text-sm">
           <div class="flex items-center space-x-2">
-            <span class="text-blue-400">ℹ️</span>
+            <span class="text-blue-400">{% icon "info" size="sm" css_class="text-blue-400" %}</span>
             <span class="text-slate-300">{% trans 'Quote for your approval' %}</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-green-400">✅</span>
+            <span class="text-green-400">{% icon "check" size="sm" css_class="text-green-400" %}</span>
             <span class="text-slate-300">{% trans 'Becomes invoice when accepted' %}</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-yellow-400">📋</span>
+            <span class="text-yellow-400">{% icon "clipboard" size="sm" css_class="text-yellow-400" %}</span>
             <span class="text-slate-300">{% trans 'Romanian business compliant' %}</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-purple-400">📞</span>
+            <span class="text-purple-400">{% icon "phone" size="sm" css_class="text-purple-400" %}</span>
             <span class="text-slate-300">{% trans 'Contact us to proceed' %}</span>
           </div>
         </div>
@@ -308,22 +308,22 @@
       <!-- Contact Actions -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-          📞 {% trans 'Contact Us' %}
+          {% icon "phone" size="md" css_class="text-white" %} {% trans 'Contact Us' %}
         </h3>
 
         <div class="space-y-3 text-sm text-slate-300">
           <p>{% trans 'Ready to proceed with this quote?' %}</p>
           <div class="space-y-2">
             <div class="flex items-center space-x-2">
-              <span class="text-blue-400">📧</span>
+              <span class="text-blue-400">{% icon "mail" size="sm" css_class="text-blue-400" %}</span>
               <span>support@pragmatichost.com</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-green-400">💬</span>
+              <span class="text-green-400">{% icon "chat" size="sm" css_class="text-green-400" %}</span>
               <span>{% trans 'Live chat available' %}</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-purple-400">🎫</span>
+              <span class="text-purple-400">{% icon "receipt" size="sm" css_class="text-purple-400" %}</span>
               <span>{% trans 'Open a support ticket' %}</span>
             </div>
           </div>

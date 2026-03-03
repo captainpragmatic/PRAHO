@@ -18,7 +18,7 @@ Professional interface for staff to manage audit system
         <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
             <div class="flex items-center justify-between">
                 <div>
-                    <h1 class="text-2xl font-bold text-white">📊 {% trans "Audit Management Dashboard" %}</h1>
+                    <h1 class="font-bold text-white">{% icon "chart" size="lg" %} {% trans "Audit Management Dashboard" %}</h1>
                     <p class="text-slate-400 mt-1">{% trans "Comprehensive audit system management and monitoring" %}</p>
                 </div>
                 <div class="flex items-center space-x-3">
@@ -35,7 +35,7 @@ Professional interface for staff to manage audit system
                 <div class="flex items-center">
                     <div class="flex-shrink-0">
                         <div class="w-10 h-10 bg-blue-500 bg-opacity-20 rounded-lg flex items-center justify-center">
-                            <span class="text-blue-400 text-xl">📋</span>
+                            <span class="text-blue-400">{% icon "clipboard" size="lg" %}</span>
                         </div>
                     </div>
                     <div class="ml-4">
@@ -50,7 +50,7 @@ Professional interface for staff to manage audit system
                 <div class="flex items-center">
                     <div class="flex-shrink-0">
                         <div class="w-10 h-10 bg-green-500 bg-opacity-20 rounded-lg flex items-center justify-center">
-                            <span class="text-green-400 text-xl">⚡</span>
+                            <span class="text-green-400">{% icon "lightning" size="lg" %}</span>
                         </div>
                     </div>
                     <div class="ml-4">
@@ -65,7 +65,7 @@ Professional interface for staff to manage audit system
                 <div class="flex items-center">
                     <div class="flex-shrink-0">
                         <div class="w-10 h-10 bg-red-500 bg-opacity-20 rounded-lg flex items-center justify-center">
-                            <span class="text-red-400 text-xl">🔒</span>
+                            <span class="text-red-400">{% icon "lock" size="lg" %}</span>
                         </div>
                     </div>
                     <div class="ml-4">
@@ -80,7 +80,7 @@ Professional interface for staff to manage audit system
                 <div class="flex items-center">
                     <div class="flex-shrink-0">
                         <div class="w-10 h-10 bg-purple-500 bg-opacity-20 rounded-lg flex items-center justify-center">
-                            <span class="text-purple-400 text-xl">⚖️</span>
+                            <span class="text-purple-400 text-xl">{% icon "document" %}</span>
                         </div>
                     </div>
                     <div class="ml-4">
@@ -95,7 +95,7 @@ Professional interface for staff to manage audit system
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             <!-- Quick Actions -->
             <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
-                <h3 class="text-lg font-semibold text-white mb-4">🚀 {% trans "Quick Actions" %}</h3>
+                <h3 class="text-lg font-semibold text-white mb-4">{% icon "services" %} {% trans "Quick Actions" %}</h3>
                 <div class="space-y-3">
                     <a href="{% url 'audit:logs' %}" class="block w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
                         {% trans "View All Logs" %}
@@ -111,7 +111,7 @@ Professional interface for staff to manage audit system
 
             <!-- System Status -->
             <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
-                <h3 class="text-lg font-semibold text-white mb-4">🔧 {% trans "System Status" %}</h3>
+                <h3 class="text-lg font-semibold text-white mb-4">{% icon "settings" %} {% trans "System Status" %}</h3>
                 <div class="space-y-4">
                     <div class="flex items-center justify-between">
                         <span class="text-slate-300">{% trans "Audit System" %}</span>
@@ -131,7 +131,7 @@ Professional interface for staff to manage audit system
 
         <!-- Recent Activity -->
         <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
-            <h3 class="text-lg font-semibold text-white mb-4">📈 {% trans "Recent Activity" %}</h3>
+            <h3 class="text-lg font-semibold text-white mb-4">{% icon "chart" %} {% trans "Recent Activity" %}</h3>
             {% if recent_activity %}
                 <div class="space-y-3">
                     {% for event in recent_activity %}

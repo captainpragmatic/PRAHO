@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n ui_components %}
 
 <!-- Error Message Component (HTMX Response) -->
 <div class="fixed top-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 max-w-sm"
@@ -14,7 +14,7 @@
      x-transition:leave-end="translate-x-full">
 
   <div class="flex items-start">
-    <span class="mr-2 flex-shrink-0" aria-hidden="true">❌</span>
+    <span class="mr-2 flex-shrink-0" aria-hidden="true">{% icon "x" size="sm" %}</span>
     <div class="flex-1">
       <p class="font-medium">{% trans "Eroare" %}</p>
       <p class="text-sm opacity-90 mt-1">{{ error }}</p>

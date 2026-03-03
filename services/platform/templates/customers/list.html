@@ -9,7 +9,7 @@
   <!-- Header with Search and Actions -->
   <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-white">👥 {% trans 'Customers' %}</h1>
+      <h1 class="font-bold text-white">{% icon "users" size="lg" %} {% trans 'Customers' %}</h1>
       <p class="text-slate-400 mt-1">{% trans 'Manage your companies and contacts.' %}</p>
     </div>
 
@@ -24,7 +24,7 @@
     <form method="get" class="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
       <div class="flex-1">
         <label for="search" class="block text-sm font-medium text-slate-300 mb-1">
-          🔍 {% trans 'Search' %}
+          {% icon "search" %} {% trans 'Search' %}
         </label>
         {% input_field name="search" value=search_query placeholder="Name, CNP/CUI, email..." %}
       </div>
@@ -117,8 +117,8 @@
               <div>
                 <div class="text-white">{{ customer.contact_person }}</div>
                 <div class="text-slate-400 text-sm">
-                  <div>📧 {{ customer.contact_email }}</div>
-                  <div>📞 {{ customer.contact_phone }}</div>
+                  <div>{% icon "mail" %} {{ customer.contact_email }}</div>
+                  <div>{% icon "phone" %} {{ customer.contact_phone }}</div>
                 </div>
               </div>
             </td>
@@ -127,7 +127,7 @@
               <div>
                 {% if customer.customer_type == 'individual' %}
                   {% if customer.tax_profile and customer.tax_profile.cnp %}
-                    <div class="text-white font-mono">🧾 {{ customer.tax_profile.cnp|slice:':8' }}</div>
+                    <div class="text-white font-mono">{% icon "receipt" %} {{ customer.tax_profile.cnp|slice:':8' }}</div>
                   {% else %}
                     <div class="text-slate-400 text-sm">—</div>
                   {% endif %}
@@ -136,7 +136,7 @@
                     <div class="text-white font-mono">🇷🇴 {{ customer.tax_profile.cui }}</div>
                   {% endif %}
                   {% if customer.tax_profile and customer.tax_profile.vat_number %}
-                    <div class="text-slate-400 text-sm">💰 {{ customer.tax_profile.vat_number }}</div>
+                    <div class="text-slate-400 text-sm">{% icon "currency" %} {{ customer.tax_profile.vat_number }}</div>
                   {% endif %}
                 {% endif %}
               </div>
@@ -144,13 +144,13 @@
 
             <td class="px-6 py-4">
               {% if customer.status == 'active' %}
-                {% badge customer.get_status_display variant="success" icon="✅" %}
+                {% badge customer.get_status_display variant="success" icon="check" %}
               {% elif customer.status == 'suspended' %}
-                {% badge customer.get_status_display variant="warning" icon="⏸️" %}
+                {% badge customer.get_status_display variant="warning" icon="clock" %}
               {% elif customer.status == 'inactive' %}
-                {% badge customer.get_status_display variant="secondary" icon="⚪" %}
+                {% badge customer.get_status_display variant="secondary" icon="clock" %}
               {% elif customer.status == 'prospect' %}
-                {% badge customer.get_status_display variant="info" icon="🕓" %}
+                {% badge customer.get_status_display variant="info" icon="clock" %}
               {% else %}
                 {% badge customer.get_status_display variant="secondary" %}
               {% endif %}
@@ -170,10 +170,10 @@
             <td colspan="5" class="px-6 py-12 text-center">
               <div class="text-slate-400">
                 {% if search_query %}
-                <div class="text-4xl mb-4">🔍</div>
+                <div class="mb-4">{% icon "search" size="2xl" %}</div>
                 <p>{% filter force_escape %}{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}{% endfilter %}</p>
                 {% else %}
-                <div class="text-4xl mb-4">👥</div>
+                <div class="mb-4">{% icon "users" size="2xl" %}</div>
                 <p>{% trans 'No customers yet' %}</p>
                 <p class="mt-2">
                   <a href="{% url 'customers:create' %}" class="text-blue-400 hover:text-blue-300">
@@ -221,7 +221,7 @@
           <!-- Address -->
           {% if customer.legal_address %}
           <div class="text-slate-400 text-sm mb-2">
-            📍 {{ customer.legal_address|truncatechars:50 }}
+            {% icon "globe" %} {{ customer.legal_address|truncatechars:50 }}
           </div>
           {% endif %}
         </div>
@@ -229,13 +229,13 @@
         <!-- Status Badge -->
         <div class="sm:flex-shrink-0">
           {% if customer.status == 'active' %}
-            {% badge customer.get_status_display variant="success" icon="✅" %}
+            {% badge customer.get_status_display variant="success" icon="check" %}
           {% elif customer.status == 'suspended' %}
-            {% badge customer.get_status_display variant="warning" icon="⏸️" %}
+            {% badge customer.get_status_display variant="warning" icon="clock" %}
           {% elif customer.status == 'inactive' %}
-            {% badge customer.get_status_display variant="secondary" icon="⚪" %}
+            {% badge customer.get_status_display variant="secondary" icon="clock" %}
           {% elif customer.status == 'prospect' %}
-            {% badge customer.get_status_display variant="info" icon="🕓" %}
+            {% badge customer.get_status_display variant="info" icon="clock" %}
           {% else %}
             {% badge customer.get_status_display variant="secondary" %}
           {% endif %}
@@ -249,13 +249,13 @@
           <h4 class="text-slate-300 font-medium text-sm mb-2">{% trans 'Contact' %}</h4>
           <div class="space-y-1 text-sm">
             {% if customer.contact_person %}
-            <div class="text-white">👤 {{ customer.contact_person }}</div>
+            <div class="text-white">{% icon "user" %} {{ customer.contact_person }}</div>
             {% endif %}
             {% if customer.contact_email %}
-            <div class="text-slate-400">📧 {{ customer.contact_email|truncatechars:30 }}</div>
+            <div class="text-slate-400">{% icon "mail" %} {{ customer.contact_email|truncatechars:30 }}</div>
             {% endif %}
             {% if customer.contact_phone %}
-            <div class="text-slate-400">📞 {{ customer.contact_phone }}</div>
+            <div class="text-slate-400">{% icon "phone" %} {{ customer.contact_phone }}</div>
             {% endif %}
           </div>
         </div>
@@ -266,7 +266,7 @@
           <div class="space-y-1 text-sm">
             {% if customer.customer_type == 'individual' %}
               {% if customer.tax_profile and customer.tax_profile.cnp %}
-                <div class="text-white font-mono">🧾 {{ customer.tax_profile.cnp|slice:':8' }}</div>
+                <div class="text-white font-mono">{% icon "receipt" %} {{ customer.tax_profile.cnp|slice:':8' }}</div>
               {% else %}
                 <div class="text-slate-400">—</div>
               {% endif %}
@@ -275,7 +275,7 @@
                 <div class="text-white font-mono">🇷🇴 {{ customer.tax_profile.cui }}</div>
               {% endif %}
               {% if customer.tax_profile and customer.tax_profile.vat_number %}
-                <div class="text-slate-400">💰 {{ customer.tax_profile.vat_number }}</div>
+                <div class="text-slate-400">{% icon "currency" %} {{ customer.tax_profile.vat_number }}</div>
               {% endif %}
             {% endif %}
           </div>
@@ -297,10 +297,10 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
       <div class="text-slate-400">
         {% if search_query %}
-        <div class="text-4xl mb-4">🔍</div>
+        <div class="mb-4">{% icon "search" size="2xl" %}</div>
         <p>{% filter force_escape %}{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}{% endfilter %}</p>
         {% else %}
-        <div class="text-4xl mb-4">👥</div>
+        <div class="mb-4">{% icon "users" size="2xl" %}</div>
         <p>{% trans 'No customers yet' %}</p>
         <p class="mt-4">
           <a href="{% url 'customers:create' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">

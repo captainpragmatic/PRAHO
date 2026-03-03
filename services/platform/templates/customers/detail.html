@@ -13,10 +13,10 @@
                 {{ customer.name }}
             </h1>
             <p class="mt-1 text-sm text-slate-400">
-                {% if customer.customer_type == 'company' %}🏢 {% trans 'Company Customer' %}
-                {% elif customer.customer_type == 'individual' %}👤 {% trans 'Individual Customer' %}
-                {% elif customer.customer_type == 'pfa' %}💼 {% trans 'PFA/SRL Customer' %}
-                {% else %}🏛️ {% trans 'NGO/Association Customer' %}{% endif %}
+                {% if customer.customer_type == 'company' %}{% icon "building" %} {% trans 'Company Customer' %}
+                {% elif customer.customer_type == 'individual' %}{% icon "user" %} {% trans 'Individual Customer' %}
+                {% elif customer.customer_type == 'pfa' %}{% icon "currency" %} {% trans 'PFA/SRL Customer' %}
+                {% else %}{% icon "building" %} {% trans 'NGO/Association Customer' %}{% endif %}
                 • {% trans 'Status' %}: {{ customer.get_status_display }}
             </p>
         </div>
@@ -30,7 +30,7 @@
     <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
         <div class="p-6">
             <h2 class="text-lg font-medium text-white mb-6 border-b border-slate-600 pb-2">
-                📋 {% trans 'Customer Information' %}
+                {% icon "clipboard" %} {% trans 'Customer Information' %}
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -79,7 +79,7 @@
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Website' %}:</span>
                             <a href="{{ customer.website }}" target="_blank"
                                 class="text-sm text-blue-400 hover:text-blue-300">
-                                {{ customer.website }} ↗
+                                {{ customer.website }} {% icon "external" %}
                             </a>
                         </div>
                         {% endif %}
@@ -103,11 +103,11 @@
                         <div class="flex">
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Status' %}:</span>
                             {% if customer.status == 'active' %}
-                              {% badge customer.get_status_display variant="success" icon="✅" %}
+                              {% badge customer.get_status_display variant="success" icon="check" %}
                             {% elif customer.status == 'inactive' %}
-                              {% badge customer.get_status_display variant="danger" icon="❌" %}
+                              {% badge customer.get_status_display variant="danger" icon="x" %}
                             {% elif customer.status == 'suspended' %}
-                              {% badge customer.get_status_display variant="warning" icon="⏸️" %}
+                              {% badge customer.get_status_display variant="warning" icon="clock" %}
                             {% else %}
                               {% badge customer.get_status_display variant="info" %}
                             {% endif %}
@@ -131,12 +131,12 @@
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-                    👥 {% trans 'Customer Users' %}
+                    {% icon "users" %} {% trans 'Customer Users' %}
                 </h2>
                 {% if customer.memberships.exists %}
                 <div class="flex space-x-2">
                     {% url 'customers:add_user' customer.pk as add_user_url %}
-                    {% trans "➕ Add User" as bt2 %}{% button bt2 variant="primary" size="sm" href=add_user_url %}
+                    {% trans "Add User" as bt2 %}{% button bt2 variant="primary" size="sm" href=add_user_url %}
                 </div>
                 {% endif %}
             </div>
@@ -160,7 +160,7 @@
                                     <p class="text-sm text-slate-400">{{ membership.user.email }}</p>
                                     {% if membership.user.phone %}
                                     <p class="text-sm text-slate-500 mt-1">
-                                        📞 {{ membership.user.phone }}
+                                        {% icon "phone" %} {{ membership.user.phone }}
                                     </p>
                                     {% endif %}
                                 </div>
@@ -170,17 +170,17 @@
                             <div class="mt-3 flex flex-wrap gap-2 text-xs">
                                 {% if membership.user.is_active %}
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-green-400 bg-green-900/30">
-                                        🟢 {% trans "Active" %}
+                                        {% icon "check" %} {% trans "Active" %}
                                     </span>
                                 {% else %}
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-red-400 bg-red-900/30">
-                                        🔴 {% trans "Inactive" %}
+                                        {% icon "x" %} {% trans "Inactive" %}
                                     </span>
                                 {% endif %}
 
                                 {% if membership.user.two_factor_enabled %}
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-blue-400 bg-blue-900/30">
-                                        🔐 {% trans "2FA Enabled" %}
+                                        {% icon "lock" %} {% trans "2FA Enabled" %}
                                     </span>
                                 {% endif %}
 
@@ -190,7 +190,7 @@
                                     </span>
                                 {% else %}
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-yellow-400 bg-yellow-900/30">
-                                        ⚠️ {% trans "Never logged in" %}
+                                        {% icon "warning" %} {% trans "Never logged in" %}
                                     </span>
                                 {% endif %}
                             </div>
@@ -206,10 +206,10 @@
                                            {% elif membership.role == 'billing' %}bg-green-900 text-green-200 hover:bg-green-800
                                            {% elif membership.role == 'tech' %}bg-blue-900 text-blue-200 hover:bg-blue-800
                                            {% else %}bg-slate-600 text-slate-200 hover:bg-slate-500{% endif %}">
-                                    {% if membership.role == 'owner' %}👑
-                                    {% elif membership.role == 'billing' %}💳
-                                    {% elif membership.role == 'tech' %}🔧
-                                    {% else %}👁️{% endif %}
+                                    {% if membership.role == 'owner' %}{% icon "user" %}
+                                    {% elif membership.role == 'billing' %}{% icon "credit-card" %}
+                                    {% elif membership.role == 'tech' %}{% icon "settings" %}
+                                    {% else %}{% icon "user" %}{% endif %}
                                     {{ membership.get_role_display }}
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
@@ -224,7 +224,7 @@
                                         <button type="submit" name="role" value="owner"
                                                 class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                        {% if membership.role == 'owner' %}bg-slate-600{% endif %}">
-                                            👑 {% trans "Owner" %}
+                                            {% icon "user" %} {% trans "Owner" %}
                                             <span class="block text-xs text-slate-400">{% trans "Full control" %}</span>
                                         </button>
 
@@ -233,26 +233,26 @@
                                             <button type="submit" name="role" value="billing"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'billing' %}bg-slate-600{% endif %}">
-                                                💳 {% trans "Billing" %}
+                                                {% icon "credit-card" %} {% trans "Billing" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Invoices & payments" %}</span>
                                             </button>
                                             <button type="submit" name="role" value="tech"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'tech' %}bg-slate-600{% endif %}">
-                                                🔧 {% trans "Technical" %}
+                                                {% icon "settings" %} {% trans "Technical" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Services & support" %}</span>
                                             </button>
                                             <button type="submit" name="role" value="viewer"
                                                     class="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors
                                                            {% if membership.role == 'viewer' %}bg-slate-600{% endif %}">
-                                                👁️ {% trans "Viewer" %}
+                                                {% icon "user" %} {% trans "Viewer" %}
                                                 <span class="block text-xs text-slate-400">{% trans "Read-only access" %}</span>
                                             </button>
                                         {% else %}
                                             <!-- Disabled options for last owner -->
                                             <div class="px-4 py-3 border-t border-slate-600">
                                                 <p class="text-xs text-yellow-400 mb-2">
-                                                    ⚠️ {% trans "Cannot change role" %}
+                                                    {% icon "warning" %} {% trans "Cannot change role" %}
                                                 </p>
                                                 <p class="text-xs text-slate-500">
                                                     {% trans "This is the only owner. Promote another user first." %}
@@ -274,7 +274,7 @@
                                                 {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                                 {% trans "Are you sure you want to suspend this user?" as confirm_suspend %}
                                                 onclick="return confirm('{{ confirm_suspend|escapejs }}')">
-                                            ⏸️ {% trans "Suspend" %}
+                                            {% icon "clock" %} {% trans "Suspend" %}
                                         </button>
                                     </form>
                                 {% else %}
@@ -286,7 +286,7 @@
                                                 {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                                 {% trans "Are you sure you want to activate this user?" as confirm_activate %}
                                                 onclick="return confirm('{{ confirm_activate|escapejs }}')">
-                                            ▶️ {% trans "Activate" %}
+                                            {% icon "services" %} {% trans "Activate" %}
                                         </button>
                                     </form>
                                 {% endif %}
@@ -297,14 +297,14 @@
                                     <button type="button" disabled
                                             class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
                                             title="{% trans 'Cannot remove the last user from customer' %}">
-                                        🚫 {% trans "Cannot Remove" %}
+                                        {% icon "ban" %} {% trans "Cannot Remove" %}
                                     </button>
                                 {% elif membership.role == 'owner' and is_last_owner %}
                                     <!-- Cannot remove - last owner -->
                                     <button type="button" disabled
                                             class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
                                             title="{% trans 'Cannot remove the only owner' %}">
-                                        🚫 {% trans "Cannot Remove" %}
+                                        {% icon "ban" %} {% trans "Cannot Remove" %}
                                     </button>
                                 {% else %}
                                     <!-- Can remove -->
@@ -315,7 +315,7 @@
                                                 {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                                 {% trans "Are you sure you want to remove this user from the customer? They will lose all access to this customer's data." as confirm_remove %}
                                                 onclick="return confirm('{{ confirm_remove|escapejs }}')">
-                                            🗑️ {% trans "Remove" %}
+                                            {% icon "x" %} {% trans "Remove" %}
                                         </button>
                                     </form>
                                 {% endif %}
@@ -330,19 +330,19 @@
             <div class="mt-6 space-y-4">
                 <!-- Role Permissions -->
                 <div class="bg-slate-700/50 rounded-lg p-4 border border-slate-600">
-                    <h4 class="text-sm font-medium text-slate-300 mb-2">ℹ️ {% trans "User Role Permissions" %}</h4>
+                    <h4 class="text-sm font-medium text-slate-300 mb-2">{% icon "info" %} {% trans "User Role Permissions" %}</h4>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-400">
                         <div>
-                            <span class="text-purple-400">👑 Owner:</span> Full control, manage users, billing
+                            <span class="text-purple-400">{% icon "user" %} Owner:</span> Full control, manage users, billing
                         </div>
                         <div>
-                            <span class="text-green-400">💳 Billing:</span> View/pay invoices, update payment methods
+                            <span class="text-green-400">{% icon "credit-card" %} Billing:</span> View/pay invoices, update payment methods
                         </div>
                         <div>
-                            <span class="text-blue-400">🔧 Technical:</span> Manage services, create support tickets
+                            <span class="text-blue-400">{% icon "settings" %} Technical:</span> Manage services, create support tickets
                         </div>
                         <div>
-                            <span class="text-slate-300">👁️ Viewer:</span> Read-only access to customer data
+                            <span class="text-slate-300">{% icon "user" %} Viewer:</span> Read-only access to customer data
                         </div>
                     </div>
                 </div>
@@ -350,7 +350,7 @@
                 <!-- Safeguard Notices -->
                 {% if is_last_user or is_last_owner %}
                 <div class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4">
-                    <h4 class="text-sm font-medium text-yellow-400 mb-2">⚠️ {% trans "Account Safeguards Active" %}</h4>
+                    <h4 class="text-sm font-medium text-yellow-400 mb-2">{% icon "warning" %} {% trans "Account Safeguards Active" %}</h4>
                     <div class="space-y-2 text-xs text-yellow-300">
                         {% if is_last_user %}
                         <div class="flex items-start gap-2">
@@ -371,7 +371,7 @@
 
             {% else %}
             <div class="text-center py-8">
-                <div class="text-6xl mb-4">👤</div>
+                <div class="mb-4">{% icon "user" size="2xl" %}</div>
                 <p class="text-slate-400 text-lg mb-2">{% trans 'No users assigned to this customer' %}</p>
                 <p class="text-sm text-slate-500 mb-6 max-w-md mx-auto">
                     {% trans 'This customer needs at least one user account to access services, receive communications, and manage their account.' %}
@@ -379,10 +379,10 @@
 
                 <div class="flex flex-col sm:flex-row gap-3 justify-center items-center">
                     {% url 'customers:add_user' customer.pk as add_user_url %}
-                    {% trans "➕ Add Existing User" as bt3 %}{% button bt3 variant="primary" href=add_user_url %}
+                    {% trans "Add Existing User" as bt3 %}{% button bt3 variant="primary" href=add_user_url %}
 
                     {% url 'customers:create_user' customer.pk as create_user_url %}
-                    {% trans "👤 Create New User" as bt4 %}{% button bt4 variant="outline" href=create_user_url %}
+                    {% trans "Create New User" as bt4 %}{% button bt4 variant="outline" href=create_user_url %}
                 </div>
 
                 <p class="text-xs text-slate-500 mt-4">
@@ -398,7 +398,7 @@
     <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
         <div class="p-6">
             <h2 class="text-lg font-medium text-white mb-6 border-b border-slate-600 pb-2">
-                🏛️ {% trans 'Tax Information' %}
+                {% icon "building" %} {% trans 'Tax Information' %}
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -420,8 +420,8 @@
                     <div class="flex">
                         <span class="text-sm font-medium text-slate-400 w-32">{% trans 'VAT Payer' %}:</span>
                         <span class="text-sm text-white">
-                            {% if tax_profile.is_vat_payer %}✅ {% trans 'Yes' %}
-                            {% else %}❌ {% trans 'No' %}{% endif %}
+                            {% if tax_profile.is_vat_payer %}{% icon "check" %} {% trans 'Yes' %}
+                            {% else %}{% icon "x" %} {% trans 'No' %}{% endif %}
                         </span>
                     </div>
                     {% if tax_profile.registration_number %}
@@ -441,7 +441,7 @@
     <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
         <div class="p-6">
             <h2 class="text-lg font-medium text-white mb-6 border-b border-slate-600 pb-2">
-                📍 {% trans 'Addresses' %}
+                {% icon "globe" %} {% trans 'Addresses' %}
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -451,7 +451,7 @@
                         <h3 class="font-medium text-white">{{ address.get_address_type_display }}</h3>
                         <div class="flex space-x-1">
                             {% if address.is_current %}
-                            {% trans "Current" as bt5 %}{% badge bt5 variant="success" icon="📍" %}
+                            {% trans "Current" as bt5 %}{% badge bt5 variant="success" icon="globe" %}
                             {% endif %}
                         </div>
                     </div>
@@ -477,7 +477,7 @@
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-                    🔧 {% trans 'Hosting Services' %}
+                    {% icon "settings" %} {% trans 'Hosting Services' %}
                 </h2>
                 <div class="flex items-center space-x-2 text-sm text-slate-400">
                     <span class="bg-slate-700 px-2 py-1 rounded">{{ services_summary.total }} {% trans 'Total' %}</span>
@@ -509,11 +509,11 @@
                         </div>
                         <div class="flex items-center space-x-2">
                             {% if service.status == 'active' %}
-                            {% badge service.get_status_display variant="success" icon="🟢" %}
+                            {% badge service.get_status_display variant="success" icon="check" %}
                             {% elif service.status == 'suspended' %}
-                            {% badge service.get_status_display variant="warning" icon="⏸️" %}
+                            {% badge service.get_status_display variant="warning" icon="clock" %}
                             {% elif service.status == 'pending' %}
-                            {% badge service.get_status_display variant="info" icon="⏳" %}
+                            {% badge service.get_status_display variant="info" icon="clock" %}
                             {% else %}
                             {% badge service.get_status_display variant="secondary" %}
                             {% endif %}
@@ -531,7 +531,7 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                <p class="text-slate-400">🔧 {% trans 'No hosting services found' %}</p>
+                <p class="text-slate-400">{% icon "settings" %} {% trans 'No hosting services found' %}</p>
                 <p class="text-sm text-slate-500 mt-2">
                     {% trans 'This customer has not purchased any hosting services yet.' %}
                 </p>
@@ -545,7 +545,7 @@
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-                    💰 {% trans 'Orders & Invoices' %}
+                    {% icon "currency" %} {% trans 'Orders & Invoices' %}
                 </h2>
                 <div class="flex items-center space-x-2 text-sm text-slate-400">
                     <span class="bg-slate-700 px-2 py-1 rounded">{{ invoices_summary.total }} {% trans 'Total' %}</span>
@@ -568,7 +568,7 @@
                     <div class="flex items-center justify-between">
                         <div>
                             <h3 class="font-medium text-white">
-                                {% if invoice.type == 'proforma' %}📋 {% trans 'Proforma' %}{% else %}📄 {% trans 'Invoice' %}{% endif %}
+                                {% if invoice.type == 'proforma' %}{% icon "clipboard" %} {% trans 'Proforma' %}{% else %}{% icon "document" %} {% trans 'Invoice' %}{% endif %}
                                 {{ invoice.invoice_number }}
                             </h3>
                             <p class="text-sm text-slate-400">
@@ -578,13 +578,13 @@
                         </div>
                         <div class="flex items-center space-x-2">
                             {% if invoice.status == 'paid' %}
-                            {% badge invoice.get_status_display variant="success" icon="✅" %}
+                            {% badge invoice.get_status_display variant="success" icon="check" %}
                             {% elif invoice.status == 'pending' %}
-                            {% badge invoice.get_status_display variant="warning" icon="⏳" %}
+                            {% badge invoice.get_status_display variant="warning" icon="clock" %}
                             {% elif invoice.status == 'overdue' %}
-                            {% badge invoice.get_status_display variant="danger" icon="❌" %}
+                            {% badge invoice.get_status_display variant="danger" icon="x" %}
                             {% elif invoice.status == 'draft' %}
-                            {% badge invoice.get_status_display variant="secondary" icon="📝" %}
+                            {% badge invoice.get_status_display variant="secondary" icon="document" %}
                             {% else %}
                             {% badge invoice.get_status_display variant="secondary" %}
                             {% endif %}
@@ -602,7 +602,7 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                <p class="text-slate-400">💰 {% trans 'No invoices found' %}</p>
+                <p class="text-slate-400">{% icon "currency" %} {% trans 'No invoices found' %}</p>
                 <p class="text-sm text-slate-500 mt-2">
                     {% trans 'This customer has not been billed yet.' %}
                 </p>
@@ -616,7 +616,7 @@
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-                    🎫 {% trans 'Support Tickets' %}
+                    {% icon "tickets" %} {% trans 'Support Tickets' %}
                 </h2>
                 <div class="flex items-center space-x-2 text-sm text-slate-400">
                     <span class="bg-slate-700 px-2 py-1 rounded">{{ tickets_summary.total }} {% trans 'Total' %}</span>
@@ -648,13 +648,13 @@
                         </div>
                         <div class="flex items-center space-x-2">
                             {% if ticket.status == 'open' %}
-                            {% badge ticket.get_status_display variant="warning" icon="🔓" %}
+                            {% badge ticket.get_status_display variant="warning" icon="lock" %}
                             {% elif ticket.status == 'in_progress' %}
-                            {% badge ticket.get_status_display variant="info" icon="⚡" %}
+                            {% badge ticket.get_status_display variant="info" icon="lightning" %}
                             {% elif ticket.status == 'closed' %}
-                            {% badge ticket.get_status_display variant="success" icon="✅" %}
+                            {% badge ticket.get_status_display variant="success" icon="check" %}
                             {% elif ticket.status == 'pending' %}
-                            {% badge ticket.get_status_display variant="secondary" icon="⏳" %}
+                            {% badge ticket.get_status_display variant="secondary" icon="clock" %}
                             {% else %}
                             {% badge ticket.get_status_display variant="secondary" %}
                             {% endif %}
@@ -672,7 +672,7 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                <p class="text-slate-400">🎫 {% trans 'No support tickets found' %}</p>
+                <p class="text-slate-400">{% icon "tickets" %} {% trans 'No support tickets found' %}</p>
                 <p class="text-sm text-slate-500 mt-2">
                     {% trans 'This customer has not created any support tickets yet.' %}
                 </p>

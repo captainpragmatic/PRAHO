@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📦 ORDERS LIST PARTIAL - PRAHO Platform
+{% icon "orders" %} ORDERS LIST PARTIAL - PRAHO Platform
 ===============================================================================
 HTMX-loaded partial for orders list with pagination.
 This template is dynamically loaded and contains only the results section.
@@ -29,36 +29,36 @@ This template is dynamically loaded and contains only the results section.
 
                   <!-- Order Status Badge -->
                   {% if order.status == "draft" %}
-                    {% trans "📝 Draft" as bt1 %}{% badge bt1 variant="secondary" %}
+                    {% trans "Draft" as bt1 %}{% badge bt1 icon="document" variant="secondary" %}
                   {% elif order.status == "pending" %}
-                    {% trans "⏳ Pending" as bt2 %}{% badge bt2 variant="warning" %}
+                    {% trans "Pending" as bt2 %}{% badge bt2 icon="clock" variant="warning" %}
                   {% elif order.status == "processing" %}
-                    {% trans "⚙️ Processing" as bt3 %}{% badge bt3 variant="primary" %}
+                    {% trans "Processing" as bt3 %}{% badge bt3 icon="settings" variant="primary" %}
                   {% elif order.status == "completed" %}
-                    {% trans "✅ Completed" as bt4 %}{% badge bt4 variant="success" %}
+                    {% trans "Completed" as bt4 %}{% badge bt4 icon="check" variant="success" %}
                   {% elif order.status == "cancelled" %}
-                    {% trans "❌ Cancelled" as bt5 %}{% badge bt5 variant="danger" %}
+                    {% trans "Cancelled" as bt5 %}{% badge bt5 icon="x" variant="danger" %}
                   {% elif order.status == "failed" %}
-                    {% trans "🔥 Failed" as bt6 %}{% badge bt6 variant="danger" %}
+                    {% trans "Failed" as bt6 %}{% badge bt6 variant="danger" %}
                   {% elif order.status == "refunded" %}
-                    {% trans "💰 Refunded" as bt7 %}{% badge bt7 variant="info" %}
+                    {% trans "Refunded" as bt7 %}{% badge bt7 icon="currency" variant="info" %}
                   {% elif order.status == "partially_refunded" %}
-                    {% trans "💸 Partially Refunded" as bt8 %}{% badge bt8 variant="warning" %}
+                    {% trans "Partially Refunded" as bt8 %}{% badge bt8 variant="warning" %}
                   {% endif %}
                 </div>
 
                 <!-- Customer Info -->
                 <div class="flex items-center space-x-4 text-sm text-slate-400 mb-3">
                   <div class="flex items-center">
-                    <span class="mr-1">🏢</span>
+                    <span class="mr-1">{% icon "building" %}</span>
                     {{ order.customer.company_name }}
                   </div>
                   <div class="flex items-center">
-                    <span class="mr-1">📅</span>
+                    <span class="mr-1">{% icon "clock" %}</span>
                     {{ order.created_at|date:"M d, Y" }}
                   </div>
                   <div class="flex items-center">
-                    <span class="mr-1">📦</span>
+                    <span class="mr-1">{% icon "orders" %}</span>
                     {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}
                   </div>
                 </div>
@@ -93,7 +93,7 @@ This template is dynamically loaded and contains only the results section.
   {% else %}
     <!-- Empty State -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
-      <div class="text-6xl mb-4">📦</div>
+      <div class="mb-4">{% icon "orders" size="2xl" %}</div>
       <h3 class="text-xl font-semibold text-white mb-2">
         {% if search_query or current_status %}
           {% trans "No orders found" %}
@@ -111,7 +111,7 @@ This template is dynamically loaded and contains only the results section.
 
       {% if is_staff and not search_query and not current_status %}
         {% url 'orders:order_create' as create_url %}
-        {% trans "📦 Create First Order" as bt11 %}{% button bt11 variant="primary" href=create_url %}
+        {% trans "Create First Order" as bt11 %}{% button bt11 variant="primary" href=create_url %}
       {% endif %}
     </div>
   {% endif %}

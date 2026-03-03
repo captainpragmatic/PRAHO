@@ -26,7 +26,7 @@
         <div class="flex items-center">
             <div class="flex-shrink-0">
                 <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
-                    <span class="text-white text-xl">🌐</span>
+                    <span class="text-white">{% icon "globe" size="lg" %}</span>
                 </div>
             </div>
             <div class="ml-4">
@@ -152,7 +152,7 @@
                 <!-- Form Actions -->
                 <div class="px-6 py-4 bg-slate-750 border-t border-slate-700 flex justify-end space-x-3">
                     {% trans "Cancel" as bt1 %}{% button bt1 href=cancel_url variant="secondary" %}
-                    {% trans "💾 Create Backup" as bt2 %}{% button bt2 type="submit" variant="primary" %}
+                    {% trans "Create Backup" as bt2 %}{% button bt2 type="submit" variant="primary" %}
                 </div>
             </form>
         </div>
@@ -164,19 +164,19 @@
                 <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "Backup Types" %}</h3>
                 <div class="space-y-4">
                     <div>
-                        <h4 class="text-sm font-medium text-slate-100">🔄 {% trans "Full Backup" %}</h4>
+                        <h4 class="text-sm font-medium text-slate-100">{% icon "refresh" %} {% trans "Full Backup" %}</h4>
                         <p class="text-sm text-slate-400 mt-1">
                             {% trans "Complete backup including all data, settings, and configurations. Recommended for disaster recovery." %}
                         </p>
                     </div>
                     <div>
-                        <h4 class="text-sm font-medium text-slate-100">📈 {% trans "Incremental Backup" %}</h4>
+                        <h4 class="text-sm font-medium text-slate-100">{% icon "chart" %} {% trans "Incremental Backup" %}</h4>
                         <p class="text-sm text-slate-400 mt-1">
                             {% trans "Only backs up changes since the last full backup. Faster but requires a previous full backup." %}
                         </p>
                     </div>
                     <div>
-                        <h4 class="text-sm font-medium text-slate-100">⚙️ {% trans "Configuration Only" %}</h4>
+                        <h4 class="text-sm font-medium text-slate-100">{% icon "settings" %} {% trans "Configuration Only" %}</h4>
                         <p class="text-sm text-slate-400 mt-1">
                             {% trans "Backs up settings and structure only, without user data. Quick backup for configuration changes." %}
                         </p>
@@ -189,28 +189,28 @@
                 <h3 class="text-lg font-semibold text-slate-100 mb-4">{% trans "What's Included" %}</h3>
                 <div class="space-y-3">
                     <div class="flex items-center">
-                        <span class="text-blue-400 text-lg mr-3">📧</span>
+                        <span class="text-blue-400 text-lg mr-3">{% icon "mail" %}</span>
                         <div>
                             <p class="text-sm font-medium text-slate-100">{% trans "Email Data" %}</p>
                             <p class="text-xs text-slate-400">{% trans "Mailboxes, messages, filters" %}</p>
                         </div>
                     </div>
                     <div class="flex items-center">
-                        <span class="text-green-400 text-lg mr-3">🗄️</span>
+                        <span class="text-green-400 text-lg mr-3">{% icon "folder" %}</span>
                         <div>
                             <p class="text-sm font-medium text-slate-100">{% trans "Databases" %}</p>
                             <p class="text-xs text-slate-400">{% trans "MySQL, PostgreSQL" %}</p>
                         </div>
                     </div>
                     <div class="flex items-center">
-                        <span class="text-yellow-400 text-lg mr-3">📁</span>
+                        <span class="text-yellow-400 text-lg mr-3">{% icon "folder" %}</span>
                         <div>
                             <p class="text-sm font-medium text-slate-100">{% trans "Web Files" %}</p>
                             <p class="text-xs text-slate-400">{% trans "HTML, uploads, logs" %}</p>
                         </div>
                     </div>
                     <div class="flex items-center">
-                        <span class="text-red-400 text-lg mr-3">🔒</span>
+                        <span class="text-red-400 text-lg mr-3">{% icon "lock" %}</span>
                         <div>
                             <p class="text-sm font-medium text-slate-100">{% trans "SSL Certificates" %}</p>
                             <p class="text-xs text-slate-400">{% trans "Certificates, private keys" %}</p>
@@ -223,7 +223,7 @@
             <div class="bg-yellow-900 border border-yellow-700 rounded-lg p-4">
                 <div class="flex">
                     <div class="flex-shrink-0">
-                        <span class="text-yellow-400 text-lg">⚠️</span>
+                        <span class="text-yellow-400 text-lg">{% icon "warning" %}</span>
                     </div>
                     <div class="ml-3">
                         <h3 class="text-sm font-medium text-yellow-100">{% trans "Important Notes" %}</h3>

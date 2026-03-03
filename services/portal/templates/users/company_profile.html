@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Company Profile" %} - PRAHO{% endblock %}
 
@@ -17,13 +18,13 @@
             <div class="mt-4 flex items-center space-x-3">
               <span class="text-sm text-slate-400">{% trans "Viewing:" %}</span>
               <div class="bg-slate-700 rounded-lg px-3 py-1 flex items-center space-x-2">
-                <span class="text-blue-400">🏢</span>
+                <span class="text-blue-400">{% icon "building" size="sm" css_class="text-blue-400" %}</span>
                 <span class="text-sm font-medium text-white">{{ selected_customer_name }}</span>
                 <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
-                  {% if selected_customer_role == "owner" %}👑 {% trans "Owner" %}
-                  {% elif selected_customer_role == "billing" %}💳 {% trans "Billing" %}
-                  {% elif selected_customer_role == "tech" %}⚙️ {% trans "Technical" %}
-                  {% elif selected_customer_role == "viewer" %}👁️ {% trans "Viewer" %}
+                  {% if selected_customer_role == "owner" %}{% icon "users" size="xs" css_class="text-white" %} {% trans "Owner" %}
+                  {% elif selected_customer_role == "billing" %}{% icon "credit-card" size="xs" css_class="text-white" %} {% trans "Billing" %}
+                  {% elif selected_customer_role == "tech" %}{% icon "settings" size="xs" css_class="text-white" %} {% trans "Technical" %}
+                  {% elif selected_customer_role == "viewer" %}{% icon "search" size="xs" css_class="text-white" %} {% trans "Viewer" %}
                   {% else %}{{ selected_customer_role|title }}{% endif %}
                 </span>
               </div>

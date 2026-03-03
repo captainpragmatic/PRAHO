@@ -41,7 +41,7 @@
   <!-- VAT Information -->
   <div class="bg-slate-700/50 rounded-lg p-3 mb-6 text-xs text-slate-400">
     <p class="flex items-center">
-      <span class="mr-2">ℹ️</span>
+      {% icon "info" size="sm" css_class="mr-2" %}
       {% trans "Prices include VAT according to Romanian legislation" %}
     </p>
   </div>
@@ -49,11 +49,11 @@
   <!-- Proceed to Checkout Button -->
   {% if calculation.total_cents > 0 %}
   <a href="{% url 'orders:checkout' %}" class="w-full inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200" data-cart-version="{{ cart.get_cart_version }}">
-    💳 {% trans "Continue to checkout" %}
+    {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Continue to checkout" %}
   </a>
   {% else %}
   <button disabled class="w-full inline-flex items-center justify-center px-6 py-3 text-base font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg cursor-not-allowed opacity-50">
-    💳 {% trans "Continue to checkout" %}
+    {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Continue to checkout" %}
   </button>
   {% endif %}
 
@@ -61,7 +61,7 @@
   <!-- Calculation Error State -->
   <div class="text-center py-6">
     <div class="text-red-400 mb-3">
-      <span class="text-2xl">⚠️</span>
+      {% icon "warning" size="2xl" css_class="text-red-400" %}
     </div>
     <p class="text-sm text-red-400 mb-4">
       {% trans "Error calculating totals" %}

@@ -23,13 +23,13 @@
         <!-- PDF Download Button -->
         <a href="{% url 'billing:invoice_pdf_export' invoice.number %}"
            class="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700">
-          📄 {% trans "Download PDF" %}
+          {% icon "download" size="sm" css_class="text-white" %} {% trans "Download PDF" %}
         </a>
 
         <!-- Customer Refund Request Button -->
         {% if invoice.status == "paid" %}
           <button onclick="showInvoiceRefundRequestModal()" class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
-            🎫 {% trans "Request Refund" %}
+            {% icon "receipt" size="sm" css_class="text-white" %} {% trans "Request Refund" %}
           </button>
         {% endif %}
 
@@ -259,7 +259,7 @@
       <form id="invoiceRefundRequestForm" method="post">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">🎫 {% trans "Request Invoice Refund" %}</h3>
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "receipt" size="md" css_class="text-white" %} {% trans "Request Invoice Refund" %}</h3>
           <p class="text-sm text-slate-400 mb-4">
             {% trans "Submit a refund request for this invoice. Our billing team will review your request and contact you." %}
           </p>
@@ -299,7 +299,7 @@
           <div class="mb-4 p-4 bg-blue-900 border border-blue-700 rounded-lg">
             <div class="flex items-start">
               <div class="flex-shrink-0">
-                <span class="text-blue-300 text-xl">ℹ️</span>
+                <span class="text-blue-300">{% icon "info" size="lg" %}</span>
               </div>
               <div class="ml-3">
                 <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
@@ -318,7 +318,7 @@
           </button>
           <button type="submit"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-            🎫 {% trans "Submit Request" %}
+            {% icon "receipt" size="sm" css_class="text-white" %} {% trans "Submit Request" %}
           </button>
         </div>
       </form>
@@ -355,7 +355,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     // Disable submit button
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
+    submitBtn.innerHTML = '{% trans "Submitting..." %}';
 
     // Get CSRF token
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
@@ -383,13 +383,13 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
         } else {
             alert(data.error || '{% trans "Unable to process refund request. Please try again." %}');
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+            submitBtn.innerHTML = '{% trans "Submit Request" %}';
         }
     })
     .catch(function() {
         alert('{% trans "Unable to process refund request. Please try again." %}');
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+        submitBtn.innerHTML = '{% trans "Submit Request" %}';
     });
 });
 </script>

@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n ui_components %}
 
 <!-- WCAG-Compliant Order Process Breadcrumbs -->
 <nav aria-label="{% trans 'Order process steps' %}" class="mb-8">
@@ -18,7 +18,7 @@
           1
         </span>
         <span class="{% if current_step == 'products' %}text-blue-400 font-medium{% else %}text-slate-400{% endif %}">
-          📦 {% trans 'Product Selection' %}
+          {% icon "orders" size="sm" css_class="mr-1" %} {% trans 'Product Selection' %}
         </span>
       {% if current_step == 'products' %}
       </div>
@@ -44,7 +44,7 @@
           2
         </span>
         <span class="{% if current_step == 'cart' %}text-blue-400 font-medium{% else %}text-slate-500{% endif %}">
-          🛒 {% trans 'Cart Review' %}
+          {% icon "orders" size="sm" css_class="mr-1" %} {% trans 'Cart Review' %}
         </span>
       </div>
       {% if current_step == 'cart' %}
@@ -68,7 +68,7 @@
           3
         </span>
         <span class="{% if current_step == 'checkout' %}text-blue-400 font-medium{% else %}text-slate-500{% endif %}">
-          💳 {% trans 'Checkout' %}
+          {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans 'Checkout' %}
         </span>
       </div>
       {% if current_step == 'checkout' %}
@@ -92,7 +92,7 @@
           {% if current_step == 'confirm' %}✓{% else %}4{% endif %}
         </span>
         <span class="{% if current_step == 'confirm' %}text-green-400 font-medium{% else %}text-slate-500{% endif %}">
-          ✅ {% trans 'Confirmation' %}
+          {% icon "check" size="sm" css_class="mr-1" %} {% trans 'Confirmation' %}
         </span>
       </div>
       {% if current_step == 'confirm' %}

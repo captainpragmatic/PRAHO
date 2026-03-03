@@ -43,23 +43,35 @@
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             {% if service.status == 'active' %}
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                {% trans 'Active' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 w-28 justify-center">
+                {% icon "check" size="xs" %} {% trans 'Active' %}
               </span>
             {% elif service.status == 'suspended' %}
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                {% trans 'Suspended' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
+                {% icon "ban" size="xs" %} {% trans 'Suspended' %}
               </span>
             {% elif service.status == 'pending' %}
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                {% trans 'Pending' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 w-28 justify-center">
+                {% icon "clock" size="xs" %} {% trans 'Pending' %}
+              </span>
+            {% elif service.status == 'provisioning' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-28 justify-center">
+                {% icon "lightning" size="xs" %} {% trans 'Provisioning' %}
+              </span>
+            {% elif service.status == 'expired' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
+                {% icon "clock" size="xs" %} {% trans 'Expired' %}
+              </span>
+            {% elif service.status == 'terminated' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
+                {% icon "x" size="xs" %} {% trans 'Terminated' %}
               </span>
             {% elif service.status == 'cancelled' %}
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                {% trans 'Cancelled' %}
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
+                {% icon "x" size="xs" %} {% trans 'Cancelled' %}
               </span>
             {% else %}
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
                 {{ service.status|title }}
               </span>
             {% endif %}
@@ -87,23 +99,35 @@
       </div>
       <div class="ml-3">
         {% if service.status == 'active' %}
-          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            {% trans 'Active' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 w-28 justify-center">
+            {% icon "check" size="xs" %} {% trans 'Active' %}
           </span>
         {% elif service.status == 'suspended' %}
-          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-            {% trans 'Suspended' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
+            {% icon "ban" size="xs" %} {% trans 'Suspended' %}
           </span>
         {% elif service.status == 'pending' %}
-          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-            {% trans 'Pending' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 w-28 justify-center">
+            {% icon "clock" size="xs" %} {% trans 'Pending' %}
+          </span>
+        {% elif service.status == 'provisioning' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-28 justify-center">
+            {% icon "lightning" size="xs" %} {% trans 'Provisioning' %}
+          </span>
+        {% elif service.status == 'expired' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
+            {% icon "clock" size="xs" %} {% trans 'Expired' %}
+          </span>
+        {% elif service.status == 'terminated' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
+            {% icon "x" size="xs" %} {% trans 'Terminated' %}
           </span>
         {% elif service.status == 'cancelled' %}
-          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-            {% trans 'Cancelled' %}
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
+            {% icon "x" size="xs" %} {% trans 'Cancelled' %}
           </span>
         {% else %}
-          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
             {{ service.status|title }}
           </span>
         {% endif %}
@@ -115,7 +139,7 @@
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Plan' %}</div>
         <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
       </div>
-      <div>
+      <div class="text-right">
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
         <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} RON/mo</div>
       </div>

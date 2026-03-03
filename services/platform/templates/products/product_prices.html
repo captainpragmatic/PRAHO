@@ -17,7 +17,7 @@
         <span>{% trans 'Pricing' %}</span>
       </div>
       <h1 class="text-2xl sm:text-3xl font-bold text-white mb-2">
-        💰 {% trans "Pricing Management" %}
+        {% icon "currency" %} {% trans "Pricing Management" %}
       </h1>
       <p class="text-sm sm:text-base text-slate-400">{{ product.name }} - {% trans "Manage multi-currency pricing for Romanian business" %}</p>
     </div>
@@ -26,7 +26,7 @@
       {% url 'products:product_detail' slug=product.slug as detail_url %}
       {% trans "← Back to Product" as bt1 %}{% button bt1 variant="secondary" href=detail_url %}
       {% url 'products:product_price_create' slug=product.slug as create_price_url %}
-      {% trans "💰 Add Price" as bt2 %}{% button bt2 variant="primary" href=create_price_url %}
+      {% trans "Add Price" as bt2 %}{% button bt2 variant="primary" href=create_price_url %}
     </div>
   </div>
 
@@ -43,7 +43,7 @@
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
             <h2 class="text-lg sm:text-xl font-semibold text-white flex items-center flex-wrap gap-2">
-              <span class="flex-shrink-0">💱</span>
+              <span class="flex-shrink-0">{% icon "currency" %}</span>
               <span class="truncate">{{ currency_group.grouper.name }} ({{ currency_group.grouper.code }})</span>
               {% if currency_group.grouper.code == 'RON' %}
                 <span class="flex-shrink-0 px-2 py-1 bg-green-800 text-green-200 text-xs rounded whitespace-nowrap">{% trans 'Romanian Lei' %}</span>
@@ -65,7 +65,7 @@
           <!-- Base Monthly Price -->
           <div class="mb-6">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-              <h3 class="text-lg font-semibold text-white">💰 {% trans 'Base Monthly Price' %}</h3>
+              <h3 class="text-lg font-semibold text-white">{% icon "currency" %} {% trans 'Base Monthly Price' %}</h3>
               {% if price.is_active %}
                 {% trans "Active" as bt4 %}{% badge bt4 variant="success" size="sm" %}
               {% else %}
@@ -82,7 +82,7 @@
             <!-- Monthly -->
             <div class="bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-600">
               <div class="text-center">
-                <div class="text-sm font-medium text-slate-300 mb-2">📅 {% trans 'Monthly' %}</div>
+                <div class="text-sm font-medium text-slate-300 mb-2">{% icon "clock" %} {% trans 'Monthly' %}</div>
                 <div class="text-lg sm:text-xl font-bold text-white break-all">{{ price.monthly_price|floatformat:2 }} {{ currency_group.grouper.symbol }}</div>
                 <div class="text-xs text-slate-400 mt-1">{% trans 'Standard rate' %}</div>
               </div>
@@ -91,7 +91,7 @@
             <!-- Semiannual -->
             <div class="bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-600 {% if price.semiannual_discount_percent > 0 %}ring-2 ring-green-500{% endif %}">
               <div class="text-center">
-                <div class="text-sm font-medium text-slate-300 mb-2">📅 {% trans '6 Months' %}</div>
+                <div class="text-sm font-medium text-slate-300 mb-2">{% icon "clock" %} {% trans '6 Months' %}</div>
                 <div class="text-lg sm:text-xl font-bold text-white break-all">{{ price.semiannual_price|floatformat:2 }} {{ currency_group.grouper.symbol }}</div>
                 {% if price.semiannual_discount_percent > 0 %}
                   <div class="text-xs text-green-400 mt-1">
@@ -106,7 +106,7 @@
             <!-- Annual -->
             <div class="bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-600 {% if price.annual_discount_percent > 0 %}ring-2 ring-green-500{% endif %}">
               <div class="text-center">
-                <div class="text-sm font-medium text-slate-300 mb-2">📅 {% trans 'Annual' %}</div>
+                <div class="text-sm font-medium text-slate-300 mb-2">{% icon "clock" %} {% trans 'Annual' %}</div>
                 <div class="text-lg sm:text-xl font-bold text-white break-all">{{ price.annual_price|floatformat:2 }} {{ currency_group.grouper.symbol }}</div>
                 {% if price.annual_discount_percent > 0 %}
                   <div class="text-xs text-green-400 mt-1">
@@ -122,7 +122,7 @@
           <!-- Setup Fee -->
           {% if price.setup_cents > 0 %}
           <div class="bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-600 mb-4">
-            <div class="text-sm text-slate-400 mb-1">⚡ {% trans 'One-time Setup Fee' %}</div>
+            <div class="text-sm text-slate-400 mb-1">{% icon "lightning" %} {% trans 'One-time Setup Fee' %}</div>
             <div class="text-lg font-semibold text-yellow-400 break-all">
               + {{ price.setup_fee|floatformat:2 }} {{ currency_group.grouper.symbol }}
             </div>
@@ -133,7 +133,7 @@
           {% if price.promo_price_cents and price.promo_valid_until %}
           <div class="bg-red-900 border border-red-700 rounded-lg p-3 sm:p-4 mb-4">
             <div class="flex items-start sm:items-center gap-2">
-              <span class="text-red-300 text-lg flex-shrink-0">🎯</span>
+              <span class="text-red-300 text-lg flex-shrink-0">{% icon "check" %}</span>
               <div class="min-w-0 flex-1">
                 <div class="text-sm font-medium text-red-200">{% trans 'Special Promotion' %}</div>
                 <div class="text-red-300 text-sm break-all">
@@ -151,7 +151,7 @@
           <!-- Quantity Limits -->
           {% if price.minimum_quantity > 1 or price.maximum_quantity %}
           <div class="bg-slate-800 rounded-lg p-3 sm:p-4 border border-slate-600 mb-4">
-            <div class="text-sm font-medium text-slate-300 mb-2">📦 {% trans 'Quantity Limits' %}</div>
+            <div class="text-sm font-medium text-slate-300 mb-2">{% icon "orders" %} {% trans 'Quantity Limits' %}</div>
             <div class="flex flex-col sm:flex-row gap-2 sm:gap-4 text-sm text-slate-400">
               {% if price.minimum_quantity > 1 %}
                 <div>{% trans 'Minimum:' %} <span class="text-white font-medium">{{ price.minimum_quantity }}</span></div>
@@ -168,13 +168,13 @@
             <a href="{% url 'products:product_price_edit' slug=product.slug price_id=price.id %}"
                class="flex items-center justify-center px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded-lg transition-colors"
                title="{% trans 'Edit Pricing' %}">
-              <span class="mr-1">✏️</span>
+              <span class="mr-1">{% icon "document" %}</span>
               {% trans 'Edit' %}
             </a>
             <a href="{% url 'products:product_price_delete' slug=product.slug price_id=price.id %}"
                class="flex items-center justify-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
                title="{% trans 'Delete Pricing' %}">
-              <span class="mr-1">🗑️</span>
+              <span class="mr-1">{% icon "x" %}</span>
               {% trans 'Delete' %}
             </a>
           </div>
@@ -189,7 +189,7 @@
   <!-- Empty State -->
   <div class="bg-slate-800 rounded-lg border border-slate-700">
     <div class="text-center py-12">
-      <div class="text-6xl mb-4">💰</div>
+      <div class="mb-4">{% icon "currency" size="2xl" %}</div>
       <h3 class="text-lg font-medium text-slate-300 mb-2">
         {% trans 'No pricing configured' %}
       </h3>
@@ -197,14 +197,14 @@
         {% trans 'Start by adding pricing options for this product. Multiple currencies and billing periods are supported.' %}
       </p>
       {% url 'products:product_price_create' slug=product.slug as create_price_url %}
-      {% trans "💰 Add First Price" as bt6 %}{% button bt6 variant="primary" href=create_price_url %}
+      {% trans "Add First Price" as bt6 %}{% button bt6 variant="primary" href=create_price_url %}
     </div>
   </div>
   {% endif %}
 
   <!-- Pricing Guidelines -->
   <div class="mt-8 bg-slate-800 rounded-lg border border-slate-700 p-6">
-    <h3 class="text-lg font-semibold text-white mb-4">📋 {% trans 'Pricing Guidelines' %}</h3>
+    <h3 class="text-lg font-semibold text-white mb-4">{% icon "clipboard" %} {% trans 'Pricing Guidelines' %}</h3>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-slate-400">
       <div>
         <h4 class="font-medium text-slate-300 mb-2">{% trans 'Romanian Business' %}</h4>

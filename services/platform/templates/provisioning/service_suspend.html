@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}
 {% trans "Suspend Service" %} - PRAHO Platform
@@ -16,7 +17,7 @@
         </a>
       </div>
       <h1 class="text-2xl font-semibold text-white mt-4 romanian-flag">
-        ⏸️ {% trans "Suspend Service" %}
+        {% icon "clock" %} {% trans "Suspend Service" %}
       </h1>
       <p class="mt-2 text-sm text-slate-400">
         {% trans "Confirm suspension of hosting service" %}
@@ -83,7 +84,7 @@
 
           <button type="submit"
                   class="bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-2 rounded-md transition-colors">
-            ⏸️ {% trans 'Suspend Service' %}
+            {% icon "clock" %} {% trans 'Suspend Service' %}
           </button>
         </div>
       </form>

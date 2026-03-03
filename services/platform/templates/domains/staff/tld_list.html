@@ -10,15 +10,15 @@
     <!-- Page Header -->
     <div class="flex items-center justify-between mb-6">
         <div>
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">🌐 {% trans "TLD Management" %}</h1>
+            <h1 class="font-bold text-slate-900 dark:text-white">{% icon "globe" size="lg" %} {% trans "TLD Management" %}</h1>
             <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 {% trans "Manage available top-level domains, pricing, and registrars" %}
             </p>
         </div>
         <div class="flex gap-3">
             {% url 'domains:tld_create' as tld_create_url %}
-            {% trans "➕ Add TLD" as bt1 %}{% button bt1 variant="primary" href=tld_create_url %}
-            {% trans "⭐ Featured" as bt2 %}{% button bt2 variant="secondary" href="?status=featured" %}
+            {% trans "Add TLD" as bt1 %}{% button bt1 variant="primary" href=tld_create_url %}
+            {% trans "Featured" as bt2 %}{% button bt2 variant="secondary" href="?status=featured" %}
         </div>
     </div>
 
@@ -28,7 +28,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
-                        <span class="text-blue-600 dark:text-blue-400 text-sm">🌐</span>
+                        <span class="text-blue-600 dark:text-blue-400 text-sm">{% icon "globe" %}</span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -41,7 +41,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
-                        <span class="text-green-600 dark:text-green-400 text-sm">🟢</span>
+                        <span class="text-green-600 dark:text-green-400 text-sm">{% icon "check" %}</span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -54,7 +54,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
-                        <span class="text-yellow-600 dark:text-yellow-400 text-sm">⭐</span>
+                        <span class="text-yellow-600 dark:text-yellow-400 text-sm">{% icon "check" %}</span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -90,7 +90,7 @@
             </div>
             <div>
                 <button type="submit" class="inline-flex items-center px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600">
-                    🔎 {% trans "Filter" %}
+                    {% icon "search" %} {% trans "Filter" %}
                 </button>
             </div>
         </form>
@@ -111,9 +111,9 @@
                         <div>
                             <div class="flex items-center gap-2">
                                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white">.{{ tld.extension }}</h3>
-                                {% if tld.is_active %}{% trans "🟢" as bt3 %}{% badge bt3 %}{% else %}{% trans "🔴" as bt4 %}{% badge bt4 %}{% endif %}
-                                {% if tld.is_featured %}{% trans "⭐" as bt5 %}{% badge bt5 variant="secondary" %}{% endif %}
-                                {% if tld.whois_privacy_available %}{% trans "🔒 WHOIS" as bt6 %}{% badge bt6 size="sm" %}{% endif %}
+                                {% if tld.is_active %}{% trans "" as bt3 %}{% badge bt3 %}{% else %}{% trans "" as bt4 %}{% badge bt4 %}{% endif %}
+                                {% if tld.is_featured %}{% trans "" as bt5 %}{% badge bt5 variant="secondary" %}{% endif %}
+                                {% if tld.whois_privacy_available %}{% trans "WHOIS" as bt6 %}{% badge bt6 icon="lock" size="sm" %}{% endif %}
                             </div>
                             <p class="text-sm text-slate-600 dark:text-slate-400">{{ tld.description }}</p>
                             <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
@@ -168,8 +168,8 @@
                     <!-- Actions -->
                     <div class="flex items-center gap-2">
                         {% url 'domains:tld_edit' pk=tld.id as tld_edit_url %}
-                        {% trans "✏️ Edit" as bt7 %}{% button bt7 variant="secondary" size="sm" href=tld_edit_url %}
-                        {% trans "📊 Pricing" as bt8 %}{% button bt8 variant="secondary" size="sm" href=tld_edit_url|add:'#pricing' %}
+                        {% trans "Edit" as bt7 %}{% button bt7 variant="secondary" size="sm" href=tld_edit_url %}
+                        {% trans "Pricing" as bt8 %}{% button bt8 variant="secondary" size="sm" href=tld_edit_url|add:'#pricing' %}
                     </div>
                 </div>
             </div>
@@ -237,12 +237,12 @@
         {% endif %}
         {% else %}
         <div class="px-6 py-12 text-center">
-            <div class="text-slate-400 text-6xl mb-4">🌐</div>
+            <div class="text-slate-400  mb-4">{% icon "globe" size="2xl" %}</div>
             <h3 class="text-lg font-medium text-slate-900 dark:text-white mb-2">{% trans "No TLDs found" %}</h3>
             <p class="text-slate-500 dark:text-slate-400 mb-6">
                 {% trans "Get started by adding your first TLD and pricing." %}
             </p>
-            {% trans "➕ Add First TLD" as bt9 %}{% button bt9 variant="primary" href="#" %}
+            {% trans "Add First TLD" as bt9 %}{% button bt9 variant="primary" href="#" %}
         </div>
         {% endif %}
     </div>

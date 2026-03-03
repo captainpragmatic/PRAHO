@@ -10,18 +10,18 @@
     <!-- Page Header -->
     <div class="flex items-center justify-between mb-6">
         <div>
-            <h1 class="text-2xl font-bold text-slate-900 dark:text-white">🏢 {% trans "Registrar Management" %}</h1>
+            <h1 class="font-bold text-slate-900 dark:text-white">{% icon "building" size="lg" %} {% trans "Registrar Management" %}</h1>
             <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 {% trans "Configure and manage domain registrar integrations" %}
             </p>
         </div>
         <div class="flex gap-3">
             {% url 'domains:registrar_create' as registrar_create_url %}
-            {% trans "➕ Add Registrar" as bt1 %}{% button bt1 variant="primary" href=registrar_create_url %}
+            {% trans "Add Registrar" as bt1 %}{% button bt1 variant="primary" href=registrar_create_url %}
 
             <form method="post" action="{% url 'domains:registrar_sync_all' %}" class="inline">
                 {% csrf_token %}
-                {% trans "🔄 Sync All" as bt2 %}{% button bt2 variant="secondary" type="submit" attrs="onclick=\"return confirm('Sync all registrars now?')\"" %}
+                {% trans "Sync All" as bt2 %}{% button bt2 variant="secondary" type="submit" attrs="onclick=\"return confirm('Sync all registrars now?')\"" %}
             </form>
         </div>
     </div>
@@ -32,7 +32,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
-                        <span class="text-blue-600 dark:text-blue-400 text-sm">🏢</span>
+                        <span class="text-blue-600 dark:text-blue-400 text-sm">{% icon "building" %}</span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -45,7 +45,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
-                        <span class="text-green-600 dark:text-green-400 text-sm">🟢</span>
+                        <span class="text-green-600 dark:text-green-400 text-sm">{% icon "check" %}</span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -58,7 +58,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
-                        <span class="text-yellow-600 dark:text-yellow-400 text-sm">🟡</span>
+                        <span class="text-yellow-600 dark:text-yellow-400 text-sm"></span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -71,7 +71,7 @@
             <div class="flex items-center">
                 <div class="flex-shrink-0">
                     <div class="w-8 h-8 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center">
-                        <span class="text-red-600 dark:text-red-400 text-sm">🔴</span>
+                        <span class="text-red-600 dark:text-red-400 text-sm">{% icon "x" %}</span>
                     </div>
                 </div>
                 <div class="ml-3">
@@ -98,7 +98,7 @@
                 </select>
             </div>
             <div class="flex items-end">
-                {% trans "🔍 Filter" as bt3 %}{% button bt3 variant="primary" type="submit" size="sm" %}
+                {% trans "Filter" as bt3 %}{% button bt3 variant="primary" type="submit" size="sm" %}
                 <a href="{% url 'domains:registrar_list' %}" class="ml-2 text-sm text-slate-500 hover:text-slate-700">{% trans "Clear" %}</a>
             </div>
         </form>
@@ -173,7 +173,7 @@
                     <!-- Action: Configure only -->
                     <div class="flex items-center flex-shrink-0">
                         {% url 'domains:registrar_edit' pk=registrar.id as registrar_edit_url %}
-                        {% trans "⚙️ Configure" as bt4 %}{% button bt4 variant="secondary" size="sm" href=registrar_edit_url %}
+                        {% trans "Configure" as bt4 %}{% button bt4 variant="secondary" size="sm" href=registrar_edit_url %}
                     </div>
                 </div>
             </div>
@@ -242,12 +242,12 @@
 
         {% else %}
         <div class="px-6 py-12 text-center">
-            <div class="text-slate-400 text-6xl mb-4">🏢</div>
+            <div class="text-slate-400  mb-4">{% icon "building" size="2xl" %}</div>
             <h3 class="text-lg font-medium text-slate-900 dark:text-white mb-2">{% trans "No registrars found" %}</h3>
             <p class="text-slate-500 dark:text-slate-400 mb-6">
                 {% trans "Get started by adding your first domain registrar." %}
             </p>
-            {% trans "➕ Add First Registrar" as bt5 %}{% button bt5 variant="primary" href="#" %}
+            {% trans "Add First Registrar" as bt5 %}{% button bt5 variant="primary" href="#" %}
         </div>
         {% endif %}
     </div>

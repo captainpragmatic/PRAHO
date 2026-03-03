@@ -3,7 +3,7 @@
 {% get_current_language as LANGUAGE_CODE %}
 
 <!-- ===============================================================================
-     MOBILE HEADER & NAVIGATION 📱 - PORTAL VERSION
+     MOBILE HEADER & NAVIGATION - PORTAL VERSION
      ===============================================================================
      Mobile-first responsive header with hamburger menu navigation.
      Hidden on desktop (lg:hidden), visible on mobile devices.
@@ -189,7 +189,7 @@
 
 <style>
 /* ===============================================================================
-   ENHANCED MOBILE NAVIGATION STYLES 📱
+   ENHANCED MOBILE NAVIGATION STYLES
    =============================================================================== */
 
 .mobile-nav-item {
@@ -280,12 +280,12 @@ body.mobile-menu-open {
 
 <script>
 // ===============================================================================
-// MOBILE MENU FUNCTIONALITY 📱
+// MOBILE MENU FUNCTIONALITY
 // ===============================================================================
 
 // Wait for DOM to be ready before binding events
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('📱 [Mobile Nav] Initializing mobile navigation');
+    console.log('[Mobile Nav] Initializing mobile navigation');
 
     // Ensure mobile menu starts closed
     const menu = document.getElementById('mobile-menu');
@@ -304,24 +304,24 @@ function toggleMobileMenu() {
 
     if (menu && hamburger && close) {
         if (menu.classList.contains('hidden')) {
-            // 📱 Opening menu
+            // Opening menu
             menu.classList.remove('hidden');
             menu.removeAttribute('inert');
             hamburger.classList.add('hidden');
             close.classList.remove('hidden');
             document.body.classList.add('mobile-menu-open');
-            console.log('📱 [Mobile Nav] Menu opened');
+            console.log('[Mobile Nav] Menu opened');
         } else {
-            // 📱 Closing menu
+            // Closing menu
             menu.classList.add('hidden');
             menu.setAttribute('inert', '');
             hamburger.classList.remove('hidden');
             close.classList.add('hidden');
             document.body.classList.remove('mobile-menu-open');
-            console.log('📱 [Mobile Nav] Menu closed');
+            console.log('[Mobile Nav] Menu closed');
         }
     } else {
-        console.warn('📱 [Mobile Nav] Menu elements not found - layout may not be ready');
+        console.warn('[Mobile Nav] Menu elements not found - layout may not be ready');
     }
 }
 

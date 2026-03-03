@@ -4,7 +4,7 @@
 {% block title %}{{ product.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
   {% include "orders/partials/order_breadcrumbs.html" with current_step="products" %}
 
   <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
@@ -19,7 +19,7 @@
         <h2 class="text-lg font-medium text-white">{% trans "Caracteristici" %}</h2>
         <ul class="grid sm:grid-cols-2 gap-2">
           {% for feature in product.meta.features %}
-          <li class="text-slate-300 flex items-center"><span class="mr-2">✅</span>{{ feature }}</li>
+          <li class="text-slate-300 flex items-center"><span class="mr-2">{% icon "check" size="sm" css_class="text-green-400" %}</span>{{ feature }}</li>
           {% endfor %}
         </ul>
         {% endif %}
@@ -46,10 +46,10 @@
             </div>
             {% if product.requires_domain %}
             <div class="mb-4">
-              {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="🌐" %}
+              {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="globe" %}
             </div>
             {% endif %}
-            {% trans "🛒 Add to Cart" as bt1 %}{% button bt1 variant="primary" size="md" type="submit" class="w-full" %}
+            {% trans "Add to Cart" as bt1 %}{% button bt1 variant="primary" size="md" type="submit" class="w-full" %}
           </form>
         </div>
       </div>

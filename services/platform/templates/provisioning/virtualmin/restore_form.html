@@ -37,7 +37,7 @@
     <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
         <div class="flex">
             <div class="flex-shrink-0">
-                <span class="text-yellow-400 text-xl">⚠️</span>
+                <span class="text-yellow-400">{% icon "warning" size="lg" %}</span>
             </div>
             <div class="ml-3">
                 <h3 class="text-sm font-medium text-yellow-400">
@@ -71,7 +71,7 @@
                     <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
                         <div class="flex">
                             <div class="flex-shrink-0">
-                                <span class="text-red-400 text-xl">❌</span>
+                                <span class="text-red-400">{% icon "x" size="lg" %}</span>
                             </div>
                             <div class="ml-3">
                                 <h3 class="text-sm font-medium text-red-400">
@@ -256,7 +256,7 @@
                 </div>
                 {% else %}
                 <div class="text-center">
-                    <span class="text-slate-400 text-4xl">📦</span>
+                    <span class="text-slate-400">{% icon "orders" size="2xl" %}</span>
                     <p class="mt-2 text-sm text-slate-400">
                         {% trans "No backups available for this account" %}
                     </p>

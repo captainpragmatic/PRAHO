@@ -20,10 +20,10 @@
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Refund Button for Staff -->
       {% if is_staff and invoice.status == "paid" %}
-        {% trans "💰 Refund Invoice" as bt1 %}{% button bt1 onclick="showInvoiceRefundModal()" variant="success" %}
+        {% trans "Refund Invoice" as bt1 %}{% button bt1 onclick="showInvoiceRefundModal()" variant="success" %}
       {% elif not is_staff and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
-        {% trans "🎫 Request Refund" as bt2 %}{% button bt2 onclick="showInvoiceRefundRequestModal()" variant="primary" %}
+        {% trans "Request Refund" as bt2 %}{% button bt2 onclick="showInvoiceRefundRequestModal()" variant="primary" %}
       {% endif %}
 
       <a href="{% url 'billing:invoice_list' %}"
@@ -238,7 +238,7 @@
       <form id="invoiceRefundForm" method="post" action="{% url 'billing:invoice_refund' pk=invoice.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">💰 {% trans "Refund Invoice" %}</h3>
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "currency" %} {% trans "Refund Invoice" %}</h3>
 
           <div class="mb-4">
             <label for="invoice_refund_type" class="block text-sm font-medium text-slate-400 mb-2">
@@ -320,7 +320,7 @@
           </button>
           <button type="submit"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
-            💰 {% trans "Process Refund" %}
+            {% icon "currency" %} {% trans "Process Refund" %}
           </button>
         </div>
       </form>
@@ -368,7 +368,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
     // Disable submit button to prevent double-clicks
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '⏳ {% trans "Processing..." %}';
+    submitBtn.innerHTML = '{% trans "Processing..." %}';
 
     fetch(this.action, {
         method: 'POST',
@@ -386,7 +386,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
             alert('Error: ' + data.error);
             // Re-enable button
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+            submitBtn.innerHTML = '{% trans "Process Refund" %}';
         }
     })
     .catch(error => {
@@ -396,7 +396,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
         alert('{{ refund_error_msg|escapejs }}');
         // Re-enable button
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+        submitBtn.innerHTML = '{% trans "Process Refund" %}';
     });
 });
 </script>
@@ -414,7 +414,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
       <form id="invoiceRefundRequestForm" method="post" action="{% url 'billing:invoice_refund_request' pk=invoice.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">🎫 {% trans "Request Invoice Refund" %}</h3>
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "tickets" %} {% trans "Request Invoice Refund" %}</h3>
           <p class="text-sm text-slate-400 mb-4">
             {% trans "Submit a refund request for this invoice. Our billing team will review your request and contact you." %}
           </p>
@@ -454,7 +454,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
           <div class="mb-4 p-4 bg-blue-900 border border-blue-700 rounded-lg">
             <div class="flex items-start">
               <div class="flex-shrink-0">
-                <span class="text-blue-300 text-xl">ℹ️</span>
+                <span class="text-blue-300">{% icon "info" size="lg" %}</span>
               </div>
               <div class="ml-3">
                 <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
@@ -473,7 +473,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
           </button>
           <button type="submit"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-            🎫 {% trans "Submit Request" %}
+            {% icon "tickets" %} {% trans "Submit Request" %}
           </button>
         </div>
       </form>
@@ -512,7 +512,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     // Disable submit button
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
+    submitBtn.innerHTML = '{% trans "Submitting..." %}';
 
     fetch(this.action, {
         method: 'POST',
@@ -533,7 +533,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
             alert('Error: ' + data.error);
             // Re-enable button
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+            submitBtn.innerHTML = '{% trans "Submit Request" %}';
         }
     })
     .catch(error => {
@@ -543,7 +543,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
         alert('{{ generic_error_msg|escapejs }}');
         // Re-enable button
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+        submitBtn.innerHTML = '{% trans "Submit Request" %}';
     });
 });
 </script>

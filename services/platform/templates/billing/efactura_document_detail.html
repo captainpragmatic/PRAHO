@@ -10,7 +10,7 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
-        📄 {% trans "e-Factura" %}: {{ document.invoice.number }}
+        {% icon "document" %} {% trans "e-Factura" %}: {{ document.invoice.number }}
       </h1>
       <p class="mt-2 text-slate-400">
         {% trans "Document ID" %}: {{ document.id }}
@@ -27,7 +27,7 @@
       <form method="post" action="{% url 'billing:efactura_retry' pk=document.pk %}">
         {% csrf_token %}
         <button type="submit" class="inline-flex items-center rounded-md bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-500" hx-confirm="{% trans 'Retry this e-Factura submission?' %}">
-          🔄 {% trans "Retry Submission" %}
+          {% icon "refresh" %} {% trans "Retry Submission" %}
         </button>
       </form>
       {% endif %}
@@ -38,7 +38,7 @@
   {% if is_deadline_approaching and not is_terminal %}
   <div class="bg-amber-900 border border-amber-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
-      <span class="text-amber-300 text-xl mr-3">⏰</span>
+      <span class="text-amber-300 text-xl mr-3">{% icon "clock" %}</span>
       <div>
         <h3 class="text-sm font-medium text-amber-200">{% trans "Deadline Approaching" %}</h3>
         <p class="mt-1 text-sm text-amber-300">
@@ -60,19 +60,19 @@
             <dt class="text-sm text-slate-400">{% trans "Status" %}</dt>
             <dd class="mt-1">
               {% if document.status == "accepted" %}
-                <span class="inline-flex items-center rounded-full bg-green-900 px-3 py-1 text-sm font-medium text-green-300">✅ {% trans "Accepted" %}</span>
+                <span class="inline-flex items-center rounded-full bg-green-900 px-3 py-1 text-sm font-medium text-green-300">{% icon "check" %} {% trans "Accepted" %}</span>
               {% elif document.status == "rejected" %}
-                <span class="inline-flex items-center rounded-full bg-red-900 px-3 py-1 text-sm font-medium text-red-300">❌ {% trans "Rejected" %}</span>
+                <span class="inline-flex items-center rounded-full bg-red-900 px-3 py-1 text-sm font-medium text-red-300">{% icon "x" %} {% trans "Rejected" %}</span>
               {% elif document.status == "error" %}
-                <span class="inline-flex items-center rounded-full bg-orange-900 px-3 py-1 text-sm font-medium text-orange-300">⚠️ {% trans "Error" %}</span>
+                <span class="inline-flex items-center rounded-full bg-orange-900 px-3 py-1 text-sm font-medium text-orange-300">{% icon "warning" %} {% trans "Error" %}</span>
               {% elif document.status == "processing" %}
-                <span class="inline-flex items-center rounded-full bg-yellow-900 px-3 py-1 text-sm font-medium text-yellow-300">⏳ {% trans "Processing" %}</span>
+                <span class="inline-flex items-center rounded-full bg-yellow-900 px-3 py-1 text-sm font-medium text-yellow-300">{% icon "clock" %} {% trans "Processing" %}</span>
               {% elif document.status == "submitted" %}
-                <span class="inline-flex items-center rounded-full bg-indigo-900 px-3 py-1 text-sm font-medium text-indigo-300">📤 {% trans "Submitted" %}</span>
+                <span class="inline-flex items-center rounded-full bg-indigo-900 px-3 py-1 text-sm font-medium text-indigo-300">{% icon "external" %} {% trans "Submitted" %}</span>
               {% elif document.status == "queued" %}
-                <span class="inline-flex items-center rounded-full bg-blue-900 px-3 py-1 text-sm font-medium text-blue-300">📋 {% trans "Queued" %}</span>
+                <span class="inline-flex items-center rounded-full bg-blue-900 px-3 py-1 text-sm font-medium text-blue-300">{% icon "clipboard" %} {% trans "Queued" %}</span>
               {% else %}
-                <span class="inline-flex items-center rounded-full bg-slate-700 px-3 py-1 text-sm font-medium text-slate-300">📝 {% trans "Draft" %}</span>
+                <span class="inline-flex items-center rounded-full bg-slate-700 px-3 py-1 text-sm font-medium text-slate-300">{% icon "document" %} {% trans "Draft" %}</span>
               {% endif %}
             </dd>
           </div>
@@ -110,7 +110,7 @@
       <!-- Validation Errors -->
       {% if document.validation_errors %}
       <div class="bg-slate-800 rounded-lg border border-red-700 p-6">
-        <h2 class="text-lg font-semibold text-red-300 mb-4">❌ {% trans "Validation Errors" %}</h2>
+        <h2 class="text-lg font-semibold text-red-300 mb-4">{% icon "x" %} {% trans "Validation Errors" %}</h2>
         <ul class="space-y-2">
           {% for error in document.validation_errors %}
           <li class="text-sm text-red-200 bg-red-900/30 rounded p-2">
@@ -124,7 +124,7 @@
       <!-- Last Error -->
       {% if document.last_error %}
       <div class="bg-slate-800 rounded-lg border border-orange-700 p-6">
-        <h2 class="text-lg font-semibold text-orange-300 mb-4">⚠️ {% trans "Last Error" %}</h2>
+        <h2 class="text-lg font-semibold text-orange-300 mb-4">{% icon "warning" %} {% trans "Last Error" %}</h2>
         <pre class="text-sm text-orange-200 whitespace-pre-wrap">{{ document.last_error }}</pre>
       </div>
       {% endif %}
@@ -132,7 +132,7 @@
       <!-- ANAF Response -->
       {% if document.anaf_response %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">📨 {% trans "ANAF Response" %}</h2>
+        <h2 class="text-lg font-semibold text-white mb-4">{% icon "mail" %} {% trans "ANAF Response" %}</h2>
         <pre class="text-xs text-slate-300 bg-slate-900 rounded p-4 overflow-x-auto max-h-64 overflow-y-auto">{{ document.anaf_response|pprint }}</pre>
       </div>
       {% endif %}
@@ -142,7 +142,7 @@
     <div class="space-y-6">
       <!-- Timeline -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">📅 {% trans "Timeline" %}</h2>
+        <h2 class="text-lg font-semibold text-white mb-4">{% icon "clock" %} {% trans "Timeline" %}</h2>
         <ol class="space-y-3">
           <li class="flex items-start">
             <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.created_at|date:"d/m H:i" }}</span>
@@ -172,7 +172,7 @@
       <!-- Webhook Events -->
       {% if webhook_events %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">🔔 {% trans "Webhook Events" %}</h2>
+        <h2 class="text-lg font-semibold text-white mb-4">{% icon "warning" %} {% trans "Webhook Events" %}</h2>
         <ul class="space-y-2">
           {% for event in webhook_events %}
           <li class="text-sm">
@@ -188,7 +188,7 @@
       <!-- XML Hash -->
       {% if document.xml_hash %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-lg font-semibold text-white mb-4">🔐 {% trans "Integrity" %}</h2>
+        <h2 class="text-lg font-semibold text-white mb-4">{% icon "lock" %} {% trans "Integrity" %}</h2>
         <dl>
           <dt class="text-xs text-slate-400">{% trans "XML SHA-256" %}</dt>
           <dd class="mt-1 text-xs text-slate-300 font-mono break-all">{{ document.xml_hash }}</dd>

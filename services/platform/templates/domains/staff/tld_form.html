@@ -9,7 +9,7 @@
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
   <div class="mb-6">
     <h1 class="text-2xl font-bold text-slate-900 dark:text-white">
-      {% if is_edit %}✏️ {% trans "Edit TLD" %}{% else %}🌐 {% trans "Add TLD" %}{% endif %}
+      {% if is_edit %}{% icon "document" %} {% trans "Edit TLD" %}{% else %}{% icon "globe" %} {% trans "Add TLD" %}{% endif %}
     </h1>
     <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
       {% if is_edit %}{% trans "Update TLD configuration, pricing, and settings." %}{% else %}{% trans "Create a new top-level domain with pricing and settings." %}{% endif %}
@@ -69,9 +69,9 @@
 
     <div class="pt-2 flex items-center gap-3">
       {% if is_edit %}
-        {% trans "💾 Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
+        {% trans "Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
       {% else %}
-        {% trans "💾 Save TLD" as bt2 %}{% button bt2 variant="primary" type="submit" %}
+        {% trans "Save TLD" as bt2 %}{% button bt2 variant="primary" type="submit" %}
       {% endif %}
       {% url 'domains:tld_list' as tld_list_url %}
       {% trans "Cancel" as bt3 %}{% button bt3 variant="secondary" href=tld_list_url %}

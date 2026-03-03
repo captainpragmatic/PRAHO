@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{{ title }} - PRAHO Platform{% endblock %}
 
@@ -31,7 +32,7 @@
         {% if form.non_field_errors %}
         <div class="bg-red-900 border border-red-700 rounded-md p-3">
           {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          <p class="text-red-100 text-sm">{% icon "x" %} {{ error }}</p>
           {% endfor %}
         </div>
         {% endif %}
@@ -39,7 +40,7 @@
         <!-- Core Customer Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            👤 {% trans 'Customer Information' %}
+            {% icon "user" %} {% trans 'Customer Information' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -129,7 +130,7 @@
         <!-- Tax Profile Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🏛️ {% trans 'Romanian Tax Information' %}
+            {% icon "building" %} {% trans 'Romanian Tax Information' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -203,7 +204,7 @@
         <!-- Billing Profile Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            💼 {% trans 'Billing Configuration' %}
+            {% icon "currency" %} {% trans 'Billing Configuration' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -274,7 +275,7 @@
         <!-- Address Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            📍 {% trans 'Primary Address Information' %}
+            {% icon "globe" %} {% trans 'Primary Address Information' %}
           </h3>
 
           <!-- Address Line 1 -->
@@ -355,7 +356,7 @@
         <!-- Billing Address Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🧾 {% trans 'Billing Address Information' %}
+            {% icon "receipt" %} {% trans 'Billing Address Information' %}
           </h3>
 
           <!-- Billing Same As Primary Checkbox -->
@@ -377,7 +378,7 @@
           <!-- Separate Billing Address Fields (Hidden by default) -->
           <div id="billing-address-fields" class="space-y-4 border-l-4 border-blue-500 pl-4 bg-slate-900/50 p-4 rounded-r-lg">
             <p class="text-sm text-blue-300 mb-4">
-              📝 {% trans "Specify different billing address details below:" %}
+              {% icon "document" %} {% trans "Specify different billing address details below:" %}
             </p>
 
             <!-- Billing Address Line 1 -->
@@ -459,7 +460,7 @@
         <!-- GDPR Compliance -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🛡️ {% trans 'Privacy & Consent' %}
+            {% icon "lock" %} {% trans 'Privacy & Consent' %}
           </h3>
 
           <!-- Data Processing Consent -->
@@ -515,7 +516,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   // ===============================================================================
-  // BILLING ADDRESS TOGGLE FUNCTIONALITY 🧾
+  // BILLING ADDRESS TOGGLE FUNCTIONALITY {% icon "receipt" %}
   // ===============================================================================
 
   const billingSameCheckbox = document.getElementById('id_billing_same_as_primary');
@@ -573,7 +574,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ===============================================================================
-  // FORM VALIDATION & FORMATTING 🔍
+  // FORM VALIDATION & FORMATTING {% icon "search" %}
   // ===============================================================================
 
   // Real-time CUI validation

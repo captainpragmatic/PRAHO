@@ -22,9 +22,9 @@
       </div>
       <h1 class="text-3xl font-bold text-white mt-4">
         {% if proforma %}
-        ✏️ {% trans "Edit Proforma" %} {{ proforma.number }}
+        {% icon "document" %} {% trans "Edit Proforma" %} {{ proforma.number }}
         {% else %}
-        📄 {% trans "Create New Proforma" %}
+        {% icon "document" %} {% trans "Create New Proforma" %}
         {% endif %}
       </h1>
       <p class="mt-2 text-slate-400">
@@ -62,7 +62,7 @@
     {% if form.non_field_errors %}
     <div class="bg-red-900 border border-red-700 rounded-md p-4">
       {% for error in form.non_field_errors %}
-      <p class="text-red-100 text-sm">❌ {{ error }}</p>
+      <p class="text-red-100 text-sm">{% icon "x" %} {{ error }}</p>
       {% endfor %}
     </div>
     {% endif %}
@@ -74,7 +74,7 @@
         <!-- Customer Selection -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            👤 {% trans 'Customer Information' %}
+            {% icon "user" %} {% trans 'Customer Information' %}
           </h3>
 
           <div class="space-y-4">
@@ -128,7 +128,7 @@
         <!-- Proforma Details -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            📄 {% trans 'Proforma Details' %}
+            {% icon "document" %} {% trans 'Proforma Details' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -176,7 +176,7 @@
         <!-- Line Items Section -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            📋 {% trans 'Proforma Lines' %}
+            {% icon "clipboard" %} {% trans 'Proforma Lines' %}
           </h3>
 
           <div class="space-y-4">
@@ -218,7 +218,7 @@
                     </div>
                   </div>
                   <div class="col-span-1">
-                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">🗑️</button>
+                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
                   </div>
                 </div>
                 {% endfor %}
@@ -248,7 +248,7 @@
                     </div>
                   </div>
                   <div class="col-span-1">
-                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>🗑️</button>
+                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>{% icon "x" %}</button>
                   </div>
                 </div>
               {% endif %}
@@ -256,7 +256,7 @@
 
             <!-- Add Line Button -->
             <div class="pt-4">
-              {% trans "➕ Add Line Item" as bt1 %}{% button bt1 variant="secondary" class_="add-line-btn" %}
+              {% trans "Add Line Item" as bt1 %}{% button bt1 variant="secondary" class_="add-line-btn" %}
             </div>
           </div>
         </div>
@@ -264,7 +264,7 @@
         <!-- Additional Information -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            📝 {% trans 'Additional Information' %}
+            {% icon "document" %} {% trans 'Additional Information' %}
           </h3>
 
           <div class="space-y-4">
@@ -295,7 +295,7 @@
         <!-- Proforma Summary -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 sticky top-4">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            💰 {% trans 'Proforma Summary' %}
+            {% icon "currency" %} {% trans 'Proforma Summary' %}
           </h3>
 
           <div class="space-y-3">
@@ -331,19 +331,19 @@
 
           <div class="space-y-3 text-sm">
             <div class="flex items-center space-x-2">
-              <span class="text-green-400">✅</span>
+              <span class="text-green-400">{% icon "check" %}</span>
               <span class="text-slate-300">{% trans 'Customer preview & approval' %}</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-green-400">✅</span>
+              <span class="text-green-400">{% icon "check" %}</span>
               <span class="text-slate-300">{% trans 'Auto-converts to invoice when paid' %}</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-green-400">✅</span>
+              <span class="text-green-400">{% icon "check" %}</span>
               <span class="text-slate-300">{% trans 'Sequential numbering (PRO-XXXXXX)' %}</span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-green-400">✅</span>
+              <span class="text-green-400">{% icon "check" %}</span>
               <span class="text-slate-300">{% trans 'Romanian VAT compliance' %}</span>
             </div>
           </div>
@@ -352,21 +352,21 @@
         <!-- Action Buttons -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h3 class="text-lg font-semibold text-white border-b border-slate-600 pb-3 mb-4">
-            ⚡ {% trans 'Actions' %}
+            {% icon "lightning" %} {% trans 'Actions' %}
           </h3>
 
           <div class="space-y-3">
             {% if proforma %}
-            {% trans "💾 Update Proforma" as bt2 %}{% button bt2 variant="primary" type="submit" css_class="w-full" %}
+            {% trans "Update Proforma" as bt2 %}{% button bt2 variant="primary" type="submit" css_class="w-full" %}
             {% else %}
-            {% trans "💾 Create Proforma" as bt3 %}{% button bt3 variant="primary" type="submit" css_class="w-full" %}
+            {% trans "Create Proforma" as bt3 %}{% button bt3 variant="primary" type="submit" css_class="w-full" %}
             {% endif %}
 
             <hr class="border-slate-600">
 
             <a href="{% url 'billing:invoice_list' %}"
               class="block w-full text-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-              ❌ {% trans 'Cancel' %}
+              {% icon "x" %} {% trans 'Cancel' %}
             </a>
           </div>
         </div>
@@ -457,7 +457,7 @@
                 <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 RON</div>
             </div>
             <div class="col-span-1">
-                <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">🗑️</button>
+                <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
             </div>
         </div>`;
 
@@ -473,7 +473,7 @@
     newLine.querySelector('.remove-line').addEventListener('click', function () {
       if (document.querySelectorAll('.proforma-line').length > 1) {
         newLine.remove();
-        renumberLines(); // 🔄 Renumber lines after removal
+        renumberLines(); // {% icon "refresh" %} Renumber lines after removal
         calculateTotals();
         updateRemoveButtons();
       }
@@ -506,7 +506,7 @@
     });
   }
 
-  // 🔄 Renumber all lines to ensure consecutive numbering (0, 1, 2, ...)
+  // {% icon "refresh" %} Renumber all lines to ensure consecutive numbering (0, 1, 2, ...)
   function renumberLines() {
     const lines = document.querySelectorAll('.proforma-line');
     lines.forEach((line, index) => {
@@ -550,7 +550,7 @@
     btn.addEventListener('click', function () {
       if (document.querySelectorAll('.proforma-line').length > 1) {
         btn.closest('.proforma-line').remove();
-        renumberLines(); // 🔄 Renumber lines after removal
+        renumberLines(); // {% icon "refresh" %} Renumber lines after removal
         calculateTotals();
         updateRemoveButtons();
       }

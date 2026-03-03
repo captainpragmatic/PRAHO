@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n ui_components %}
 
 {% block title %}{% trans "Service Action Request" %} - {{ service.service_name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
   <!-- Back Navigation -->
   <div class="mb-6">
     <a href="{% url 'services:detail' service_id=service_id %}"
@@ -233,11 +233,11 @@
             <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
             <dd class="text-sm">
               {% if service.status == 'active' %}
-                <span class="text-green-400">✅ {% trans "Active" %}</span>
+                <span class="text-green-400">{% icon "check" size="sm" css_class="mr-1" %} {% trans "Active" %}</span>
               {% elif service.status == 'suspended' %}
-                <span class="text-red-400">⏸️ {% trans "Suspended" %}</span>
+                <span class="text-red-400">{% icon "ban" size="sm" css_class="mr-1" %} {% trans "Suspended" %}</span>
               {% elif service.status == 'pending' %}
-                <span class="text-yellow-400">⏳ {% trans "Pending" %}</span>
+                <span class="text-yellow-400">{% icon "clock" size="sm" css_class="mr-1" %} {% trans "Pending" %}</span>
               {% else %}
                 <span class="text-slate-400">{{ service.status_display }}</span>
               {% endif %}

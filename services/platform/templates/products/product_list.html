@@ -10,7 +10,7 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
-        🛍️ {% trans "Product Catalog" %}
+        {% icon "orders" %} {% trans "Product Catalog" %}
       </h1>
       <p class="mt-2 text-slate-400">
         {% trans "Manage hosting products and services for Romanian business compliance" %}
@@ -18,7 +18,7 @@
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
       {% url 'products:product_create' as create_product_url %}
-      {% trans "✨ New Product" as bt1 %}{% button bt1 variant="primary" href=create_product_url %}
+      {% trans "New Product" as bt1 %}{% button bt1 variant="primary" href=create_product_url %}
     </div>
   </div>
 
@@ -28,7 +28,7 @@
     <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">📦</div>
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:">{% icon "orders" size="lg" %}</div>
         </div>
         <div class="ml-3 sm:ml-4 min-w-0 flex-1">
           <p class="text-xs sm:text-sm font-medium text-slate-400 truncate">{% trans 'Total Products' %}</p>
@@ -40,7 +40,7 @@
     <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">✅</div>
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:">{% icon "check" size="lg" %}</div>
         </div>
         <div class="ml-3 sm:ml-4 min-w-0 flex-1">
           <p class="text-xs sm:text-sm font-medium text-slate-400 truncate">{% trans 'Active Products' %}</p>
@@ -52,7 +52,7 @@
     <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">👁️</div>
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:">{% icon "user" size="lg" %}</div>
         </div>
         <div class="ml-3 sm:ml-4 min-w-0 flex-1">
           <p class="text-xs sm:text-sm font-medium text-slate-400 truncate">{% trans 'Public Products' %}</p>
@@ -64,7 +64,7 @@
     <div class="bg-slate-800 rounded-lg p-4 sm:p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">⭐</div>
+          <div class="w-6 h-6 sm:w-8 sm:h-8 text-xl sm:text-2xl">{% icon "check" %}</div>
         </div>
         <div class="ml-3 sm:ml-4 min-w-0 flex-1">
           <p class="text-xs sm:text-sm font-medium text-slate-400 truncate">{% trans 'Featured Products' %}</p>
@@ -129,9 +129,9 @@
 
       <!-- Filter Buttons -->
       <div class="flex gap-2 w-full sm:w-auto">
-        {% trans "🔍 Filter" as bt2 %}{% button bt2 variant="primary" type="submit" %}
+        {% trans "Filter" as bt2 %}{% button bt2 variant="primary" type="submit" %}
         <a href="{% url 'products:product_list' %}" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-          ❌ {% trans 'Clear' %}
+          {% icon "x" %} {% trans 'Clear' %}
         </a>
       </div>
     </form>
@@ -149,7 +149,7 @@
       <!-- Loading State -->
       <div class="px-6 py-4 border-b border-slate-700">
         <h3 class="text-lg font-medium text-white">
-          📦 {% trans 'Products' %}
+          {% icon "orders" %} {% trans 'Products' %}
         </h3>
       </div>
       <div class="flex items-center justify-center py-12">

@@ -28,7 +28,7 @@
   <div class="bg-red-900 border border-red-700 rounded-lg p-4 mb-6">
     <div class="flex items-start">
       <div class="flex-shrink-0">
-        <span class="text-red-300 text-xl">🚨</span>
+        <span class="text-red-300 text-xl">{% icon "warning" %}</span>
       </div>
       <div class="ml-3">
         <h3 class="text-sm font-medium text-red-200">{% trans "Approaching Deadlines" %}</h3>
@@ -58,7 +58,7 @@
     <!-- Submission Queue -->
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="px-4 py-3 border-b border-slate-700">
-        <h3 class="text-sm font-semibold text-blue-300">📋 {% trans "Submission Queue" %}</h3>
+        <h3 class="text-sm font-semibold text-blue-300">{% icon "clipboard" %} {% trans "Submission Queue" %}</h3>
       </div>
       <div class="p-4">
         {% if pending_submissions %}
@@ -81,7 +81,7 @@
     <!-- Awaiting Response -->
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="px-4 py-3 border-b border-slate-700">
-        <h3 class="text-sm font-semibold text-indigo-300">📤 {% trans "Awaiting Response" %}</h3>
+        <h3 class="text-sm font-semibold text-indigo-300">{% icon "external" %} {% trans "Awaiting Response" %}</h3>
       </div>
       <div class="p-4">
         {% if awaiting_response %}
@@ -104,7 +104,7 @@
     <!-- Retry Queue -->
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="px-4 py-3 border-b border-slate-700">
-        <h3 class="text-sm font-semibold text-orange-300">🔄 {% trans "Retry Queue" %}</h3>
+        <h3 class="text-sm font-semibold text-orange-300">{% icon "refresh" %} {% trans "Retry Queue" %}</h3>
       </div>
       <div class="p-4">
         {% if retry_queue %}
@@ -128,7 +128,7 @@
   <!-- All Documents Table -->
   <div class="bg-slate-800 rounded-lg border border-slate-700">
     <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
-      <h3 class="text-sm font-semibold text-white">📄 {% trans "All Documents" %} ({{ total_documents }})</h3>
+      <h3 class="text-sm font-semibold text-white">{% icon "document" %} {% trans "All Documents" %} ({{ total_documents }})</h3>
       <div class="flex items-center gap-3">
         <!-- Status Filter -->
         <select onchange="window.location.href='?status=' + this.value" class="bg-slate-700 text-sm text-slate-300 rounded border-slate-600 px-2 py-1">

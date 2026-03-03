@@ -38,7 +38,7 @@
         <!-- Header -->
         <div class="px-6 py-4 bg-red-900/30 border-b border-red-600">
             <div class="flex items-center">
-                <span class="text-3xl mr-4">⚠️</span>
+                <span class="mr-4">{% icon "warning" size="xl" %}</span>
                 <div>
                     <h1 class="text-xl font-bold text-white">{% trans "Delete Customer" %}</h1>
                     <p class="text-sm text-red-300">{% trans "This action cannot be undone" %}</p>
@@ -52,10 +52,10 @@
                 <h2 class="text-sm font-semibold text-slate-400 mb-3">{% trans "Customer to be deleted:" %}</h2>
                 <div class="flex items-start">
                     <div class="w-12 h-12 rounded-lg bg-slate-700 flex items-center justify-center text-xl mr-4">
-                        {% if customer.customer_type == 'company' %}🏢
-                        {% elif customer.customer_type == 'individual' %}👤
-                        {% elif customer.customer_type == 'pfa' %}💼
-                        {% else %}🏛️{% endif %}
+                        {% if customer.customer_type == 'company' %}{% icon "building" %}
+                        {% elif customer.customer_type == 'individual' %}{% icon "user" %}
+                        {% elif customer.customer_type == 'pfa' %}{% icon "currency" %}
+                        {% else %}{% icon "building" %}{% endif %}
                     </div>
                     <div>
                         <h3 class="text-lg font-semibold text-white">{{ customer.name }}</h3>
@@ -138,7 +138,7 @@
                     </a>
                     <button type="submit"
                             class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors">
-                        <span class="mr-2">🗑️</span>
+                        <span class="mr-2">{% icon "x" %}</span>
                         {% trans "Delete Customer" %}
                     </button>
                 </div>

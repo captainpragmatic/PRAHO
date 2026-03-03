@@ -19,7 +19,7 @@
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
             {% if can_retry %}
-                {% trans "🔄 Retry Job" as bt1 %}{% button bt1 variant="warning" href="#" %}
+                {% trans "Retry Job" as bt1 %}{% button bt1 variant="warning" href="#" %}
             {% endif %}
             {% trans "← Back to Jobs" as bt2 %}{% button bt2 variant="secondary" href="/provisioning/virtualmin/servers/" %}
         </div>
@@ -46,11 +46,11 @@
                             <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
                             <dd class="mt-1">
                                 {% if job.status == 'completed' %}
-                                    {% trans "✅ Completed" as bt3 %}{% badge bt3 variant="success" %}
+                                    {% trans "Completed" as bt3 %}{% badge bt3 icon="check" variant="success" %}
                                 {% elif job.status == 'failed' %}
-                                    {% trans "❌ Failed" as bt4 %}{% badge bt4 variant="danger" %}
+                                    {% trans "Failed" as bt4 %}{% badge bt4 icon="x" variant="danger" %}
                                 {% elif job.status == 'running' %}
-                                    {% trans "🔄 Running" as bt5 %}{% badge bt5 variant="warning" %}
+                                    {% trans "Running" as bt5 %}{% badge bt5 icon="refresh" variant="warning" %}
                                 {% else %}
                                     {% badge job.get_status_display variant="secondary" %}
                                 {% endif %}
@@ -97,7 +97,7 @@
             <div class="bg-red-900/20 border border-red-700 rounded-lg p-6">
                 <div class="flex items-start">
                     <div class="flex-shrink-0">
-                        <span class="text-red-400 text-xl">❌</span>
+                        <span class="text-red-400">{% icon "x" size="lg" %}</span>
                     </div>
                     <div class="ml-3">
                         <h3 class="text-sm font-medium text-red-400">
@@ -151,7 +151,7 @@
                                     <div class="absolute top-4 left-4 mt-0.5 h-full w-0.5 bg-slate-600"></div>
                                     <div class="relative flex space-x-3">
                                         <div class="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center">
-                                            <span class="text-white text-xs">📝</span>
+                                            <span class="text-white text-xs">{% icon "document" %}</span>
                                         </div>
                                         <div class="min-w-0 flex-1">
                                             <div class="text-sm text-slate-300">
@@ -171,7 +171,7 @@
                                     <div class="absolute top-4 left-4 mt-0.5 h-full w-0.5 bg-slate-600"></div>
                                     <div class="relative flex space-x-3">
                                         <div class="h-8 w-8 rounded-full bg-yellow-600 flex items-center justify-center">
-                                            <span class="text-white text-xs">▶️</span>
+                                            <span class="text-white text-xs">{% icon "services" %}</span>
                                         </div>
                                         <div class="min-w-0 flex-1">
                                             <div class="text-sm text-slate-300">
@@ -191,7 +191,7 @@
                                 <div class="relative">
                                     <div class="relative flex space-x-3">
                                         <div class="h-8 w-8 rounded-full {% if job.status == 'completed' %}bg-green-600{% else %}bg-red-600{% endif %} flex items-center justify-center">
-                                            <span class="text-white text-xs">{% if job.status == 'completed' %}✅{% else %}❌{% endif %}</span>
+                                            <span class="text-white text-xs">{% if job.status == 'completed' %}{% icon "check" %}{% else %}{% icon "x" %}{% endif %}</span>
                                         </div>
                                         <div class="min-w-0 flex-1">
                                             <div class="text-sm text-slate-300">
@@ -214,12 +214,12 @@
             <div class="bg-slate-800 rounded-lg border border-slate-700">
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h3 class="text-lg font-medium text-slate-100 flex items-center">
-                        📋 {% trans "Live Logs" %}
+                        {% icon "clipboard" %} {% trans "Live Logs" %}
                         <button class="ml-2 text-xs bg-blue-600 px-2 py-1 rounded"
                                 hx-get="{% url 'provisioning:virtualmin_job_logs' job.id %}"
                                 hx-target="#job-logs"
                                 hx-trigger="every 2s">
-                            🔄 Auto-refresh
+                            {% icon "refresh" %} Auto-refresh
                         </button>
                     </h3>
                 </div>

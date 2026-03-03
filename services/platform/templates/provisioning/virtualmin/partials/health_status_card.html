@@ -1,10 +1,11 @@
 {% load i18n %}
+{% load ui_components %}
 <!-- Health Check Card (Partial for HTMX updates) -->
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
     <div class="flex items-center">
         <div class="flex-shrink-0">
             <div class="w-10 h-10 {% if health_status.is_healthy %}bg-green-600{% else %}bg-orange-600{% endif %} rounded-lg flex items-center justify-center">
-                <span class="text-white text-lg">🏥</span>
+                <span class="text-white text-lg">{% icon "services" %}</span>
             </div>
         </div>
         <div class="ml-4">

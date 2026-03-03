@@ -7,7 +7,7 @@
   <!-- Cart Header -->
   <div class="px-4 py-3 border-b border-slate-700">
     <h3 class="font-medium text-white">
-      🛒 {% trans "Your Cart" %}
+      {% icon "orders" size="sm" css_class="mr-1" %} {% trans "Your Cart" %}
     </h3>
     <p class="text-xs text-slate-400 mt-1">
       {% filter force_escape %}{% blocktrans count counter=total_items %}
@@ -44,7 +44,7 @@
               hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}"
               class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1"
               aria-label="{% trans 'Remove from cart' %}">
-        <span class="text-xs">🗑️</span>
+        {% icon "x" size="sm" %}
       </button>
     </div>
     {% endfor %}
@@ -61,10 +61,10 @@
   <!-- Cart Actions -->
   <div class="px-4 py-3 border-t border-slate-700 space-y-2">
     <a href="{% url 'orders:cart_review' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
-      👀 {% trans "View full cart" %}
+      {% icon "search" size="sm" css_class="mr-1" %} {% trans "View full cart" %}
     </a>
     <a href="{% url 'orders:checkout' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-      💳 {% trans "Finish order" %}
+      {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Finish order" %}
     </a>
   </div>
 
@@ -72,13 +72,13 @@
   <!-- Empty Cart State -->
   <div class="px-4 py-6 text-center">
     <div class="text-slate-400 mb-3">
-      <span class="text-2xl">🛒</span>
+      {% icon "orders" size="2xl" css_class="text-slate-400" %}
     </div>
     <p class="text-sm text-slate-400 mb-3">
       {% trans "Coșul dumneavoastră este gol" %}
     </p>
     <a href="{% url 'orders:catalog' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-      📦 {% trans "Explore products" %}
+      {% icon "orders" size="sm" css_class="mr-1" %} {% trans "Explore products" %}
     </a>
   </div>
   {% endif %}

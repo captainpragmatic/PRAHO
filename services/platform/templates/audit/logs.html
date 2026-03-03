@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Audit Logs" %}{% endblock %}
 
@@ -17,7 +18,7 @@ Dark theme interface for staff/admin audit log monitoring
         <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
             <div class="flex items-center justify-between">
                 <div>
-                    <h1 class="text-2xl font-bold text-white">🔍 {% trans "Audit Logs" %}</h1>
+                    <h1 class="font-bold text-white">{% icon "search" size="lg" %} {% trans "Audit Logs" %}</h1>
                     <p class="text-slate-400 mt-1">{% trans "Monitor all system activities and security events" %}</p>
                 </div>
                 <div class="flex items-center space-x-3">
@@ -29,7 +30,7 @@ Dark theme interface for staff/admin audit log monitoring
 
         <!-- Filter Section -->
         <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-6">
-            <h2 class="text-lg font-medium text-white mb-4">🔧 {% trans "Filters" %}</h2>
+            <h2 class="text-lg font-medium text-white mb-4">{% icon "settings" %} {% trans "Filters" %}</h2>
 
             <!-- Filter Form -->
             <form id="audit-filters"
@@ -112,8 +113,8 @@ Dark theme interface for staff/admin audit log monitoring
                 <div class="mt-6 flex justify-center gap-3">
                     {% url 'audit:logs_list' as logs_list_url %}
                     {% include 'components/button.html' with text='Apply Filters' variant='primary' hx_get=logs_list_url hx_target='#audit-results' hx_include='#audit-filters' %}
-                    {% include 'components/button.html' with text='Reset Filters' variant='secondary' icon='🔄' attrs='onclick="resetFilters()"' %}
-                    {% include 'components/button.html' with text='Export CSV' variant='success' icon='📊' attrs='onclick="exportCSV()"' %}
+                    {% include 'components/button.html' with text='Reset Filters' variant='secondary' icon='' attrs='onclick="resetFilters()"' %}
+                    {% include 'components/button.html' with text='Export CSV' variant='success' icon='' attrs='onclick="exportCSV()"' %}
                 </div>
             </form>
         </div>
@@ -122,7 +123,7 @@ Dark theme interface for staff/admin audit log monitoring
         <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-700">
                 <div class="flex items-center justify-between">
-                    <h2 class="text-lg font-medium text-white">📋 {% trans "Audit Events" %}</h2>
+                    <h2 class="text-lg font-medium text-white">{% icon "clipboard" %} {% trans "Audit Events" %}</h2>
                     <div class="flex items-center space-x-2">
                         <!-- Loading Spinner -->
                         <div id="loading-spinner" class="htmx-indicator">
@@ -167,7 +168,7 @@ function resetFilters() {
     if (form) {
         // Add loading state
         const originalText = resetBtn.innerHTML;
-        resetBtn.innerHTML = '⏳ {% trans "Resetting..." %}';
+        resetBtn.innerHTML = '{% trans "Resetting..." %}';
         resetBtn.disabled = true;
 
         // Reset all form fields
@@ -194,7 +195,7 @@ function exportCSV() {
     if (form) {
         // Add loading state
         const originalText = exportBtn.innerHTML;
-        exportBtn.innerHTML = '⏳ {% trans "Exporting..." %}';
+        exportBtn.innerHTML = '{% trans "Exporting..." %}';
         exportBtn.disabled = true;
 
         // Get form data

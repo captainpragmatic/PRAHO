@@ -3,10 +3,9 @@
 Tests all security enhancements implemented for the UI components.
 """
 
-from unittest.mock import patch, Mock
-from django.test import TestCase, RequestFactory
-from django.template import Context, Template
 from django.contrib.auth import get_user_model
+from django.template import Context, Template
+from django.test import TestCase
 from django.utils.html import escape
 
 from apps.ui.templatetags.ui_components import button, icon
@@ -99,45 +98,32 @@ class ButtonComponentXSSTests(TestCase):
 
 
 class IconComponentSecurityTests(TestCase):
-    """🔒 Tests for security improvements in icon component"""
+    """Tests for security of inline SVG icon component"""
 
     def test_icon_uses_format_html_not_f_strings(self):
-        """Test that icon function uses format_html instead of f-strings"""
-        with patch('apps.ui.templatetags.ui_components.format_html') as mock_format_html:
-            mock_format_html.return_value = '<svg>safe</svg>'
+        """Test that icon function produces safe inline SVG output"""
+        result = icon('dashboard')
 
-            result = icon('test-icon')
-
-            # Verify format_html was called
-            mock_format_html.assert_called_once()
-
-            # Verify the call was made with proper arguments
-            call_args = mock_format_html.call_args
-            self.assertEqual(len(call_args[0]), 4)  # template string + 3 arguments
-            self.assertIn('svg', call_args[0][0])  # Template string contains svg
+        # Should produce a valid inline SVG with path data
+        self.assertIn('<svg', result)
+        self.assertIn('viewBox="0 0 24 24"', result)
+        self.assertIn('<path', result)
+        self.assertIn('aria-hidden="true"', result)
 
     def test_icon_name_validation(self):
-        """Test that icon name is properly validated and escaped"""
-        # Test with malicious icon name
+        """Test that unknown icon names return empty string (fail-safe)"""
         malicious_name = '<script>alert("XSS")</script>'
 
         result = icon(malicious_name)
 
-        # Should not contain raw malicious content
-        self.assertNotIn('<script>alert', result)
-        self.assertNotIn('XSS', result)
-
-        # Should either use default name or escaped version
-        self.assertTrue(
-            'data-icon="default"' in result or
-            '&lt;script&gt;' in result
-        )
+        # Unknown names return empty string
+        self.assertEqual(result, '')
 
     def test_icon_css_class_sanitization(self):
         """Test that CSS classes are properly escaped"""
         malicious_css = 'text-red-500"><script>alert("XSS")</script><span class="'
 
-        result = icon('home', css_class=malicious_css)
+        result = icon('dashboard', css_class=malicious_css)
 
         # Should not contain unescaped malicious content
         self.assertNotIn('<script>alert', result)
@@ -147,7 +133,7 @@ class IconComponentSecurityTests(TestCase):
         self.assertIn('&lt;script&gt;', result)
 
     def test_icon_regex_validation_blocks_dangerous_names(self):
-        """Test that regex validation blocks dangerous icon names"""
+        """Test that unknown/dangerous icon names return empty"""
         dangerous_names = [
             '../../../etc/passwd',
             'icon;rm -rf /',
@@ -158,16 +144,14 @@ class IconComponentSecurityTests(TestCase):
         for dangerous_name in dangerous_names:
             result = icon(dangerous_name)
 
-            # Should fallback to default safe icon name
-            self.assertIn('data-icon="default"', result)
-            self.assertNotIn(dangerous_name, result)
+            # Unknown names return empty string
+            self.assertEqual(result, '')
 
     def test_icon_size_parameter_safety(self):
         """Test that size parameter is handled safely"""
-        # Test with malicious size parameter
         malicious_size = '"><script>alert("XSS")</script><div class="'
 
-        result = icon('home', size=malicious_size)
+        result = icon('dashboard', size=malicious_size)
 
         # Should not contain malicious content
         self.assertNotIn('<script>alert', result)

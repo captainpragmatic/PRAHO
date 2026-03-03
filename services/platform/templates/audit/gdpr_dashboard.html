@@ -11,7 +11,7 @@
   <div class="max-w-7xl mx-auto">
     <div class="mb-8">
       <h1 class="text-3xl font-bold text-white mb-4">
-        🛡️ {% trans 'Privacy & Data Protection' %}
+        {% icon "lock" %} {% trans 'Privacy & Data Protection' %}
       </h1>
       <p class="text-slate-300 text-lg">
         {% trans 'Manage your personal data and exercise your GDPR rights as a Romanian hosting customer.' %}
@@ -25,9 +25,9 @@
         <div class="px-6 py-4 border-b border-slate-700">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-medium text-white">
-              🔒 {% trans 'Privacy Consent Status' %}
+              {% icon "lock" %} {% trans 'Privacy Consent Status' %}
             </h3>
-            {% trans "✏️ Edit" as bt1 %}{% button bt1 variant="primary" size="xs" attrs="data-modal=consent-settings-modal" %}
+            {% trans "Edit" as bt1 %}{% button bt1 variant="primary" size="xs" attrs="data-modal=consent-settings-modal" %}
           </div>
         </div>
         <div class="p-6">
@@ -40,9 +40,9 @@
               </div>
               <div class="flex items-center">
                 {% if consent_status.data_processing %}
-                  {% trans "Given" as bt2 %}{% badge bt2 variant="success" icon="✅" %}
+                  {% trans "Given" as bt2 %}{% badge bt2 variant="success" icon="check" %}
                 {% else %}
-                  {% trans "Not Given" as bt3 %}{% badge bt3 variant="danger" icon="❌" %}
+                  {% trans "Not Given" as bt3 %}{% badge bt3 variant="danger" icon="x" %}
                 {% endif %}
               </div>
             </div>
@@ -55,9 +55,9 @@
               </div>
               <div class="flex items-center">
                 {% if consent_status.marketing %}
-                  {% trans "Enabled" as bt4 %}{% badge bt4 variant="success" icon="✅" %}
+                  {% trans "Enabled" as bt4 %}{% badge bt4 variant="success" icon="check" %}
                 {% else %}
-                  {% trans "Disabled" as bt5 %}{% badge bt5 variant="secondary" icon="📛" %}
+                  {% trans "Disabled" as bt5 %}{% badge bt5 variant="secondary" icon="ban" %}
                 {% endif %}
               </div>
             </div>
@@ -75,14 +75,14 @@
       <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
         <div class="px-6 py-4 border-b border-slate-700">
           <h3 class="text-lg font-medium text-white">
-            ⚡ {% trans 'Quick Actions' %}
+            {% icon "lightning" %} {% trans 'Quick Actions' %}
           </h3>
         </div>
         <div class="p-6">
           <div class="space-y-3">
-            {% trans "📄 Export My Data" as bt6 %}{% button bt6 variant="primary" size="sm" attrs="data-modal=export-modal" class_="w-full" %}
+            {% trans "Export My Data" as bt6 %}{% button bt6 variant="primary" size="sm" attrs="data-modal=export-modal" class_="w-full" %}
 
-            {% trans "🗑️ Delete Account" as bt7 %}{% button bt7 variant="danger" size="sm" attrs="data-modal=deletion-modal" class_="w-full" %}
+            {% trans "Delete Account" as bt7 %}{% button bt7 variant="danger" size="sm" attrs="data-modal=deletion-modal" class_="w-full" %}
           </div>
         </div>
       </div>
@@ -91,13 +91,13 @@
       <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
         <div class="px-6 py-4 border-b border-slate-700">
           <h3 class="text-lg font-medium text-white">
-            📋 {% trans 'Your Rights' %}
+            {% icon "clipboard" %} {% trans 'Your Rights' %}
           </h3>
         </div>
         <div class="p-6">
           <div class="space-y-2 text-sm">
             <div class="flex items-start">
-              <span class="text-blue-400 mr-2">📄</span>
+              <span class="text-blue-400 mr-2">{% icon "document" %}</span>
               <div>
                 <div class="text-white font-medium">{% trans 'Right to Access' %}</div>
                 <div class="text-slate-400">{% trans 'Export your personal data' %}</div>
@@ -105,7 +105,7 @@
             </div>
 
             <div class="flex items-start">
-              <span class="text-yellow-400 mr-2">✏️</span>
+              <span class="text-yellow-400 mr-2">{% icon "document" %}</span>
               <div>
                 <div class="text-white font-medium">{% trans 'Right to Rectification' %}</div>
                 <div class="text-slate-400">{% trans 'Update your information' %}</div>
@@ -113,7 +113,7 @@
             </div>
 
             <div class="flex items-start">
-              <span class="text-red-400 mr-2">🗑️</span>
+              <span class="text-red-400 mr-2">{% icon "x" %}</span>
               <div>
                 <div class="text-white font-medium">{% trans 'Right to Erasure' %}</div>
                 <div class="text-slate-400">{% trans 'Request data deletion' %}</div>
@@ -121,7 +121,7 @@
             </div>
 
             <div class="flex items-start">
-              <span class="text-green-400 mr-2">🔒</span>
+              <span class="text-green-400 mr-2">{% icon "lock" %}</span>
               <div>
                 <div class="text-white font-medium">{% trans 'Right to Withdraw Consent' %}</div>
                 <div class="text-slate-400">{% trans 'Change your consent anytime' %}</div>
@@ -139,7 +139,7 @@
       <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
         <div class="px-6 py-4 border-b border-slate-700">
           <h3 class="text-lg font-medium text-white">
-            📋 {% trans 'Recent Data Exports' %}
+            {% icon "clipboard" %} {% trans 'Recent Data Exports' %}
           </h3>
         </div>
         <div class="p-6">
@@ -155,15 +155,15 @@
             <div class="flex items-center space-x-2">
               <!-- Status Badge -->
               {% if export.status == 'completed' %}
-                {% trans "Ready" as bt8 %}{% badge bt8 variant="success" icon="✅" %}
+                {% trans "Ready" as bt8 %}{% badge bt8 variant="success" icon="check" %}
                 {% url 'audit:download_data_export' export_id=export.id as download_url %}
-                {% trans "📥 Download" as bt9 %}{% button bt9 variant="success" size="xs" href=download_url %}
+                {% trans "Download" as bt9 %}{% button bt9 variant="success" size="xs" href=download_url %}
               {% elif export.status == 'processing' %}
-                {% trans "Processing" as bt10 %}{% badge bt10 variant="warning" icon="⏳" %}
+                {% trans "Processing" as bt10 %}{% badge bt10 variant="warning" icon="clock" %}
               {% elif export.status == 'failed' %}
-                {% trans "Failed" as bt11 %}{% badge bt11 variant="danger" icon="❌" %}
+                {% trans "Failed" as bt11 %}{% badge bt11 variant="danger" icon="x" %}
               {% else %}
-                {% trans "Pending" as bt12 %}{% badge bt12 variant="warning" icon="⏳" %}
+                {% trans "Pending" as bt12 %}{% badge bt12 variant="warning" icon="clock" %}
               {% endif %}
             </div>
           </div>
@@ -175,13 +175,13 @@
       <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
         <div class="px-6 py-4 border-b border-slate-700">
           <h3 class="text-lg font-medium text-white">
-            📋 {% trans 'Recent Data Exports' %}
+            {% icon "clipboard" %} {% trans 'Recent Data Exports' %}
           </h3>
         </div>
         <div class="p-6">
           <div class="text-center py-8">
             <p class="text-slate-400 mb-4">{% trans 'No data exports yet' %}</p>
-            {% trans "📄 Export My Data" as bt13 %}{% button bt13 variant="primary" size="md" attrs="onclick=\"showModal('export-modal')\"" %}
+            {% trans "Export My Data" as bt13 %}{% button bt13 variant="primary" size="md" attrs="onclick=\"showModal('export-modal')\"" %}
           </div>
         </div>
       </div>
@@ -192,7 +192,7 @@
       <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
         <div class="px-6 py-4 border-b border-slate-700">
           <h3 class="text-lg font-medium text-white">
-            🔄 {% trans 'Recent Consent Changes' %}
+            {% icon "refresh" %} {% trans 'Recent Consent Changes' %}
           </h3>
         </div>
         <div class="p-6">
@@ -203,7 +203,7 @@
             <div class="text-xs text-slate-400">{{ change.timestamp|date:"M d, Y H:i" }}</div>
             {% if change.status == 'completed' %}
               <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full mt-2">
-                ✅ {% trans 'Completed' %}
+                {% icon "check" %} {% trans 'Completed' %}
               </span>
             {% endif %}
           </div>
@@ -215,7 +215,7 @@
       <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-sm">
         <div class="px-6 py-4 border-b border-slate-700">
           <h3 class="text-lg font-medium text-white">
-            🔄 {% trans 'Recent Consent Changes' %}
+            {% icon "refresh" %} {% trans 'Recent Consent Changes' %}
           </h3>
         </div>
         <div class="p-6">
@@ -229,7 +229,7 @@
 
     <!-- Legal Information -->
     <div class="mt-8 p-4 bg-slate-800 border border-slate-700 rounded-lg">
-      <h3 class="text-lg font-medium text-white mb-2">⚖️ {% trans 'Legal Information' %}</h3>
+      <h3 class="text-lg font-medium text-white mb-2">{% icon "document" %} {% trans 'Legal Information' %}</h3>
       <p class="text-slate-300 text-sm mb-2">
         {% trans 'Your personal data is processed according to GDPR (EU 2016/679) and Romanian Law 190/2018. As a Romanian hosting provider, we ensure compliance with national data protection requirements.' %}
       </p>
@@ -251,7 +251,7 @@
 <template id="export-modal">
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
     <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
-      <h3 class="text-lg font-medium text-white mb-4">📄 {% trans 'Export Personal Data' %}</h3>
+      <h3 class="text-lg font-medium text-white mb-4">{% icon "document" %} {% trans 'Export Personal Data' %}</h3>
       <form hx-post="{% url 'audit:request_data_export' %}" hx-target="body" hx-swap="outerHTML">
         {% csrf_token %}
         <div class="space-y-4">
@@ -286,7 +286,7 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% trans "📄 Request Export" as bt14 %}{% button bt14 variant="primary" type="submit" %}
+          {% trans "Request Export" as bt14 %}{% button bt14 variant="primary" type="submit" %}
           {% trans "Cancel" as bt15 %}{% button bt15 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
@@ -297,11 +297,11 @@
 <template id="consent-modal">
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
     <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
-      <h3 class="text-lg font-medium text-white mb-4">⚠️ {% trans 'Withdraw Consent' %}</h3>
+      <h3 class="text-lg font-medium text-white mb-4">{% icon "warning" %} {% trans 'Withdraw Consent' %}</h3>
       <form hx-post="{% url 'audit:withdraw_consent' %}" hx-target="body">
         {% csrf_token %}
         <div class="space-y-4">
-          {% alert "⚠️ Warning: Withdrawing consent may affect your service." variant="warning" %}
+          {% alert "Warning: Withdrawing consent may affect your service." variant="warning" %}
 
           <label class="flex items-center">
             <input type="checkbox" name="consent_types" value="marketing" class="rounded border-slate-600 bg-slate-700 text-blue-600">
@@ -315,7 +315,7 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% trans "⚠️ Withdraw Consent" as bt16 %}{% button bt16 variant="warning" type="submit" %}
+          {% trans "Withdraw Consent" as bt16 %}{% button bt16 variant="warning" type="submit" %}
           {% trans "Cancel" as bt17 %}{% button bt17 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
@@ -326,11 +326,11 @@
 <template id="deletion-modal">
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
     <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
-      <h3 class="text-lg font-medium text-white mb-4">🗑️ {% trans 'Request Account Deletion' %}</h3>
+      <h3 class="text-lg font-medium text-white mb-4">{% icon "x" %} {% trans 'Request Account Deletion' %}</h3>
       <form hx-post="{% url 'audit:request_data_deletion' %}" hx-target="body">
         {% csrf_token %}
         <div class="space-y-4">
-          {% alert "🚨 This action cannot be undone. Your account will be anonymized to comply with Romanian business law." variant="danger" %}
+          {% alert "This action cannot be undone. Your account will be anonymized to comply with Romanian business law." variant="danger" %}
 
           <div>
             <label class="block text-sm font-medium text-white mb-2">{% trans 'Deletion Type:' %}</label>
@@ -352,7 +352,7 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% trans "🗑️ Request Deletion" as bt18 %}{% button bt18 variant="danger" type="submit" %}
+          {% trans "Request Deletion" as bt18 %}{% button bt18 variant="danger" type="submit" %}
           {% trans "Cancel" as bt19 %}{% button bt19 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
@@ -363,7 +363,7 @@
 <template id="consent-settings-modal">
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
     <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
-      <h3 class="text-lg font-medium text-white mb-4">✏️ {% trans 'Update Privacy Settings' %}</h3>
+      <h3 class="text-lg font-medium text-white mb-4">{% icon "document" %} {% trans 'Update Privacy Settings' %}</h3>
       <form hx-post="{% url 'audit:update_consent' %}" hx-target="body" hx-swap="outerHTML">
         {% csrf_token %}
         <div class="space-y-4">
@@ -403,7 +403,7 @@
         </div>
 
         <div class="mt-6 flex space-x-3">
-          {% trans "💾 Save Changes" as bt20 %}{% button bt20 variant="primary" type="submit" %}
+          {% trans "Save Changes" as bt20 %}{% button bt20 variant="primary" type="submit" %}
           {% trans "Cancel" as bt21 %}{% button bt21 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
         </div>
       </form>
@@ -414,28 +414,28 @@
 <script>
 // Simple modal handling with debugging
 function showModal(modalId) {
-  console.log('🔍 [Modal] Attempting to show modal:', modalId);
+  console.log('[Modal] Attempting to show modal:', modalId);
   const template = document.getElementById(modalId);
   if (template) {
-    console.log('✅ [Modal] Template found, inserting into modal container');
+    console.log('[Modal] Template found, inserting into modal container');
     const modalContainer = document.getElementById('modal-container');
     modalContainer.innerHTML = template.innerHTML;
 
     // CRITICAL: Process HTMX attributes on the newly inserted content
-    console.log('🔍 [Modal] Processing HTMX attributes on modal content');
+    console.log('[Modal] Processing HTMX attributes on modal content');
     htmx.process(modalContainer);
   } else {
-    console.error('❌ [Modal] Template not found:', modalId);
+    console.error('[Modal] Template not found:', modalId);
   }
 }
 
 function closeModal() {
-  console.log('🔍 [Modal] Closing modal');
+  console.log('[Modal] Closing modal');
   document.getElementById('modal-container').innerHTML = '';
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('🔍 [GDPR Dashboard] DOM loaded, setting up event handlers');
+  console.log('[GDPR Dashboard] DOM loaded, setting up event handlers');
 
   // Handle modal triggers - both onclick and data-modal attributes
   document.addEventListener('click', function(e) {
@@ -443,7 +443,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (target) {
       e.preventDefault();
       const modalId = target.getAttribute('data-modal');
-      console.log('🔍 [Modal] Modal trigger clicked:', modalId);
+      console.log('[Modal] Modal trigger clicked:', modalId);
       showModal(modalId);
       return;
     }
@@ -453,33 +453,33 @@ document.addEventListener('DOMContentLoaded', function() {
     if (clickTarget.getAttribute && clickTarget.getAttribute('onclick')) {
       const onclickAttr = clickTarget.getAttribute('onclick');
       if (onclickAttr.includes('showModal(')) {
-        console.log('🔍 [Modal] Onclick modal trigger detected:', onclickAttr);
+        console.log('[Modal] Onclick modal trigger detected:', onclickAttr);
       }
     }
   });
 
   // Debug HTMX events
   document.body.addEventListener('htmx:configRequest', function(evt) {
-    console.log('🔍 [HTMX] Request config:', evt.detail);
+    console.log('[HTMX] Request config:', evt.detail);
   });
 
   document.body.addEventListener('htmx:beforeRequest', function(evt) {
-    console.log('🔍 [HTMX] Before request:', evt.detail.xhr.responseURL || evt.detail.pathInfo.requestPath);
+    console.log(' [HTMX] Before request:', evt.detail.xhr.responseURL || evt.detail.pathInfo.requestPath);
   });
 
   document.body.addEventListener('htmx:afterRequest', function(evt) {
-    console.log('🔍 [HTMX] After request:', evt.detail.xhr.status, evt.detail.xhr.responseText?.substring(0, 200));
+    console.log('[HTMX] After request:', evt.detail.xhr.status, evt.detail.xhr.responseText?.substring(0, 200));
   });
 
   document.body.addEventListener('htmx:responseError', function(evt) {
-    console.error('❌ [HTMX] Response error:', evt.detail);
+    console.error('[HTMX] Response error:', evt.detail);
   });
 
   // Debug form submissions
   document.addEventListener('submit', function(e) {
     if (e.target.hasAttribute('hx-post')) {
-      console.log('🔍 [Form] HTMX form submission:', e.target.getAttribute('hx-post'));
-      console.log('🔍 [Form] Form data:', new FormData(e.target));
+      console.log('[Form] HTMX form submission:', e.target.getAttribute('hx-post'));
+      console.log('[Form] Form data:', new FormData(e.target));
     }
   });
 });

@@ -33,7 +33,7 @@
         {% if form.non_field_errors %}
         <div class="bg-red-900 border border-red-700 rounded-md p-3">
           {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">❌ {{ error }}</p>
+          <p class="text-red-100 text-sm">{% icon "x" %} {{ error }}</p>
           {% endfor %}
         </div>
         {% endif %}
@@ -41,7 +41,7 @@
         <!-- Step 1: Personal Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            👤 {% trans 'Personal Information' %}
+            {% icon "user" %} {% trans 'Personal Information' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -98,7 +98,7 @@
         {% if not form.instance.pk %}
         <div class="space-y-4" x-data="{ userAction: 'create' }">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            👤 {% trans 'User Account Assignment' %}
+            {% icon "user" %} {% trans 'User Account Assignment' %}
           </h3>
 
           <div class="space-y-3">
@@ -154,7 +154,7 @@
             </div>
             <div class="p-3 bg-blue-900/20 rounded-lg border border-blue-800">
               <p class="text-sm text-blue-300">
-                ℹ️ {% trans "A user account will be created using the customer's email address. They will receive a password reset link to set their password." %}
+                {% icon "info" %} {% trans "A user account will be created using the customer's email address. They will receive a password reset link to set their password." %}
               </p>
             </div>
           </div>
@@ -177,7 +177,7 @@
           <div x-show="userAction === 'skip'" x-cloak class="mt-4 pl-4 border-l-2 border-yellow-500">
             <div class="p-3 bg-yellow-900/20 rounded-lg border border-yellow-800">
               <p class="text-sm text-yellow-300">
-                ⚠️ {% trans "The customer will be created without any assigned users. You can assign users later from the customer detail page." %}
+                {% icon "warning" %} {% trans "The customer will be created without any assigned users. You can assign users later from the customer detail page." %}
               </p>
             </div>
           </div>
@@ -187,7 +187,7 @@
         <!-- Step 2: Business Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🏢 {% trans 'Business Information' %}
+            {% icon "building" %} {% trans 'Business Information' %}
           </h3>
 
           <!-- Customer Type -->
@@ -246,7 +246,7 @@
         <!-- Step 3: Romanian Tax Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🏛️ {% trans 'Romanian Tax Information' %}
+            {% icon "building" %} {% trans 'Romanian Tax Information' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -299,7 +299,7 @@
         <!-- Step 4: Address Information -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            📍 {% trans 'Address Information' %}
+            {% icon "globe" %} {% trans 'Address Information' %}
           </h3>
 
           <!-- Address Line 1 -->
@@ -369,7 +369,7 @@
         <!-- Step 5: Billing Configuration -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            💼 {% trans 'Billing Configuration' %}
+            {% icon "currency" %} {% trans 'Billing Configuration' %}
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -417,7 +417,7 @@
         <!-- Step 6: GDPR Compliance -->
         <div class="space-y-4">
           <h3 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-            🛡️ {% trans 'Privacy & Consent' %}
+            {% icon "lock" %} {% trans 'Privacy & Consent' %}
           </h3>
 
           <!-- Data Processing Consent -->

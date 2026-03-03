@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📋 LIST PAGE HEADER COMPONENT - PRAHO Portal
+LIST PAGE HEADER COMPONENT - PRAHO Portal
 ===============================================================================
 Shared header card for list pages (tickets, invoices, services).
 Provides: icon, title, subtitle, stats grid, optional action button.
@@ -30,6 +30,7 @@ Optional:
 {% endcomment %}
 
 {% load i18n %}
+{% load ui_components %}
 
 <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
   {# Desktop Layout #}
@@ -37,9 +38,13 @@ Optional:
     <div class="flex items-center justify-between">
       <div class="flex items-center space-x-4">
         <div class="w-12 h-12 {{ list_icon_bg }} rounded-lg flex items-center justify-center">
-          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
-          </svg>
+          {% if list_icon_name %}
+            {% icon list_icon_name size="lg" css_class="text-white" %}
+          {% else %}
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
+            </svg>
+          {% endif %}
         </div>
         <div>
           <h1 class="text-2xl font-bold text-white">{{ list_title }}</h1>
@@ -71,9 +76,13 @@ Optional:
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center space-x-3">
         <div class="w-10 h-10 {{ list_icon_bg }} rounded-lg flex items-center justify-center">
-          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
-          </svg>
+          {% if list_icon_name %}
+            {% icon list_icon_name size="md" css_class="text-white" %}
+          {% else %}
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
+            </svg>
+          {% endif %}
         </div>
         <div>
           <h1 class="text-lg font-bold text-white">{{ list_title_mobile|default:list_title }}</h1>

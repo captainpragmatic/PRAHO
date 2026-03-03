@@ -5,7 +5,7 @@
 {% block title %}{% trans 'Create New Ticket' %} - PRAHO Portal{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6 max-w-3xl mx-auto">
+<div class="px-4 max-w-3xl mx-auto">
   <!-- Header -->
   <div class="mb-6">
     <div class="flex items-center space-x-4">
@@ -98,25 +98,25 @@
           </h3>
           <div class="space-y-2 text-sm">
             <div class="flex items-center space-x-2">
-              <span class="text-red-400">🔴</span>
+              <span class="w-3 h-3 rounded-full bg-red-500 inline-block flex-shrink-0"></span>
               <span class="text-slate-300">
                 <strong>{% trans "Critical" %}:</strong> {% trans "Service completely down, affecting your business" %}
               </span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-orange-400">🟠</span>
+              <span class="w-3 h-3 rounded-full bg-orange-500 inline-block flex-shrink-0"></span>
               <span class="text-slate-300">
                 <strong>{% trans "High" %}:</strong> {% trans "Critical issues significantly impacting service" %}
               </span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-yellow-400">🟡</span>
+              <span class="w-3 h-3 rounded-full bg-yellow-500 inline-block flex-shrink-0"></span>
               <span class="text-slate-300">
                 <strong>{% trans "Normal" %}:</strong> {% trans "Standard support requests and questions" %}
               </span>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-green-400">🟢</span>
+              <span class="w-3 h-3 rounded-full bg-green-500 inline-block flex-shrink-0"></span>
               <span class="text-slate-300">
                 <strong>{% trans "Low" %}:</strong> {% trans "General questions or minor issues" %}
               </span>

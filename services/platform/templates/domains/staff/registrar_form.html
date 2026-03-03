@@ -8,7 +8,7 @@
 <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
   <div class="mb-6">
     <h1 class="text-2xl font-bold text-slate-900 dark:text-white">
-      {% if is_edit %}✏️ {% trans "Edit Registrar" %}{% else %}🏢 {% trans "Add Registrar" %}{% endif %}
+      {% if is_edit %}{% icon "document" %} {% trans "Edit Registrar" %}{% else %}{% icon "building" %} {% trans "Add Registrar" %}{% endif %}
     </h1>
     <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
       {% if is_edit %}{% trans "Update registrar configuration and credentials." %}{% else %}{% trans "Create a new domain registrar configuration." %}{% endif %}
@@ -56,9 +56,9 @@
 
       <div class="pt-2 flex items-center gap-3">
         {% if is_edit %}
-          {% trans "💾 Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
+          {% trans "Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
         {% else %}
-          {% trans "💾 Save Registrar" as bt2 %}{% button bt2 variant="primary" type="submit" %}
+          {% trans "Save Registrar" as bt2 %}{% button bt2 variant="primary" type="submit" %}
         {% endif %}
         {% url 'domains:registrar_list' as registrar_list_url %}
         {% trans "Cancel" as bt3 %}{% button bt3 variant="secondary" href=registrar_list_url %}

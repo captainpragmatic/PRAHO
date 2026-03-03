@@ -7,12 +7,12 @@
 
 {% block content %}
 <!-- Dashboard content with stable dimensions to prevent layout shift -->
-<div class="py-6">
+<div class="space-y-6">
   <!-- Platform Connection Status -->
   {% if not platform_available %}
   <div class="mb-6 bg-red-900 border border-red-700 rounded-lg p-4">
     <div class="flex items-center">
-      <span class="text-red-400 mr-2">⚠️</span>
+      {% icon "warning" size="sm" css_class="text-red-400 mr-2" %}
       <span class="text-red-100 text-sm sm:text-base">{% trans 'Platform service temporarily unavailable. Some features may be limited.' %}</span>
     </div>
   </div>
@@ -22,9 +22,9 @@
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-white">
       {% if greeting_name %}
-        {% filter force_escape %}{% blocktrans with name=greeting_name %}👋 Welcome {{ name }}{% endblocktrans %}{% endfilter %}
+        {% filter force_escape %}{% blocktrans with name=greeting_name %}Welcome {{ name }}{% endblocktrans %}{% endfilter %}
       {% else %}
-        👋 {% trans 'Welcome' %}
+        {% trans 'Welcome' %}
       {% endif %}
     </h1>
     <p class="mt-2 text-slate-400">
@@ -38,7 +38,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">🚀</div>
+          {% icon "services" size="xl" css_class="text-blue-400" %}
         </div>
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'My Services' %}</p>
@@ -51,7 +51,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">🎫</div>
+          {% icon "tickets" size="xl" css_class="text-amber-400" %}
         </div>
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'My Open Tickets' %}</p>
@@ -64,7 +64,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">✅</div>
+          {% icon "check" size="xl" css_class="text-green-400" %}
         </div>
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</p>
@@ -77,7 +77,7 @@
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 text-2xl">📋</div>
+          {% icon "clipboard" size="xl" css_class="text-purple-400" %}
         </div>
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'Next Billing' %}</p>
@@ -93,7 +93,7 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          🧾 {% trans 'My Recent Invoices & Proformas' %}
+          {% icon "receipt" size="md" css_class="text-slate-400 mr-1" %} {% trans 'My Recent Invoices & Proformas' %}
         </h3>
 
         <div class="space-y-3">
@@ -108,13 +108,13 @@
                 </div>
                 <div class="ml-2 flex-shrink-0">
                   {% if invoice.status == 'paid' %}
-                    {% trans "Paid" as bt1 %}{% badge bt1 variant="success" icon="✅" css_class="w-20 justify-center" %}
+                    {% trans "Paid" as bt1 %}{% badge bt1 variant="success" icon="check" css_class="w-20 justify-center" %}
                   {% elif invoice.status == 'overdue' %}
-                    {% trans "Overdue" as bt2 %}{% badge bt2 variant="danger" icon="❌" css_class="w-20 justify-center" %}
+                    {% trans "Overdue" as bt2 %}{% badge bt2 variant="danger" icon="x" css_class="w-20 justify-center" %}
                   {% elif invoice.document_type == 'proforma' %}
-                    {% trans "Draft" as bt3 %}{% badge bt3 variant="info" icon="📝" css_class="w-20 justify-center" %}
+                    {% trans "Draft" as bt3 %}{% badge bt3 variant="info" icon="document" css_class="w-20 justify-center" %}
                   {% else %}
-                    {% trans "Pending" as bt4 %}{% badge bt4 variant="warning" icon="⏳" css_class="w-20 justify-center" %}
+                    {% trans "Pending" as bt4 %}{% badge bt4 variant="warning" icon="clock" css_class="w-20 justify-center" %}
                   {% endif %}
                 </div>
               </div>
@@ -147,26 +147,26 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          🎫 {% trans 'My Recent Tickets' %}
+          {% icon "tickets" size="md" css_class="text-slate-400 mr-1" %} {% trans 'My Recent Tickets' %}
         </h3>
 
         <div class="space-y-3">
           {% for ticket in dashboard_data.recent_tickets %}
           <a href="{% url 'tickets:detail' ticket_id=ticket.id %}" class="block group">
             <div class="p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
-              <div class="flex items-center justify-between">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-0">
                 <div class="flex-1 min-w-0">
-                  <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5 truncate">{{ ticket.title }}</p>
+                  <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5 sm:truncate line-clamp-2 sm:line-clamp-none">{{ ticket.title }}</p>
                 </div>
-                <div class="ml-2 flex-shrink-0">
+                <div class="sm:ml-2 flex-shrink-0">
                   {% if ticket.status == 'open' %}
-                    {% trans "Open" as bt5 %}{% badge bt5 variant="info" icon="📂" css_class="w-32 justify-center" %}
+                    {% trans "Open" as bt5 %}{% badge bt5 variant="info" icon="folder-open" css_class="w-32 justify-center" %}
                   {% elif ticket.status == 'in_progress' %}
-                    {% trans "In Progress" as bt6 %}{% badge bt6 variant="primary" icon="⚡" css_class="w-32 justify-center" %}
+                    {% trans "In Progress" as bt6 %}{% badge bt6 variant="primary" icon="lightning" css_class="w-32 justify-center" %}
                   {% elif ticket.status == 'waiting_on_customer' %}
-                    {% trans "Waiting on You" as bt7 %}{% badge bt7 variant="warning" icon="⏳" css_class="w-36 justify-center" %}
+                    {% trans "Waiting on You" as bt7 %}{% badge bt7 variant="warning" icon="clock" css_class="w-36 justify-center" %}
                   {% elif ticket.status == 'closed' %}
-                    {% trans "Closed" as bt8 %}{% badge bt8 variant="secondary" icon="📁" css_class="w-32 justify-center" %}
+                    {% trans "Closed" as bt8 %}{% badge bt8 variant="secondary" icon="folder" css_class="w-32 justify-center" %}
                   {% else %}
                     {% badge ticket.status|capfirst variant="default" css_class="w-32 justify-center" %}
                   {% endif %}
@@ -201,21 +201,21 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          ⚡ {% trans 'Quick Actions' %}
+          {% icon "lightning" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Quick Actions' %}
         </h3>
 
         <div class="grid grid-cols-2 gap-3">
           <a href="{% url 'tickets:create' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-red-600 rounded-lg hover:bg-red-700 focus:ring-4 focus:ring-red-300 transition-all duration-200">
-            🎫 {% trans 'New Ticket' %}
+            {% icon "tickets" size="sm" css_class="mr-1" %} {% trans 'New Ticket' %}
           </a>
           <a href="{% url 'billing:invoices_list' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 transition-all duration-200">
-            📄 {% trans 'View Invoices' %}
+            {% icon "invoices" size="sm" css_class="mr-1" %} {% trans 'View Invoices' %}
           </a>
           <a href="{% url 'services:list' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 focus:ring-4 focus:ring-slate-300 transition-all duration-200">
-            🚀 {% trans 'My Services' %}
+            {% icon "services" size="sm" css_class="mr-1" %} {% trans 'My Services' %}
           </a>
           <a href="{% url 'users:profile' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-yellow-500 rounded-lg hover:bg-yellow-600 focus:ring-4 focus:ring-yellow-300 transition-all duration-200">
-            👤 {% trans 'My Profile' %}
+            {% icon "user" size="sm" css_class="mr-1" %} {% trans 'My Profile' %}
           </a>
         </div>
       </div>
@@ -225,7 +225,7 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          🏢 {% trans 'Account Information' %}
+          {% icon "building" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Account Information' %}
         </h3>
 
         <div class="space-y-3">

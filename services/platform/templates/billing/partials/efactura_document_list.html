@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load ui_components %}
 
 {% if documents_page %}
 <table class="min-w-full divide-y divide-slate-700">
@@ -22,13 +23,13 @@
       </td>
       <td class="px-4 py-3 text-sm">
         {% if doc.status == "accepted" %}
-          <span class="inline-flex items-center rounded-full bg-green-900 px-2 py-0.5 text-xs font-medium text-green-300">✅ {{ doc.status }}</span>
+          <span class="inline-flex items-center rounded-full bg-green-900 px-2 py-0.5 text-xs font-medium text-green-300">{% icon "check" %} {{ doc.status }}</span>
         {% elif doc.status == "rejected" %}
-          <span class="inline-flex items-center rounded-full bg-red-900 px-2 py-0.5 text-xs font-medium text-red-300">❌ {{ doc.status }}</span>
+          <span class="inline-flex items-center rounded-full bg-red-900 px-2 py-0.5 text-xs font-medium text-red-300">{% icon "x" %} {{ doc.status }}</span>
         {% elif doc.status == "error" %}
-          <span class="inline-flex items-center rounded-full bg-orange-900 px-2 py-0.5 text-xs font-medium text-orange-300">⚠️ {{ doc.status }}</span>
+          <span class="inline-flex items-center rounded-full bg-orange-900 px-2 py-0.5 text-xs font-medium text-orange-300">{% icon "warning" %} {{ doc.status }}</span>
         {% elif doc.status == "processing" or doc.status == "submitted" %}
-          <span class="inline-flex items-center rounded-full bg-yellow-900 px-2 py-0.5 text-xs font-medium text-yellow-300">⏳ {{ doc.status }}</span>
+          <span class="inline-flex items-center rounded-full bg-yellow-900 px-2 py-0.5 text-xs font-medium text-yellow-300">{% icon "clock" %} {{ doc.status }}</span>
         {% else %}
           <span class="inline-flex items-center rounded-full bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-300">{{ doc.status }}</span>
         {% endif %}

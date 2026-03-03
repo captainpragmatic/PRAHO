@@ -1,4 +1,5 @@
 {% load i18n %}
+{% load ui_components %}
 
 <!-- Customer Selector Component -->
 <div class="customer-selector-container">
@@ -7,7 +8,7 @@
     <div class="flex items-center space-x-2">
       <span class="text-sm text-slate-400">{% trans "Acting as:" %}</span>
       <div class="bg-slate-700 rounded-lg px-3 py-1 flex items-center space-x-2">
-        <span class="text-blue-400">🏢</span>
+        <span class="text-blue-400">{% icon "building" size="sm" %}</span>
         <span class="text-sm font-medium text-white">
           {% if selected_customer_name %}
             {{ selected_customer_name }}
@@ -70,14 +71,14 @@
                            {% elif membership.role == 'tech' %}bg-purple-600 text-white
                            {% elif membership.role == 'viewer' %}bg-gray-600 text-white
                            {% else %}bg-slate-600 text-white{% endif %}">
-                  {% if membership.role == "owner" %}👑 {% trans "Owner" %}
-                  {% elif membership.role == "billing" %}💳 {% trans "Billing" %}
-                  {% elif membership.role == "tech" %}⚙️ {% trans "Technical" %}
-                  {% elif membership.role == "viewer" %}👁️ {% trans "Viewer" %}
+                  {% if membership.role == "owner" %}{% icon "users" size="xs" css_class="text-white" %} {% trans "Owner" %}
+                  {% elif membership.role == "billing" %}{% icon "credit-card" size="xs" css_class="text-white" %} {% trans "Billing" %}
+                  {% elif membership.role == "tech" %}{% icon "settings" size="xs" css_class="text-white" %} {% trans "Technical" %}
+                  {% elif membership.role == "viewer" %}{% icon "search" size="xs" css_class="text-white" %} {% trans "Viewer" %}
                   {% else %}{{ membership.role|title }}{% endif %}
                 </span>
                 {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}
-                  <span class="text-blue-400">✓</span>
+                  {% icon "check" size="sm" css_class="text-blue-400" %}
                 {% endif %}
               </div>
             </div>

@@ -11,16 +11,16 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
-        🛒 {% trans "Order" %} {{ order.order_number }}
+        {% icon "orders" %} {% trans "Order" %} {{ order.order_number }}
       </h1>
       <p class="mt-2 text-slate-400">
         {% trans "Order details, items, and status history" %}
       </p>
       {% if is_staff and order.status == 'draft' %}
         {% if preflight_ok %}
-          <div class="mt-2 text-green-400 text-sm">✅ {% trans "Validation passed" %}</div>
+          <div class="mt-2 text-green-400 text-sm">{% icon "check" %} {% trans "Validation passed" %}</div>
         {% else %}
-          <div class="mt-2 text-yellow-400 text-sm">⚠️ {% trans "Validation required before promoting to Pending" %}</div>
+          <div class="mt-2 text-yellow-400 text-sm">{% icon "warning" %} {% trans "Validation required before promoting to Pending" %}</div>
         {% endif %}
       {% endif %}
     </div>
@@ -33,11 +33,11 @@
       {% if is_staff %}
         {% if can_edit %}
           {% url 'orders:order_edit' pk=order.id as order_edit_url %}
-          {% trans "✏️ Edit" as bt2 %}{% button bt2 variant="primary" href=order_edit_url %}
+          {% trans "Edit" as bt2 %}{% button bt2 variant="primary" href=order_edit_url %}
         {% endif %}
 
         {% if order.status == "completed" or order.status == "partially_refunded" %}
-          {% trans "💰 Refund Order" as bt3 %}{% button bt3 onclick="showRefundModal()" variant="success" %}
+          {% trans "Refund Order" as bt3 %}{% button bt3 onclick="showRefundModal()" variant="success" %}
         {% endif %}
 
         {% if order.status not in "cancelled,refunded,completed" %}
@@ -47,26 +47,26 @@
               hx-target="#preflight-container"
               hx-swap="innerHTML"
               class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 text-white bg-green-700 hover:bg-green-600 focus:ring-2 focus:ring-green-500">
-              ✅ {% trans "Run Validation" %}
+              {% icon "check" %} {% trans "Run Validation" %}
             </button>
           {% endif %}
           <button
             type="button"
             id="changeStatusBtn"
             class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
-            🔄 {% trans "Change Status" %}
+            {% icon "refresh" %} {% trans "Change Status" %}
           </button>
         {% endif %}
       {% elif not is_staff and order.status in "completed,partially_refunded" %}
         <!-- Refund Request Button for Customers -->
-        {% trans "🎫 Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
+        {% trans "Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
 
         {% if order.status not in "cancelled,refunded,completed" %}
           <button
             type="button"
             id="changeStatusBtn"
             class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
-            🔄 {% trans "Change Status" %}
+            {% icon "refresh" %} {% trans "Change Status" %}
           </button>
         {% endif %}
       {% endif %}
@@ -79,7 +79,7 @@
       <!-- Order Information Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="px-6 py-4 border-b border-slate-700">
-          <h3 class="text-lg font-semibold text-white">📋 {% trans "Order Information" %}</h3>
+          <h3 class="text-lg font-semibold text-white">{% icon "clipboard" %} {% trans "Order Information" %}</h3>
         </div>
         <div class="p-6">
           <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
@@ -94,21 +94,21 @@
               <dt class="text-sm font-medium text-slate-400">{% trans "Status" %}</dt>
               <dd class="mt-1">
                 {% if order.status == "draft" %}
-                  {% trans "📝 Draft" as bt5 %}{% badge bt5 variant="secondary" %}
+                  {% trans "Draft" as bt5 %}{% badge bt5 icon="document" variant="secondary" %}
                 {% elif order.status == "pending" %}
-                  {% trans "⏳ Pending" as bt6 %}{% badge bt6 variant="warning" %}
+                  {% trans "Pending" as bt6 %}{% badge bt6 icon="clock" variant="warning" %}
                 {% elif order.status == "processing" %}
-                  {% trans "⚙️ Processing" as bt7 %}{% badge bt7 variant="primary" %}
+                  {% trans "Processing" as bt7 %}{% badge bt7 icon="settings" variant="primary" %}
                 {% elif order.status == "completed" %}
-                  {% trans "✅ Completed" as bt8 %}{% badge bt8 variant="success" %}
+                  {% trans "Completed" as bt8 %}{% badge bt8 icon="check" variant="success" %}
                 {% elif order.status == "cancelled" %}
-                  {% trans "❌ Cancelled" as bt9 %}{% badge bt9 variant="danger" %}
+                  {% trans "Cancelled" as bt9 %}{% badge bt9 icon="x" variant="danger" %}
                 {% elif order.status == "failed" %}
-                  {% trans "🔥 Failed" as bt10 %}{% badge bt10 variant="danger" %}
+                  {% trans "Failed" as bt10 %}{% badge bt10 variant="danger" %}
                 {% elif order.status == "refunded" %}
-                  {% trans "💰 Refunded" as bt11 %}{% badge bt11 variant="info" %}
+                  {% trans "Refunded" as bt11 %}{% badge bt11 icon="currency" variant="info" %}
                 {% elif order.status == "partially_refunded" %}
-                  {% trans "💸 Partially Refunded" as bt12 %}{% badge bt12 variant="warning" %}
+                  {% trans "Partially Refunded" as bt12 %}{% badge bt12 variant="warning" %}
                 {% endif %}
               </dd>
             </div>
@@ -156,7 +156,7 @@
       <!-- Billing Information Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="px-6 py-4 border-b border-slate-700">
-          <h3 class="text-lg font-semibold text-white">🧾 {% trans "Billing Information" %}</h3>
+          <h3 class="text-lg font-semibold text-white">{% icon "receipt" %} {% trans "Billing Information" %}</h3>
         </div>
         <div class="p-6">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -233,7 +233,7 @@
       <!-- Status History Card -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">
         <div class="px-6 py-4 border-b border-slate-700">
-          <h3 class="text-lg font-semibold text-white">🕐 {% trans "Status History" %}</h3>
+          <h3 class="text-lg font-semibold text-white">{% icon "clock" %} {% trans "Status History" %}</h3>
         </div>
         <div class="p-6">
           {% if order.status_history.all %}
@@ -241,14 +241,14 @@
               {% for history in order.status_history.all %}
                 <div class="flex items-start space-x-3">
                   <div class="flex-shrink-0">
-                    {% if history.new_status == "draft" %}📝
-                    {% elif history.new_status == "pending" %}⏳
-                    {% elif history.new_status == "processing" %}⚙️
-                    {% elif history.new_status == "completed" %}✅
-                    {% elif history.new_status == "cancelled" %}❌
-                    {% elif history.new_status == "failed" %}🔥
-                    {% elif history.new_status == "refunded" %}💰
-                    {% elif history.new_status == "partially_refunded" %}💸
+                    {% if history.new_status == "draft" %}{% icon "document" %}
+                    {% elif history.new_status == "pending" %}{% icon "clock" %}
+                    {% elif history.new_status == "processing" %}{% icon "settings" %}
+                    {% elif history.new_status == "completed" %}{% icon "check" %}
+                    {% elif history.new_status == "cancelled" %}{% icon "x" %}
+                    {% elif history.new_status == "failed" %}{% icon "warning" %}
+                    {% elif history.new_status == "refunded" %}{% icon "currency" %}
+                    {% elif history.new_status == "partially_refunded" %}{% icon "currency" %}
                     {% endif %}
                   </div>
                   <div class="flex-1 min-w-0">
@@ -299,13 +299,13 @@
       <form id="statusForm" method="post" action="{% url 'orders:order_change_status' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">🔄 {% trans "Change Order Status" %}</h3>
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "refresh" %} {% trans "Change Order Status" %}</h3>
           {% if order.status == 'draft' %}
           <!-- Inline validation summary -->
           <div id="modal-preflight" class="mb-4">
             {% if preflight_ok %}
               <div class="bg-green-900/30 border border-green-700/50 text-green-300 text-sm rounded-lg p-3">
-                ✅ {% trans "Validation passed — you may promote to Pending" %}
+                {% icon "check" %} {% trans "Validation passed — you may promote to Pending" %}
               </div>
             {% else %}
               {% if preflight_errors %}
@@ -379,7 +379,7 @@
           </button>
           <button type="submit"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-            🔄 {% trans "Change Status" %}
+            {% icon "refresh" %} {% trans "Change Status" %}
           </button>
         </div>
       </form>
@@ -424,7 +424,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (changeStatusBtn) {
         changeStatusBtn.addEventListener('click', function(e) {
             e.preventDefault();
-            console.log('🔄 Change Status button clicked'); // Debug log
+            console.log('Change Status button clicked'); // Debug log
             showStatusModal();
         });
     }
@@ -490,7 +490,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <form id="refundForm" method="post" action="{% url 'orders:order_refund' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">💰 {% trans "Refund Order" %}</h3>
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "currency" %} {% trans "Refund Order" %}</h3>
 
           <div class="mb-4">
             <label for="refund_type" class="block text-sm font-medium text-slate-400 mb-2">
@@ -574,7 +574,7 @@ document.addEventListener('DOMContentLoaded', function() {
           </button>
           <button type="submit"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-green-500">
-            💰 {% trans "Process Refund" %}
+            {% icon "currency" %} {% trans "Process Refund" %}
           </button>
         </div>
       </form>
@@ -622,7 +622,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
     // Disable submit button to prevent double-clicks
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '⏳ {% trans "Processing..." %}';
+    submitBtn.innerHTML = '{% trans "Processing..." %}';
 
     fetch(this.action, {
         method: 'POST',
@@ -640,7 +640,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
             alert('Error: ' + data.error);
             // Re-enable button
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+            submitBtn.innerHTML = '{% trans "Process Refund" %}';
         }
     })
     .catch(error => {
@@ -650,7 +650,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
         alert('{{ refund_error_msg|escapejs }}');
         // Re-enable button
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '💰 {% trans "Process Refund" %}';
+        submitBtn.innerHTML = '{% trans "Process Refund" %}';
     });
 });
 </script>
@@ -668,7 +668,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
       <form id="orderRefundRequestForm" method="post" action="{% url 'orders:order_refund_request' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">🎫 {% trans "Request Order Refund" %}</h3>
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "tickets" %} {% trans "Request Order Refund" %}</h3>
           <p class="text-sm text-slate-400 mb-4">
             {% trans "Submit a refund request for this order. Our billing team will review your request and contact you." %}
           </p>
@@ -708,7 +708,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
           <div class="mb-4 p-4 bg-blue-900 border border-blue-700 rounded-lg">
             <div class="flex items-start">
               <div class="flex-shrink-0">
-                <span class="text-blue-300 text-xl">ℹ️</span>
+                <span class="text-blue-300">{% icon "info" size="lg" %}</span>
               </div>
               <div class="ml-3">
                 <h4 class="text-sm font-medium text-blue-200">{% trans 'What happens next?' %}</h4>
@@ -727,7 +727,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
           </button>
           <button type="submit"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
-            🎫 {% trans "Submit Request" %}
+            {% icon "tickets" %} {% trans "Submit Request" %}
           </button>
         </div>
       </form>
@@ -766,7 +766,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
     // Disable submit button
     const submitBtn = this.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '⏳ {% trans "Submitting..." %}';
+    submitBtn.innerHTML = '{% trans "Submitting..." %}';
 
     fetch(this.action, {
         method: 'POST',
@@ -787,7 +787,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
             alert('Error: ' + data.error);
             // Re-enable button
             submitBtn.disabled = false;
-            submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+            submitBtn.innerHTML = '{% trans "Submit Request" %}';
         }
     })
     .catch(error => {
@@ -797,7 +797,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
         alert('{{ generic_error_msg|escapejs }}');
         // Re-enable button
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '🎫 {% trans "Submit Request" %}';
+        submitBtn.innerHTML = '{% trans "Submit Request" %}';
     });
 });
 </script>

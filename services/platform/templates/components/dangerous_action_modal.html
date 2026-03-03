@@ -1,3 +1,4 @@
+{% load ui_components %}
 {% comment %}
 Dangerous Action Confirmation Modal
 
@@ -81,7 +82,7 @@ x-transition:leave-end="opacity-0">
             <div class="px-6 py-4 border-b border-slate-700">
                 <div class="flex items-center">
                     <div class="flex-shrink-0">
-                        <span class="text-red-400 text-2xl">⚠️</span>
+                        <span class="text-red-400">{% icon "warning" size="lg" %}</span>
                     </div>
                     <div class="ml-3">
                         <h3 class="text-lg font-medium text-slate-100" x-text="title">

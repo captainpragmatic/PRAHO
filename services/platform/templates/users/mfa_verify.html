@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans 'Two-Factor Authentication' %} - PRAHO Platform{% endblock %}
 
@@ -9,7 +10,7 @@
 
     <!-- Header -->
     <div class="text-center">
-      <div class="mx-auto h-16 w-16 text-5xl">🔐</div>
+      <div class="mx-auto h-16 w-16 text-5xl">{% icon "lock" %}</div>
       <h2 class="mt-6 text-3xl font-extrabold text-white">
         {% trans 'Two-Factor Authentication' %}
       </h2>
@@ -40,7 +41,7 @@
             {% if message.tags == 'error' %}
             <div class="bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
               <div class="flex items-center">
-                <div class="text-xl mr-3">❌</div>
+                <div class="mr-3">{% icon "x" size="lg" %}</div>
                 <div class="text-red-200 text-sm">{{ message }}</div>
               </div>
             </div>
@@ -51,7 +52,7 @@
         <!-- Code Input Section -->
         <div class="text-center">
           <label for="token" class="block text-lg font-medium text-white mb-4">
-            🔢 {% trans 'Enter Authentication Code' %}
+            {% icon "lock" %} {% trans 'Enter Authentication Code' %}
           </label>
 
           <div class="mb-4">
@@ -69,7 +70,7 @@
         <div>
           <button type="submit"
                   class="w-full flex justify-center py-4 px-6 border border-transparent text-lg font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-lg">
-            <span class="mr-2">🔓</span>
+            <span class="mr-2">{% icon "lock" %}</span>
             {% trans 'Verify & Continue' %}
           </button>
         </div>
@@ -83,7 +84,7 @@
           <div class="space-y-3">
             <button onclick="showBackupCodeInput()"
                     class="w-full flex items-center justify-center px-4 py-3 border border-yellow-600 text-sm font-medium rounded-lg text-yellow-200 bg-yellow-900 bg-opacity-30 hover:bg-opacity-50 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
-              <span class="mr-2">🔑</span>
+              <span class="mr-2">{% icon "lock" %}</span>
               {% trans 'Use Backup Code Instead' %}
             </button>
 
@@ -93,7 +94,7 @@
                      placeholder="BACKUP-CODE-12345" autocomplete="off">
               <button onclick="submitBackupCode()"
                       class="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 transition-all">
-                <span class="mr-2">🔑</span>
+                <span class="mr-2">{% icon "lock" %}</span>
                 {% trans 'Use Backup Code' %}
               </button>
             </div>
@@ -105,7 +106,7 @@
     <!-- Help Card -->
     <div class="bg-blue-900 bg-opacity-50 rounded-lg border border-blue-600 p-6">
       <div class="flex items-start">
-        <div class="text-2xl mr-4">💡</div>
+        <div class="text-2xl mr-4">{% icon "info" %}</div>
         <div>
           <h3 class="text-lg font-medium text-blue-200 mb-2">
             {% trans 'Need Help?' %}

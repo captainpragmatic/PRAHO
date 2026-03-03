@@ -1,6 +1,6 @@
 {% comment %}
 ===============================================================================
-📄 BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform
+{% icon "document" %} BILLING DOCUMENTS LIST PARTIAL - PRAHO Platform
 ===============================================================================
 HTMX-loaded partial for billing documents table with pagination.
 This template includes both the table content and header count update.
@@ -54,9 +54,9 @@ This template includes both the table content and header count update.
           <tr class="hover:bg-slate-700 cursor-pointer transition-colors" onclick="navigateToDocument('{{ document.type }}', '{{ document.id }}')">
             <td class="px-6 py-4 whitespace-nowrap text-center">
               {% if document.type == 'proforma' %}
-                {% trans "📄 Proforma" as bt1 %}{% badge bt1 variant="primary" %}
+                {% trans "Proforma" as bt1 %}{% badge bt1 icon="document" variant="primary" %}
               {% else %}
-                {% trans "🧾 Invoice" as bt2 %}{% badge bt2 variant="success" %}
+                {% trans "Invoice" as bt2 %}{% badge bt2 icon="receipt" variant="success" %}
               {% endif %}
             </td>
 
@@ -79,29 +79,29 @@ This template includes both the table content and header count update.
             <td class="px-6 py-4 whitespace-nowrap text-center">
               {% if document.type == 'proforma' %}
                 {% if document.status == 'draft' %}
-                  {% trans "📝 Draft" as bt3 %}{% badge bt3 variant="secondary" %}
+                  {% trans "Draft" as bt3 %}{% badge bt3 icon="document" variant="secondary" %}
                 {% elif document.status == 'sent' %}
-                  {% trans "📧 Sent" as bt4 %}{% badge bt4 variant="primary" %}
+                  {% trans "Sent" as bt4 %}{% badge bt4 icon="mail" variant="primary" %}
                 {% elif document.status == 'accepted' %}
-                  {% trans "✅ Accepted" as bt5 %}{% badge bt5 variant="success" %}
+                  {% trans "Accepted" as bt5 %}{% badge bt5 icon="check" variant="success" %}
                 {% elif document.status == 'expired' %}
-                  {% trans "❌ Expired" as bt6 %}{% badge bt6 variant="danger" %}
+                  {% trans "Expired" as bt6 %}{% badge bt6 icon="x" variant="danger" %}
                 {% else %}
                   {% badge document.status|capfirst variant="secondary" %}
                 {% endif %}
               {% else %}
                 {% if document.status == 'paid' %}
-                  {% trans "✅ Paid" as bt7 %}{% badge bt7 variant="success" %}
+                  {% trans "Paid" as bt7 %}{% badge bt7 icon="check" variant="success" %}
                 {% elif document.status == 'overdue' %}
-                  {% trans "❌ Overdue" as bt8 %}{% badge bt8 variant="danger" %}
+                  {% trans "Overdue" as bt8 %}{% badge bt8 icon="x" variant="danger" %}
                 {% elif document.status == 'sent' %}
-                  {% trans "📧 Sent" as bt9 %}{% badge bt9 variant="primary" %}
+                  {% trans "Sent" as bt9 %}{% badge bt9 icon="mail" variant="primary" %}
                 {% elif document.status == 'pending' %}
-                  {% trans "⏳ Pending" as bt10 %}{% badge bt10 variant="warning" %}
+                  {% trans "Pending" as bt10 %}{% badge bt10 icon="clock" variant="warning" %}
                 {% elif document.status == 'cancelled' %}
-                  {% trans "❌ Cancelled" as bt11 %}{% badge bt11 variant="danger" %}
+                  {% trans "Cancelled" as bt11 %}{% badge bt11 icon="x" variant="danger" %}
                 {% else %}
-                  {% trans "📝 Draft" as bt12 %}{% badge bt12 variant="secondary" %}
+                  {% trans "Draft" as bt12 %}{% badge bt12 icon="document" variant="secondary" %}
                 {% endif %}
               {% endif %}
             </td>
@@ -122,7 +122,7 @@ This template includes both the table content and header count update.
     <!-- Empty State -->
     <div class="text-center py-12">
       <div class="text-slate-400">
-        <div class="text-4xl mb-4">📋</div>
+        <div class="mb-4">{% icon "clipboard" size="2xl" %}</div>
         <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
         <p class="text-sm">
           {% if user.is_staff %}
@@ -134,7 +134,7 @@ This template includes both the table content and header count update.
         {% if user.is_staff %}
           <div class="mt-4">
             {% url 'billing:proforma_create' as create_proforma_url %}
-            {% trans "📄 Create First Proforma" as bt13 %}{% button bt13 variant="primary" href=create_proforma_url %}
+            {% trans "Create First Proforma" as bt13 %}{% button bt13 variant="primary" href=create_proforma_url %}
           </div>
         {% endif %}
       </div>

@@ -1,5 +1,6 @@
 {% extends 'common/base.html' %}
 {% load i18n %}
+{% load ui_components %}
 {% load ui_tags %}
 
 {% block title %}{% trans "Product Catalog" %} - PRAHO Portal{% endblock %}
@@ -41,7 +42,7 @@
         {% if error %}
         <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-8">
             <div class="flex items-center">
-                <span class="text-red-400 mr-2">⚠️</span>
+                <span class="text-red-400 mr-2">{% icon "warning" %}</span>
                 <p class="text-red-300">
                     {% trans "Unable to load products. Please try again later." %}
                 </p>
@@ -126,7 +127,7 @@
                 {% if product.requires_domain %}
                 <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-3 mb-4">
                     <div class="flex items-center text-blue-300 text-sm">
-                        <span class="mr-2">🌐</span>
+                        <span class="mr-2">{% icon "globe" %}</span>
                         {% trans "Domain required" %}
                     </div>
                 </div>
@@ -149,7 +150,7 @@
         {% else %}
         <div class="text-center py-12">
             <div class="text-slate-400 mb-4">
-                <span class="text-6xl">📦</span>
+                <span class="">{% icon "orders" size="2xl" %}</span>
             </div>
             <h3 class="text-xl font-medium text-white mb-2">
                 {% trans "No products found" %}
@@ -165,7 +166,7 @@
         <div class="fixed bottom-4 right-4 z-50">
             <a href="{% url 'orders:cart_review' %}"
                class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-full font-medium shadow-lg transition-colors flex items-center space-x-2">
-                <span>🛒</span>
+                <span>{% icon "orders" %}</span>
                 <span>{% trans "Cart" %} ({{ cart_count }})</span>
             </a>
         </div>
@@ -178,7 +179,7 @@
 // Add any JavaScript needed for enhanced UX
 document.addEventListener('DOMContentLoaded', function() {
     // Add hover effects or other interactivity if needed
-    console.log('✅ Product catalog loaded with {{ products|length }} products');
+    console.log('Product catalog loaded with {{ products|length }} products');
 });
 </script>
 {% endblock %}

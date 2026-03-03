@@ -10,7 +10,7 @@
 
     <!-- Header -->
     <div class="text-center">
-      <div class="mx-auto h-16 w-16 text-5xl">⚠️</div>
+      <div class="mx-auto h-16 w-16 text-5xl">{% icon "warning" %}</div>
       <h2 class="mt-6 text-3xl font-extrabold text-white">
         {% trans 'Disable Two-Factor Authentication' %}
       </h2>
@@ -27,7 +27,7 @@
         <!-- Security Warning -->
         <div class="bg-red-900 bg-opacity-50 rounded-lg p-6 border border-red-600">
           <div class="flex items-center mb-4">
-            <div class="text-2xl mr-3">🚨</div>
+            <div class="text-2xl mr-3">{% icon "warning" %}</div>
             <h3 class="text-lg font-medium text-red-200">
               {% trans 'Security Warning' %}
             </h3>
@@ -58,22 +58,22 @@
         <!-- Current Security Status -->
         <div class="bg-green-900 bg-opacity-30 rounded-lg p-6 border border-green-600">
           <div class="flex items-center mb-4">
-            <div class="text-2xl mr-3">🛡️</div>
+            <div class="mr-3">{% icon "lock" size="lg" %}</div>
             <h3 class="text-lg font-medium text-green-200">
               {% trans 'Current Protection' %}
             </h3>
           </div>
           <div class="space-y-2 text-sm text-green-200">
             <div class="flex items-center">
-              <span class="text-green-400 mr-2">✅</span>
+              <span class="text-green-400 mr-2">{% icon "check" %}</span>
               {% trans 'TOTP Authenticator Active' %}
             </div>
             <div class="flex items-center">
-              <span class="text-green-400 mr-2">✅</span>
+              <span class="text-green-400 mr-2">{% icon "check" %}</span>
               {% trans 'Backup Codes Generated' %}
             </div>
             <div class="flex items-center">
-              <span class="text-green-400 mr-2">✅</span>
+              <span class="text-green-400 mr-2">{% icon "check" %}</span>
               {% trans 'Account Breach Protection' %}
             </div>
           </div>
@@ -84,7 +84,7 @@
       <div>
         <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
           <div class="text-center mb-6">
-            <div class="text-4xl mb-4">🔓</div>
+            <div class="text-4xl mb-4">{% icon "lock" %}</div>
             <h3 class="text-lg font-medium text-white mb-2">
               {% trans 'Confirm Disable MFA' %}
             </h3>
@@ -102,7 +102,7 @@
                 {% if message.tags == 'error' %}
                 <div class="bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
                   <div class="flex items-center">
-                    <div class="text-xl mr-3">❌</div>
+                    <div class="mr-3">{% icon "x" size="lg" %}</div>
                     <div class="text-red-200 text-sm">{{ message }}</div>
                   </div>
                 </div>
@@ -113,7 +113,7 @@
             <!-- MFA Code Verification -->
             <div>
               <label for="token" class="block text-sm font-medium text-slate-300 mb-2">
-                🔢 {% trans 'Current MFA Code' %}
+                {% icon "lock" %} {% trans 'Current MFA Code' %}
               </label>
               <input type="text" id="token" name="token" maxlength="6"
                      class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white text-center text-xl font-mono tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
@@ -126,7 +126,7 @@
             <!-- Password Confirmation -->
             <div>
               <label for="password" class="block text-sm font-medium text-slate-300 mb-2">
-                🔐 {% trans 'Confirm Your Password' %}
+                {% icon "lock" %} {% trans 'Confirm Your Password' %}
               </label>
               <input type="password" id="password" name="password"
                      class="appearance-none block w-full px-4 py-3 border border-slate-600 placeholder-slate-400 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 bg-slate-700 transition-all"
@@ -150,7 +150,7 @@
               <button type="submit"
                       class="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
                       onclick="return confirmDisable()">
-                <span class="mr-2">🔓</span>
+                <span class="mr-2">{% icon "lock" %}</span>
                 {% trans 'Disable MFA' %}
               </button>
             </div>
@@ -162,7 +162,7 @@
     <!-- Additional Security Recommendations -->
     <div class="bg-blue-900 bg-opacity-50 rounded-lg border border-blue-600 p-6">
       <div class="flex items-start">
-        <div class="text-2xl mr-4">💡</div>
+        <div class="text-2xl mr-4">{% icon "info" %}</div>
         <div>
           <h3 class="text-lg font-medium text-blue-200 mb-3">
             {% trans 'Consider These Alternatives' %}
@@ -218,7 +218,7 @@ document.getElementById('token').addEventListener('input', function(e) {
       <div class="space-y-4">
         <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
           <span class="absolute left-0 inset-y-0 flex items-center pl-3">
-            ⚠️
+            {% icon "warning" %}
           </span>
           {% trans 'Yes, Disable Two-Factor Authentication' %}
         </button>
