@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.21.0] - 2026-03-03
+
 ### Added
 - **hcloud Python SDK integration (ADR-0027)**: Replace Terraform with typed Python SDK for Hetzner Cloud server provisioning
 - **Provider catalog sync**: Live sync of regions, server types, and pricing from Hetzner API via `sync_providers` management command
-- **Sync providers UI**: "Sync Providers" button on Cloud Providers page
+- **Sync providers UI**: "Sync Providers" button on Cloud Providers page with provider-agnostic dispatch
 - **First-boot provider sync**: Automatic catalog sync on first migration when no providers exist
 - **Periodic provider sync**: Daily 4:00 AM background task for catalog updates
 - **`max_domains` field**: Configurable per-deployment domain limit with size-based defaults (25-500)
@@ -20,15 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deployment state machine — `stopped` state**: New intermediate state between `completed` and `destroying`/`failed` with defined transitions
 - **Makefile `check-env` guard**: Fails fast with clear message when `.env` is missing; wired as prerequisite to all dev-server targets
 - **Customer profile sub-form templates**: `address_form.html`, `billing_profile_form.html`, `note_form.html`, `tax_profile_form.html` for inline editing
+- **Portal Frontend Architecture (ADR-0026)**: Unified list page design system for Tickets, Invoices, and Services portal pages
+- **Shared template components**: `list_page_header.html`, `list_page_filters.html`, `list_page_skeleton.html` — composable includes for consistent list page layout
+- **Shared pagination utility**: `apps.common.pagination.PaginatorData` and `build_pagination_params` replace ~20 lines of duplicated pagination math per view
+- **Invoices search endpoint**: `invoices_search_api` HTMX endpoint with live search by document number
+- **Services search endpoint**: `service_search_api` HTMX endpoint with client-side search by service name/domain
+- **Tab-based filtering**: All 3 portal list pages use HTMX-powered tab navigation for primary filter dimension
+- **SVG icon template tag system**: `{% icon "name" %}` replaces inline emoji characters across all templates
+- **Account health banner**: Persistent portal banner with session-cached account summaries
+- **503 maintenance template**: Security-clean error page for Semgrep compliance
 - **Staff customer management E2E tests**: Playwright tests for customer list, detail, create/edit, profile sub-forms, and access control
 
 ### Changed
 - **Deployment pipeline**: Replaced 4 Terraform stages (config gen, init, plan, apply) with single hcloud SDK call
-- **Provider config**: Removed Terraform-specific keys from Hetzner provider config; `get_credentials_for_provider` renamed to `get_provider_token` returning `Result[str, str]`
-- **Makefile**: Added `sync_providers` step to `fixtures` and `fixtures-light` targets
-- **Deployment state machine**: `transition_to` now raises `ValidationError` instead of returning bool; redundant `.save()` calls removed (transition saves internally)
-- **`.env` loading**: Moved `load_dotenv` from `manage.py` into `dev.py` settings (both services) so WSGI/ASGI workers also load `.env` in dev
+- **Provider config**: Removed Terraform-specific keys; `get_credentials_for_provider` renamed to `get_provider_token` returning `Result[str, str]`
+- **Deployment state machine**: `transition_to` now raises `ValidationError` instead of returning bool; redundant `.save()` calls removed
+- **`.env` loading**: Moved `load_dotenv` from `manage.py` into `dev.py` settings (both services) so WSGI/ASGI workers also load `.env`
 - **Provider sync pricing**: Extracted testable `_extract_pricing` helper preferring `fsn1` with fallback for ARM server types
+- **Tickets list page**: Refactored from ~202 lines to ~42 lines using shared includes; status filtering changed from dropdown to tabs
+- **Invoices list page**: Refactored from ~347 lines to ~42 lines using shared includes with HTMX live filtering
+- **Services list page**: Refactored from ~343 lines to ~42 lines using shared includes with HTMX tabs
+- **Portal ticket page title**: Shortened from "Support Tickets" / "My Support Tickets" to "Tickets"
+- **Ticket-service linking**: Tickets can now be linked to provisioned services; `TicketAPIClient` renamed for consistency
+- **Makefile**: Added `sync_providers` step to `fixtures` and `fixtures-light` targets
 
 ### Fixed
 - **Deployment URL patterns**: Changed `<uuid:pk>` to `<int:pk>` (NodeDeployment uses `BigAutoField`, not UUID)
@@ -39,32 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Product pricing display**: Switched from `prices_by_currency` grouped dict to `active_prices` flat list
 - **Template fixes**: Removed corrupted HTML in `customers/form.html` heading; fixed `blocktrans` variable references in customer list pagination; added `{% load i18n %}` to deployment status partial
 - **Provider list count**: Added `distinct=True` to deployment count annotations to fix over-counting
-- **E2E test selectors**: Updated 5 test files to match SVG icon system (removed emoji from Playwright `:has-text()` selectors); updated proforma form field names from `lines-0-*` to `line_0_*`; narrowed portal ticket heading selectors to match "Tickets" page title
+- **E2E test selectors**: Updated 5 test files to match SVG icon system (removed emoji from Playwright `:has-text()` selectors); updated proforma form field names from `lines-0-*` to `line_0_*`
+- **Invoices search**: Search input on invoices page was never wired to backend — now filters by document number via HTMX
+- **Billing portal invoice view**: Use `request.user.id` instead of `.pk`
+- **Staff ticket replies**: Allow staff reply on closed tickets; add `inert` to mobile nav to prevent form conflicts
+- **VAT rate**: Replace hardcoded 19% VAT with dynamic `TaxService` lookup (21% since Aug 2025)
+- **Billing PDF exports**: Correct parameter order in PDF export views
+- **Order item audit**: Wrap order item audit call in `BusinessEventData`
 
 ### Removed
 - **Terraform fields**: Removed `terraform_state_path` and `terraform_state_backend` from NodeDeployment model
 - **Terraform dependency** for Hetzner: No longer required for server provisioning (kept deprecated for other providers)
-
----
-
-### Added
-- **Portal Frontend Architecture (ADR-0026)**: Unified list page design system for Tickets, Invoices, and Services portal pages
-- **Shared template components**: `list_page_header.html`, `list_page_filters.html`, `list_page_skeleton.html` — composable includes for consistent list page layout
-- **Shared pagination utility**: `apps.common.pagination.PaginatorData` and `build_pagination_params` replace ~20 lines of duplicated pagination math per view
-- **Invoices search endpoint**: `invoices_search_api` HTMX endpoint with live search by document number (was wired in UI but never processed by backend)
-- **Services search endpoint**: `service_search_api` HTMX endpoint with client-side search by service name/domain
-- **Tab-based filtering**: All 3 list pages use HTMX-powered tab navigation for primary filter dimension (status for tickets/services, doc type for invoices)
-- **Invoices E2E tests**: Comprehensive tests for tab filtering, search, status dropdown, pagination, click-through, and mobile responsiveness
-- **Services list E2E tests**: Tests for tab filtering, search, pagination, and page structure
-
-### Changed
-- **Tickets list page**: Refactored from ~202 lines of inline header/filters/skeleton to ~42 lines using shared includes; status filtering changed from dropdown to tabs
-- **Invoices list page**: Refactored from ~347 lines with form-based filters and broken search to ~42 lines using shared includes with HTMX live filtering
-- **Services list page**: Refactored from ~343 lines with `<a>` tab links (full page reloads) to ~42 lines using shared includes with HTMX tabs
-- **Portal E2E selectors**: Updated `test_portal_tickets.py` to use `button[role='tab']` instead of `select[name='status']`; updated `test_customer_services.py` mobile selectors from `sm:hidden` to `md:hidden`
-
-### Fixed
-- **Invoices search**: Search input on invoices page was never wired to backend — now filters by document number via HTMX
 
 ---
 

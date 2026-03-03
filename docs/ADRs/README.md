@@ -4,7 +4,7 @@ This folder contains all Architecture Decision Records (ADRs) for the PRAHO plat
 ADRs document significant architectural decisions, their context, and consequences,
 providing a historical record of why the system is built the way it is.
 
-> **Platform**: PRAHO v0.20.0 · **Stack**: Django 5.2 · Python 3.13 · PostgreSQL · HTMX
+> **Platform**: PRAHO v0.21.0 · **Stack**: Django 5.2 · Python 3.13 · PostgreSQL · HTMX
 > **Architecture**: Two-service split (Platform :8700 + Portal :8701)
 > See also: [Architecture docs](../architecture/) for diagrams and deep-dives.
 
