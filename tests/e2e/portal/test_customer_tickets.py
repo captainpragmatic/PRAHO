@@ -82,7 +82,7 @@ def test_customer_ticket_system_access_via_navigation(page: Page) -> None:
         title_has_ticket_text = bool(re.search(r"support|ticket|tichete", page_title, re.IGNORECASE))
         if not title_has_ticket_text:
             print(f"  ⚠️ SOFT CHECK: Page title '{page_title}' does not contain expected ticket text")
-        tickets_heading = page.locator('h1:has-text("My Support Tickets"), h1:has-text("Support Tickets")').first
+        tickets_heading = page.locator('h1:has-text("Tickets"), h1:has-text("Tichete")').first
         if tickets_heading.is_visible():
             print("  ✅ Ticket system heading visible")
         else:
@@ -125,7 +125,7 @@ def test_customer_ticket_list_display_own_tickets_only(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Verify customer can access the ticket system (support both English and Romanian)
-        tickets_heading = page.locator('h1:has-text("My Support Tickets"), h1:has-text("Support Tickets")').first
+        tickets_heading = page.locator('h1:has-text("Tickets"), h1:has-text("Tichete")').first
         expect(tickets_heading).to_be_visible()
 
         # Verify customer can create new tickets (use the main button, not dropdown)
@@ -560,7 +560,7 @@ def test_customer_ticket_access_control_security(page: Page) -> None:
 
         # Should successfully load ticket system for customer
         expect(page).to_have_url(re.compile(r"/tickets/"))
-        tickets_heading = page.locator('h1:has-text("My Support Tickets"), h1:has-text("Support Tickets")').first
+        tickets_heading = page.locator('h1:has-text("Tickets"), h1:has-text("Tichete")').first
         expect(tickets_heading).to_be_visible()
 
         # Verify customer can create tickets
@@ -800,7 +800,7 @@ def test_customer_ticket_system_mobile_responsiveness(page: Page) -> None:
 
             # Verify key mobile elements are accessible for customers
             # Soft check: h1 may be hidden behind mobile nav or scrolled off-screen on small viewports
-            tickets_heading = page.locator('h1:has-text("My Support Tickets"), h1:has-text("Support Tickets")').first
+            tickets_heading = page.locator('h1:has-text("Tickets"), h1:has-text("Tichete")').first
             if tickets_heading.is_visible():
                 print("      ✅ Ticket system heading visible on mobile")
             else:

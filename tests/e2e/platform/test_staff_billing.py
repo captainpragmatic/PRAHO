@@ -55,7 +55,7 @@ def _fill_proforma_form(page: Page, data: dict) -> None:
             print("  ⚠️ No customers available - may need sample data")
 
     description_field = page.locator(
-        'input[name="lines-0-description"], textarea[name="lines-0-description"]'
+        'input[name="line_0_description"], textarea[name="line_0_description"]'
     ).first
     if description_field.is_visible():
         description_field.fill(data['description'])
@@ -64,7 +64,7 @@ def _fill_proforma_form(page: Page, data: dict) -> None:
         print("  ⚠️ Line item description field not found")
 
     amount_field = page.locator(
-        'input[name="lines-0-unit_price"], input[name="lines-0-amount"]'
+        'input[name="line_0_unit_price"], input[name="line_0_amount"]'
     ).first
     if amount_field.is_visible():
         amount_field.fill(data['amount'])
@@ -72,7 +72,7 @@ def _fill_proforma_form(page: Page, data: dict) -> None:
     else:
         print("  ⚠️ Amount field not found")
 
-    quantity_field = page.locator('input[name="lines-0-quantity"]')
+    quantity_field = page.locator('input[name="line_0_quantity"]')
     if quantity_field.is_visible():
         quantity_field.fill('1')
 
@@ -122,13 +122,13 @@ def _fill_workflow_proforma_form(page: Page, data: dict) -> None:
             page.select_option('select[name="customer"]', index=1)
 
     description_field = page.locator(
-        'input[name="lines-0-description"], textarea[name="lines-0-description"]'
+        'input[name="line_0_description"], textarea[name="line_0_description"]'
     ).first
     if description_field.is_visible():
         description_field.fill(data['description'])
 
     amount_field = page.locator(
-        'input[name="lines-0-unit_price"], input[name="lines-0-amount"]'
+        'input[name="line_0_unit_price"], input[name="line_0_amount"]'
     ).first
     if amount_field.is_visible():
         amount_field.fill(data['amount'])
@@ -244,7 +244,7 @@ def test_staff_billing_system_access_via_navigation(page: Page) -> None:
         # Verify page title and staff-specific content (handle both English and Romanian)
         title = page.title()
         assert ("Billing" in title or "Facturare" in title), f"Expected billing page title but got: {title}"
-        billing_heading = page.locator('h1:has-text("🧾 Billing Management"), h1:has-text("🧾 Billing")').first
+        billing_heading = page.locator('h1:has-text("Billing Management")').first
         assert billing_heading.is_visible(), "Billing system heading should be visible"
 
         # Check for creation button (may not be implemented yet)
@@ -309,7 +309,7 @@ def test_staff_billing_list_dashboard_display(page: Page) -> None:
             print("  [i] Billing filtering interface may not be implemented yet")
 
         # Verify billing page content is present (support both English and Romanian)
-        billing_content = page.locator('div:has-text("🧾 Invoices"), div:has-text("🧾 Facturi")').first
+        billing_content = page.locator('div:has-text("Invoices"), div:has-text("Facturi")').first
         assert billing_content.is_visible(), "Billing content should be present"
 
         # Check if any documents are displayed
@@ -361,7 +361,7 @@ def test_staff_proforma_creation_workflow(page: Page) -> None:
         assert "/billing/proformas/create/" in page.url
 
         # Verify create proforma form elements
-        create_heading = page.locator('h1:has-text("📄 Create New Proforma"), h1:has-text("Create Proforma")')
+        create_heading = page.locator('h1:has-text("Create New Proforma"), h1:has-text("Create Proforma")')
         assert create_heading.is_visible(), "Create proforma heading should be visible"
 
         # Test proforma data for staff creation
@@ -680,7 +680,7 @@ def test_staff_billing_system_mobile_responsiveness(page: Page) -> None:
             run_standard_mobile_test(page, mobile, context_label="staff billing")
 
             # Verify key mobile elements are accessible
-            billing_heading = page.locator('h1:has-text("🧾 Billing Management"), h1:has-text("🧾 Billing")').first
+            billing_heading = page.locator('h1:has-text("Billing Management")').first
             if billing_heading.is_visible():
                 print("      ✅ Billing system heading visible on mobile")
 
@@ -786,7 +786,7 @@ def test_staff_billing_system_responsive_breakpoints(page: Page) -> None:
                 require_authentication(test_page)
 
                 # Check core elements are present
-                billing_heading = test_page.locator('h1:has-text("🧾 Billing Management"), h1:has-text("🧾 Billing")').first
+                billing_heading = test_page.locator('h1:has-text("Billing Management")').first
 
                 # Just check for the main heading - creation button may not always be present
                 elements_present = billing_heading.is_visible()

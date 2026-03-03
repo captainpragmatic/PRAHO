@@ -67,13 +67,13 @@ def test_product_catalog_access_via_navigation(page: Page) -> None:
         assert navigate_to_platform_page(page, "/")
 
         # Click on Business dropdown
-        business_dropdown = page.locator('button:has-text("🏢 Business")')
+        business_dropdown = page.locator('button:has-text("Business")')
         expect(business_dropdown.first).to_be_attached()
         business_dropdown.click()
 
         # Wait for Alpine.js dropdown to open (uses role="menu")
         page.locator('[role="menu"], .dropdown-menu').first.wait_for(state="visible", timeout=3000)
-        products_link = page.locator('a:has-text("🛍️ Products"), menuitem:has-text("🛍️ Products")')
+        products_link = page.locator('a:has-text("Products"), menuitem:has-text("Products")')
         if products_link.count() == 0:
             # Try alternative selectors
             products_link = page.locator('a[href*="/products/"]', 'text="Products"')
@@ -87,7 +87,7 @@ def test_product_catalog_access_via_navigation(page: Page) -> None:
 
         # Verify page title and content
         expect(page).to_have_title(re.compile(r"Product Catalog"))
-        catalog_heading = page.locator('h1:has-text("🛍️ Product Catalog")')
+        catalog_heading = page.locator('h1:has-text("Product Catalog")')
         expect(catalog_heading).to_be_visible()
 
         print("  ✅ Product catalog successfully accessible via Business navigation")
@@ -120,15 +120,15 @@ def test_product_catalog_dashboard_display(page: Page) -> None:
 
         # Verify statistics cards are present and show data
         stats_cards = [
-            ("📦", "Total Products", "should show total product count"),
-            ("✅", "Active Products", "should show active product count"),
-            ("👁️", "Public Products", "should show public product count"),
-            ("⭐", "Featured Products", "should show featured product count")
+            ("Total Products", "should show total product count"),
+            ("Active Products", "should show active product count"),
+            ("Public Products", "should show public product count"),
+            ("Featured Products", "should show featured product count")
         ]
 
-        for icon, card_name, description in stats_cards:
+        for card_name, description in stats_cards:
             # Use more specific selector to avoid strict mode violations
-            card_selector = f'div.bg-slate-800:has-text("{icon}"):has-text("{card_name}")'
+            card_selector = f'div.bg-slate-800:has-text("{card_name}")'
             card = page.locator(card_selector).first
             expect(card).to_be_attached()
 
@@ -202,7 +202,7 @@ def _verify_product_created(page: Page, product_data: dict) -> None:
         search_input = page.locator('input[placeholder*="Product name"]')
         if search_input.is_visible():
             search_input.fill(product_data['name'])
-            page.locator('button:has-text("🔍 Filter")').click()
+            page.locator('button:has-text("Filter")').click()
             page.wait_for_load_state("networkidle")
 
             product_found = page.locator(f'text="{product_data["name"]}"').first
@@ -252,7 +252,7 @@ def test_product_creation_full_workflow(page: Page) -> None:
         navigate_to_platform_page(page, "/products/")
 
         # Click "New Product" button
-        new_product_button = page.locator('a:has-text("✨ New Product")')
+        new_product_button = page.locator('a:has-text("New Product")')
         expect(new_product_button).to_be_visible()
         new_product_button.click()
 
@@ -299,7 +299,7 @@ def test_product_creation_full_workflow(page: Page) -> None:
         expect(vat_checkbox).to_be_checked()
 
         # Submit the form
-        create_button = page.locator('button:has-text("✨ Create Product")')
+        create_button = page.locator('button:has-text("Create Product")')
         expect(create_button).to_be_visible()
         create_button.click()
 
@@ -315,7 +315,7 @@ def _submit_and_verify_pricing(page: Page) -> None:
     Clicks the submit button, waits for the redirect, and confirms RON pricing
     appears in the pricing list. Navigates back to the pricing page if needed.
     """
-    add_price_submit = page.locator('button:has-text("💰 Add Price")')
+    add_price_submit = page.locator('button:has-text("Add Price")')
     expect(add_price_submit).to_be_visible()
     add_price_submit.click()
 
@@ -370,7 +370,7 @@ def test_product_pricing_management(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Find first product pricing link (icon)
-        first_pricing_link = page.locator('a[href*="/prices/"]:has-text("💰")').first
+        first_pricing_link = page.locator('a[href*="/prices/"]').first
         expect(first_pricing_link).to_be_visible()
 
         pricing_url = first_pricing_link.get_attribute('href')
@@ -379,7 +379,7 @@ def test_product_pricing_management(page: Page) -> None:
 
         # Verify we're on pricing management page
         expect(page).to_have_url(re.compile(r"/prices/"))
-        pricing_heading = page.locator('h1:has-text("💰 Pricing Management")')
+        pricing_heading = page.locator('h1:has-text("Pricing Management")')
         expect(pricing_heading).to_be_visible()
 
         # Optional UI element — presence depends on product configuration
@@ -388,7 +388,7 @@ def test_product_pricing_management(page: Page) -> None:
             print("      ✅ Romanian business pricing context visible")
 
         # Click "Add Price" button
-        add_price_button = page.locator('a:has-text("💰 Add Price"), a:has-text("💰 Add First Price")').first
+        add_price_button = page.locator('a:has-text("Add Price"), a:has-text("Add First Price")').first
         expect(add_price_button).to_be_visible()
         add_price_button.click()
 
@@ -496,7 +496,7 @@ def test_product_status_toggles(page: Page) -> None:
 
 def _clear_product_filters(page: Page) -> None:
     """Click the Clear button if present, otherwise navigate directly to products list."""
-    clear_button = page.locator('a:has-text("❌ Clear"), a:has-text("Clear"), button:has-text("Clear")').first
+    clear_button = page.locator('a:has-text("Clear"), button:has-text("Clear")').first
     if clear_button.count() > 0:
         clear_button.click()
     else:
@@ -531,7 +531,7 @@ def test_product_search_and_filtering(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Get initial product count
-        initial_count_text = page.locator('h3:has-text("📦 Products")').inner_text()
+        initial_count_text = page.locator('h3:has-text("Products")').inner_text()
         print(f"    Initial product count: {initial_count_text}")
 
         # Test text search
@@ -540,13 +540,13 @@ def test_product_search_and_filtering(page: Page) -> None:
 
         # Search for "VPS" products
         search_input.fill("VPS")
-        filter_button = page.locator('button:has-text("🔍 Filter")')
+        filter_button = page.locator('button:has-text("Filter")')
         filter_button.click()
 
         page.wait_for_load_state("networkidle")
 
         # Verify search results contain VPS products
-        search_results_count = page.locator('h3:has-text("📦 Products")').inner_text()
+        search_results_count = page.locator('h3:has-text("Products")').inner_text()
         print(f"    Search results count: {search_results_count}")
 
         # Check that VPS products are visible in results
@@ -568,7 +568,7 @@ def test_product_search_and_filtering(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Verify filter worked
-        type_filter_count = page.locator('h3:has-text("📦 Products")').inner_text()
+        type_filter_count = page.locator('h3:has-text("Products")').inner_text()
         print(f"    Type filter results: {type_filter_count}")
 
         # Test status filters
@@ -581,7 +581,7 @@ def test_product_search_and_filtering(page: Page) -> None:
 
         page.wait_for_load_state("networkidle")
 
-        active_filter_count = page.locator('h3:has-text("📦 Products")').inner_text()
+        active_filter_count = page.locator('h3:has-text("Products")').inner_text()
         print(f"    Active filter results: {active_filter_count}")
 
         # Verify that active products are shown with active status badges
@@ -592,7 +592,7 @@ def test_product_search_and_filtering(page: Page) -> None:
         # Test clear filters
         _clear_product_filters(page)
 
-        cleared_count = page.locator('h3:has-text("📦 Products")').inner_text()
+        cleared_count = page.locator('h3:has-text("Products")').inner_text()
         print(f"    After clearing filters: {cleared_count}")
 
         print("  ✅ Product search and filtering functionality works correctly")
@@ -631,17 +631,17 @@ def test_product_catalog_staff_access_control(page: Page) -> None:
 
         # Should successfully load product catalog
         expect(page).to_have_url(re.compile(r"/products/"))
-        catalog_heading = page.locator('h1:has-text("🛍️ Product Catalog")')
+        catalog_heading = page.locator('h1:has-text("Product Catalog")')
         expect(catalog_heading).to_be_visible()
 
         # Verify Business dropdown shows Products link
         navigate_to_platform_page(page, "/")
-        business_dropdown = page.locator('button:has-text("🏢 Business")')
+        business_dropdown = page.locator('button:has-text("Business")')
         expect(business_dropdown.first).to_be_attached()
         business_dropdown.click()
         page.wait_for_load_state("networkidle")
 
-        products_link = page.locator('a:has-text("🛍️ Products"), menuitem:has-text("🛍️ Products"), a[href*="/products/"]')
+        products_link = page.locator('a:has-text("Products"), menuitem:has-text("Products"), a[href*="/products/"]')
         expect(products_link.first).to_be_attached()
 
         print("    ✅ Staff user has proper access to product catalog")
@@ -844,3 +844,142 @@ def test_product_catalog_responsive_breakpoints(page: Page) -> None:
             print(f"    - Touch interactions: {'YES' if touch_works else 'LIMITED'}")
 
         print("  ✅ Product catalog validated across all responsive breakpoints")
+
+
+# ===============================================================================
+# PRODUCT DETAIL, EDIT, AND HTMX TESTS
+# ===============================================================================
+
+
+def test_product_detail_page_sections(page: Page) -> None:
+    """
+    Test that a product detail page renders basic info, status sidebar, and pricing section.
+    """
+    print("🧪 Testing product detail page sections")
+
+    with ComprehensivePageMonitor(page, "product detail page sections",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_platform_session(page)
+        assert login_platform_user(page)
+
+        # Navigate to product list and pick the first product
+        navigate_to_platform_page(page, "/products/")
+        page.wait_for_load_state("networkidle")
+
+        first_product_link = page.locator('table a[href*="/products/"]').first
+        expect(first_product_link).to_be_visible()
+        product_name = first_product_link.inner_text()
+        first_product_link.click()
+        page.wait_for_load_state("networkidle")
+
+        # Verify we landed on a detail page (not the list)
+        expect(page).to_have_url(re.compile(r"/products/[^/]+/$"))
+
+        # Basic info card — product name should appear in the page content
+        page_text = page.locator("body").inner_text()
+        assert product_name in page_text, f"Product name '{product_name}' not found on detail page"
+
+        # Status sidebar section (icon rendered as SVG, not emoji)
+        status_heading = page.locator('h2:has-text("Status")')
+        expect(status_heading.first).to_be_visible()
+
+        # Quick Actions section
+        actions_heading = page.locator('h2:has-text("Quick Actions")')
+        expect(actions_heading.first).to_be_visible()
+
+        print(f"  ✅ Product detail page for '{product_name}' renders all sections")
+
+
+def test_product_edit_form_renders(page: Page) -> None:
+    """
+    Test that the product edit form loads with expected fields pre-populated.
+    """
+    print("🧪 Testing product edit form renders")
+
+    with ComprehensivePageMonitor(page, "product edit form renders",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_platform_session(page)
+        assert login_platform_user(page)
+
+        # Navigate to product list and find the first edit link
+        navigate_to_platform_page(page, "/products/")
+        page.wait_for_load_state("networkidle")
+
+        edit_link = page.locator('table a[href*="/edit/"]').first
+        expect(edit_link).to_be_visible()
+        edit_link.click()
+        page.wait_for_load_state("networkidle")
+
+        # Verify we're on the edit page
+        expect(page).to_have_url(re.compile(r"/products/[^/]+/edit/$"))
+
+        # Verify key form fields are present and pre-populated
+        name_input = page.locator('input[name="name"]')
+        expect(name_input).to_be_visible()
+        name_value = name_input.input_value()
+        assert len(name_value) > 0, "Name field should be pre-populated"
+
+        slug_input = page.locator('input[name="slug"]')
+        expect(slug_input).to_be_visible()
+        assert len(slug_input.input_value()) > 0, "Slug field should be pre-populated"
+
+        product_type_select = page.locator('select[name="product_type"]')
+        expect(product_type_select).to_be_visible()
+
+        # Verify submit button exists
+        save_button = page.locator('button[type="submit"]')
+        expect(save_button.first).to_be_visible()
+
+        print(f"  ✅ Product edit form renders correctly for '{name_value}'")
+
+
+def test_product_htmx_status_toggle_has_csrf(page: Page) -> None:
+    """
+    Test that status toggle buttons include hx-headers with X-CSRFToken for HTMX POST.
+    """
+    print("🧪 Testing HTMX status toggle CSRF headers")
+
+    with ComprehensivePageMonitor(page, "htmx status toggle csrf",
+                                 check_console=True,
+                                 check_network=True,
+                                 check_html=True,
+                                 check_css=True,
+                                 check_accessibility=False,
+                                 allow_accessibility_skip=True):
+        ensure_fresh_platform_session(page)
+        assert login_platform_user(page)
+
+        # Navigate to first product detail page
+        navigate_to_platform_page(page, "/products/")
+        page.wait_for_load_state("networkidle")
+
+        first_product_link = page.locator('table a[href*="/products/"]').first
+        expect(first_product_link).to_be_visible()
+        first_product_link.click()
+        page.wait_for_load_state("networkidle")
+
+        # Find all HTMX toggle buttons (they use hx-post for status changes)
+        toggle_buttons = page.locator('button[hx-post]')
+        toggle_count = toggle_buttons.count()
+        assert toggle_count > 0, "Product detail should have HTMX toggle buttons"
+
+        # Verify each toggle button has hx-headers with CSRFToken
+        for i in range(toggle_count):
+            button = toggle_buttons.nth(i)
+            hx_headers = button.get_attribute("hx-headers")
+            assert hx_headers is not None, f"Toggle button {i} missing hx-headers attribute"
+            assert "CSRFToken" in hx_headers or "csrftoken" in hx_headers.lower(), (
+                f"Toggle button {i} hx-headers missing CSRFToken: {hx_headers}"
+            )
+
+        print(f"  ✅ All {toggle_count} toggle buttons have proper CSRF headers")

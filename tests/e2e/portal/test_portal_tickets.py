@@ -115,8 +115,8 @@ def test_ticket_list_display(monitored_customer_page: Page) -> None:
 
     # Heading
     heading = page.locator(
-        'h1:has-text("Support Tickets"), h1:has-text("My Support Tickets"), '
-        'h1:has-text("Tichete de suport")'
+        'h1:has-text("Tickets"), '
+        'h1:has-text("Tichete")'
     ).first
     expect(heading).to_be_visible()
 
@@ -295,8 +295,8 @@ def test_ticket_mobile_responsiveness(monitored_customer_page: Page) -> None:
         pg.goto(f"{BASE_URL}/tickets/")
         pg.wait_for_load_state("networkidle")
         heading = pg.locator(
-            'h1:has-text("Support Tickets"), h1:has-text("My Support Tickets"), '
-            'h1:has-text("Tichete de suport")'
+            'h1:has-text("Tickets"), '
+            'h1:has-text("Tichete")'
         ).first
         new_btn = pg.locator(
             'a:has-text("New Ticket"), a:has-text("Tichet nou"), a[href*="/tickets/create/"]'

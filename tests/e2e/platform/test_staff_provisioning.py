@@ -101,16 +101,16 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
 
         # Check status filter tabs
         status_tabs = [
-            '📊',  # All Services
-            '✅',  # Active
-            '⏸️',  # Suspended
-            '⏳',  # Pending
-            '❌',  # Cancelled
+            'All Services',
+            'Active',
+            'Suspended',
+            'Pending',
+            'Cancelled',
         ]
 
-        for tab_icon in status_tabs:
-            tab = page.locator(f'a:has-text("{tab_icon}")')
-            assert tab.count() > 0, f"Status tab {tab_icon} not found"
+        for tab_text in status_tabs:
+            tab = page.locator(f'a:has-text("{tab_text}")')
+            assert tab.count() > 0, f"Status tab {tab_text} not found"
 
         # Check for New Service button (staff only)
         new_service_btn = page.locator('a[href*="/create/"], a:has-text("New Service"), a:has-text("➕")')  # noqa: RUF001 — locator matches actual UI emoji
@@ -118,8 +118,8 @@ def test_staff_provisioning_dashboard_display(page: Page) -> None:
             print("  ✅ New Service button available for staff")
 
         # Check quick action buttons (in main content, not navigation)
-        servers_btn = page.locator('main a:has-text("🖥️"), .content a[href*="servers"], a[href*="/provisioning/servers/"]')
-        plans_btn = page.locator('main a:has-text("📦"), .content a[href*="plans"], a[href*="/provisioning/plans/"]')
+        servers_btn = page.locator('main a:has-text("Servers"), .content a[href*="servers"], a[href*="/provisioning/servers/"]')
+        plans_btn = page.locator('main a:has-text("Plans"), .content a[href*="plans"], a[href*="/provisioning/plans/"]')
 
         assert servers_btn.count() > 0, "Servers button missing"
         assert plans_btn.count() > 0, "Plans button missing"
@@ -291,17 +291,17 @@ def test_staff_service_status_filtering(page: Page) -> None:
 
         # Test status filter tabs
         status_filters = [
-            ('active', '✅'),
-            ('suspended', '⏸️'),
-            ('pending', '⏳'),
-            ('cancelled', '❌'),
+            ('active', 'Active'),
+            ('suspended', 'Suspended'),
+            ('pending', 'Pending'),
+            ('cancelled', 'Cancelled'),
         ]
 
-        for status, icon in status_filters:
+        for status, text in status_filters:
             print(f"  📊 Testing {status} status filter")
 
             # Click on status tab
-            status_tab = page.locator(f'a[href*="status={status}"], a:has-text("{icon}")')
+            status_tab = page.locator(f'a[href*="status={status}"], a:has-text("{text}")')
             if status_tab.count() > 0:
                 status_tab.first.click()
                 page.wait_for_load_state("networkidle")
@@ -316,7 +316,7 @@ def test_staff_service_status_filtering(page: Page) -> None:
                 print(f"    [i] {status} status tab not found")
 
         # Return to all services
-        all_services_tab = page.locator('a:has-text("📊")')
+        all_services_tab = page.locator('a:has-text("All Services")')
         if all_services_tab.count() > 0:
             all_services_tab.first.click()
             page.wait_for_load_state("networkidle")
@@ -347,7 +347,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Test Servers access (target buttons in main content, not navigation)
-        servers_btn = page.locator('main a:has-text("🖥️"), .content a[href*="servers"], a[href*="/provisioning/servers/"]').first
+        servers_btn = page.locator('main a:has-text("Servers"), .content a[href*="servers"], a[href*="/provisioning/servers/"]').first
         if servers_btn.count() > 0:
             print("  🖥️ Testing servers section access")
             servers_btn.click()
@@ -363,7 +363,7 @@ def test_staff_servers_and_plans_access(page: Page) -> None:
             page.wait_for_load_state("networkidle")
 
         # Test Plans access
-        plans_btn = page.locator('a:has-text("📦"), a[href*="plans"]')
+        plans_btn = page.locator('a:has-text("Plans"), a[href*="plans"]')
         if plans_btn.count() > 0:
             print("  📦 Testing plans section access")
             plans_btn.first.click()
@@ -560,14 +560,14 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
 
         # Test status filtering
         print("  📊 Phase 2: Service filtering functionality")
-        active_tab = page.locator('a:has-text("✅")')
+        active_tab = page.locator('a:has-text("Active")')
         if active_tab.count() > 0:
             active_tab.first.click()
             page.wait_for_load_state("networkidle")
             print("    ✅ Status filtering functional")
 
         # Return to all services
-        all_tab = page.locator('a:has-text("📊")')
+        all_tab = page.locator('a:has-text("All Services")')
         if all_tab.count() > 0:
             all_tab.first.click()
             page.wait_for_load_state("networkidle")
@@ -599,7 +599,7 @@ def test_staff_complete_provisioning_workflow(page: Page) -> None:
         navigate_to_platform_page(page, "/provisioning/services/")
         page.wait_for_load_state("networkidle")
 
-        servers_btn = page.locator('main a:has-text("🖥️"), .content a[href*="servers"], a[href*="/provisioning/servers/"]').first
+        servers_btn = page.locator('main a:has-text("Servers"), .content a[href*="servers"], a[href*="/provisioning/servers/"]').first
         if servers_btn.count() > 0:
             servers_btn.click()
             page.wait_for_load_state("networkidle")
