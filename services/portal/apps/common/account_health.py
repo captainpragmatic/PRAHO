@@ -24,7 +24,7 @@ from django.utils.translation import ngettext
 from apps.api_client.services import PlatformAPIError
 from apps.billing.services import InvoiceViewService
 from apps.services.services import ServicesAPIClient
-from apps.tickets.services import TicketAPIClient
+from apps.tickets.services import TicketsAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ def _fetch_summaries(customer_id: int, user_id: int) -> tuple[dict[str, Any], di
         logger.warning("⚠️ [AccountHealth] Failed to fetch services summary: %s", e)
 
     try:
-        tickets_summary = TicketAPIClient().get_tickets_summary(customer_id, user_id)
+        tickets_summary = TicketsAPIClient().get_tickets_summary(customer_id, user_id)
     except (PlatformAPIError, Exception) as e:
         logger.warning("⚠️ [AccountHealth] Failed to fetch tickets summary: %s", e)
 

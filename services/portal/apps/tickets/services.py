@@ -31,9 +31,10 @@ class TicketCreateRequest:
     description: str
     priority: str = "normal"
     category: str = ""
+    related_service: int | None = None
 
 
-class TicketAPIClient(PlatformAPIClient):
+class TicketsAPIClient(PlatformAPIClient):
     """
     Customer support tickets API client for portal service.
 
@@ -161,6 +162,9 @@ class TicketAPIClient(PlatformAPIClient):
                 }
                 data["category"] = category_mapping.get(request.category, 1)  # Default to Technical Support
 
+            if request.related_service:
+                data["related_service"] = request.related_service
+
             logger.debug(f"🔍 [Tickets API] Sending ticket data: {data}")
             response = self._make_request("POST", "/tickets/create/", data=data)
 
@@ -280,4 +284,4 @@ class TicketAPIClient(PlatformAPIClient):
 
 
 # Global instance for easy importing
-ticket_api = TicketAPIClient()
+tickets_api = TicketsAPIClient()

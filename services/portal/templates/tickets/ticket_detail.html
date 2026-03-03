@@ -6,7 +6,7 @@
 
 {% block content %}
 <div class="px-4">
-    <h1 class="text-3xl font-bold text-white mb-6">
+    <h1 class="text-3xl font-bold text-white mb-4">
         {% trans 'Ticket' %}
         {% if ticket.ticket_number %}
             #{{ ticket.ticket_number }}
@@ -14,6 +14,18 @@
             #{{ ticket.id }}
         {% endif %}
     </h1>
+
+    {% if ticket.related_service %}
+    <div class="flex items-center space-x-2 text-sm mb-6">
+      {% icon "services" size="sm" css_class="text-blue-400" %}
+      <span class="text-slate-400">{% trans "Service" %}:</span>
+      <a href="{% url 'services:detail' service_id=ticket.related_service %}" class="text-blue-400 hover:text-blue-300">
+        {{ ticket.related_service_name|default:ticket.related_service }}
+      </a>
+    </div>
+    {% else %}
+    <div class="mb-6"></div>
+    {% endif %}
 
     <!-- Dynamic content that updates after replies -->
     <div id="ticket-status-and-comments">

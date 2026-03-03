@@ -16,7 +16,7 @@ from django.utils.translation import gettext as _
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
 from apps.services.services import ServicesAPIClient
-from apps.tickets.services import TicketAPIClient, TicketFilters
+from apps.tickets.services import TicketFilters, TicketsAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +94,14 @@ def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str |
     return customers, greeting_name
 
 
-def _get_ticket_data(ticket_api: TicketAPIClient, customer_id: str, user_id: int) -> tuple[list[Any], int]:
+def _get_ticket_data(tickets_api: TicketsAPIClient, customer_id: str, user_id: int) -> tuple[list[Any], int]:
     """Get recent tickets and open tickets count"""
     recent_tickets = []
     try:
-        ticket_response = ticket_api.get_customer_tickets(int(customer_id), user_id, TicketFilters(page=1))
+        ticket_response = tickets_api.get_customer_tickets(int(customer_id), user_id, TicketFilters(page=1))
         raw_tickets = ticket_response.get("results", [])[:4]
         recent_tickets = [DictAsObj(ticket) for ticket in raw_tickets]
-        tickets_summary = ticket_api.get_tickets_summary(int(customer_id), user_id)
+        tickets_summary = tickets_api.get_tickets_summary(int(customer_id), user_id)
         open_tickets_count = tickets_summary.get("open_tickets", len(recent_tickets))
     except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
         logger.debug(f"⚠️ [Dashboard] Failed to load ticket data: {e}")
@@ -152,14 +152,14 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # Get dashboard data from platform API using helper functions
     try:
         invoice_service = InvoiceViewService()
-        ticket_api = TicketAPIClient()
+        tickets_api = TicketsAPIClient()
         services_api = ServicesAPIClient()
         user_id = int(request.user.id)  # type: ignore[union-attr, arg-type]
 
         # Get all data using helper functions
         recent_documents, invoice_summary = _get_billing_data(invoice_service, str(customer_id), user_id)
         customers, greeting_name = _get_customer_data(str(customer_id), user_id)
-        recent_tickets, open_tickets_count = _get_ticket_data(ticket_api, str(customer_id), user_id)
+        recent_tickets, open_tickets_count = _get_ticket_data(tickets_api, str(customer_id), user_id)
         active_services = _get_services_data(services_api, str(customer_id), user_id)
 
         # Fallback for greeting name if not resolved - use generic greeting instead of email

@@ -13,8 +13,9 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.services.services import services_api
 
-from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, ticket_api
+from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
 
 # Tab configuration for ticket status filtering
 TICKET_STATUS_TABS = [
@@ -83,13 +84,13 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         filters = TicketFilters(page=page, status=status_filter, priority=priority_filter, search=search_query)
 
         # Get tickets from platform API
-        response = ticket_api.get_customer_tickets(customer_id=customer_id, user_id=user_id, filters=filters)
+        response = tickets_api.get_customer_tickets(customer_id=customer_id, user_id=user_id, filters=filters)
 
         tickets = response.get("results", [])
         total_count = response.get("count", 0)
 
         # Get summary for header stats
-        summary = ticket_api.get_tickets_summary(customer_id, user_id)
+        summary = tickets_api.get_tickets_summary(customer_id, user_id)
         open_count = summary.get("open_tickets", 0)
 
         # Pagination via shared utility
@@ -164,7 +165,7 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
 
     try:
         # Get ticket details (includes comments/replies)
-        ticket_response = ticket_api.get_ticket_detail(customer_id, user_id, ticket_id)
+        ticket_response = tickets_api.get_ticket_detail(customer_id, user_id, ticket_id)
 
         # Extract ticket data and replies from platform response
         if ticket_response.get("success") and "data" in ticket_response:
@@ -207,6 +208,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
         description = request.POST.get("description", "").strip()
         priority = request.POST.get("priority", "normal")
         category = request.POST.get("category", "")
+        service_id_str = request.POST.get("service_id", "")
+        service_name = request.POST.get("service_name", "")
 
         # Validation
         if not title or not description:
@@ -219,6 +222,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                     "description": description,
                     "priority": priority,
                     "category": category,
+                    "service_id": service_id_str,
+                    "service_name": service_name,
                 },
             )
 
@@ -230,8 +235,9 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                 description=description,
                 priority=priority,
                 category=category,
+                related_service=int(service_id_str) if service_id_str else None,
             )
-            ticket = ticket_api.create_ticket(customer_id, user_id, ticket_request)
+            ticket = tickets_api.create_ticket(customer_id, user_id, ticket_request)
 
             # Extract ticket identifier for redirect and messages
             ticket_id = ticket.get("id") or ticket.get("pk")
@@ -263,6 +269,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                     "description": description,
                     "priority": priority,
                     "category": category,
+                    "service_id": service_id_str,
+                    "service_name": service_name,
                     "priorities": [
                         ("low", _("Low")),
                         ("normal", _("Normal")),
@@ -282,6 +290,17 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
             )
 
     # GET request - show create form
+    # Resolve linked service if service_id provided
+    service_id = request.GET.get("service_id", "")
+    service_name = ""
+    if service_id:
+        try:
+            svc = services_api.get_service_detail(customer_id, user_id, int(service_id))
+            service_name = svc.get("service_name", "") or svc.get("name", "")
+        except Exception:
+            logger.warning(f"⚠️ [Tickets View] Could not resolve service {service_id}, passing ID only")
+            # Keep service_id even if name resolution fails — Platform will validate on create
+
     context = {
         "priorities": [
             ("low", _("Low")),
@@ -298,6 +317,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
             ("domain", _("Domain Management")),
             ("email", _("Email Services")),
         ],
+        "service_id": service_id,
+        "service_name": service_name,
     }
 
     return render(request, "tickets/ticket_create.html", context)
@@ -338,7 +359,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
 
     try:
         # Add reply via platform API
-        ticket_api.add_ticket_reply(
+        tickets_api.add_ticket_reply(
             customer_id=customer_id,
             user_id=user_id,
             ticket_id=ticket_id,
@@ -350,7 +371,7 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
 
         # Get updated ticket details for HTMX response
         if request.headers.get("HX-Request"):
-            ticket_response = ticket_api.get_ticket_detail(customer_id, user_id, ticket_id)
+            ticket_response = tickets_api.get_ticket_detail(customer_id, user_id, ticket_id)
 
             # Extract ticket and replies from the response
             if ticket_response.get("success") and "data" in ticket_response:
@@ -390,7 +411,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
     priority_filter = request.GET.get("priority", "")
 
     try:
-        response = ticket_api.get_customer_tickets(
+        response = tickets_api.get_customer_tickets(
             customer_id=customer_id,
             user_id=user_id,
             filters=TicketFilters(
@@ -451,10 +472,10 @@ def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
 
     try:
-        summary = ticket_api.get_tickets_summary(customer_id, user_id)
+        summary = tickets_api.get_tickets_summary(customer_id, user_id)
 
         # Get recent tickets (last 5)
-        response = ticket_api.get_customer_tickets(customer_id, user_id, filters=TicketFilters(page=1))
+        response = tickets_api.get_customer_tickets(customer_id, user_id, filters=TicketFilters(page=1))
         recent_tickets = response.get("results", [])[:5]
 
         context = {

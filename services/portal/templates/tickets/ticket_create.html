@@ -34,12 +34,12 @@
             </label>
             <select name="category" id="category"
               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="">{% trans 'Select category (optional)' %}</option>
-              <option value="technical">🛠️ {% trans 'Technical Support' %}</option>
-              <option value="billing">💰 {% trans 'Billing & Account' %}</option>
-              <option value="hosting">🏠 {% trans 'Hosting Services' %}</option>
-              <option value="domains">🌐 {% trans 'Domain Management' %}</option>
-              <option value="general">💬 {% trans 'General Inquiry' %}</option>
+              <option value="" {% if not category %}selected{% endif %}>{% trans 'Select category (optional)' %}</option>
+              <option value="technical" {% if category == "technical" %}selected{% endif %}>🛠️ {% trans 'Technical Support' %}</option>
+              <option value="billing" {% if category == "billing" %}selected{% endif %}>💰 {% trans 'Billing & Account' %}</option>
+              <option value="hosting" {% if category == "hosting" %}selected{% endif %}>🏠 {% trans 'Hosting Services' %}</option>
+              <option value="domains" {% if category == "domains" %}selected{% endif %}>🌐 {% trans 'Domain Management' %}</option>
+              <option value="general" {% if category == "general" %}selected{% endif %}>💬 {% trans 'General Inquiry' %}</option>
             </select>
           </div>
 
@@ -49,10 +49,10 @@
             </label>
             <select name="priority" id="priority"
               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="low">🟢 {% trans 'Low' %}</option>
-              <option value="normal" selected>🟡 {% trans 'Normal' %}</option>
-              <option value="high">🟠 {% trans 'High' %}</option>
-              <option value="critical">🔴 {% trans 'Critical' %}</option>
+              <option value="low" {% if priority == "low" %}selected{% endif %}>🟢 {% trans 'Low' %}</option>
+              <option value="normal" {% if priority != "low" and priority != "high" and priority != "critical" %}selected{% endif %}>🟡 {% trans 'Normal' %}</option>
+              <option value="high" {% if priority == "high" %}selected{% endif %}>🟠 {% trans 'High' %}</option>
+              <option value="critical" {% if priority == "critical" %}selected{% endif %}>🔴 {% trans 'Critical' %}</option>
             </select>
           </div>
         </div>
@@ -65,18 +65,23 @@
           {% input_field name="title" placeholder="Brief description of the issue" required=True %}
         </div>
 
-        <!-- Optional: Related Service - For future implementation -->
-        <!--
-        <div>
-          <label for="service" class="block text-sm font-medium text-slate-300 mb-2">
-            {% trans 'Related Service' %} <span class="text-slate-500">({% trans 'optional' %})</span>
-          </label>
-          <select name="service" id="service"
-            class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-            <option value="">{% trans 'Select a service (if applicable)' %}</option>
-          </select>
+        <!-- Linked Service Banner -->
+        {% if service_id %}
+        <div class="bg-blue-900/30 border border-blue-700/50 rounded-lg p-4 flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            {% icon "services" size="md" css_class="text-blue-400" %}
+            <div>
+              <p class="text-sm text-slate-400">{% trans "Related Service" %}</p>
+              <p class="text-white font-medium">{{ service_name|default:service_id }}</p>
+            </div>
+          </div>
+          <a href="{% url 'services:detail' service_id=service_id %}" class="text-blue-400 hover:text-blue-300 text-sm">
+            {% trans "View Service" %} →
+          </a>
         </div>
-        -->
+        <input type="hidden" name="service_id" value="{{ service_id }}">
+        <input type="hidden" name="service_name" value="{{ service_name }}">
+        {% endif %}
 
         <!-- Description -->
         <div>
