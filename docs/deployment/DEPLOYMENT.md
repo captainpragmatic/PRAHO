@@ -1,16 +1,17 @@
 # PRAHO Deployment Guide
 
-This guide covers all deployment scenarios for PRAHO, from single-server setups to multi-server distributed deployments.
+This guide covers all deployment scenarios for PRAHO, from native single-server setups to multi-server distributed deployments.
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
-- [Deployment Scenarios](#deployment-scenarios)
-  - [Single Server (All Services)](#scenario-1-single-server-all-services)
-  - [Container Services (DigitalOcean, etc.)](#scenario-2-container-services)
-  - [Platform Only](#scenario-3-platform-only)
-  - [Portal Only](#scenario-4-portal-only)
-  - [Two Servers (Distributed)](#scenario-5-two-servers-distributed)
+- [Choosing a Deployment Method](#choosing-a-deployment-method)
+- [Deployment Options](#deployment-options)
+  - [Option 1: Native Single Server](#option-1-native-single-server)
+  - [Option 2: Docker Single Server](#option-2-docker-single-server)
+  - [Option 3: Container Service](#option-3-container-service)
+  - [Option 4: Docker Platform Only](#option-4-docker-platform-only)
+  - [Option 5: Docker Portal Only](#option-5-docker-portal-only)
+  - [Option 6: Two Servers (Distributed)](#option-6-two-servers-distributed)
 - [Using Ansible](#ansible-deployments)
 - [Database Operations](#database-operations)
 - [Rollback Procedures](#rollback-procedures)
@@ -20,28 +21,130 @@ This guide covers all deployment scenarios for PRAHO, from single-server setups 
 
 ---
 
-## Quick Start
+## Choosing a Deployment Method
 
-```bash
-# 1. Clone repository
-git clone https://github.com/captainpragmatic/PRAHO.git
-cd PRAHO
+| Method | Stack | RAM | Complexity | Management |
+|--------|-------|-----|------------|------------|
+| **Native** | Gunicorn + systemd + Caddy | 2 GB+ | Low | `systemctl`, `journalctl` |
+| **Docker** | Docker Compose + Caddy | 4 GB+ | Medium | `docker compose`, `docker logs` |
+| **Container Service** | ECS / Cloud Run / App Platform | Varies | High | Platform-specific CLI |
 
-# 2. Copy and configure environment
-cp .env.example .env
-# Edit .env with your settings
+**Native** is the simplest option for a single VPS — no Docker overhead, direct systemd control, and easy debugging with `journalctl`. Start here if you have a single Ubuntu server.
 
-# 3. Deploy (single server with all services)
-make deploy-single-server
-```
+**Docker** provides reproducible builds and easier horizontal scaling. Use this if you already run Docker infrastructure or want identical dev/prod environments.
+
+**Container Service** is for managed cloud platforms with auto-scaling, built-in load balancing, and managed databases.
 
 ---
 
-## Deployment Scenarios
+## Deployment Options
 
-### Scenario 1: Single Server (All Services)
+### Option 1: Native Single Server
 
-Deploy Platform, Portal, PostgreSQL, and Caddy on a single server. Best for small to medium deployments.
+Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. No Docker required. Automated via Ansible.
+
+**Architecture:**
+```
+┌──────────────────────────────────────────────────┐
+│                  Ubuntu Server                    │
+│                                                   │
+│  ┌─────────┐  ┌───────────────┐  ┌──────────┐   │
+│  │  Caddy  │──│ praho-platform│──│ Postgres │   │
+│  │  :80    │  │  (Gunicorn)   │  │   15     │   │
+│  │  :443   │  │  :8700        │  │  :5432   │   │
+│  │         │  └───────────────┘  └──────────┘   │
+│  │         │  ┌───────────────┐                  │
+│  │         │──│ praho-portal  │                  │
+│  │         │  │  (Gunicorn)   │                  │
+│  │         │  │  :8701        │                  │
+│  └─────────┘  └───────────────┘                  │
+│               ┌───────────────┐                  │
+│               │praho-qcluster │                  │
+│               │  (Django-Q2)  │                  │
+│               └───────────────┘                  │
+└──────────────────────────────────────────────────┘
+```
+
+**What it installs:**
+- PostgreSQL 15 (from official APT repo)
+- Python 3.13 (from deadsnakes PPA)
+- uv (Python package manager)
+- Caddy (automatic HTTPS via Let's Encrypt)
+- 3 systemd services: `praho-platform`, `praho-portal`, `praho-qcluster`
+- Backup cron job (daily at 2:00 AM)
+
+**Prerequisites:**
+- Ubuntu 22.04+ (required for deadsnakes PPA)
+- Ansible installed on your local machine
+- A domain with DNS pointing to your server
+
+**Deploy:**
+```bash
+# Install Ansible and required collections
+pip install ansible
+ansible-galaxy collection install community.postgresql
+
+# Configure your server
+cd deploy/ansible
+cp inventory/single-server.yml.example inventory/single-server.yml
+# Edit inventory with your server IP
+
+# Set required variables
+export PRAHO_SERVER_IP=your-server-ip
+export PRAHO_DOMAIN=praho.example.com
+export PRAHO_DB_PASSWORD=secure-password
+export PRAHO_SECRET_KEY=your-secret-key
+export PRAHO_ACME_EMAIL=admin@example.com
+
+# Run the native playbook
+ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml \
+  -e praho_role=praho-native
+```
+
+**Management commands:**
+```bash
+# Service status
+systemctl status praho-platform praho-portal praho-qcluster
+
+# View logs (live)
+journalctl -u praho-platform -f
+journalctl -u praho-portal -f
+journalctl -u praho-qcluster -f
+
+# Restart a service
+sudo systemctl restart praho-platform
+
+# Health check
+/opt/praho/scripts/health-check.sh
+
+# Manual backup
+/opt/praho/scripts/backup.sh
+
+# Restore from backup
+/opt/praho/scripts/restore.sh --latest
+```
+
+**Caveats:**
+- Ubuntu-only (relies on deadsnakes PPA for Python 3.13)
+- Single-server only — no built-in horizontal scaling
+- Manual scaling requires adjusting Gunicorn workers in Ansible vars
+
+**Tuning (Ansible variables):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `gunicorn_workers_platform` | 2 | Platform Gunicorn workers |
+| `gunicorn_workers_portal` | 1 | Portal Gunicorn workers |
+| `qcluster_workers` | 2 | Django-Q2 background workers |
+| `platform_memory_max` | 1G | systemd memory limit (platform) |
+| `portal_memory_max` | 512M | systemd memory limit (portal) |
+| `deploy_method` | rsync | `rsync` (dev) or `git` (prod) |
+
+---
+
+### Option 2: Docker Single Server
+
+Deploy Platform, Portal, PostgreSQL, and Caddy in Docker containers on a single server. Best for teams already using Docker.
 
 **Architecture:**
 ```
@@ -80,7 +183,7 @@ make deploy-single-server
 
 ---
 
-### Scenario 2: Container Services
+### Option 3: Container Service
 
 For managed container platforms like DigitalOcean App Platform, AWS ECS, or Google Cloud Run.
 
@@ -113,7 +216,7 @@ PLATFORM_API_BASE_URL=https://platform.praho.example.com/api
 
 ---
 
-### Scenario 3: Platform Only
+### Option 4: Docker Platform Only
 
 Deploy just the Platform service (admin, API, business logic).
 
@@ -136,7 +239,7 @@ docker compose -f deploy/docker-compose.platform-only.yml --profile full up -d
 
 ---
 
-### Scenario 4: Portal Only
+### Option 5: Docker Portal Only
 
 Deploy just the Portal service (customer-facing).
 
@@ -159,7 +262,7 @@ docker compose -f deploy/docker-compose.portal-only.yml --profile with-caddy up 
 
 ---
 
-### Scenario 5: Two Servers (Distributed)
+### Option 6: Two Servers (Distributed)
 
 Platform + DB on primary server, Portal on secondary server.
 
@@ -209,7 +312,7 @@ ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
 pip install ansible
 
 # Install required collections
-ansible-galaxy collection install community.docker
+ansible-galaxy collection install community.docker community.postgresql
 ```
 
 ### Single Server Deployment
@@ -224,7 +327,10 @@ export PRAHO_DB_PASSWORD=secure-password
 export PRAHO_SECRET_KEY=your-secret-key
 export PRAHO_ACME_EMAIL=admin@example.com
 
-# Run playbook
+# Native (no Docker)
+ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml -e praho_role=praho-native
+
+# Docker-based
 ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
 ```
 
@@ -269,6 +375,9 @@ make backup
 
 # List existing backups
 ./deploy/scripts/backup.sh --list
+
+# Native deployment
+/opt/praho/scripts/backup.sh
 ```
 
 Backups are stored in `./backups/` with format: `praho_backup_YYYYMMDD_HHMMSS.sql.gz`
@@ -287,6 +396,9 @@ Backups are stored in `./backups/` with format: `praho_backup_YYYYMMDD_HHMMSS.sq
 
 # Using make
 make restore
+
+# Native deployment
+/opt/praho/scripts/restore.sh --latest
 ```
 
 ### Backup Retention
@@ -417,18 +529,27 @@ make health-check
 # Manual checks
 curl http://localhost:8700/health/
 curl http://localhost:8701/health/
+
+# Native deployment
+/opt/praho/scripts/health-check.sh
+systemctl status praho-platform praho-portal praho-qcluster
 ```
 
 ### View Logs
 
 ```bash
-# All services
+# Docker: all services
 docker compose -f deploy/docker-compose.single-server.yml logs -f
 
-# Specific service
+# Docker: specific service
 docker logs praho_platform -f
 docker logs praho_portal -f
 docker logs praho_db -f
+
+# Native: systemd journal
+journalctl -u praho-platform -f
+journalctl -u praho-portal -f
+journalctl -u praho-qcluster -f
 
 # Using make
 make deploy-logs
@@ -438,19 +559,24 @@ make deploy-logs
 
 **1. Database connection failed**
 ```bash
-# Check if database is running
+# Docker
 docker ps | grep praho_db
-
-# Check database logs
 docker logs praho_db
+
+# Native
+systemctl status postgresql
+journalctl -u postgresql -n 50
 
 # Verify DATABASE_URL is correct
 ```
 
 **2. SSL/HTTPS not working**
 ```bash
-# Check Caddy logs
+# Docker
 docker logs praho_caddy
+
+# Native
+journalctl -u caddy -f
 
 # Verify domain DNS is correct
 dig your-domain.com
@@ -463,17 +589,22 @@ dig your-domain.com
 # Verify PLATFORM_API_BASE_URL
 echo $PLATFORM_API_BASE_URL
 
-# Test connectivity from portal container
+# Docker
 docker exec praho_portal curl http://platform:8700/health/
+
+# Native
+curl http://localhost:8700/health/
 ```
 
 **4. Health checks failing**
 ```bash
-# Check container status
+# Docker
 docker ps -a
-
-# Restart unhealthy service
 docker restart praho_platform
+
+# Native
+systemctl restart praho-platform
+journalctl -u praho-platform --since "5 minutes ago"
 ```
 
 ### Emergency Procedures
@@ -481,16 +612,18 @@ docker restart praho_platform
 **Quick rollback to last known good state:**
 ```bash
 # 1. Stop current services
-make deploy-stop
+make deploy-stop                    # Docker
+sudo systemctl stop praho-platform praho-portal praho-qcluster  # Native
 
 # 2. Restore database
 make rollback-db
 
 # 3. Deploy previous version
-make rollback VERSION=v1.0.0
+make rollback VERSION=v1.0.0        # Docker
+# Native: re-run Ansible with previous git tag
 ```
 
-**Complete reset:**
+**Complete reset (Docker):**
 ```bash
 # Stop and remove all containers
 docker compose -f deploy/docker-compose.single-server.yml down -v
@@ -524,7 +657,7 @@ deploy/
 │   ├── backup.sh                      # Database backup
 │   ├── restore.sh                     # Database restore
 │   ├── rollback.sh                    # Version/DB rollback
-│   └── health-check.sh                # Health check script
+│   └── health-check.sh               # Health check script
 └── ansible/
     ├── inventory/
     │   ├── single-server.yml          # Single server hosts
@@ -539,5 +672,10 @@ deploy/
     └── roles/
         ├── common/                    # Base server setup
         ├── docker/                    # Docker installation
-        └── praho/                     # Application deployment
+        ├── praho/                     # Docker-based deployment
+        └── praho-native/              # Native deployment (systemd + Gunicorn)
+            ├── defaults/main.yml      # Tunable variables
+            ├── handlers/main.yml      # Service restart handlers
+            ├── tasks/main.yml         # 11-step deployment
+            └── templates/             # systemd units, Caddyfile, scripts
 ```

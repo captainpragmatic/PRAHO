@@ -64,8 +64,8 @@ services/
 
 - **Python 3.13+**
 - **[uv](https://docs.astral.sh/uv/)** - Python package manager (used for workspace management)
-- **PostgreSQL 16+** (production) or SQLite (development)
 - **Git**
+- **Node.js** (optional, only if modifying CSS)
 
 ### Installation
 
@@ -78,8 +78,9 @@ cd PRAHO
 make install
 
 # 3. Configure environment
-cp .env.example .env
-# Edit .env with your settings (database, encryption keys, etc.)
+cp .env.example.dev .env
+# Edit .env — generate the encryption keys noted in the file
+# For production config, see .env.example
 
 # 4. Set up database and load sample data
 make migrate
@@ -93,7 +94,9 @@ Visit:
 - **Platform**: http://localhost:8700 (staff interface)
 - **Portal**: http://localhost:8701 (customer API)
 
-**Test credentials**: `admin@example.com` / `admin123`
+**Test credentials**: `admin@pragmatichost.com` / `admin123`
+
+> **Using PostgreSQL instead of SQLite?** Run `make docker-dev` to start Platform + Portal + PostgreSQL in Docker containers with hot reload.
 
 ## Development Commands
 
@@ -104,6 +107,7 @@ All commands run from project root via Makefile:
 make dev               # Start both services
 make dev-platform      # Platform only (:8700)
 make dev-portal        # Portal only (:8701)
+make docker-dev        # Development with PostgreSQL (Docker)
 
 # Testing
 make test              # Run ALL tests (platform + portal + integration)
@@ -121,11 +125,6 @@ make pre-commit        # Run all pre-commit hooks
 # Database
 make migrate           # Run platform migrations
 make fixtures          # Load sample data
-
-# Docker deployment
-make docker-build      # Build service images
-make docker-dev        # Start dev environment
-make docker-prod       # Start production services
 ```
 
 ## Configuration
@@ -172,6 +171,20 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 See `.env.example` for the complete list with documentation.
 
+## Production Deployment
+
+PRAHO supports three deployment methods. Choose based on your infrastructure:
+
+| Method | Stack | Best For | Requirements |
+|--------|-------|----------|--------------|
+| **[Native](docs/deployment/DEPLOYMENT.md#option-1-native-single-server)** | Gunicorn + systemd + Caddy | Small VPS (4 GB+), lowest overhead | Ubuntu 22.04+, Ansible |
+| **[Docker](docs/deployment/DEPLOYMENT.md#option-2-docker-single-server)** | Docker Compose + Caddy | Standard deployments, reproducible builds | Docker, Docker Compose |
+| **[Container Service](docs/deployment/DEPLOYMENT.md#option-3-container-service)** | Managed platform (ECS, Cloud Run) | Scalable cloud deployments | Container registry, managed DB |
+
+All methods include automatic HTTPS (Caddy/Let's Encrypt), database backups, health checks, and rollback support.
+
+> **Full guide:** [Deployment Guide](docs/deployment/DEPLOYMENT.md) — includes multi-server setups, Ansible automation, backup/restore, and troubleshooting.
+
 ## Tech Stack
 
 - **Backend**: Django 5.2, Python 3.13+
@@ -180,7 +193,7 @@ See `.env.example` for the complete list with documentation.
 - **Package Management**: [uv](https://docs.astral.sh/uv/) (workspace)
 - **Code Quality**: Ruff (linting/formatting), MyPy (type checking)
 - **Testing**: Django test runner + pytest, Playwright (E2E)
-- **Deployment**: Docker, Ansible, Terraform (in `deploy/` and `services/platform/infrastructure/`)
+- **Deployment**: Native (systemd + Gunicorn), Docker, Ansible (in `deploy/`)
 
 ## VAT & Romanian Compliance
 
@@ -208,10 +221,10 @@ PRAHO is built for Romanian hosting providers with **full EU VAT support**:
 
 ## Documentation
 
-- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design and patterns
+- **[Architecture Guide](docs/architecture/ARCHITECTURE.md)** - System design and patterns
 - **[Architecture Diagrams](docs/architecture/)** - Mermaid diagrams (system, data flow, deployment)
-- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment scenarios
-- **[Linting Guide](docs/LINTING_GUIDE.md)** - Code quality framework
+- **[Deployment Guide](docs/deployment/DEPLOYMENT.md)** - Production deployment scenarios
+- **[Linting Guide](docs/development/LINTING_GUIDE.md)** - Code quality framework
 - **[Changelog](CHANGELOG.md)** - Version history (SemVer)
 - **[ADRs](docs/ADRs/)** - Architecture decision records
 
