@@ -28,6 +28,7 @@ from .services import (
     HMACPriceSealer,
     OrderCreationService,
 )
+from .validators import OrderInputValidator
 
 logger = logging.getLogger(__name__)
 MINI_CART_MAX_ITEMS = 3
@@ -246,9 +247,16 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
     try:
         # Get form data
         product_slug = request.POST.get("product_slug", "").strip()
-        quantity = int(request.POST.get("quantity", 1))
         billing_period = request.POST.get("billing_period", "monthly")
         domain_name = request.POST.get("domain_name", "").strip()
+
+        # 🔒 SECURITY: Validate inputs before processing (fail-fast on bad data)
+        try:
+            quantity = OrderInputValidator.validate_quantity(request.POST.get("quantity", 1))
+            billing_period = OrderInputValidator.validate_billing_period(billing_period)
+        except ValidationError as e:
+            OrderSecurityHardening.uniform_response_delay()
+            return JsonResponse({"error": str(e.message)}, status=400)
 
         # Parse configuration from JSON if provided
         config_json = request.POST.get("config", "{}")
@@ -303,14 +311,23 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
 
     except ValidationError as e:
         logger.warning(f"⚠️ [Cart] Validation error: {e}")
-        return render(request, "orders/partials/error_message.html", {"error": str(e)}, status=400)
+        return render(
+            request,
+            "orders/partials/cart_error_notification.html",
+            {"error": str(e), "cart_count": 0, "cart_total_quantity": 0},
+            status=200,
+        )
     except Exception as e:
         logger.error(f"🔥 [Cart] Unexpected error adding to cart: {e}")
         return render(
             request,
-            "orders/partials/error_message.html",
-            {"error": _("Eroare la adăugarea în coș. Vă rugăm încercați din nou.")},
-            status=500,
+            "orders/partials/cart_error_notification.html",
+            {
+                "error": _("Eroare la adăugarea în coș. Vă rugăm încercați din nou."),
+                "cart_count": 0,
+                "cart_total_quantity": 0,
+            },
+            status=200,
         )
 
 
@@ -371,11 +388,11 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         )
 
     except ValidationError as e:
-        return render(request, "orders/partials/error_message.html", {"error": str(e)}, status=400)
+        return render(request, "orders/partials/cart_empty.html", {"error": str(e)}, status=200)
     except Exception as e:
         logger.error(f"🔥 [Cart] Error updating cart item: {e}")
         return render(
-            request, "orders/partials/error_message.html", {"error": _("Eroare la actualizarea coșului.")}, status=500
+            request, "orders/partials/cart_empty.html", {"error": _("Eroare la actualizarea coșului.")}, status=200
         )
 
 
@@ -435,11 +452,11 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         )
 
     except ValidationError as e:
-        return render(request, "orders/partials/error_message.html", {"error": str(e)}, status=400)
+        return render(request, "orders/partials/cart_empty.html", {"error": str(e)}, status=200)
     except Exception as e:
         logger.error(f"🔥 [Cart] Error removing from cart: {e}")
         return render(
-            request, "orders/partials/error_message.html", {"error": _("Eroare la eliminarea din coș.")}, status=500
+            request, "orders/partials/cart_empty.html", {"error": _("Eroare la eliminarea din coș.")}, status=200
         )
 
 
@@ -546,12 +563,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
 
         if not user_id:
             logger.error(f"🔥 [Cart] Missing user_id parameter - user_id: {user_id}")
-            return render(
-                request,
-                "orders/partials/error_message.html",
-                {"error": _("Authentication error. Please refresh the page.")},
-                status=400,
-            )
+            return render(request, "orders/partials/cart_empty.html", status=400)
 
         if not cart.has_items():
             return render(request, "orders/partials/cart_empty.html")
@@ -574,12 +586,11 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
         )
 
     except ValidationError as e:
-        return render(request, "orders/partials/error_message.html", {"error": str(e)}, status=400)
+        logger.warning(f"⚠️ [Cart] Validation error in calculate_totals: {e}")
+        return render(request, "orders/partials/cart_empty.html", status=400)
     except Exception as e:
         logger.error(f"🔥 [Cart] Calculation error: {e}")
-        return render(
-            request, "orders/partials/error_message.html", {"error": _("Eroare la calcularea totalurilor.")}, status=500
-        )
+        return render(request, "orders/partials/cart_empty.html", status=500)
 
 
 @require_customer_authentication

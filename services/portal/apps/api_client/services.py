@@ -33,6 +33,8 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 
+from apps.common.outbound_http import portal_request
+
 # HTTP status code constants
 HTTP_OK = 200
 HTTP_MULTIPLE_CHOICES = 300
@@ -125,6 +127,7 @@ class PlatformAPIClient:
     def _build_url(self, endpoint: str) -> str:
         base_url = self.base_url.rstrip("/")
 
+        # Upgrade http:// to https:// in production — portal_request() enforces this as a safety net.
         allow_insecure_http = bool(getattr(settings, "PLATFORM_API_ALLOW_INSECURE_HTTP", False))
         if not settings.DEBUG and not allow_insecure_http and base_url.startswith("http://"):
             base_url = f"https://{base_url[len('http://') :]}"
@@ -291,7 +294,7 @@ class PlatformAPIClient:
 
         try:
             for attempt in range(max_retries + 1):
-                response = requests.request(
+                response = portal_request(
                     method=method,
                     url=url,
                     headers=headers,
@@ -388,7 +391,7 @@ class PlatformAPIClient:
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
-            response = requests.request(
+            response = portal_request(
                 method=method,
                 url=url,
                 headers=headers,
@@ -421,7 +424,7 @@ class PlatformAPIClient:
         headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
 
         try:
-            response = requests.request(
+            response = portal_request(
                 method=method,
                 url=url,
                 headers=headers,

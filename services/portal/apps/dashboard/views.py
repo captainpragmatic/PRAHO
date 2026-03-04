@@ -9,36 +9,15 @@ from typing import Any
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
+from apps.common.api_utils import DictAsObj
 from apps.services.services import ServicesAPIClient
 from apps.tickets.services import TicketFilters, TicketsAPIClient
 
 logger = logging.getLogger(__name__)
-
-
-class DictAsObj:
-    """Simple wrapper to allow dot notation access on dictionaries for Django templates"""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        for key, value in data.items():
-            if isinstance(value, dict):
-                setattr(self, key, DictAsObj(value))
-            elif key in ("created_at", "updated_at") and isinstance(value, str):
-                # Parse datetime strings for Django template date filters
-                parsed_date = parse_datetime(value)
-                if parsed_date:
-                    if timezone.is_naive(parsed_date):
-                        parsed_date = timezone.make_aware(parsed_date)
-                    setattr(self, key, parsed_date)
-                else:
-                    setattr(self, key, value)
-            else:
-                setattr(self, key, value)
 
 
 def _get_billing_data(

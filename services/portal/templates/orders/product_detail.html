@@ -6,6 +6,8 @@
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
   {% include "orders/partials/order_breadcrumbs.html" with current_step="products" %}
+  {# Cart widget placeholder — required as hx-target for add_to_cart HTMX swap #}
+  <div id="cart-widget" class="hidden"></div>
 
   <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
     <div class="p-6 border-b border-slate-700">
@@ -41,8 +43,8 @@
               </select>
             </div>
             <div class="mb-3">
-              <label class="block text-sm text-slate-300 mb-1">{% trans "Quantity" %}</label>
-              <input type="number" name="quantity" value="1" min="1" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
+              <label for="id_quantity" class="block text-sm text-slate-300 mb-1">{% trans "Quantity" %}</label>
+              <input type="number" name="quantity" id="id_quantity" value="1" min="1" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
             </div>
             {% if product.requires_domain %}
             <div class="mb-4">

@@ -42,8 +42,8 @@ class CartServiceProductIdTestCase(SimpleTestCase):
         return mock_instance
 
     @patch('apps.orders.services.PlatformAPIClient')
-    def test_add_item_stores_product_id_from_api(self, mock_cls: MagicMock) -> None:
-        """add_item() records product_id from the platform response in the cart item."""
+    def test_add_item_omits_product_id_uses_slug(self, mock_cls: MagicMock) -> None:
+        """add_item() intentionally omits product_id; product_slug is the stable identifier."""
         mock_cls.return_value = self._make_mock_api(product_id='prod-uuid-001')
 
         cart = GDPRCompliantCartSession(self.session)
@@ -55,8 +55,9 @@ class CartServiceProductIdTestCase(SimpleTestCase):
 
         items = cart.get_items()
         self.assertEqual(len(items), 1)
-        self.assertIn('product_id', items[0])
-        self.assertEqual(items[0]['product_id'], 'prod-uuid-001')
+        # product_id is intentionally NOT stored — slug is the public identifier
+        self.assertNotIn('product_id', items[0])
+        self.assertEqual(items[0]['product_slug'], 'shared-hosting-basic')
 
     @patch('apps.orders.services.PlatformAPIClient')
     def test_add_item_stores_product_slug(self, mock_cls: MagicMock) -> None:
@@ -74,8 +75,8 @@ class CartServiceProductIdTestCase(SimpleTestCase):
         self.assertEqual(items[0]['product_slug'], 'shared-hosting-basic')
 
     @patch('apps.orders.services.PlatformAPIClient')
-    def test_add_item_product_id_is_integer(self, mock_cls: MagicMock) -> None:
-        """add_item() stores integer product_id (as returned by real platform API)."""
+    def test_add_item_get_api_items_defaults_product_id(self, mock_cls: MagicMock) -> None:
+        """get_api_items() returns empty string for product_id when not stored in cart."""
         mock_cls.return_value = self._make_mock_api(product_id=42)
 
         cart = GDPRCompliantCartSession(self.session)
@@ -85,8 +86,9 @@ class CartServiceProductIdTestCase(SimpleTestCase):
             billing_period='monthly',
         )
 
-        items = cart.get_items()
-        self.assertEqual(items[0]['product_id'], 42)
+        api_items = cart.get_api_items()
+        # product_id defaults to "" because add_item intentionally omits it
+        self.assertEqual(api_items[0]['product_id'], '')
 
 
 @override_settings(

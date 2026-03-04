@@ -363,18 +363,36 @@ class TestOrderViewsSecurity(SimpleTestCase):
         pass  # Placeholder for rate limiting integration test
 
     def test_input_validation_and_sanitization(self):
-        """Test input validation and sanitization"""
+        """Test that malicious/invalid input is rejected with 400 before processing.
+
+        Security context:
+        - add_to_cart is an HTMX endpoint (returns HTML partials, not full pages).
+        - HTMX by default ignores non-2xx responses (swaps nothing), so returning
+          400 for bad input is the correct behavior: the UI stays unchanged AND the
+          server signals the error to monitoring/logging.
+        - Previously, invalid input (e.g. quantity='invalid') caused a ValueError
+          caught by a broad `except Exception`, which returned 200 with an error
+          partial. This masked input validation failures as successful responses,
+          defeating security monitoring and making the endpoint accept any garbage.
+        - Fix: the view now validates quantity and billing_period via
+          OrderInputValidator BEFORE cart processing, returning 400 on failure.
+          This follows the "fail fast, loud & logged" golden rule.
+        """
         session = self.client.session
         session['customer_id'] = 123
         session['user_id'] = 456
         session.save()
 
-        # Test with malicious input
+        # Malicious input: XSS in slug, non-integer quantity, invalid billing period.
+        # The view should reject this at the validation layer (400), not silently
+        # swallow the ValueError in a broad except clause (200).
         response = self.client.post('/order/cart/add/', {
             'product_slug': '<script>alert("xss")</script>',
             'quantity': 'invalid',
             'billing_period': 'invalid_period'
         })
 
-        # Should handle gracefully without XSS or errors
-        self.assertIn(response.status_code, [400, 403, 500])  # Error response
+        # 400 = input validation rejected the request (OrderInputValidator).
+        # 403 = authentication/authorization blocked it.
+        # 500 = unexpected server error (still preferable to silent 200).
+        self.assertIn(response.status_code, [400, 403, 500])

@@ -12,6 +12,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
+from apps.common.api_utils import DictAsObj
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.services.services import services_api
 
@@ -86,7 +87,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         # Get tickets from platform API
         response = tickets_api.get_customer_tickets(customer_id=customer_id, user_id=user_id, filters=filters)
 
-        tickets = response.get("results", [])
+        tickets = [DictAsObj(t) for t in response.get("results", [])]
         total_count = response.get("count", 0)
 
         # Get summary for header stats
@@ -422,7 +423,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
             ),
         )
 
-        tickets = response.get("results", [])
+        tickets = [DictAsObj(t) for t in response.get("results", [])]
         total_count = response.get("count", 0)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=25)
@@ -476,7 +477,7 @@ def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
 
         # Get recent tickets (last 5)
         response = tickets_api.get_customer_tickets(customer_id, user_id, filters=TicketFilters(page=1))
-        recent_tickets = response.get("results", [])[:5]
+        recent_tickets = [DictAsObj(t) for t in response.get("results", [])[:5]]
 
         context = {
             "summary": summary,

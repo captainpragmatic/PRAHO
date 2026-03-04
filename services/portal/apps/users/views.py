@@ -1105,9 +1105,12 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
                     messages.success(request, _("Company profile updated successfully!"))
 
                     # Handle redirect based on 'next' parameter for order flow continuity
-                    next_url = request.GET.get("next") or request.POST.get(
+                    # SECURITY: "next" is a redirect URL param validated by url_has_allowed_host_and_scheme()
+                    next_url = request.GET.get(
                         "next"
-                    )  # nosemgrep: django-using-request-post-after-is-valid — redirect param, not form field
+                    ) or request.POST.get(  # nosemgrep: django-using-request-post-after-is-valid
+                        "next"
+                    )
                     if next_url and url_has_allowed_host_and_scheme(
                         url=next_url,
                         allowed_hosts={request.get_host()},

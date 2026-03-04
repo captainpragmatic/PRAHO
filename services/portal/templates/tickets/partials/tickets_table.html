@@ -93,7 +93,7 @@
             </div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {{ ticket.created_at|date:"d.m.Y"|default:ticket.date_created|date:"d.m.Y"|default:ticket.timestamp|date:"d.m.Y"|default:ticket.created|date:"d.m.Y"|default:"—" }}
+            {{ ticket.created_at|date:"d.m.Y"|default:"—" }}
           </td>
         </tr>
         {% endfor %}
@@ -159,7 +159,7 @@
     </div>
     <div class="flex items-center justify-between text-sm">
       <span class="text-slate-400">
-        {{ ticket.created_at|date:"d.m.Y"|default:ticket.date_created|date:"d.m.Y"|default:ticket.timestamp|date:"d.m.Y"|default:ticket.created|date:"d.m.Y"|default:"—" }}
+        {{ ticket.created_at|date:"d.m.Y"|default:"—" }}
       </span>
     </div>
   </div>

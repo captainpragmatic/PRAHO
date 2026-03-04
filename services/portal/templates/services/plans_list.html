@@ -161,7 +161,7 @@
 
         {% if plan.setup_fee %}
         <p class="text-xs text-slate-400 text-center">
-          {% blocktrans %}Setup fee: {{ plan.setup_fee }} RON{% endblocktrans %}
+          {% filter force_escape %}{% blocktrans %}Setup fee: {{ plan.setup_fee }} RON{% endblocktrans %}{% endfilter %}
         </p>
         {% endif %}
       </div>
