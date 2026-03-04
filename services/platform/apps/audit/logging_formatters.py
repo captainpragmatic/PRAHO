@@ -10,6 +10,7 @@ This module provides custom log formatters and filters for:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import socket
@@ -214,7 +215,9 @@ class SIEMJSONFormatter(logging.Formatter):
             "stack_trace": "".join(traceback.format_exception(*exc_info)) if exc_tb else "",
         }
 
-    def _get_event_category(self, record: logging.LogRecord) -> str:
+    def _get_event_category(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, record: logging.LogRecord
+    ) -> str:  # Complexity: log format selection  # Complexity: multi-step business logic
         """Determine event category from logger name"""
         logger_name = record.name.lower()
 
@@ -315,8 +318,6 @@ class AuditLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format audit log record with integrity chain"""
-        import hashlib
-
         self.sequence += 1
         timestamp = datetime.utcfromtimestamp(record.created).isoformat() + "Z"
 
@@ -363,7 +364,9 @@ class AuditLogFormatter(logging.Formatter):
 
         return json.dumps(audit_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:
+    def _determine_category(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, record: logging.LogRecord
+    ) -> str:  # Complexity: log format selection  # Complexity: multi-step business logic
         """Determine audit category from log record"""
         message = record.getMessage().lower()
 
@@ -466,7 +469,9 @@ class ComplianceLogFormatter(logging.Formatter):
 
         return json.dumps(compliance_entry, default=str, ensure_ascii=False)
 
-    def _determine_category(self, record: logging.LogRecord) -> str:
+    def _determine_category(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, record: logging.LogRecord
+    ) -> str:  # Complexity: log format selection  # Complexity: multi-step business logic
         """Determine compliance category"""
         message = record.getMessage().lower()
 

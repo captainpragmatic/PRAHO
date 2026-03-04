@@ -182,7 +182,9 @@ def generate_invoice_number(year: int | None = None) -> str:
         year = get_romanian_now().year
 
     # Format: YYYY-000001 (sequential per year)
-    from apps.billing.models import Invoice  # Cross-app import to avoid circular dependencies
+    from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        Invoice,  # Cross-app import to avoid circular dependencies  # Circular: cross-app
+    )
 
     # Get next invoice number for this year
     last_invoice = Invoice.objects.filter(number__startswith=f"{year}-").order_by("number").last()
@@ -244,8 +246,10 @@ def maintenance_mode_check(view_func: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         if getattr(settings, "MAINTENANCE_MODE", False) and not request.user.is_staff:
             return HttpResponse(
-                _("System is under maintenance. Please try again later."), status=503
-            )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
+                _("System is under maintenance. Please try again later."),
+                status=503,
+                content_type="text/plain",
+            )
         return view_func(request, *args, **kwargs)
 
     return wrapper

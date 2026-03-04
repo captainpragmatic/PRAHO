@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Final
 
@@ -388,8 +389,6 @@ class FileIntegrityMonitoringService:
 
     def _is_excluded(self, relative_path: str) -> bool:
         """Check if a path should be excluded."""
-        from fnmatch import fnmatch
-
         return any(fnmatch(relative_path, pattern) for pattern in self.config.exclude_patterns)
 
     def _get_file_severity(self, relative_path: str) -> FileSeverity:

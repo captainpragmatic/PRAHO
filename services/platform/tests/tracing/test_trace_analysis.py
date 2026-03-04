@@ -28,7 +28,7 @@ from apps.common.logging import (
     MethodTracer,
     PerformanceProfiler,
     QueryBudget,
-    QueryBudgetExceeded,
+    QueryBudgetExceededError,
     QueryTracer,
     RequestIDFilter,
     RuntimeAnalyzer,
@@ -170,18 +170,16 @@ class TestQueryTracer:
         """Test that query budget raises exception when exceeded."""
         budget = QueryBudget(max_queries=1, raise_on_exceed=True)
 
-        with pytest.raises(QueryBudgetExceeded):
-            with QueryTracer(budget=budget):
-                # Execute multiple queries to exceed budget
-                list(User.objects.all()[:1])
-                list(User.objects.all()[:1])
+        with pytest.raises(QueryBudgetExceededError), QueryTracer(budget=budget):
+            # Execute multiple queries to exceed budget
+            list(User.objects.all()[:1])
+            list(User.objects.all()[:1])
 
     def test_query_budget_warning_only(self):
         """Test that query budget can warn without raising."""
         budget = QueryBudget(max_queries=1, raise_on_exceed=False, warn_on_exceed=True)
 
-        with patch("apps.common.logging.logger") as mock_logger:
-            with QueryTracer(budget=budget):
+        with patch("apps.common.logging.logger"), QueryTracer(budget=budget):
                 list(User.objects.all()[:1])
                 list(User.objects.all()[:1])
 
@@ -217,8 +215,7 @@ class TestAssertMaxQueries:
 
     def test_fails_when_over_budget(self):
         """Test that exception is raised when over query budget."""
-        with pytest.raises(QueryBudgetExceeded):
-            with assert_max_queries(max_count=1, max_duplicates=0, raise_on_fail=True):
+        with pytest.raises(QueryBudgetExceededError), assert_max_queries(max_count=1, max_duplicates=0, raise_on_fail=True):
                 list(User.objects.all()[:1])
                 list(User.objects.all()[:1])
                 list(User.objects.all()[:1])

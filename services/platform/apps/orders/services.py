@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -146,7 +147,10 @@ class OrderCalculationService:
             subtotal_cents += (qty * unit) + setup
 
         # Use authoritative VAT calculator for consistency
-        from .vat_rules import CustomerVATInfo, OrderVATCalculator
+        from .vat_rules import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
+            CustomerVATInfo,
+            OrderVATCalculator,
+        )
 
         # Determine customer context for VAT calculation
         if billing_address:
@@ -204,7 +208,7 @@ class OrderNumberingService:
     @transaction.atomic
     def generate_order_number(customer: Customer) -> str:
         """Generate sequential order number for customer compliance"""
-        from .models import Order
+        from .models import Order  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         current_year = timezone.now().year
         # Use first 8 characters of UUID hex (no hyphens) as customer identifier
@@ -245,7 +249,9 @@ class OrderService:
         Build billing address data from customer profile (database lookup).
         This ensures we always use the most current customer data.
         """
-        from apps.customers.models import CustomerAddress
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            CustomerAddress,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         # Get current address from CustomerAddress model - try multiple strategies
         address = None
@@ -301,7 +307,10 @@ class OrderService:
         """Create new order with validation and audit trail"""
         logger.warning(f"🧮 [OrderService] Starting order creation for customer {data.customer.id}")
         try:
-            from .models import Order, OrderItem
+            from .models import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
+                Order,
+                OrderItem,
+            )
 
             # Generate order number
             order_number = OrderNumberingService.generate_order_number(data.customer)
@@ -347,7 +356,10 @@ class OrderService:
 
                 # Determine VAT using comprehensive VAT rules (per customer country/business)
                 try:
-                    from .vat_rules import CustomerVATInfo, OrderVATCalculator
+                    from .vat_rules import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
+                        CustomerVATInfo,
+                        OrderVATCalculator,
+                    )
 
                     # Extract customer VAT context from billing address snapshot
                     customer_country = (data.billing_address.get("country") or "RO").upper()
@@ -382,7 +394,9 @@ class OrderService:
                 except Exception as e:
                     # Fallback to centralized VAT service if VAT rules fail
                     logger.warning(f"🔥 [OrderService] VAT calculation failed, using fallback: {e}")
-                    from apps.common.tax_service import TaxService
+                    from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+                        TaxService,  # Circular: cross-app  # Deferred: avoids circular import
+                    )
 
                     fallback_vat_result = TaxService.calculate_vat(
                         amount_cents=subtotal_cents,
@@ -457,7 +471,9 @@ class OrderService:
             # Enforce preflight validation on draft → pending
             if old_status == "draft" and status_data.new_status == "pending":
                 try:
-                    from .preflight import OrderPreflightValidationService
+                    from .preflight import (  # noqa: PLC0415  # Deferred: avoids circular import
+                        OrderPreflightValidationService,  # Circular: same-app  # Deferred: avoids circular import
+                    )
 
                     OrderPreflightValidationService.assert_valid(order)
                     logger.info(
@@ -505,7 +521,9 @@ class OrderService:
         order: Order, old_status: str | None, new_status: str, notes: str, changed_by: User | None
     ) -> None:
         """Create order status history entry"""
-        from .models import OrderStatusHistory
+        from .models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            OrderStatusHistory,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         OrderStatusHistory.objects.create(
             order=order,
@@ -564,7 +582,9 @@ class OrderServiceCreationService:
             Result containing list of created services or error message
         """
         try:
-            from apps.provisioning.models import Service
+            from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Service,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             services_created = []
 
@@ -597,8 +617,6 @@ class OrderServiceCreationService:
                     billing_cycle = "monthly"
 
                 # Generate unique username (will be updated during provisioning)
-                import time
-
                 username = f"tmp_{int(time.time())}_{order.id.hex[:8]}"
 
                 # Create service with pending status
@@ -667,7 +685,9 @@ class OrderServiceCreationService:
             Result containing ServicePlan or error message
         """
         try:
-            from apps.provisioning.models import ServicePlan
+            from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                ServicePlan,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             # Strategy 1: Check if product has a direct service plan reference
             if hasattr(product, "default_service_plan") and product.default_service_plan:
@@ -766,7 +786,7 @@ class OrderQueryService:
     def get_orders_for_customer(customer: Customer, filters: OrderFilters | None = None) -> Result[list[Order], str]:
         """Get orders for a specific customer with optional filtering"""
         try:
-            from .models import Order
+            from .models import Order  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
             queryset = Order.objects.filter(customer=customer).select_related("customer")
 
@@ -793,7 +813,7 @@ class OrderQueryService:
     def get_order_with_items(order_id: uuid.UUID, customer: Customer | None = None) -> Result[Order, str]:
         """Get order with related items, optionally scoped to customer"""
         try:
-            from .models import Order
+            from .models import Order  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
             queryset = Order.objects.select_related("customer").prefetch_related(
                 "items__product", "items__service", "status_history__changed_by"

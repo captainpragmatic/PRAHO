@@ -12,4 +12,4 @@ class UsersConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals and MFA models when the app is ready."""
-        from . import mfa, signals  # noqa: F401 — register WebAuthnCredential model + connect signals
+        from . import mfa, signals  # noqa: F401  # Circular: app registry

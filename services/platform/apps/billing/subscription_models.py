@@ -29,7 +29,10 @@ from django.utils.translation import gettext_lazy as _
 if TYPE_CHECKING:
     pass
 
+from apps.settings.services import SettingsService
+
 from .currency_models import Currency
+from .invoice_models import InvoiceSequence
 from .validators import log_security_event, validate_financial_amount
 
 logger = logging.getLogger(__name__)
@@ -58,8 +61,6 @@ MAX_PAYMENT_RETRY_ATTEMPTS = _DEFAULT_MAX_PAYMENT_RETRY_ATTEMPTS
 def get_subscription_grace_period_days() -> int:
     """Get grace period days from SettingsService (runtime)."""
     try:
-        from apps.settings.services import SettingsService
-
         return max(
             1, SettingsService.get_integer_setting("billing.subscription_grace_period_days", _DEFAULT_GRACE_PERIOD_DAYS)
         )
@@ -70,8 +71,6 @@ def get_subscription_grace_period_days() -> int:
 def get_max_payment_retry_attempts() -> int:
     """Get max payment retry attempts from SettingsService (runtime)."""
     try:
-        from apps.settings.services import SettingsService
-
         return max(
             1,
             SettingsService.get_integer_setting(
@@ -372,6 +371,14 @@ class Subscription(models.Model):
     def __str__(self) -> str:
         return f"{self.subscription_number} - {self.customer} ({self.status})"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Generate subscription number if not set."""
+        if not self.subscription_number:
+            self.subscription_number = self._generate_subscription_number()
+
+        self.clean()
+        super().save(*args, **kwargs)
+
     def clean(self) -> None:
         """Validate subscription data."""
         super().clean()
@@ -393,18 +400,8 @@ class Subscription(models.Model):
         ):
             raise ValidationError(_("Period end must be after period start"))
 
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Generate subscription number if not set."""
-        if not self.subscription_number:
-            self.subscription_number = self._generate_subscription_number()
-
-        self.clean()
-        super().save(*args, **kwargs)
-
     def _generate_subscription_number(self) -> str:
         """Generate unique subscription number."""
-        from .invoice_models import InvoiceSequence
-
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="subscription")
         return sequence.get_next_number("SUB")
 

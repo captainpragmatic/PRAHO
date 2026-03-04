@@ -30,6 +30,10 @@ from .settings import efactura_settings
 if TYPE_CHECKING:
     pass
 
+import inspect
+
+from .settings import ROMANIA_TIMEZONE
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,8 +174,6 @@ class ANAFQuotaTracker:
 
     def _get_reset_time(self) -> str:
         """Get next reset time (midnight Romanian time)."""
-        from .settings import ROMANIA_TIMEZONE
-
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         return tomorrow.isoformat()
@@ -319,8 +321,6 @@ class ANAFQuotaTracker:
 
     def _seconds_until_midnight(self) -> int:
         """Get seconds until midnight Romanian time."""
-        from .settings import ROMANIA_TIMEZONE
-
         now = timezone.now().astimezone(ROMANIA_TIMEZONE)
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         delta = tomorrow - now
@@ -368,8 +368,6 @@ class ANAFQuotaTracker:
                 cui = kwargs.get(cui_param)
                 if cui is None and args:
                     # Try to get from args based on function signature
-                    import inspect
-
                     sig = inspect.signature(func)
                     params = list(sig.parameters.keys())
                     if cui_param in params:
@@ -392,8 +390,6 @@ class ANAFQuotaTracker:
                         QuotaEndpoint.DOWNLOAD,
                     )
                 ):
-                    import inspect
-
                     sig = inspect.signature(func)
                     params = list(sig.parameters.keys())
                     if message_id_param in params:

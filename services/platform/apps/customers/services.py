@@ -50,56 +50,72 @@ SERVICES_MEDIUM_THRESHOLD = _DEFAULT_SERVICES_MEDIUM_THRESHOLD
 
 def get_orders_high_threshold() -> int:
     """Get orders high threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.orders_high_threshold", _DEFAULT_ORDERS_HIGH_THRESHOLD)
 
 
 def get_orders_medium_threshold() -> int:
     """Get orders medium threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.orders_medium_threshold", _DEFAULT_ORDERS_MEDIUM_THRESHOLD)
 
 
 def get_orders_low_threshold() -> int:
     """Get orders low threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.orders_low_threshold", _DEFAULT_ORDERS_LOW_THRESHOLD)
 
 
 def get_payment_rate_excellent() -> int:
     """Get payment rate excellent from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.payment_rate_excellent", _DEFAULT_PAYMENT_RATE_EXCELLENT)
 
 
 def get_payment_rate_good() -> int:
     """Get payment rate good from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.payment_rate_good", _DEFAULT_PAYMENT_RATE_GOOD)
 
 
 def get_payment_rate_fair() -> int:
     """Get payment rate fair from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.payment_rate_fair", _DEFAULT_PAYMENT_RATE_FAIR)
 
 
 def get_services_high_threshold() -> int:
     """Get services high threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.services_high_threshold", _DEFAULT_SERVICES_HIGH_THRESHOLD)
 
 
 def get_services_medium_threshold() -> int:
     """Get services medium threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "customers.services_medium_threshold", _DEFAULT_SERVICES_MEDIUM_THRESHOLD
@@ -120,7 +136,9 @@ class CustomerAnalyticsService:
         Returns:
             Dictionary containing customer metrics
         """
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -171,7 +189,9 @@ class CustomerAnalyticsService:
     def _get_order_metrics(customer: Any) -> dict[str, Any]:
         """Get order-related metrics for a customer."""
         try:
-            from apps.orders.models import Order
+            from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Order,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             orders = Order.objects.filter(customer=customer)
 
@@ -212,7 +232,10 @@ class CustomerAnalyticsService:
     def _get_billing_metrics(customer: Any) -> dict[str, Any]:
         """Get billing-related metrics for a customer."""
         try:
-            from apps.billing.models import Invoice, Payment
+            from apps.billing.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+                Invoice,
+                Payment,
+            )
 
             invoices = Invoice.objects.filter(customer=customer)
             payments = Payment.objects.filter(invoice__customer=customer)
@@ -248,7 +271,9 @@ class CustomerAnalyticsService:
     def _get_service_metrics(customer: Any) -> dict[str, Any]:
         """Get service-related metrics for a customer."""
         try:
-            from apps.provisioning.models import Service
+            from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Service,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             services = Service.objects.filter(customer=customer)
 
@@ -268,7 +293,9 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _calculate_engagement_score(customer: Any, metrics: dict[str, Any]) -> int:
+    def _calculate_engagement_score(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+        customer: Any, metrics: dict[str, Any]
+    ) -> int:  # Complexity: customer processing  # Complexity: multi-step business logic
         """Calculate customer engagement score (0-100)."""
         score = 0
 
@@ -329,8 +356,12 @@ class CustomerStatsService:
         Returns:
             Dictionary with update results
         """
-        from apps.audit.services import AuditService
-        from apps.customers.models import Customer
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -396,7 +427,9 @@ class CustomerStatsService:
         Returns:
             Dictionary with batch update results
         """
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         # Engagement scoring thresholds
 

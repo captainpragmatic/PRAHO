@@ -109,8 +109,10 @@ class ValidateCouponView(View):
     Rate limited to prevent brute-force attacks on coupon codes.
     """
 
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+    def post(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, request: HttpRequest, *args: Any, **kwargs: Any
+    ) -> JsonResponse:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
+        from apps.orders.models import Order  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -231,7 +233,7 @@ class ApplyCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -328,7 +330,7 @@ class RemoveCouponView(View):
     """
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -406,7 +408,7 @@ class AvailableCouponsView(View):
     """
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         order_id = request.GET.get("order_id")
 
@@ -516,7 +518,7 @@ class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
-        from apps.orders.models import Order
+        from apps.orders.models import Order  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Check rate limit
         if getattr(request, "limited", False):
@@ -902,7 +904,9 @@ class CouponBatchCreateView(StaffRequiredMixin, TemplateView):
 
     def _get_max_batch_size(self) -> int:
         """Get max batch size from SettingsService at runtime."""
-        from apps.settings.services import SettingsService
+        from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return SettingsService.get_integer_setting("promotions.max_coupon_batch_size", self._DEFAULT_MAX_BATCH_SIZE)
 

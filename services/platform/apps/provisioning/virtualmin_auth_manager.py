@@ -47,21 +47,27 @@ SUDO_COMMAND_TIMEOUT = _DEFAULT_SUDO_COMMAND_TIMEOUT
 
 def get_cache_timeout() -> int:
     """Get cache timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("provisioning.cache_timeout", _DEFAULT_CACHE_TIMEOUT)
 
 
 def get_ssh_timeout() -> int:
     """Get ssh timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("provisioning.ssh_timeout", _DEFAULT_SSH_TIMEOUT)
 
 
 def get_sudo_command_timeout() -> int:
     """Get sudo command timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("provisioning.sudo_command_timeout", _DEFAULT_SUDO_COMMAND_TIMEOUT)
 

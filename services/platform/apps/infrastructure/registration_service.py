@@ -52,11 +52,11 @@ class NodeRegistrationService:
             Result with VirtualminServer instance or error
         """
         # Import here to avoid circular imports
-        from apps.common.credential_vault import (
+        from apps.common.credential_vault import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
             CredentialData,
             get_credential_vault,
         )
-        from apps.provisioning.virtualmin_models import (
+        from apps.provisioning.virtualmin_models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
             VirtualminServer,
         )
 
@@ -162,13 +162,13 @@ class NodeRegistrationService:
         try:
             with transaction.atomic():
                 # Remove credentials from vault
-                from apps.common.credential_vault import (
+                from apps.common.credential_vault import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
                     get_credential_vault,
                 )
 
                 get_credential_vault()
                 # Deactivate credential if it exists
-                from apps.common.credential_vault import (
+                from apps.common.credential_vault import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
                     EncryptedCredential,
                 )
 
@@ -266,7 +266,7 @@ _registration_service: NodeRegistrationService | None = None
 
 def get_registration_service() -> NodeRegistrationService:
     """Get global registration service instance"""
-    global _registration_service
+    global _registration_service  # noqa: PLW0603  # Module-level singleton pattern
     if _registration_service is None:
         _registration_service = NodeRegistrationService()
     return _registration_service

@@ -21,7 +21,6 @@ Usage:
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 import shutil
@@ -141,28 +140,31 @@ PROVIDER_CONFIG: dict[str, dict[str, Any]] = {
 # Type: (token: str, dry_run: bool) -> Result[SyncResult, str]
 ProviderSyncFn = Callable[..., "Result[Any, str]"]
 
-# Each entry: (module_path, function_name) — resolved at call time
-PROVIDER_SYNC_REGISTRY: dict[str, tuple[str, str]] = {
-    "hetzner": ("apps.infrastructure.provider_sync", "sync_hetzner_provider"),
-    "digitalocean": ("apps.infrastructure.provider_sync", "sync_digitalocean_provider"),
-    "vultr": ("apps.infrastructure.provider_sync", "sync_vultr_provider"),
-    "aws": ("apps.infrastructure.provider_sync", "sync_aws_provider"),
-}
+# Eager registration pattern — functions register at import time via register_sync_fn().
+# Security: removes runtime dynamic import from execution path — no import surface to abuse
+# even if input validation regresses. Failures move to startup/import time (fail-fast).
+# Type safety: concrete callables are easier for mypy than module-path strings.
+_SYNC_FN_REGISTRY: dict[str, ProviderSyncFn] = {}
+
+
+def register_sync_fn(provider_type: str, fn: ProviderSyncFn) -> None:
+    """Register a provider sync function. Called at module import time."""
+    _SYNC_FN_REGISTRY[provider_type] = fn
 
 
 def get_provider_sync_fn(provider_type: str) -> ProviderSyncFn | None:
     """
-    Lazy-load and return the sync function for a provider type.
+    Return the sync function for a provider type, or None if not registered.
 
-    Returns None if no sync function is registered for the given provider type.
+    Functions are registered eagerly at import time via register_sync_fn(),
+    so no dynamic import happens at call time.
     """
-    entry = PROVIDER_SYNC_REGISTRY.get(provider_type)
-    if not entry:
-        return None
-    module_path, fn_name = entry
-    module = importlib.import_module(module_path)
-    fn: ProviderSyncFn = getattr(module, fn_name)
-    return fn
+    return _SYNC_FN_REGISTRY.get(provider_type)
+
+
+def get_registered_sync_providers() -> set[str]:
+    """Return the set of provider types with registered sync functions."""
+    return set(_SYNC_FN_REGISTRY.keys())
 
 
 # =============================================================================
@@ -229,7 +231,7 @@ class ProviderCommandResult:
     command: str
 
 
-def run_provider_command(
+def run_provider_command(  # Complexity: multi-step workflow  # noqa: PLR0911  # Complexity: multi-step business logic
     provider_type: str,
     operation: str,
     credentials: dict[str, str],
@@ -305,11 +307,12 @@ def run_provider_command(
 
     # Execute command
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
             env=env,
         )
 
@@ -398,7 +401,9 @@ def get_provider_token(provider: CloudProvider) -> Result[str, str]:
 
     # Primary: credential vault (sole source when credential_identifier is configured)
     if provider.credential_identifier:
-        from apps.common.credential_vault import get_credential_vault
+        from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_credential_vault,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         vault = get_credential_vault()
         result = vault.get_credential(
@@ -438,7 +443,10 @@ def store_provider_token(
     Returns:
         Result with credential_identifier string or error message
     """
-    from apps.common.credential_vault import CredentialData, get_credential_vault
+    from apps.common.credential_vault import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+        CredentialData,
+        get_credential_vault,
+    )
 
     credential_id = provider.credential_identifier or f"cloud_provider_{provider.code}"
     vault = get_credential_vault()

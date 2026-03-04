@@ -4,12 +4,13 @@ DRF serializers for order and product catalog endpoints with Romanian compliance
 """
 
 import logging
+import traceback
 
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.orders.models import Order, OrderItem
-from apps.orders.price_sealing import create_sealed_price_for_product_price
+from apps.orders.price_sealing import create_sealed_price_for_product_price, get_client_ip
 from apps.products.models import Product, ProductPrice
 
 
@@ -26,7 +27,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductPrice
-        fields = [
+        fields = (
             "id",
             "monthly_price",
             "semiannual_price",
@@ -36,7 +37,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
             "has_annual_discount",
             "is_active",
             "sealed_price_token",
-        ]
+        )
 
     def get_sealed_price_token(self, obj: ProductPrice) -> dict[str, str] | None:
         """🔒 Generate sealed price tokens for all billing periods"""
@@ -48,8 +49,6 @@ class ProductPriceSerializer(serializers.ModelSerializer):
             if not request:
                 logger.warning("🚨 [Sealing] No request context available for sealed price tokens")
                 return None
-
-            from apps.orders.price_sealing import get_client_ip
 
             client_ip = get_client_ip(request)
 
@@ -68,8 +67,6 @@ class ProductPriceSerializer(serializers.ModelSerializer):
         except Exception as e:
             # If sealing fails completely, return None
             logger.error(f"🔥 [Sealing] Complete failure in sealed price token generation: {e}")
-            import traceback
-
             logger.error(traceback.format_exc())
             return None
 
@@ -82,7 +79,7 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = [
+        fields = (
             "id",
             "slug",
             "name",
@@ -93,7 +90,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "requires_domain",
             "is_active",
             "prices",
-        ]
+        )
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
@@ -104,7 +101,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = [
+        fields = (
             "id",
             "slug",
             "name",
@@ -121,7 +118,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "meta_description",
             "tags",
             "meta",
-        ]
+        )
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -135,7 +132,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = [
+        fields = (
             "id",
             "product_name",
             "product_type",
@@ -149,7 +146,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "domain_name",
             "config",
             "provisioning_status",
-        ]
+        )
 
 
 class OrderListSerializer(serializers.ModelSerializer):
@@ -163,7 +160,7 @@ class OrderListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = [
+        fields = (
             "id",
             "order_number",
             "status",
@@ -175,7 +172,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "completed_at",
-        ]
+        )
 
 
 class OrderDetailSerializer(serializers.ModelSerializer):
@@ -190,7 +187,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = [
+        fields = (
             "id",
             "order_number",
             "status",
@@ -209,7 +206,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "updated_at",
             "completed_at",
             "items",
-        ]
+        )
 
 
 # Input Serializers for Order Creation and Calculation

@@ -1,3 +1,4 @@
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 """
 ANAF e-Factura API client with OAuth2 authentication.
 
@@ -30,7 +31,20 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.common.outbound_http import OutboundPolicy, safe_request
+from apps.settings.services import SettingsService
+
 logger = logging.getLogger(__name__)
+
+EFACTURA_POLICY = OutboundPolicy(
+    name="efactura",
+    allowed_domains=frozenset({"anaf.ro", "mfinante.gov.ro"}),
+    timeout_seconds=30.0,
+    max_retries=0,  # Retries handled by _request_with_retry
+)
+
+# Maximum Retry-After sleep to prevent unbounded waits
+MAX_RETRY_AFTER_SECONDS = 120
 
 
 class EFacturaEnvironment(StrEnum):
@@ -65,8 +79,6 @@ class EFacturaConfig:
     @classmethod
     def from_settings(cls) -> EFacturaConfig:
         """Create config from Django settings and SettingsService."""
-        from apps.settings.services import SettingsService
-
         env_str = getattr(settings, "EFACTURA_ENVIRONMENT", "test")
         environment = EFacturaEnvironment.PRODUCTION if env_str == "production" else EFacturaEnvironment.TEST
 
@@ -287,31 +299,20 @@ class EFacturaClient:
     """
 
     # Token cache key prefix
-    TOKEN_CACHE_KEY: ClassVar[str] = "efactura_token_{env}"
+    TOKEN_CACHE_KEY: ClassVar[str] = (
+        "efactura_token_{env}"  # Not a real secret: cache key name  # noqa: S105  # Not a real secret: config key name
+    )
 
     def __init__(self, config: EFacturaConfig | None = None):
         self.config = config or EFacturaConfig.from_settings()
-        self._session: requests.Session | None = None
         self._token: TokenResponse | None = None
-
-    @property
-    def session(self) -> requests.Session:
-        """Get or create HTTP session."""
-        if self._session is None:
-            self._session = requests.Session()
-            self._session.headers.update(
-                {
-                    "Accept": "application/json",
-                    "User-Agent": "PRAHO-EFactura/1.0",
-                }
-            )
-        return self._session
+        self._default_headers: dict[str, str] = {
+            "Accept": "application/json",
+            "User-Agent": "PRAHO-EFactura/1.0",
+        }
 
     def close(self) -> None:
-        """Close HTTP session."""
-        if self._session is not None:
-            self._session.close()
-            self._session = None
+        """No-op — safe_request() manages sessions internally."""
 
     def __enter__(self) -> EFacturaClient:
         return self
@@ -367,10 +368,12 @@ class EFacturaClient:
         }
 
         try:
-            response = self.session.post(
+            response = safe_request(
+                "POST",
                 self.config.oauth_token_url,
+                policy=EFACTURA_POLICY,
                 data=data,
-                timeout=self.config.timeout,
+                headers=self._default_headers,
             )
             response.raise_for_status()
             token = TokenResponse.from_dict(response.json())
@@ -401,10 +404,12 @@ class EFacturaClient:
         }
 
         try:
-            response = self.session.post(
+            response = safe_request(
+                "POST",
                 self.config.oauth_token_url,
+                policy=EFACTURA_POLICY,
                 data=data,
-                timeout=self.config.timeout,
+                headers=self._default_headers,
             )
             response.raise_for_status()
             token = TokenResponse.from_dict(response.json())
@@ -734,18 +739,24 @@ class EFacturaClient:
         url: str,
         **kwargs: Any,
     ) -> requests.Response:
-        """Make HTTP request with retry logic."""
-        kwargs.setdefault("timeout", self.config.timeout)
+        """Make HTTP request with retry logic via safe_request()."""
+        # Merge default headers with caller-provided headers
+        merged_headers = {**self._default_headers, **kwargs.pop("headers", {})}
         last_error: Exception | None = None
 
         for attempt in range(self.config.max_retries):
             try:
-                response = self.session.request(method, url, **kwargs)
+                response = safe_request(method, url, policy=EFACTURA_POLICY, headers=merged_headers, **kwargs)
 
                 # Check for rate limiting
                 if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
-                    retry_after = int(response.headers.get("Retry-After", 60))
-                    logger.warning(f"Rate limited, waiting {retry_after}s")
+                    retry_after = min(
+                        int(response.headers.get("Retry-After", 60)),
+                        MAX_RETRY_AFTER_SECONDS,
+                    )
+                    logger.warning(
+                        f"⚠️ [e-Factura] Rate limited, waiting {retry_after}s (capped at {MAX_RETRY_AFTER_SECONDS}s)"
+                    )
                     time.sleep(retry_after)
                     continue
 
@@ -753,10 +764,10 @@ class EFacturaClient:
 
             except requests.Timeout as e:
                 last_error = e
-                logger.warning(f"Request timeout (attempt {attempt + 1}/{self.config.max_retries})")
+                logger.warning(f"⚠️ [e-Factura] Request timeout (attempt {attempt + 1}/{self.config.max_retries})")
             except requests.ConnectionError as e:
                 last_error = e
-                logger.warning(f"Connection error (attempt {attempt + 1}/{self.config.max_retries})")
+                logger.warning(f"⚠️ [e-Factura] Connection error (attempt {attempt + 1}/{self.config.max_retries})")
 
             # Wait before retry (exponential backoff)
             if attempt < self.config.max_retries - 1:

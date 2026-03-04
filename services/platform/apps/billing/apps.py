@@ -17,7 +17,8 @@ class BillingConfig(AppConfig):
     def ready(self) -> None:
         """Import signals and schedule e-Factura tasks when Django starts."""
         from django.conf import settings
-        from . import signals  # noqa: F401
+
+        from . import signals  # noqa: F401  # Signal registration
 
         # Schedule e-Factura recurring tasks if enabled
         if getattr(settings, "EFACTURA_ENABLED", False):

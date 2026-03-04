@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
@@ -32,7 +33,7 @@ def setup_anymail_signals() -> None:
     This function should be called from apps.py ready() method.
     """
     try:
-        from anymail.signals import (
+        from anymail.signals import (  # Deferred: optional dependency  # noqa: PLC0415  # Deferred: avoids circular import
             post_send,
             tracking,
         )
@@ -85,7 +86,9 @@ def handle_anymail_tracking(sender: Any, event: Any, esp_name: str, **kwargs: An
 
     Called when a tracking event is received (delivery, bounce, complaint, open, click).
     """
-    from apps.notifications.services import EmailService
+    from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EmailService,  # Circular: cross-app signal handler  # Deferred: avoids circular import
+    )
 
     try:
         event_type = event.event_type
@@ -133,8 +136,6 @@ def handle_anymail_tracking(sender: Any, event: Any, esp_name: str, **kwargs: An
 
 def clear_template_cache(template_key: str, locale: str) -> None:
     """Clear cached email template after update."""
-    from django.core.cache import cache
-
     cache_key = f"email_template:{template_key}:{locale}"
     cache.delete(cache_key)
     logger.info(f"Cleared email template cache: {cache_key}")

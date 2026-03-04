@@ -192,20 +192,24 @@ class DigitalOceanService(CloudProviderGateway):
                     logger.warning(f"⚠️ [DigitalOcean] SSH key '{name}' exists with different content, replacing")
                     self.client.ssh_keys.delete(ssh_key_identifier=cast(Any, str(existing["id"])))
                 else:
-                    return Ok(SSHKeyResult(
-                        key_id=str(existing["id"]),
-                        name=existing["name"],
-                        fingerprint=existing.get("fingerprint", ""),
-                    ))
+                    return Ok(
+                        SSHKeyResult(
+                            key_id=str(existing["id"]),
+                            name=existing["name"],
+                            fingerprint=existing.get("fingerprint", ""),
+                        )
+                    )
 
             response = self.client.ssh_keys.create(body={"name": name, "public_key": public_key})
             key = response["ssh_key"]
             logger.info(f"✅ [DigitalOcean] SSH key uploaded: {name}")
-            return Ok(SSHKeyResult(
-                key_id=str(key["id"]),
-                name=key["name"],
-                fingerprint=key.get("fingerprint", ""),
-            ))
+            return Ok(
+                SSHKeyResult(
+                    key_id=str(key["id"]),
+                    name=key["name"],
+                    fingerprint=key.get("fingerprint", ""),
+                )
+            )
         except Exception as e:
             return Err(f"SSH key upload failed: {e}")
 
@@ -282,12 +286,14 @@ class DigitalOceanService(CloudProviderGateway):
                         # Extract prefix (letters before digits) for country lookup
                         prefix = "".join(c for c in slug if c.isalpha())
                         country = DO_REGION_COUNTRY_MAP.get(prefix, prefix.upper()[:2])
-                        all_regions.append(LocationInfo(
-                            name=slug,
-                            description=region.get("name", ""),
-                            country=country,
-                            city=region.get("name", ""),
-                        ))
+                        all_regions.append(
+                            LocationInfo(
+                                name=slug,
+                                description=region.get("name", ""),
+                                country=country,
+                                city=region.get("name", ""),
+                            )
+                        )
                 if len(regions) < DO_LIST_PER_PAGE:
                     break
                 page += 1
@@ -427,7 +433,6 @@ class DigitalOceanService(CloudProviderGateway):
             location=droplet.get("region", {}).get("slug", "") if isinstance(droplet.get("region"), dict) else "",
             labels=labels,
         )
-
 
     # =========================================================================
     # Snapshot operations (stubs — not yet implemented for DigitalOcean)

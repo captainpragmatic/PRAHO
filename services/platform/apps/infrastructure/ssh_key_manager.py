@@ -13,6 +13,8 @@ Features:
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 import tempfile
@@ -111,8 +113,6 @@ class SSHKeyManager:
         ).decode("utf-8")
 
         # Calculate fingerprint (using SHA256)
-        import base64
-        import hashlib
 
         # The public key bytes in raw format for fingerprint
         raw_public = public_key.public_bytes(
@@ -486,7 +486,7 @@ _ssh_key_manager: SSHKeyManager | None = None
 
 def get_ssh_key_manager() -> SSHKeyManager:
     """Get global SSH key manager instance"""
-    global _ssh_key_manager
+    global _ssh_key_manager  # noqa: PLW0603  # Module-level singleton pattern
     if _ssh_key_manager is None:
         _ssh_key_manager = SSHKeyManager()
     return _ssh_key_manager

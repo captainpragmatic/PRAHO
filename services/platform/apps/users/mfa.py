@@ -524,7 +524,9 @@ class WebAuthnService:
         return options
 
     @staticmethod
-    def verify_authentication(user: "User", authentication_data: dict[str, Any]) -> bool:
+    def verify_authentication(  # noqa: PLR0911  # Complexity: multi-step business logic
+        user: "User", authentication_data: dict[str, Any]
+    ) -> bool:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """
         Verify WebAuthn authentication
 

@@ -124,7 +124,7 @@ def secure_service_method(
 
 
 # Legacy wrapper for backward compatibility
-def secure_service_method_legacy(
+def secure_service_method_legacy(  # security decorator parameters  # noqa: PLR0913  # Business logic parameters
     validation_type: str = "general",
     rate_limit_key: str | None = None,
     rate_limit: int | None = None,

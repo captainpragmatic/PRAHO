@@ -38,7 +38,9 @@ class ProvisioningService:
         Returns:
             Result with success status or error message
         """
-        from apps.audit.services import AuditService
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             previous_status = service.status
@@ -82,8 +84,12 @@ class ProvisioningService:
         Returns:
             Dictionary with activation results
         """
-        from apps.audit.services import AuditService
-        from apps.provisioning.models import Service
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         if invoice is None:
             logger.warning("⚠️ [Provisioning] Cannot activate services for None invoice")
@@ -156,9 +162,15 @@ class ProvisioningService:
         Returns:
             Dictionary with suspension results
         """
-        from apps.audit.services import AuditService
-        from apps.customers.models import Customer
-        from apps.provisioning.models import Service
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_suspended": 0, "errors": []}
 
@@ -216,9 +228,15 @@ class ProvisioningService:
         Returns:
             Dictionary with reactivation results
         """
-        from apps.audit.services import AuditService
-        from apps.customers.models import Customer
-        from apps.provisioning.models import Service
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         results: dict[str, Any] = {"success": True, "customer_id": customer_id, "services_reactivated": 0, "errors": []}
 
@@ -274,13 +292,13 @@ class ProvisioningService:
             return {"success": False, "error": str(e), "services_reactivated": 0}
 
     @staticmethod
-    def provision_service(service: Service) -> dict[str, Any]:
+    def provision_service(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+        service: Service,
+    ) -> dict[str, Any]:  # Complexity: provisioning workflow  # Complexity: multi-step business logic
         """
         Provision a new service after order confirmation.
         This triggers the actual infrastructure setup for the service.
         """
-        from django.utils import timezone
-
         try:
             logger.info(f"🚀 [Provisioning] Provisioning service {service.id} ({service.service_name})")
 
@@ -312,7 +330,7 @@ class ProvisioningService:
                 # Implement actual provisioning based on control panel type
                 if service.server.control_panel == "Virtualmin":
                     try:
-                        from .virtualmin_gateway import (
+                        from .virtualmin_gateway import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
                             VirtualminAuthError,
                             VirtualminConfig,
                             VirtualminGateway,

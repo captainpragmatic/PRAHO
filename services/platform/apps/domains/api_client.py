@@ -1,3 +1,4 @@
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 """
 Secure API Client for Domain Registrar Integration
 Separated complex API call logic to reduce cyclomatic complexity.
@@ -11,6 +12,8 @@ from typing import Any
 import requests
 from django.conf import settings
 from requests import Response
+
+from apps.common.outbound_http import STRICT_EXTERNAL, safe_request
 
 from .models import Registrar
 
@@ -97,16 +100,13 @@ class SecureAPIClient:
 
     @staticmethod
     def _make_http_request(method: str, url: str, data: dict[str, Any], headers: dict[str, str]) -> Response:
-        """🌐 Make HTTP request with security settings"""
-        timeouts = get_api_timeouts()
-        request_timeout = timeouts.get("REQUEST_TIMEOUT", 30)
-        return requests.request(
-            method=method,
-            url=url,
+        """🌐 Make HTTP request with security settings via safe_request()"""
+        return safe_request(
+            method,
+            url,
+            policy=STRICT_EXTERNAL,
             json=data,
             headers=headers,
-            timeout=request_timeout,
-            verify=True,  # Always verify SSL certificates
         )
 
     @staticmethod

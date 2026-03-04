@@ -1,90 +1,46 @@
 """
-🔒 Billing Security Services for PRAHO Platform
+Billing Security Services for PRAHO Platform
 Handles URL validation for e-Factura integration and other security concerns.
+
+Delegates SSRF prevention to ``apps.common.outbound_http.validate_and_resolve()``.
 """
 
-import ipaddress
+from __future__ import annotations
+
 import re
-import urllib.parse
 
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, validate_and_resolve
+
 # Allowed e-Factura government endpoints
 ALLOWED_EFACTURA_DOMAINS = ["anaf.ro", "mfinante.gov.ro", "efactura.mfinante.ro", "webservicesp.anaf.ro"]
 
-# Blocked protocols for SSRF prevention
-BLOCKED_PROTOCOLS = ["file", "ftp", "gopher", "ldap", "dict", "tftp", "ssh"]
-
-
-def _is_private_ip(ip_str: str) -> bool:
-    """Check if an IP address is private, loopback, link-local, or otherwise non-public."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
-    except ValueError:
-        return False
-
-
-def _is_valid_domain_suffix(domain: str, allowed_domains: list[str]) -> bool:
-    """
-    Securely check if domain ends with an allowed domain suffix.
-    Prevents bypass via subdomains like 'evil-anaf.ro' or 'anaf.ro.evil.com'.
-    """
-    domain = domain.lower().strip()
-
-    # Remove port if present
-    if ":" in domain:
-        domain = domain.split(":")[0]
-
-    for allowed in allowed_domains:
-        allowed = allowed.lower()
-        # Exact match
-        if domain == allowed:
-            return True
-        # Valid subdomain (must end with .allowed_domain)
-        if domain.endswith(f".{allowed}"):
-            return True
-
-    return False
+# Policy for e-Factura URL validation
+_EFACTURA_POLICY = OutboundPolicy(
+    name="efactura_validation",
+    require_https=False,
+    allowed_schemes=frozenset({"http", "https"}),
+    allowed_domains=frozenset(ALLOWED_EFACTURA_DOMAINS),
+    check_dns=False,  # Validation only — actual connection handled elsewhere
+)
 
 
 def validate_efactura_url(url: str) -> str:
     """
-    🔒 Validate e-Factura URLs to prevent SSRF attacks.
+    Validate e-Factura URLs to prevent SSRF attacks.
     Returns the validated URL or raises ValidationError.
     """
     if not url:
         raise ValidationError(_("URL is required for e-Factura integration"))
 
     try:
-        parsed = urllib.parse.urlparse(url)
-    except Exception as e:
-        raise ValidationError(_("Invalid URL format: %(error)s") % {"error": e}) from e
+        validate_and_resolve(url, _EFACTURA_POLICY)
+    except OutboundSecurityError as exc:
+        raise ValidationError(str(exc)) from None
 
-    # Check protocol
-    if parsed.scheme.lower() not in ["http", "https"]:
-        raise ValidationError(
-            _("Protocol '%(scheme)s' not allowed. Only HTTP/HTTPS permitted.") % {"scheme": parsed.scheme}
-        )
-
-    if parsed.scheme.lower() in BLOCKED_PROTOCOLS:
-        raise ValidationError(_("Protocol '%(scheme)s' is blocked for security reasons") % {"scheme": parsed.scheme})
-
-    # Check domain whitelist for e-Factura using secure suffix matching
-    domain = parsed.netloc.lower()
-    if not _is_valid_domain_suffix(domain, ALLOWED_EFACTURA_DOMAINS):
-        raise ValidationError(
-            _("Domain '%(domain)s' not in allowed e-Factura endpoints: %(allowed)s")
-            % {"domain": domain, "allowed": ", ".join(ALLOWED_EFACTURA_DOMAINS)}
-        )
-
-    # Check for blocked IP patterns using ipaddress module
-    hostname = parsed.hostname
-    if hostname and _is_private_ip(hostname):
-        raise ValidationError(_("Access to IP range '%(hostname)s' is blocked for security") % {"hostname": hostname})
-
-    # Check for suspicious URL patterns
+    # Additional e-Factura-specific suspicious pattern check
     if any(suspicious in url.lower() for suspicious in ["localhost", "0.0.0.0", "metadata"]):
         raise ValidationError(_("URL contains suspicious patterns"))
 
@@ -93,29 +49,23 @@ def validate_efactura_url(url: str) -> str:
 
 def validate_external_api_url(url: str, allowed_domains: list[str]) -> str:
     """
-    🔒 General validation for external API URLs to prevent SSRF.
+    General validation for external API URLs to prevent SSRF.
     """
     if not url:
         raise ValidationError(_("URL is required"))
 
+    policy = OutboundPolicy(
+        name="external_api_validation",
+        require_https=False,
+        allowed_schemes=frozenset({"http", "https"}),
+        allowed_domains=frozenset(allowed_domains),
+        check_dns=False,
+    )
+
     try:
-        parsed = urllib.parse.urlparse(url)
-    except Exception as e:
-        raise ValidationError(_("Invalid URL format: %(error)s") % {"error": e}) from e
-
-    # Check protocol
-    if parsed.scheme.lower() not in ["http", "https"]:
-        raise ValidationError(_("Protocol '%(scheme)s' not allowed") % {"scheme": parsed.scheme})
-
-    # Check domain whitelist using secure suffix matching
-    domain = parsed.netloc.lower()
-    if not _is_valid_domain_suffix(domain, allowed_domains):
-        raise ValidationError(_("Domain '%(domain)s' not in allowed list") % {"domain": domain})
-
-    # Check for blocked IPs using ipaddress module
-    hostname = parsed.hostname
-    if hostname and _is_private_ip(hostname):
-        raise ValidationError(_("Access to IP range '%(hostname)s' is blocked") % {"hostname": hostname})
+        validate_and_resolve(url, policy)
+    except OutboundSecurityError as exc:
+        raise ValidationError(str(exc)) from None
 
     return url
 

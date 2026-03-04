@@ -111,6 +111,7 @@
       {% if active_prices %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <div class="flex justify-between items-center mb-4">
+          {# nosemgrep: template-translate-as-no-escape — trans output auto-escaped by Django #}
           <h2 class="font-semibold text-white">{% icon "currency" size="lg" %} {% trans 'Pricing' %}</h2>
           {% url 'products:product_prices' slug=product.slug as manage_prices_url %}
           <a href="{{ manage_prices_url }}" class="text-blue-400 hover:text-blue-300 text-sm">

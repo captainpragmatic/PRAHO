@@ -4,16 +4,13 @@ Addresses critical security vulnerabilities and Romanian compliance requirements
 """
 
 import hashlib
-import ipaddress
 import logging
 import re
-import socket
 import time
 from collections.abc import Callable
 from datetime import datetime
 from functools import wraps
 from typing import Any, TypeVar, cast
-from urllib.parse import urlparse
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -48,7 +45,9 @@ _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
 def get_registration_rate_limit() -> int:
     """Get registration rate limit per IP from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "security.registration_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
@@ -57,7 +56,9 @@ def get_registration_rate_limit() -> int:
 
 def get_invitation_rate_limit() -> int:
     """Get invitation rate limit per user from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "security.invitation_rate_limit_per_user", _DEFAULT_RATE_LIMIT_INVITATION_PER_USER
@@ -333,130 +334,50 @@ class SecureInputValidator:
         Validate URL destination to prevent SSRF attacks.
         A10 - Server-Side Request Forgery prevention
 
+        Delegates to ``apps.common.outbound_http.validate_and_resolve()`` for
+        DNS resolution, IP validation, scheme/port checks, and encoding trick detection.
+
         Args:
             url: The URL to validate
             return_pinned_ips: If True, return (url, validated_ips) for DNS pinning
 
         Returns:
             Validated URL string, or tuple of (url, pinned_ips) if return_pinned_ips=True
-
-        Note: When making HTTP requests, use the pinned IPs directly to prevent
-        DNS rebinding attacks between validation and request time.
         """
+        from apps.common.outbound_http import (  # noqa: PLC0415
+            OutboundPolicy,
+            OutboundSecurityError,
+            validate_and_resolve,
+        )
+
         if not url or not isinstance(url, str):
             raise ValidationError(_("Invalid URL format"))
 
-        # Length check (DoS prevention)
         if len(url) > MAX_URL_LENGTH:
             raise ValidationError(_("URL too long"))
 
-        # XSS/injection check
+        # XSS/injection check (not covered by outbound_http)
         SecureInputValidator._check_malicious_patterns(url)
 
         url = url.strip()
 
+        safe_url_policy = OutboundPolicy(
+            name="safe_url_validator",
+            require_https=False,
+            allowed_schemes=frozenset({"http", "https"}),
+            check_dns=True,
+        )
+
         try:
-            parsed = urlparse(url)
-            SecureInputValidator._validate_url_scheme(parsed)
-            validated_ips = SecureInputValidator._validate_url_hostname(parsed)
-            SecureInputValidator._validate_url_port(parsed)
+            target = validate_and_resolve(url, safe_url_policy)
+        except OutboundSecurityError as exc:
+            raise ValidationError(str(exc)) from None
 
-            logger.info(f"✅ [Security] Safe URL validated: {parsed.hostname} -> {validated_ips}")
+        logger.info("✅ [Security] Safe URL validated: %s -> %s", target.hostname, target.pinned_ips)
 
-            if return_pinned_ips:
-                return url, validated_ips
-            return url
-
-        except ValidationError:
-            # Re-raise our validation errors
-            raise
-        except Exception as e:
-            logger.warning(f"⚠️ [Security] URL validation error: {e}")
-            raise ValidationError(_("Invalid URL format")) from None
-
-    @staticmethod
-    def _validate_url_scheme(parsed: Any) -> None:
-        """Validate URL scheme is safe"""
-        allowed_schemes = ["http", "https"]
-        if parsed.scheme.lower() not in allowed_schemes:
-            raise ValidationError(_("Only HTTP and HTTPS URLs are allowed"))
-
-    @staticmethod
-    def _validate_url_hostname(parsed: Any) -> list[str]:
-        """
-        🔒 Enhanced hostname validation with DNS rebinding protection.
-
-        Returns list of validated IP addresses for connection pinning.
-        Callers should use these IPs directly to prevent DNS rebinding attacks.
-        """
-        if not parsed.hostname:
-            raise ValidationError(_("Invalid URL format"))
-
-        hostname = parsed.hostname.lower()
-
-        # Block dangerous domains first (before DNS resolution)
-        dangerous_domains = [
-            "localhost",
-            "127.0.0.1",
-            "metadata.google.internal",
-            "metadata.google.com",
-            "metadata",
-            "link-local",
-            "instance-data",
-            "::1",
-            "10.",
-            "172.",
-            "192.168.",
-            "169.254.",
-        ]
-
-        for dangerous in dangerous_domains:
-            if dangerous in hostname:
-                raise ValidationError(_("URL destination not allowed"))
-
-        # Check for direct IP addresses and block private/internal ranges
-        try:
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
-                raise ValidationError(_("URL destination not allowed"))
-            # Direct IP provided, return it for pinning
-            return [str(ip)]
-        except ValueError:
-            # Not an IP address, proceed with DNS resolution
-            pass
-
-        # Security: Resolve hostname and validate ALL resolved IPs
-        # Return validated IPs for connection pinning to prevent DNS rebinding
-        validated_ips: list[str] = []
-        try:
-            resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            for ip_info in resolved_ips:
-                ip_str = ip_info[4][0]
-                try:
-                    ip = ipaddress.ip_address(ip_str)
-                    # Security: Block any resolved IP that points to private/internal ranges
-                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
-                        raise ValidationError(_("URL destination resolves to blocked IP range"))
-                    validated_ips.append(str(ip))
-                except ValueError:
-                    continue
-
-            if not validated_ips:
-                raise ValidationError(_("No valid IP addresses resolved for URL"))
-
-        except (TimeoutError, socket.gaierror):
-            logger.warning(f"⚡ [Security] DNS resolution failed for hostname: {hostname}")
-            raise ValidationError(_("Unable to verify URL destination")) from None
-
-        return validated_ips
-
-    @staticmethod
-    def _validate_url_port(parsed: Any) -> None:
-        """Validate URL port is not dangerous"""
-        if parsed.port:
-            dangerous_ports = [22, 23, 25, 53, 135, 445, 993, 995, 1433, 1521, 3306, 5432, 6379, 9200, 11211]
-            if parsed.port in dangerous_ports:
-                raise ValidationError(_("URL destination not allowed"))
+        if return_pinned_ips:
+            return url, target.pinned_ips
+        return url
 
     @staticmethod
     def validate_customer_role(role: str) -> str:
@@ -704,7 +625,9 @@ class BusinessLogicValidator:
         # Rate limiting for enumeration prevention
         cache_key = f"company_check:{request_ip or 'unknown'}"
         current_checks = cache.get(cache_key, 0)
-        from apps.settings.services import SettingsService
+        from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         if current_checks >= SettingsService.get_integer_setting(
             "security.company_check_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP
@@ -845,7 +768,9 @@ def log_security_event(
     """
     details = details or {}
     try:
-        from apps.audit.services import AuditService
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         metadata = {**details}
         if user_email:

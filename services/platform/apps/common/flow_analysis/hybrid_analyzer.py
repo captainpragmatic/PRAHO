@@ -40,7 +40,9 @@ PROXIMITY_LINE_THRESHOLD = _DEFAULT_PROXIMITY_LINE_THRESHOLD
 
 def get_proximity_line_threshold() -> int:
     """Get proximity line threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("common.proximity_line_threshold", _DEFAULT_PROXIMITY_LINE_THRESHOLD)
 

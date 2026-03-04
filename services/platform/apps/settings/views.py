@@ -680,7 +680,7 @@ def _build_import_updates(
     user_id: int | None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
     """Validate setting entries and build SettingUpdate list. Returns (updates, skipped)."""
-    from .services import SettingUpdate
+    from .services import SettingUpdate  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     updates: list[SettingUpdate] = []
     skipped: list[dict[str, str]] = []

@@ -4,7 +4,9 @@ from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
 
+import requests
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from apps.billing.models import Payment
@@ -62,7 +64,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         could allow forged payloads to pass verification.
         """
         try:
-            from apps.settings.services import SettingsService
+            from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             # Get encrypted webhook secret from settings system
             webhook_secret = SettingsService.get_setting("integrations.stripe_webhook_secret")
@@ -132,14 +136,14 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return handler
         return None
 
-    def handle_payment_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
+    def handle_payment_intent_event(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, event_type: str, payload: dict[str, Any]
+    ) -> tuple[bool, str]:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """💳 Handle PaymentIntent events with race condition protection.
 
         SECURITY FIX: Uses select_for_update() to prevent race conditions where
         concurrent webhook deliveries could corrupt payment state.
         """
-        from django.db import transaction
-
         payment_intent = payload.get("data", {}).get("object", {})
         stripe_payment_id = payment_intent.get("id")
 
@@ -204,7 +208,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 # Trigger dunning process if this was an invoice payment
                 if payment.invoice:
                     try:
-                        from apps.billing.tasks import start_dunning_process_async
+                        from apps.billing.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                            start_dunning_process_async,  # Circular: cross-app
+                        )
 
                         start_dunning_process_async(str(payment.invoice.id))
                         logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
@@ -274,7 +280,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             # Send urgent notification to admin
             try:
-                from apps.notifications.services import NotificationService
+                from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    NotificationService,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 dispute_amount = charge.get("dispute", {}).get("amount", charge.get("amount", 0))
                 NotificationService.send_admin_alert(
@@ -380,9 +388,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
     def _send_portal_webhook(self, data: dict[str, Any]) -> None:
         """Send webhook notification to Portal service"""
         try:
-            import requests
-            from django.conf import settings
-
             # Get Portal webhook URL from settings
             portal_webhook_url = getattr(settings, "PORTAL_PAYMENT_WEBHOOK_URL", None)
             if not portal_webhook_url:

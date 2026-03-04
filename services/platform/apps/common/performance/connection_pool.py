@@ -83,7 +83,7 @@ class HTTPConnectionPool:
     _instances: ClassVar[dict[str, HTTPConnectionPool]] = {}
     _lock = threading.Lock()
 
-    def __init__(
+    def __init__(  # connection pool config  # noqa: PLR0913  # Business logic parameters
         self,
         base_url: str,
         pool_connections: int = 10,
@@ -176,7 +176,14 @@ class ExternalServicePool:
     """
     Manages connection pools for multiple external services.
     Singleton pattern for application-wide pool management.
+
+    .. deprecated::
+        This class is unused in production. New outbound HTTP callsites should use
+        ``safe_request()`` from ``apps.common.outbound_http`` instead, which creates
+        per-request sessions with DNS-pinned ``PinnedIPAdapter``.
     """
+
+    # OUTBOUND_HTTP_MIGRATION: deprecated - use safe_request()
 
     _instance: ExternalServicePool | None = None
     _lock = threading.Lock()
@@ -350,7 +357,7 @@ class SSHConnectionPool:
         idle_timeout: float = 300.0,
     ) -> None:
         try:
-            import paramiko
+            import paramiko  # Optional dependency  # noqa: PLC0415  # Deferred: avoids circular import
 
             self._paramiko = paramiko
         except ImportError:

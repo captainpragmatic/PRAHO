@@ -80,7 +80,9 @@ class Command(BaseCommand):
         Raises:
             CommandError: If provider not found, token is empty, or vault storage fails.
         """
-        from apps.infrastructure.models import CloudProvider
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         provider_slug = options["provider"]
 
@@ -92,8 +94,7 @@ class Command(BaseCommand):
 
         if not provider:
             raise CommandError(
-                f"No active provider found for type '{provider_slug}'. "
-                f"Create one in the admin panel first."
+                f"No active provider found for type '{provider_slug}'. Create one in the admin panel first."
             )
 
         # Read token using priority chain: --stdin > --token > interactive prompt
@@ -112,12 +113,7 @@ class Command(BaseCommand):
             raise CommandError(f"Failed to store token: {result.unwrap_err()}")
 
         credential_id = result.unwrap()
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"✅ Token stored for {provider.name} "
-                f"(credential_id={credential_id})"
-            )
-        )
+        self.stdout.write(self.style.SUCCESS(f"✅ Token stored for {provider.name} (credential_id={credential_id})"))
 
     def _read_token(self, options: dict[str, Any]) -> str:
         """

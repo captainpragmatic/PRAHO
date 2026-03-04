@@ -18,14 +18,15 @@ from apps.infrastructure.cloud_gateway import (
 )
 from apps.infrastructure.provider_config import (
     PROVIDER_CONFIG,
-    PROVIDER_SYNC_REGISTRY,
+    get_registered_sync_providers,
 )
 
-# Import provider modules to trigger registration
+# Import provider modules to trigger gateway + sync function registration
 import apps.infrastructure.hcloud_service  # noqa: F401
 import apps.infrastructure.digitalocean_service  # noqa: F401
 import apps.infrastructure.vultr_service  # noqa: F401
-import apps.infrastructure.aws_service  # noqa: F401
+import apps.infrastructure.aws_service  # side-effect: registers sync fn
+import apps.infrastructure.provider_sync  # noqa: F401
 
 # AWS expects JSON credentials
 AWS_TEST_TOKEN = json.dumps({
@@ -111,12 +112,12 @@ class TestRegistryConsistency(TestCase):
         )
 
     def test_sync_registry_has_all_providers(self):
-        """PROVIDER_SYNC_REGISTRY should cover all gateway-registered providers."""
+        """Sync function registry should cover all gateway-registered providers."""
         gateway_providers = set(get_registered_providers())
-        sync_providers = set(PROVIDER_SYNC_REGISTRY.keys())
+        sync_providers = get_registered_sync_providers()
         missing = gateway_providers - sync_providers
         self.assertEqual(
             missing,
             set(),
-            f"Gateway providers missing from PROVIDER_SYNC_REGISTRY: {missing}",
+            f"Gateway providers missing from sync registry: {missing}",
         )

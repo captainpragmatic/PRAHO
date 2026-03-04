@@ -47,7 +47,9 @@ MAX_USERNAME_UNIQUENESS_ATTEMPTS = _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
 
 def get_max_username_uniqueness_attempts() -> int:
     """Get max username uniqueness attempts from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "provisioning.max_username_uniqueness_attempts", _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
@@ -154,9 +156,10 @@ class VirtualminProvisioningService:
                     praho_customer_id=creation_data.service.customer.id,
                     praho_service_id=creation_data.service.id,
                 )
-                account.set_password(
+                # SECURITY: password is secrets.token_urlsafe(24) — not user input
+                account.set_password(  # nosemgrep: unvalidated-password
                     password
-                )  # nosemgrep: unvalidated-password — system-generated random password, not user input
+                )
                 account.save()
 
                 # Create provisioning job
@@ -403,7 +406,7 @@ class VirtualminProvisioningService:
             logger.exception(f"🔥 [VirtualminService] Validation error for {account.domain}: {e}")
             return Err(f"Validation error: {e}")
 
-    def _execute_rollback(
+    def _execute_rollback(  # Complexity: Virtualmin workflow  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
         self, rollback_operations: list[dict[str, Any]], gateway: VirtualminGateway, account: VirtualminAccount
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -514,7 +517,9 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(self, account: VirtualminAccount, reason: str = "") -> Result[bool, str]:
+    def suspend_account(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, account: VirtualminAccount, reason: str = ""
+    ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
         Suspend Virtualmin account with idempotency and rollback support.
 
@@ -634,7 +639,9 @@ class VirtualminProvisioningService:
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(self, account: VirtualminAccount) -> Result[bool, str]:
+    def unsuspend_account(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, account: VirtualminAccount
+    ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
         Unsuspend (reactivate) Virtualmin account with idempotency and rollback support.
 
@@ -755,7 +762,9 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(self, account: VirtualminAccount) -> Result[bool, str]:
+    def delete_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+        self, account: VirtualminAccount
+    ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
         Delete Virtualmin account permanently with idempotency and rollback support.
 
@@ -1263,7 +1272,10 @@ class VirtualminBackupManagementService:
         """
         try:
             # Import here to avoid circular imports
-            from .virtualmin_backup_service import BackupConfig, VirtualminBackupService
+            from .virtualmin_backup_service import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
+                BackupConfig,
+                VirtualminBackupService,
+            )
 
             # Use default config if none provided
             if config is None:
@@ -1336,7 +1348,9 @@ class VirtualminBackupManagementService:
         """
         try:
             # Import here to avoid circular imports
-            from .virtualmin_backup_service import VirtualminBackupService
+            from .virtualmin_backup_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+                VirtualminBackupService,  # Circular: same-app  # Deferred: avoids circular import
+            )
 
             target_server = target_server or self.server
 

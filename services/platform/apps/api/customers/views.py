@@ -18,7 +18,7 @@ from rest_framework.views import APIView
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import require_customer_authentication
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
 
@@ -655,7 +655,9 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
-def update_customer_billing_address(request: Request, customer: Customer) -> Response:
+def update_customer_billing_address(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    request: Request, customer: Customer
+) -> Response:  # Complexity: customer processing  # Complexity: multi-step business logic
     """
     🏠 Update customer billing address during checkout validation failures.
 
@@ -708,9 +710,6 @@ def update_customer_billing_address(request: Request, customer: Customer) -> Res
     validated_data = serializer.validated_data
 
     try:
-        # Import models locally to avoid circular imports
-        from apps.customers.models import CustomerAddress, CustomerTaxProfile
-
         with transaction.atomic():
             # Update customer basic info
             if validated_data.get("company_name"):

@@ -35,7 +35,9 @@ class ExternalSyncService:
         Returns:
             Dictionary with sync results
         """
-        from apps.audit.services import AuditService
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         if data_type not in ExternalSyncService.SYNC_TYPES:
             logger.warning(f"⚠️ [ExternalSync] Unknown data type: {data_type}")
@@ -86,7 +88,9 @@ class ExternalSyncService:
     @staticmethod
     def _sync_customer(customer_id: str) -> dict[str, Any]:
         """Sync customer data to external systems."""
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -108,7 +112,9 @@ class ExternalSyncService:
     @staticmethod
     def _sync_invoice(invoice_id: str) -> dict[str, Any]:
         """Sync invoice data to external systems."""
-        from apps.billing.models import Invoice
+        from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Invoice,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             invoice = Invoice.objects.get(id=invoice_id)
@@ -136,7 +142,9 @@ class ExternalSyncService:
     @staticmethod
     def _sync_payment(payment_id: str) -> dict[str, Any]:
         """Sync payment data to external systems."""
-        from apps.billing.models import Payment
+        from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Payment,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             payment = Payment.objects.get(id=payment_id)
@@ -160,7 +168,9 @@ class ExternalSyncService:
     @staticmethod
     def _sync_service(service_id: str) -> dict[str, Any]:
         """Sync service data to external systems."""
-        from apps.provisioning.models import Service
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             service = Service.objects.get(id=service_id)
@@ -183,7 +193,9 @@ class ExternalSyncService:
     @staticmethod
     def _sync_domain(domain_id: str) -> dict[str, Any]:
         """Sync domain data to external systems."""
-        from apps.domains.models import Domain
+        from apps.domains.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Domain,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             domain = Domain.objects.get(id=domain_id)

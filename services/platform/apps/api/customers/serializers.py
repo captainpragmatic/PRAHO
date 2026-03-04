@@ -14,7 +14,8 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.common.types import Err, Ok
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
+from apps.users.models import CustomerMembership
 from apps.users.services import SecureUserRegistrationService
 
 if TYPE_CHECKING:
@@ -274,8 +275,6 @@ class CustomerCreationSerializer(serializers.Serializer):
 
                 # Create tax profile if VAT number provided
                 if validated_data.get("vat_number"):
-                    from apps.customers.models import CustomerTaxProfile
-
                     CustomerTaxProfile.objects.create(
                         customer=customer,
                         vat_number=validated_data["vat_number"],
@@ -286,8 +285,6 @@ class CustomerCreationSerializer(serializers.Serializer):
 
                 # Create billing address if provided
                 if billing_address_data:
-                    from apps.customers.models import CustomerAddress
-
                     CustomerAddress.objects.create(
                         customer=customer,
                         address_type="primary",
@@ -300,8 +297,6 @@ class CustomerCreationSerializer(serializers.Serializer):
                     )
 
                 # Create owner membership for the user
-                from apps.users.models import CustomerMembership
-
                 CustomerMembership.objects.create(
                     user=user,
                     customer=customer,

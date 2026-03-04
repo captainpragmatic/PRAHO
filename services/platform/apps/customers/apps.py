@@ -12,4 +12,4 @@ class CustomersConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when the app is ready."""
-        from . import signals  # noqa: F401
+        from . import signals  # noqa: F401  # Signal registration

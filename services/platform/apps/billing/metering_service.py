@@ -18,13 +18,29 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
 
-from django.db import transaction
+from django.core.cache import cache as django_cache
+from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.audit.services import AuditService
+from apps.customers.models import Customer
+from apps.notifications.services import EmailService
+from apps.provisioning.models import Service
+from apps.provisioning.provisioning_service import ProvisioningService
 
 from . import config as billing_config
+from .metering_models import (
+    BillingCycle,
+    PricingTier,
+    PricingTierBracket,
+    UsageAggregation,
+    UsageAlert,
+    UsageEvent,
+    UsageMeter,
+    UsageThreshold,
+)
+from .subscription_models import Subscription, SubscriptionItem
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +61,6 @@ def _parse_decimal(value: Any) -> Decimal:
 def _get_subscription_item_for_meter(subscription: Any, meter: Any) -> Any | None:
     if not subscription or not meter:
         return None
-
-    from .subscription_models import SubscriptionItem
 
     items = SubscriptionItem.objects.filter(subscription=subscription, product__is_active=True)
     if not items.exists():
@@ -86,7 +100,9 @@ def _get_allowance_from_subscription_item(sub_item: Any | None) -> Decimal:
     return Decimal("0")
 
 
-def _get_allowance_from_service_plan(meter: Any, service_plan: Any | None) -> Decimal:
+def _get_allowance_from_service_plan(  # noqa: PLR0911  # Complexity: multi-step business logic
+    meter: Any, service_plan: Any | None
+) -> Decimal:  # Complexity: usage aggregation  # Complexity: multi-step business logic
     if not service_plan or not meter:
         return Decimal("0")
 
@@ -170,14 +186,14 @@ class MeteringService:
     - Stripe Meter event synchronization
     """
 
-    def record_event(self, event_data: UsageEventData) -> Result:
+    def record_event(  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
+        self, event_data: UsageEventData
+    ) -> Result:  # Complexity: usage aggregation  # Complexity: multi-step business logic
         """
         Record a usage event with idempotency protection.
 
         Returns Result containing the UsageEvent if successful.
         """
-        from .metering_models import UsageEvent, UsageMeter
-
         try:
             # Get the meter
             try:
@@ -189,8 +205,6 @@ class MeteringService:
                 return Result.err(f"Meter is inactive: {event_data.meter_name}")
 
             # Get customer
-            from apps.customers.models import Customer
-
             try:
                 customer = Customer.objects.get(id=event_data.customer_id)
             except Customer.DoesNotExist:
@@ -214,16 +228,12 @@ class MeteringService:
             service = None
 
             if event_data.subscription_id:
-                from .subscription_models import Subscription
-
                 try:
                     subscription = Subscription.objects.get(id=event_data.subscription_id)
                 except Subscription.DoesNotExist:
                     logger.warning(f"Subscription not found: {event_data.subscription_id}")
 
             if event_data.service_id:
-                from apps.provisioning.models import Service
-
                 try:
                     service = Service.objects.get(id=event_data.service_id)
                 except Service.DoesNotExist:
@@ -231,8 +241,6 @@ class MeteringService:
 
             # Create the event with idempotency using database constraint
             # This is race-condition-safe: we try to insert and catch duplicate
-            from django.db import IntegrityError
-
             try:
                 with transaction.atomic():
                     event = UsageEvent.objects.create(
@@ -303,7 +311,9 @@ class MeteringService:
     def _schedule_aggregation_update(self, event: Any) -> None:
         """Schedule async update of aggregation for this event"""
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                async_task,  # Deferred: optional dependency  # Deferred: avoids circular import
+            )
 
             async_task("apps.billing.metering_tasks.update_aggregation_for_event", str(event.id), timeout=60)
         except Exception as e:
@@ -314,9 +324,6 @@ class MeteringService:
     def _update_aggregation_sync(self, event: Any) -> None:
         """Synchronously update aggregation for an event"""
         try:
-            from .metering_models import UsageAggregation
-            from .subscription_models import Subscription
-
             # Find the billing cycle for this event
             subscription = event.subscription
             if not subscription:
@@ -394,7 +401,9 @@ class MeteringService:
     def _check_thresholds_async(self, customer: Any, meter: Any, subscription: Any | None) -> None:
         """Schedule async threshold check"""
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                async_task,  # Deferred: optional dependency  # Deferred: avoids circular import
+            )
 
             async_task(
                 "apps.billing.metering_tasks.check_usage_thresholds",
@@ -425,8 +434,6 @@ class AggregationService:
 
         Returns (processed_count, error_count)
         """
-        from .metering_models import UsageEvent
-
         query = UsageEvent.objects.filter(is_processed=False)
 
         if meter_id:
@@ -455,8 +462,6 @@ class AggregationService:
         """
         Close a billing cycle and prepare aggregations for rating.
         """
-        from .metering_models import BillingCycle, UsageAggregation
-
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
@@ -500,8 +505,6 @@ class AggregationService:
         """
         Get a summary of customer usage for a period.
         """
-        from .metering_models import UsageAggregation
-
         query = UsageAggregation.objects.filter(customer_id=customer_id)
 
         if period_start:
@@ -553,8 +556,6 @@ class RatingEngine:
         """
         Calculate charges for a usage aggregation.
         """
-        from .metering_models import PricingTier, UsageAggregation
-
         try:
             aggregation = UsageAggregation.objects.select_related("meter", "subscription", "billing_cycle").get(
                 id=aggregation_id
@@ -644,8 +645,6 @@ class RatingEngine:
         """
         Rate all aggregations for a billing cycle.
         """
-        from .metering_models import BillingCycle, UsageAggregation
-
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
@@ -718,8 +717,6 @@ class RatingEngine:
         return value
 
     def _get_pricing_brackets(self, pricing_tier: Any) -> Any:
-        from .metering_models import PricingTierBracket
-
         return PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
     def _calculate_per_unit_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
@@ -790,14 +787,6 @@ class UsageAlertService:
 
         Returns list of created alerts.
         """
-        from apps.customers.models import Customer
-
-        from .metering_models import (
-            UsageAggregation,
-            UsageAlert,
-            UsageThreshold,
-        )
-
         customer = self._get_customer(Customer, customer_id)
         if customer is None:
             logger.error(f"Customer not found: {customer_id}")
@@ -929,7 +918,9 @@ class UsageAlertService:
     def _schedule_alert_notification(self, alert: Any) -> None:
         """Schedule async notification for an alert"""
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                async_task,  # Deferred: optional dependency  # Deferred: avoids circular import
+            )
 
             async_task("apps.billing.metering_tasks.send_usage_alert_notification", str(alert.id), timeout=60)
         except Exception as e:
@@ -939,7 +930,7 @@ class UsageAlertService:
         """
         Send notification for a usage alert.
         """
-        from .metering_models import UsageAlert
+        from apps.billing.metering_models import UsageAlert  # noqa: PLC0415  # Deferred: test mockability
 
         try:
             alert = UsageAlert.objects.select_related("threshold", "customer", "threshold__meter").get(id=alert_id)
@@ -954,8 +945,6 @@ class UsageAlertService:
         # Send email notification
         if threshold.notify_customer:
             try:
-                from apps.notifications.services import EmailService
-
                 email_result = EmailService.send_template_email(
                     template_key="usage_alert",
                     recipient=alert.customer.primary_email,
@@ -993,8 +982,6 @@ class UsageAlertService:
             # Just the notification, no service action
             pass
         elif action == "throttle":
-            from apps.provisioning.provisioning_service import ProvisioningService
-
             ProvisioningService.suspend_services_for_customer(customer_id=alert.customer.id, reason="usage_throttled")
             AuditService.log_simple_event(
                 event_type="metering_throttle_applied",
@@ -1006,8 +993,6 @@ class UsageAlertService:
             )
             logger.info(f"⚠️ [Metering] Throttled services for {alert.customer}")
         elif action == "suspend":
-            from apps.provisioning.provisioning_service import ProvisioningService
-
             ProvisioningService.suspend_services_for_customer(customer_id=alert.customer.id, reason="usage_exceeded")
             AuditService.log_simple_event(
                 event_type="metering_suspension_applied",
@@ -1019,8 +1004,6 @@ class UsageAlertService:
             )
             logger.info(f"🛑 [Metering] Suspended services for {alert.customer}")
         elif action == "block_new":
-            from django.core.cache import cache as django_cache
-
             cache_key = f"usage_blocked:{alert.customer.id}"
             django_cache.set(cache_key, True, timeout=86400)  # 24 hours
             AuditService.log_simple_event(

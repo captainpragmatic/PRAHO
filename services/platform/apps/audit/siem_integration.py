@@ -17,8 +17,10 @@ Standards:
 - Syslog RFC 5424 compatible timestamps
 """
 
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -33,6 +35,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.common.outbound_http import STRICT_EXTERNAL, OutboundSecurityError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -186,12 +189,11 @@ class SIEMIntegrationService:
     def __init__(self, config: SIEMConfig) -> None:
         """Initialize SIEM integration service."""
         self.config = config
-        self._session = requests.Session()
-        self._setup_session()
+        self._default_headers = self._build_headers()
 
-    def _setup_session(self) -> None:
-        """Configure the HTTP session with authentication headers."""
-        headers = {
+    def _build_headers(self) -> dict[str, str]:
+        """Build authentication headers for the configured SIEM provider."""
+        headers: dict[str, str] = {
             "Content-Type": "application/json",
             "User-Agent": "PRAHO-Platform/1.0 SIEM-Integration",
         }
@@ -207,8 +209,6 @@ class SIEMIntegrationService:
 
         elif self.config.provider == SIEMProvider.ELASTICSEARCH:
             if self.config.api_key and self.config.api_secret:
-                import base64
-
                 credentials = f"{self.config.api_key}:{self.config.api_secret}"
                 encoded = base64.b64encode(credentials.encode()).decode()
                 headers["Authorization"] = f"Basic {encoded}"
@@ -222,7 +222,7 @@ class SIEMIntegrationService:
 
         # Add custom headers
         headers.update(self.config.custom_headers)
-        self._session.headers.update(headers)
+        return headers
 
     def convert_to_siem_event(self, audit_event: AuditEvent) -> SIEMEvent:
         """Convert an AuditEvent to SIEM-compatible format."""
@@ -353,18 +353,21 @@ class SIEMIntegrationService:
         if self.config.api_secret:
             extra_headers["X-PRAHO-Signature"] = self._sign_payload(payload)
 
+        # Merge default and extra headers
+        all_headers = {**self._default_headers, **extra_headers}
+
         try:
-            response = self._session.post(
+            response = safe_request(
+                "POST",
                 self.config.endpoint_url,
+                policy=STRICT_EXTERNAL,
                 data=payload,
-                headers=extra_headers,
-                timeout=self.config.timeout_seconds,
-                verify=self.config.verify_ssl,
+                headers=all_headers,
             )
             response.raise_for_status()
 
             logger.info(
-                f"Successfully sent {len(siem_events)} events to SIEM",
+                f"✅ [SIEM] Sent {len(siem_events)} events",
                 extra={
                     "provider": self.config.provider.value,
                     "event_count": len(siem_events),
@@ -372,9 +375,18 @@ class SIEMIntegrationService:
             )
             return True
 
+        except OutboundSecurityError as e:
+            logger.error(
+                f"🔥 [SIEM] Endpoint blocked by security policy: {e}",
+                extra={
+                    "provider": self.config.provider.value,
+                    "event_count": len(siem_events),
+                },
+            )
+            return False
         except requests.exceptions.RequestException as e:
             logger.error(
-                f"Failed to send events to SIEM: {e}",
+                f"🔥 [SIEM] Failed to send events: {e}",
                 extra={
                     "provider": self.config.provider.value,
                     "event_count": len(siem_events),

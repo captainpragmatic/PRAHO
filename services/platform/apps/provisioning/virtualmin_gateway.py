@@ -1,3 +1,4 @@
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 """
 Virtualmin API Gateway - PRAHO Platform
 Secure API integration for Virtualmin server management with multi-path authentication.
@@ -24,6 +25,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 
+from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
@@ -351,7 +353,7 @@ class VirtualminConfig:
     use_credential_vault: bool = True
 
     @classmethod
-    def from_credentials(
+    def from_credentials(  # Virtualmin API parameters  # noqa: PLR0913  # Business logic parameters
         cls,
         hostname: str,
         username: str,
@@ -564,7 +566,9 @@ class VirtualminGateway:
         """Lazy load authentication manager"""
         if not self._auth_manager:
             # Import here to avoid circular imports
-            from .virtualmin_auth_manager import VirtualminAuthenticationManager
+            from .virtualmin_auth_manager import (  # noqa: PLC0415  # Deferred: avoids circular import
+                VirtualminAuthenticationManager,  # Circular: same-app  # Deferred: avoids circular import
+            )
 
             self._auth_manager = VirtualminAuthenticationManager(self.server)
         return self._auth_manager
@@ -572,7 +576,9 @@ class VirtualminGateway:
     def _get_credential_vault(self) -> CredentialVault:
         """Lazy load credential vault"""
         if not self._credential_vault:
-            from apps.common.credential_vault import get_credential_vault
+            from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
+                get_credential_vault,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             self._credential_vault = get_credential_vault()
         return self._credential_vault
@@ -670,9 +676,12 @@ class VirtualminGateway:
             pool_maxsize=VIRTUALMIN_CONNECTION_POOL_SIZE,
             max_retries=0,  # Handle retries manually
         )
+        # SECURITY: session.mount("http://") registers the connection adapter — it does NOT make
+        # an HTTP request. Both HTTP and HTTPS adapters must be mounted for requests.Session.
         session.mount(
-            "http://", adapter
-        )  # nosemgrep: request-session-with-http — Virtualmin uses HTTP on trusted internal network
+            "http://",
+            adapter,  # nosemgrep: request-session-with-http
+        )
         session.mount("https://", adapter)
 
         # Set authentication
@@ -878,17 +887,27 @@ class VirtualminGateway:
             ) from e
 
     def _execute_http_request(self, params: dict[str, Any]) -> requests.Response:
-        """Execute the HTTP request and return response."""
+        """Execute the HTTP request via safe_request() with DNS pinning."""
         # Get current timeout configuration (supports hot-reloading)
         timeout_config = get_virtualmin_timeouts()
         request_timeout = timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
 
-        return self._session.get(
+        # Build per-server policy — Virtualmin uses self-signed certs on some nodes
+        virtualmin_policy = OutboundPolicy(
+            name="virtualmin",
+            require_https=False,
+            verify_tls=self.config.verify_ssl,
+            allowed_schemes=frozenset({"https", "http"}),
+            timeout_seconds=float(request_timeout),
+            blocked_ports=frozenset(),  # Virtualmin runs on non-standard ports
+        )
+
+        return safe_request(
+            "GET",
             self.server.api_url,
+            policy=virtualmin_policy,
             params=params,
-            timeout=request_timeout,  # Use externalized timeout configuration
-            verify=self.config.verify_ssl,
-            stream=True,  # For response size checking
+            auth=(self.server.api_username, self.server.get_api_password()),
         )
 
     def _validate_response_size(self, response: requests.Response) -> None:

@@ -30,8 +30,19 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, validate_and_resolve
+
 if TYPE_CHECKING:
-    from apps.audit.models import AuditEvent
+    pass
+
+# Policy for SIEM socket connections — validates target IP is not private/internal
+SIEM_SOCKET_POLICY = OutboundPolicy(
+    name="siem_socket",
+    require_https=False,
+    allowed_schemes=frozenset({"tcp", "udp", "tls", "https", "http"}),
+    check_dns=True,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -519,12 +530,28 @@ class SIEMTransport:
         self._socket: socket.socket | None = None
         self._lock = threading.Lock()
 
+    def _validate_target(self) -> bool:
+        """Validate SIEM target is not a private/internal IP."""
+        try:
+            scheme = "tls" if self.config.use_tls else self.config.protocol
+            validate_and_resolve(
+                f"{scheme}://{self.config.host}:{self.config.port}/",
+                policy=SIEM_SOCKET_POLICY,
+            )
+            return True
+        except OutboundSecurityError as exc:
+            logger.warning("⚠️ [SIEM] Blocked connection to %s:%s — %s", self.config.host, self.config.port, exc)
+            return False
+
     def connect(self) -> bool:
         """Establish connection to SIEM"""
         try:
             with self._lock:
                 if self._socket:
                     return True
+
+                if not self._validate_target():
+                    return False
 
                 if self.config.protocol in ("tcp", "tls"):
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -734,7 +761,7 @@ class SIEMService:
     def start(self) -> None:
         """Start background log forwarding"""
         if not self.config.enabled:
-            logger.info("ℹ️ [SIEM] SIEM integration is disabled")
+            logger.info("ℹ️ [SIEM] SIEM integration is disabled")  # noqa: RUF001  # Intentional: emoji logging
             return
 
         self._running = True
@@ -884,8 +911,6 @@ class SIEMService:
         Returns:
             Tuple of (is_valid, list_of_errors)
         """
-        from apps.audit.models import AuditEvent
-
         # Fetch events in order
         events = AuditEvent.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date).order_by("timestamp")
 
@@ -928,7 +953,7 @@ _siem_service: SIEMService | None = None
 
 def get_siem_service() -> SIEMService:
     """Get or create global SIEM service instance"""
-    global _siem_service
+    global _siem_service  # noqa: PLW0603  # Module-level singleton pattern
     if _siem_service is None:
         _siem_service = SIEMService()
     return _siem_service

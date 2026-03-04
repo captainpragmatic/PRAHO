@@ -1,3 +1,4 @@
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 """
 Email Webhook Handlers for PRAHO Platform
 Process delivery events from email service providers (AWS SES, SendGrid, Mailgun).
@@ -28,8 +29,17 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 from apps.common.validators import log_security_event
-from apps.notifications.services import EmailService
+from apps.notifications.services import EmailPreferenceService, EmailService
+
+SNS_CONFIRMATION_POLICY = OutboundPolicy(
+    name="sns_confirmation",
+    allowed_domains=frozenset({"amazonaws.com"}),
+    allow_redirects=True,
+    max_redirects=2,
+    timeout_seconds=10.0,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,39 +149,14 @@ class SESWebhookView(View):
         """Handle SNS subscription confirmation."""
         subscribe_url = data.get("SubscribeURL")
         if subscribe_url:
-            # SECURITY: Validate SubscribeURL is from AWS SNS to prevent SSRF
-            from urllib.parse import urlparse
-
-            parsed = urlparse(subscribe_url)
-
-            # Only allow HTTPS URLs from AWS SNS domains
-            allowed_domains = [
-                "sns.amazonaws.com",
-                "sns.us-east-1.amazonaws.com",
-                "sns.us-west-2.amazonaws.com",
-                "sns.eu-west-1.amazonaws.com",
-                "sns.eu-central-1.amazonaws.com",
-                "sns.ap-southeast-1.amazonaws.com",
-                "sns.ap-northeast-1.amazonaws.com",
-            ]
-            # Also allow regional pattern: sns.<region>.amazonaws.com
-            is_valid_sns_domain = parsed.scheme == "https" and (
-                parsed.netloc in allowed_domains
-                or (parsed.netloc.startswith("sns.") and parsed.netloc.endswith(".amazonaws.com"))
-            )
-
-            if not is_valid_sns_domain:
-                logger.warning(f"Rejected non-AWS SubscribeURL: {parsed.netloc}")
-                return HttpResponse("Invalid SubscribeURL domain", status=400)
-
-            # Auto-confirm subscription
-            import requests
-
+            # Auto-confirm subscription — domain/SSRF validation handled by SNS_CONFIRMATION_POLICY
             try:
-                requests.get(subscribe_url, timeout=10)
-                logger.info("SNS subscription confirmed")
+                safe_request("GET", subscribe_url, policy=SNS_CONFIRMATION_POLICY)
+                logger.info("✅ [SNS] Subscription confirmed")
+            except OutboundSecurityError as e:
+                logger.warning(f"⚠️ [SNS] Rejected SubscribeURL: {e}")
             except Exception as e:
-                logger.error(f"Failed to confirm SNS subscription: {e}")
+                logger.error(f"🔥 [SNS] Failed to confirm subscription: {e}")
 
         return HttpResponse("OK", status=200)
 
@@ -460,8 +445,6 @@ class UnsubscribeView(View):
         if not email or not token:
             return HttpResponse("Missing parameters", status=400)
 
-        from apps.notifications.services import EmailPreferenceService
-
         success = EmailPreferenceService.process_unsubscribe(email, token, category)
 
         if success:
@@ -510,8 +493,6 @@ class UnsubscribeView(View):
 
         if not email or not token:
             return JsonResponse({"error": "Missing parameters"}, status=400)
-
-        from apps.notifications.services import EmailPreferenceService
 
         success = EmailPreferenceService.process_unsubscribe(email, token, category)
 

@@ -246,19 +246,23 @@ class AWSService(CloudProviderGateway):
                     try:
                         response = self.ec2.import_key_pair(KeyName=name, PublicKeyMaterial=public_key.encode())
                         logger.info(f"✅ [AWS] SSH key imported: {name}")
-                        return Ok(SSHKeyResult(
-                            key_id=response.get("KeyPairId", ""),
-                            name=name,
-                            fingerprint=response.get("KeyFingerprint", ""),
-                        ))
+                        return Ok(
+                            SSHKeyResult(
+                                key_id=response.get("KeyPairId", ""),
+                                name=name,
+                                fingerprint=response.get("KeyFingerprint", ""),
+                            )
+                        )
                     except ClientError as import_err:
                         if "already exists" in str(import_err).lower() or "InvalidKeyPair.Duplicate" in str(import_err):
                             # Key exists and import failed — same key, return existing info
-                            return Ok(SSHKeyResult(
-                                key_id=existing_id,
-                                name=name,
-                                fingerprint=existing_fingerprint,
-                            ))
+                            return Ok(
+                                SSHKeyResult(
+                                    key_id=existing_id,
+                                    name=name,
+                                    fingerprint=existing_fingerprint,
+                                )
+                            )
                         # Different key content — delete and re-import
                         self.ec2.delete_key_pair(KeyName=name)
             except ClientError:
@@ -340,9 +344,7 @@ class AWSService(CloudProviderGateway):
     def get_locations(self) -> Result[Sequence[LocationInfo], str]:
         """Get available AWS availability zones."""
         try:
-            response = self.ec2.describe_availability_zones(
-                Filters=[{"Name": "state", "Values": ["available"]}]
-            )
+            response = self.ec2.describe_availability_zones(Filters=[{"Name": "state", "Values": ["available"]}])
             locations: list[LocationInfo] = [
                 LocationInfo(
                     name=az["ZoneName"],
@@ -361,9 +363,7 @@ class AWSService(CloudProviderGateway):
         """Get available EC2 instance types (filtered to hosting-relevant families)."""
         try:
             paginator = self.ec2.get_paginator("describe_instance_types")
-            pages = paginator.paginate(
-                Filters=[{"Name": "instance-type", "Values": AWS_HOSTING_FAMILIES}]
-            )
+            pages = paginator.paginate(Filters=[{"Name": "instance-type", "Values": AWS_HOSTING_FAMILIES}])
             types: list[ServerTypeInfo] = []
             for page in pages:
                 for it in page.get("InstanceTypes", []):
@@ -424,7 +424,6 @@ class AWSService(CloudProviderGateway):
             location=inst.get("Placement", {}).get("AvailabilityZone", ""),
             labels=tags,
         )
-
 
     # =========================================================================
     # Snapshot operations (stubs — not yet implemented for AWS)

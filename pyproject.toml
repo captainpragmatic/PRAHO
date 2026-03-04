@@ -707,6 +707,11 @@ disable_error_code = ["misc", "assignment"]
 module = "apps.common.credential_vault"
 disable_error_code = ["no-any-return", "misc"]
 
+# Outbound HTTP: requests.HTTPAdapter.init_poolmanager is untyped in stubs
+[[tool.mypy.overrides]]
+module = "apps.common.outbound_http"
+disable_error_code = ["no-untyped-call", "override"]
+
 # Users forms: cleaned_data dict access patterns — pre-existing
 [[tool.mypy.overrides]]
 module = "apps.users.forms"

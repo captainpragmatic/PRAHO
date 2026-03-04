@@ -89,7 +89,9 @@ class Command(BaseCommand):
         The method continues on individual failures — one broken deployment
         doesn't prevent cleanup of the rest.
         """
-        from apps.infrastructure.models import NodeDeployment
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         max_age_hours = options["max_age_hours"]
         dry_run = options.get("dry_run", False)
@@ -113,10 +115,7 @@ class Command(BaseCommand):
             self.stdout.write("No stale failed deployments found matching criteria.")
             return
 
-        self.stdout.write(
-            f"Found {len(deployments)} failed deployment(s) "
-            f"older than {max_age_hours} hours"
-        )
+        self.stdout.write(f"Found {len(deployments)} failed deployment(s) older than {max_age_hours} hours")
 
         if dry_run:
             self.stdout.write(self.style.WARNING("\nDRY RUN — no cleanup will be performed\n"))
@@ -143,8 +142,7 @@ class Command(BaseCommand):
 
         # Summary
         self.stdout.write(
-            f"\n📊 Cleanup complete: {cleaned} cleaned, {errors} error(s) "
-            f"out of {len(deployments)} total"
+            f"\n📊 Cleanup complete: {cleaned} cleaned, {errors} error(s) out of {len(deployments)} total"
         )
 
     def _cleanup_deployment(self, deployment: Any) -> bool:
@@ -183,16 +181,13 @@ class Command(BaseCommand):
                 # orphaned servers that cost money
                 self.stderr.write(
                     self.style.WARNING(
-                        f"    ⚠️  Cloud deletion failed for {deployment.hostname}, "
-                        f"keeping status '{deployment.status}'"
+                        f"    ⚠️  Cloud deletion failed for {deployment.hostname}, keeping status '{deployment.status}'"
                     )
                 )
                 return False
 
         except Exception as e:
-            self.stderr.write(
-                self.style.ERROR(f"    🔥 Error cleaning {deployment.hostname}: {e}")
-            )
+            self.stderr.write(self.style.ERROR(f"    🔥 Error cleaning {deployment.hostname}: {e}"))
             logger.error(f"[Cleanup] Error cleaning {deployment.hostname}: {e}")
             return False
 
@@ -204,16 +199,17 @@ class Command(BaseCommand):
         available to attempt deletion). Returns False if the deletion
         API call failed, indicating an orphaned server may still exist.
         """
-        from apps.infrastructure.cloud_gateway import get_cloud_gateway
-        from apps.infrastructure.provider_config import get_provider_token
+        from apps.infrastructure.cloud_gateway import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_cloud_gateway,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         token_result = get_provider_token(deployment.provider)
         if token_result.is_err():
             self.stderr.write(
-                self.style.WARNING(
-                    f"    ⚠️  No token for {deployment.provider.name}, "
-                    f"skipping cloud deletion"
-                )
+                self.style.WARNING(f"    ⚠️  No token for {deployment.provider.name}, skipping cloud deletion")
             )
             # No token = can't verify server exists, treat as success
             return True
@@ -231,15 +227,9 @@ class Command(BaseCommand):
             else:
                 # Deletion failed — server may still be running and costing money
                 self.stderr.write(
-                    self.style.WARNING(
-                        f"    ⚠️  Could not delete cloud server: {delete_result.unwrap_err()}"
-                    )
+                    self.style.WARNING(f"    ⚠️  Could not delete cloud server: {delete_result.unwrap_err()}")
                 )
                 return False
         except Exception as e:
-            self.stderr.write(
-                self.style.WARNING(
-                    f"    ⚠️  Cloud deletion error: {e}"
-                )
-            )
+            self.stderr.write(self.style.WARNING(f"    ⚠️  Cloud deletion error: {e}"))
             return False

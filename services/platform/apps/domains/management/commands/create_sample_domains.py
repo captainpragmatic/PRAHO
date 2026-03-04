@@ -300,11 +300,15 @@ class Command(BaseCommand):
                     tld = TLD.objects.get(extension=tld_extension)
                 except TLD.DoesNotExist:
                     # Fallback to random TLD
-                    tld = random.choice(available_tlds)  # Sample data generation
+                    tld = random.choice(  # noqa: S311  # Safe: non-cryptographic usage
+                        available_tlds
+                    )  # Sample data generation  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
                     domain_name = f"{domain_name.split('.')[0]}.{tld.extension}"
             else:
                 # Generate random domain
-                tld = random.choice(available_tlds)  # Sample data generation
+                tld = random.choice(  # noqa: S311  # Safe: non-cryptographic usage
+                    available_tlds
+                )  # Sample data generation  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
                 domain_name = f"sample-domain-{i + 1}.{tld.extension}"
 
             # Get primary registrar for this TLD
@@ -320,11 +324,17 @@ class Command(BaseCommand):
                 registrar = registrar_candidate
 
             # Random customer
-            customer = random.choice(customers)  # Sample data generation
+            customer = random.choice(  # noqa: S311  # Safe: non-cryptographic usage
+                customers
+            )  # Sample data generation  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
 
             # Random dates
-            registered_at = timezone.now() - timedelta(days=random.randint(30, 365))
-            expires_at = registered_at + timedelta(days=365 * random.randint(1, 3))
+            registered_at = timezone.now() - timedelta(
+                days=random.randint(30, 365)  # noqa: S311  # Safe: non-cryptographic usage
+            )  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
+            expires_at = registered_at + timedelta(
+                days=365 * random.randint(1, 3)  # noqa: S311  # Safe: non-cryptographic usage
+            )  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
 
             # Create domain
             domain, created = Domain.objects.get_or_create(
@@ -333,13 +343,19 @@ class Command(BaseCommand):
                     "tld": tld,
                     "registrar": registrar,
                     "customer": customer,
-                    "status": random.choice(["active", "active", "active", "pending"]),
+                    "status": random.choice(  # noqa: S311  # Safe: non-cryptographic usage
+                        ["active", "active", "active", "pending"]
+                    ),  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
                     "registered_at": registered_at,
                     "expires_at": expires_at,
-                    "registrar_domain_id": f"DOM_{random.randint(100000, 999999)}",  # Sample data generation
-                    "epp_code": f"EPP{random.randint(100000, 999999)}",  # Sample data generation
-                    "auto_renew": random.choice([True, True, False]),  # Sample data generation
-                    "whois_privacy": random.choice([True, False]) if tld.whois_privacy_available else False,
+                    "registrar_domain_id": f"DOM_{random.randint(100000, 999999)}",  # Sample data generation  # Safe: sample data generation, not security  # noqa: S311  # Safe: non-cryptographic usage
+                    "epp_code": f"EPP{random.randint(100000, 999999)}",  # Sample data generation  # Safe: sample data generation, not security  # noqa: S311  # Safe: non-cryptographic usage
+                    "auto_renew": random.choice(  # noqa: S311  # Safe: non-cryptographic usage
+                        [True, True, False]
+                    ),  # Sample data generation  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
+                    "whois_privacy": random.choice([True, False])  # noqa: S311  # Safe: non-cryptographic usage
+                    if tld.whois_privacy_available
+                    else False,  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
                     "locked": True,
                     "nameservers": registrar.default_nameservers or [],
                     "last_paid_amount_cents": tld.registration_price_cents,

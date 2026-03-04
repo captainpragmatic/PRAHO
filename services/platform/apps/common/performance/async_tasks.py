@@ -317,7 +317,9 @@ def async_task(
 
             # Queue the task with Django-Q2
             try:
-                from django_q.tasks import async_task as q_async_task
+                from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    async_task as q_async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+                )
 
                 q_async_task(
                     _execute_tracked_task,
@@ -626,7 +628,9 @@ def schedule_task(
     task_id = generate_task_id(f"scheduled_{func.__name__}")
 
     try:
-        from django_q.tasks import schedule
+        from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+            schedule,  # Deferred: django-q task  # Deferred: avoids circular import
+        )
 
         schedule(
             func,
@@ -649,7 +653,9 @@ def schedule_task(
 def cancel_scheduled_task(task_id: str) -> bool:
     """Cancel a scheduled task by ID."""
     try:
-        from django_q.models import Schedule
+        from django_q.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Schedule,  # Deferred: django-q task  # Deferred: avoids circular import
+        )
 
         deleted, _ = Schedule.objects.filter(name=task_id).delete()
         return bool(deleted > 0)

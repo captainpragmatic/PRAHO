@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import gc
 import logging
+import re
 import threading
 import time
 import traceback
@@ -42,6 +44,7 @@ from datetime import datetime
 from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import connection, reset_queries
 
 # Thread-local storage for request context
@@ -59,21 +62,27 @@ VALUE_SUMMARY_LIMIT = _DEFAULT_VALUE_SUMMARY_LIMIT
 
 def get_sql_display_limit() -> int:
     """Get sql display limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("common.sql_display_limit", _DEFAULT_SQL_DISPLAY_LIMIT)
 
 
 def get_max_summarized_args() -> int:
     """Get max summarized args from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("common.max_summarized_args", _DEFAULT_MAX_SUMMARIZED_ARGS)
 
 
 def get_value_summary_limit() -> int:
     """Get value summary limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("common.value_summary_limit", _DEFAULT_VALUE_SUMMARY_LIMIT)
 
@@ -307,7 +316,7 @@ class QueryBudget:
     raise_on_exceed: bool = False
 
 
-class QueryBudgetExceeded(Exception):
+class QueryBudgetExceededError(Exception):
     """Exception raised when query budget is exceeded."""
 
     def __init__(self, message: str, summary: dict[str, Any]) -> None:
@@ -418,7 +427,6 @@ class QueryTracer:
 
     def _normalize_sql(self, sql: str) -> str:
         """Normalize SQL for duplicate detection (remove parameter values)."""
-        import re
 
         # Replace numeric values
         normalized = re.sub(r"\b\d+\b", "?", sql)
@@ -456,7 +464,7 @@ class QueryTracer:
                 logger.warning(message, extra={"query_summary": summary})
 
             if self.budget.raise_on_exceed:
-                raise QueryBudgetExceeded(message, summary)
+                raise QueryBudgetExceededError(message, summary)
 
     def get_summary(self) -> dict[str, Any]:
         """Get summary of traced queries."""
@@ -781,14 +789,11 @@ class PerformanceProfiler:
 
     def _take_snapshot(self) -> PerformanceSnapshot:
         """Take a snapshot of current system metrics."""
-        import gc
-
-        from django.core.cache import cache
 
         # Memory usage (requires psutil for accurate measurement)
         memory_mb = 0.0
         try:
-            import psutil
+            import psutil  # Optional dependency  # noqa: PLC0415  # Deferred: avoids circular import
 
             process = psutil.Process()
             memory_mb = process.memory_info().rss / 1024 / 1024
@@ -1107,7 +1112,7 @@ __all__ = [
     "PerformanceProfiler",
     "PerformanceSnapshot",
     "QueryBudget",
-    "QueryBudgetExceeded",
+    "QueryBudgetExceededError",
     "QueryInfo",
     # Query Tracing
     "QueryTracer",

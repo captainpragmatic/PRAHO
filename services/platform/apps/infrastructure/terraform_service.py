@@ -349,12 +349,13 @@ ssh_public_key       = "{ssh_public_key}"
         logger.info(f"🏗️ [Terraform] Running: {cmd_str} in {deploy_dir}")
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
                 cmd,
                 cwd=deploy_dir,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                check=False,
                 env={**os.environ, "TF_IN_AUTOMATION": "1"},
             )
 
@@ -406,7 +407,7 @@ _terraform_service: TerraformService | None = None
 
 def get_terraform_service() -> TerraformService:
     """Get global Terraform service instance"""
-    global _terraform_service
+    global _terraform_service  # noqa: PLW0603  # Module-level singleton pattern
     if _terraform_service is None:
         _terraform_service = TerraformService()
     return _terraform_service

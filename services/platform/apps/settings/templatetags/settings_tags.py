@@ -169,7 +169,9 @@ def setting_display(context: RequestContext, key: str, label: str = "", show_def
 
 
 @register.filter(name="setting_badge")
-def setting_badge(value: Any, data_type: str = "string") -> SafeString:
+def setting_badge(  # noqa: PLR0911  # Complexity: multi-step business logic
+    value: Any, data_type: str = "string"
+) -> SafeString:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
     """
     🏷️ Generate a badge for setting value based on data type
 

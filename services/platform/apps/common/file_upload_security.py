@@ -32,15 +32,15 @@ class FileUploadError(Exception):
     """Base exception for file upload validation errors."""
 
 
-class FileTypeNotAllowed(FileUploadError):
+class FileTypeNotAllowedError(FileUploadError):
     """Raised when file type is not in the allowed list."""
 
 
-class FileSizeTooLarge(FileUploadError):
+class FileSizeTooLargeError(FileUploadError):
     """Raised when file exceeds size limits."""
 
 
-class MaliciousContentDetected(FileUploadError):
+class MaliciousContentDetectedError(FileUploadError):
     """Raised when potentially malicious content is detected."""
 
 
@@ -244,7 +244,7 @@ class FileUploadSecurityService:
         self.max_size_override_mb = max_size_override_mb
         self.scan_content = scan_content
 
-    def validate_file(
+    def validate_file(  # Complexity: multi-step workflow  # noqa: PLR0911  # Complexity: multi-step business logic
         self,
         file: UploadedFile,
         filename: str | None = None,

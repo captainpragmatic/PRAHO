@@ -147,7 +147,7 @@ def current_customer(request: HttpRequest) -> dict[str, Any]:
         if hasattr(request, "session") and request.session:
             customer_id = request.session.get("staff_customer_context")
             if customer_id:
-                from apps.customers.models import (  # Cross-app import to avoid circular dependencies
+                from apps.customers.models import (  # Cross-app import to avoid circular dependencies  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
                     Customer,
                 )
 

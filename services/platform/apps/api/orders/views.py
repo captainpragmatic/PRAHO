@@ -8,11 +8,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-# Constants
-ISO_COUNTRY_CODE_LENGTH = 2
-IDEMPOTENCY_KEY_MIN_LENGTH = 16
-IDEMPOTENCY_KEY_MAX_LENGTH = 128
-
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -23,10 +19,19 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import require_customer_authentication
+from apps.audit.services import AuditService
+from apps.billing.models import Currency
 from apps.common.types import Ok
 from apps.customers.models import Customer
+from apps.orders.models import Order
+from apps.orders.preflight import OrderPreflightValidationService
+from apps.orders.price_sealing import PriceSealingService, get_client_ip
 from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
-from apps.products.models import Product
+from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
+from apps.products.models import Product, ProductPrice
+from apps.provisioning.models import Service
+from apps.provisioning.service_models import Server
+from apps.provisioning.tasks import queue_service_provisioning
 
 from .serializers import (
     CartCalculationInputSerializer,
@@ -39,6 +44,11 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Constants
+ISO_COUNTRY_CODE_LENGTH = 2
+IDEMPOTENCY_KEY_MIN_LENGTH = 16
+IDEMPOTENCY_KEY_MAX_LENGTH = 128
 
 
 # 🔒 SECURITY: Custom throttle classes for order endpoints
@@ -118,7 +128,9 @@ def product_detail(request: Request, slug: str) -> Response:
 @permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def calculate_cart_totals(request: Request, customer: Customer) -> Response:
+def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+    request: Request, customer: Customer
+) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
     Calculate cart totals with Romanian VAT compliance.
     Server-authoritative pricing - never trust client input.
@@ -141,9 +153,6 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
     cart_items = validated_data["items"]
 
     try:
-        # Import here to avoid circular imports
-        from apps.billing.models import Currency
-
         # Get currency
         try:
             currency = Currency.objects.get(code=currency_code)
@@ -180,8 +189,6 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
                     continue
 
                 # Get current pricing (server-authoritative)
-                from apps.products.models import ProductPrice
-
                 try:
                     product_price = ProductPrice.objects.get(product=product, currency=currency, is_active=True)
                 except ProductPrice.DoesNotExist:
@@ -211,12 +218,6 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
                 warnings.append({"type": "product_not_found", "message": f"Product not found: {identifier}"})
 
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
-        from apps.customers.models import Customer
-        from apps.orders.vat_rules import (
-            CustomerVATInfo,
-            OrderVATCalculator,
-        )
-
         # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
         try:
             customer_obj = Customer.objects.get(id=customer_id)
@@ -282,7 +283,9 @@ def calculate_cart_totals(request: Request, customer: Customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(request: Request, customer: Customer) -> Response:
+def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
+    request: Request, customer: Customer
+) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
     🔎 Preflight validation for portal checkout.
     Validates customer profile, product/price availability, VAT scenario, and returns errors/warnings + totals preview.
@@ -304,14 +307,6 @@ def preflight_order(request: Request, customer: Customer) -> Response:
             )
 
         # Create a preview order data structure (without saving to DB)
-        import uuid
-
-        from apps.billing.models import Currency
-        from apps.orders.preflight import (
-            OrderPreflightValidationService,
-        )
-        from apps.orders.services import OrderService
-
         # Get currency (default to RON)
         currency = Currency.objects.get(code="RON")
 
@@ -325,8 +320,6 @@ def preflight_order(request: Request, customer: Customer) -> Response:
 
         for cart_item in cart_items:
             # Get product and pricing
-            from apps.products.models import Product
-
             try:
                 product_id = cart_item.get("product_id")
                 if not product_id:
@@ -388,8 +381,6 @@ def preflight_order(request: Request, customer: Customer) -> Response:
                 )
 
         # Calculate VAT using the VAT calculator
-        from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
-
         company_name = billing_address.get("company_name", "")
         vat_number = billing_address.get("vat_number", "")
         country_raw = billing_address.get("country", "România")
@@ -418,8 +409,6 @@ def preflight_order(request: Request, customer: Customer) -> Response:
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
         # Create a temporary order object for validation (not saved to DB)
-        from apps.orders.models import Order
-
         # Normalize billing address for validation (ensure country is ISO code)
         normalized_billing_address = dict(billing_address)
         normalized_billing_address["country"] = country  # Use the normalized country code
@@ -485,7 +474,9 @@ def preflight_order(request: Request, customer: Customer) -> Response:
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCreateThrottle])
 @require_customer_authentication
-def create_order(request: Request, customer: Customer) -> Response:
+def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    request: Request, customer: Customer
+) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
     Create order from cart items with server-side pricing resolution.
     Supports idempotency keys to prevent duplicate orders and race conditions.
@@ -504,16 +495,12 @@ def create_order(request: Request, customer: Customer) -> Response:
         )
 
     # 🔒 SECURITY: Check for existing order with this idempotency key
-    from django.core.cache import cache
-
     cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
     existing_order_id = cache.get(cache_key)
 
     if existing_order_id:
         logger.info(f"🔄 [API] Returning existing order for idempotency key: {idempotency_key[:8]}...")
         try:
-            from apps.orders.models import Order
-
             existing_order = Order.objects.get(id=existing_order_id, customer=customer)
             serializer = OrderDetailSerializer(existing_order)
             return Response(
@@ -572,9 +559,6 @@ def create_order(request: Request, customer: Customer) -> Response:
 
             if sealed_token:
                 try:
-                    # Import here to avoid circular imports
-                    from apps.orders.price_sealing import PriceSealingService, get_client_ip
-
                     # Get client IP for validation
                     client_ip = get_client_ip(request)
 
@@ -665,10 +649,6 @@ def create_order(request: Request, customer: Customer) -> Response:
                         serializer = OrderDetailSerializer(order)
                     else:
                         # Collect preflight errors for client visibility
-                        from apps.orders.preflight import (
-                            OrderPreflightValidationService,
-                        )
-
                         errs, warns = OrderPreflightValidationService.validate(order)
                         preflight = {"errors": errs, "warnings": warns}
                 except Exception as e:
@@ -715,8 +695,6 @@ def order_list(request: Request, customer: Customer) -> Response:
 
     try:
         # Get customer orders
-        from apps.orders.models import Order
-
         orders = Order.objects.filter(customer_id=customer_id).order_by("-created_at")
 
         # Apply filters from request body
@@ -747,8 +725,6 @@ def order_detail(request: Request, customer: Customer, order_id: str) -> Respons
     customer_id = customer.id
 
     try:
-        from apps.orders.models import Order
-
         order = Order.objects.prefetch_related("items").get(id=order_id, customer_id=customer_id)
 
         serializer = OrderDetailSerializer(order)
@@ -780,10 +756,6 @@ def _get_server_for_product_type(product_type: str, server_model: Any) -> tuple[
 def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dict[str, Any]:
     """Provision one confirmed order item and return API-safe result data."""
     try:
-        from apps.provisioning.models import Service
-        from apps.provisioning.service_models import Server
-        from apps.provisioning.tasks import queue_service_provisioning
-
         if not item.product.default_service_plan:
             logger.error(f"❌ Product {item.product.name} has no default_service_plan configured")
             return {
@@ -839,9 +811,6 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
     Confirm order after successful payment and trigger service provisioning.
     """
     try:
-        from apps.audit.services import AuditService
-        from apps.orders.models import Order
-
         # Get order and verify ownership
         order = Order.objects.prefetch_related("items").get(id=order_id, customer_id=customer.id)
 

@@ -93,7 +93,7 @@ E_FACTURA_MINIMUM_AMOUNT = 100  # 100 RON - minimum for mandatory e-Factura
 # ===============================================================================
 
 
-def _log_billing_model_event(
+def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Business logic parameters
     *,
     event_type: str,
     instance: Any,

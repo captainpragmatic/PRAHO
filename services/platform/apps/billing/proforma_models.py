@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, ClassVar, TypedDict
 
 from django.core.exceptions import ValidationError
@@ -243,7 +243,9 @@ class ProformaInvoice(models.Model):
 
     def convert_to_invoice(self) -> None:
         """Convert this proforma to an actual invoice via ProformaConversionService."""
-        from apps.billing.services import ProformaConversionService
+        from apps.billing.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ProformaConversionService,  # Circular: models->services  # Deferred: avoids circular import
+        )
 
         result = ProformaConversionService.convert_to_invoice(str(self.id))
         if result.is_err():
@@ -295,7 +297,6 @@ class ProformaLine(models.Model):
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        from decimal import ROUND_HALF_EVEN
 
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderItem)

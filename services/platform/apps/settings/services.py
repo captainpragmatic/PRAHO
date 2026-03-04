@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.security_decorators import (
@@ -505,8 +506,6 @@ class SettingsService:
         Returns:
             Result with updated setting or validation error
         """
-        from django.db import IntegrityError
-
         try:
             # Infer data type
             data_type = cls._infer_data_type(value)

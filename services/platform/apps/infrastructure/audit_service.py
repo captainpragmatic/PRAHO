@@ -1051,7 +1051,7 @@ class InfrastructureAuditService:
         )
 
     @classmethod
-    def _create_event(
+    def _create_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         cls,
         action: str,
         content_object: Any,
@@ -1098,7 +1098,7 @@ _audit_service: InfrastructureAuditService | None = None
 
 def get_infrastructure_audit_service() -> InfrastructureAuditService:
     """Get global infrastructure audit service instance"""
-    global _audit_service
+    global _audit_service  # noqa: PLW0603  # Module-level singleton pattern
     if _audit_service is None:
         _audit_service = InfrastructureAuditService()
     return _audit_service

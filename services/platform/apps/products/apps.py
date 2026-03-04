@@ -12,4 +12,4 @@ class ProductsConfig(AppConfig):
 
     def ready(self) -> None:
         """Register signals when app is ready"""
-        import apps.products.signals  # noqa: F401
+        import apps.products.signals  # noqa: F401  # Signal registration

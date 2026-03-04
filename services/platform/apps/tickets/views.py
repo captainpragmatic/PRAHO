@@ -391,9 +391,10 @@ def _handle_ticket_status_update(
     except ValueError as e:
         # Handle validation errors from TicketStatusService
         if request.headers.get("HX-Request"):
-            return "", HttpResponse(
+            # SECURITY: format_html() escapes all interpolated values
+            return "", HttpResponse(  # nosemgrep: direct-use-of-httpresponse
                 format_html('<div class="text-red-500 text-sm">Error: {}</div>', str(e))
-            )  # nosemgrep: direct-use-of-httpresponse — content is developer-controlled string/integer
+            )
         messages.error(request, _("❌ Error: {error}").format(error=str(e)))
         return "", redirect("tickets:detail", pk=ticket.pk)
 

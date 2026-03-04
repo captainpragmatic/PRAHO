@@ -5,6 +5,7 @@ Comprehensive EU VAT compliance for Romanian hosting provider.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import Enum
@@ -89,14 +90,18 @@ class OrderVATCalculator:
     @classmethod
     def _get_vat_rate(cls, country_code: str) -> Decimal:
         """Get VAT rate from centralized TaxService."""
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            TaxService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return TaxService.get_vat_rate(country_code, as_decimal=False)
 
     @classmethod
     def _get_eu_countries(cls) -> set[str]:
         """Get EU countries from centralized TaxService."""
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            TaxService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return TaxService.get_eu_countries()
 
@@ -180,7 +185,7 @@ class OrderVATCalculator:
         return result
 
     @classmethod
-    def _determine_vat_scenario(
+    def _determine_vat_scenario(  # Complexity: order processing pipeline  # noqa: PLR0911, PLR0912  # Complexity: multi-step business logic
         cls,
         country_code: str,
         is_business: bool,
@@ -276,7 +281,7 @@ class OrderVATCalculator:
                 return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
 
     @classmethod
-    def _generate_vat_reasoning(
+    def _generate_vat_reasoning(  # Complexity: order processing pipeline  # noqa: PLR0911  # Complexity: multi-step business logic
         cls,
         scenario: VATScenario,
         country_code: str,
@@ -356,8 +361,6 @@ class OrderVATCalculator:
 
         pattern = vat_patterns.get(country_code)
         if pattern:
-            import re
-
             return bool(re.match(pattern, vat_clean))
 
         # For countries without specific patterns, basic length check

@@ -88,8 +88,12 @@ def sync_hetzner_provider(token: str, dry_run: bool = False) -> Result[SyncResul
     Returns:
         Result with SyncResult or error
     """
-    from apps.infrastructure.hcloud_service import get_hcloud_service
-    from apps.infrastructure.models import CloudProvider
+    from apps.infrastructure.hcloud_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_hcloud_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     result = SyncResult(provider_type="hetzner")
 
@@ -138,7 +142,9 @@ def _sync_locations(
     dry_run: bool,
 ) -> str | None:
     """Sync Hetzner locations into NodeRegion records. Returns error string or None."""
-    from apps.infrastructure.models import NodeRegion
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     locations_result = hcloud_svc.get_locations()
     if locations_result.is_err():
@@ -200,7 +206,9 @@ def _sync_server_types(
     dry_run: bool,
 ) -> str | None:
     """Sync Hetzner server types into NodeSize records. Returns error string or None."""
-    from apps.infrastructure.models import NodeSize
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     types_result = hcloud_svc.get_server_types()
     if types_result.is_err():
@@ -336,8 +344,12 @@ def sync_digitalocean_provider(token: str, dry_run: bool = False) -> Result[Sync
     Returns:
         Result with SyncResult or error
     """
-    from apps.infrastructure.digitalocean_service import get_digitalocean_service
-    from apps.infrastructure.models import CloudProvider
+    from apps.infrastructure.digitalocean_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_digitalocean_service,  # Circular: cross-app
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     result = SyncResult(provider_type="digitalocean")
 
@@ -384,7 +396,9 @@ def _sync_do_regions(
     dry_run: bool,
 ) -> str | None:
     """Sync DigitalOcean regions into NodeRegion records. Returns error string or None."""
-    from apps.infrastructure.models import NodeRegion
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     locations_result = do_svc.get_locations()
     if locations_result.is_err():
@@ -440,7 +454,9 @@ def _sync_do_sizes(
     dry_run: bool,
 ) -> str | None:
     """Sync DigitalOcean sizes into NodeSize records. Returns error string or None."""
-    from apps.infrastructure.models import NodeSize
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     # Fetch raw size data directly to access pricing fields
     do_page_size = 200
@@ -539,8 +555,12 @@ def sync_vultr_provider(token: str, dry_run: bool = False) -> Result[SyncResult,
     Returns:
         Result with SyncResult or error
     """
-    from apps.infrastructure.models import CloudProvider
-    from apps.infrastructure.vultr_service import get_vultr_service
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.vultr_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_vultr_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     result = SyncResult(provider_type="vultr")
 
@@ -587,7 +607,9 @@ def _sync_vultr_regions(
     dry_run: bool,
 ) -> str | None:
     """Sync Vultr regions into NodeRegion records. Returns error string or None."""
-    from apps.infrastructure.models import NodeRegion
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     locations_result = vultr_svc.get_locations()
     if locations_result.is_err():
@@ -643,7 +665,9 @@ def _sync_vultr_plans(
     dry_run: bool,
 ) -> str | None:
     """Sync Vultr plans into NodeSize records. Returns error string or None."""
-    from apps.infrastructure.models import NodeSize
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     # Fetch raw plan data via the service's authenticated session (public attr)
     # to access pricing fields not exposed by get_server_types()
@@ -709,7 +733,9 @@ def _sync_vultr_plans(
 
 def _ensure_panel_types(dry_run: bool = False) -> int:
     """Ensure standard PanelType records exist."""
-    from apps.infrastructure.models import PanelType
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        PanelType,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     panels = [
         {
@@ -804,8 +830,12 @@ def sync_aws_provider(token: str, dry_run: bool = False) -> Result[SyncResult, s
     Returns:
         Result with SyncResult or error
     """
-    from apps.infrastructure.aws_service import get_aws_service
-    from apps.infrastructure.models import CloudProvider
+    from apps.infrastructure.aws_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_aws_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     result = SyncResult(provider_type="aws")
 
@@ -852,7 +882,9 @@ def _sync_aws_regions(
     dry_run: bool,
 ) -> str | None:
     """Sync AWS availability zones into NodeRegion records."""
-    from apps.infrastructure.models import NodeRegion
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeRegion,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     locations_result = aws_svc.get_locations()
     if locations_result.is_err():
@@ -910,7 +942,9 @@ def _sync_aws_instance_types(
     dry_run: bool,
 ) -> str | None:
     """Sync AWS instance types into NodeSize records."""
-    from apps.infrastructure.models import NodeSize
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     types_result = aws_svc.get_server_types()
     if types_result.is_err():
@@ -966,3 +1000,15 @@ def _sync_aws_instance_types(
         result.sizes_deactivated = deactivated
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Eager registration — fires at import time so get_provider_sync_fn() needs
+# no dynamic import at call time (eliminates non-literal-import semgrep finding)
+# ---------------------------------------------------------------------------
+from apps.infrastructure.provider_config import register_sync_fn  # noqa: E402
+
+register_sync_fn("hetzner", sync_hetzner_provider)
+register_sync_fn("digitalocean", sync_digitalocean_provider)
+register_sync_fn("vultr", sync_vultr_provider)
+register_sync_fn("aws", sync_aws_provider)

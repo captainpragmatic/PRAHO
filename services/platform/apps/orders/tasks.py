@@ -58,7 +58,9 @@ TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
 def get_max_payment_failures_before_order_fail() -> int:
     """Get max payment failures before order fail from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "orders.max_payment_failures_before_fail", _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL
@@ -67,14 +69,18 @@ def get_max_payment_failures_before_order_fail() -> int:
 
 def get_task_soft_time_limit() -> int:
     """Get task soft time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("orders.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
 
 
 def get_task_time_limit() -> int:
     """Get task time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("orders.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
@@ -766,7 +772,9 @@ def process_recurring_orders_async() -> str:
 
 def setup_order_scheduled_tasks() -> dict[str, str]:
     """Set up all order processing scheduled tasks."""
-    from django_q.models import Schedule as ScheduleModel
+    from django_q.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        Schedule as ScheduleModel,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     tasks_created = {}
 
@@ -905,8 +913,12 @@ def provision_order_item(item_id: str) -> dict[str, Any]:
 
     try:
         # Import at function level to avoid circular imports
-        from apps.orders.models import OrderItem
-        from apps.provisioning.services import ProvisioningService
+        from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            OrderItem,  # Deferred: django-q task  # Deferred: avoids circular import
+        )
+        from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ProvisioningService,  # Deferred: django-q task  # Deferred: avoids circular import
+        )
 
         item = OrderItem.objects.get(id=item_id)
 

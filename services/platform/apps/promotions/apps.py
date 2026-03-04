@@ -15,4 +15,4 @@ class PromotionsConfig(AppConfig):
     def ready(self) -> None:
         """Import signals when app is ready."""
         # Import signals to register them
-        from . import signals  # noqa: F401
+        from . import signals  # noqa: F401  # Circular: app registry

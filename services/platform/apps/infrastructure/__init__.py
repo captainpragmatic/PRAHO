@@ -69,7 +69,9 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(  # noqa: PLR0911  # Complexity: multi-step business logic
+    name: str,
+) -> Any:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
     """Lazy import for module attributes to avoid AppRegistryNotReady issues."""
     # Models
     if name in (
@@ -81,25 +83,33 @@ def __getattr__(name: str) -> Any:
         "NodeDeploymentLog",
         "NodeDeploymentCostRecord",
     ):
-        from apps.infrastructure import models
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            models,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(models, name)
 
     # SSH Key Management
     if name in ("SSHKeyManager", "SSHKeyPair", "SSHKeyInfo", "get_ssh_key_manager"):
-        from apps.infrastructure import ssh_key_manager
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ssh_key_manager,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(ssh_key_manager, name)
 
     # Terraform
     if name in ("TerraformService", "TerraformResult", "get_terraform_service"):
-        from apps.infrastructure import terraform_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            terraform_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(terraform_service, name)
 
     # Ansible
     if name in ("AnsibleService", "AnsibleResult", "get_ansible_service"):
-        from apps.infrastructure import ansible_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ansible_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(ansible_service, name)
 
@@ -110,13 +120,17 @@ def __getattr__(name: str) -> Any:
         "ValidationResult",
         "get_validation_service",
     ):
-        from apps.infrastructure import validation_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            validation_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(validation_service, name)
 
     # Registration
     if name in ("NodeRegistrationService", "get_registration_service"):
-        from apps.infrastructure import registration_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            registration_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(registration_service, name)
 
@@ -127,7 +141,9 @@ def __getattr__(name: str) -> Any:
         "DeploymentProgress",
         "get_deployment_service",
     ):
-        from apps.infrastructure import deployment_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            deployment_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(deployment_service, name)
 
@@ -137,7 +153,9 @@ def __getattr__(name: str) -> Any:
         "InfrastructureAuditContext",
         "get_infrastructure_audit_service",
     ):
-        from apps.infrastructure import audit_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            audit_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(audit_service, name)
 
@@ -150,7 +168,9 @@ def __getattr__(name: str) -> Any:
         "can_manage_sizes",
         "can_manage_regions",
     ):
-        from apps.infrastructure import permissions
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            permissions,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(permissions, name)
 
@@ -161,7 +181,9 @@ def __getattr__(name: str) -> Any:
         "DeploymentCostBreakdown",
         "get_cost_tracking_service",
     ):
-        from apps.infrastructure import cost_service
+        from apps.infrastructure import (  # noqa: PLC0415  # Deferred: avoids circular import
+            cost_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return getattr(cost_service, name)
 

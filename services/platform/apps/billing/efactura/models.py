@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     pass
 
 
+from apps.settings.services import SettingsService
+
+
 class EFacturaStatus(StrEnum):
     """e-Factura document status enumeration."""
 
@@ -385,8 +388,6 @@ class EFacturaDocument(models.Model):
     def submission_deadline(self) -> datetime.datetime | None:
         """Calculate the submission deadline from invoice issue date."""
         if self.invoice.issued_at:
-            from apps.settings.services import SettingsService
-
             deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
             return self.invoice.issued_at + timedelta(days=deadline_days)
         return None
@@ -396,8 +397,6 @@ class EFacturaDocument(models.Model):
         """Check if within warning hours of deadline."""
         deadline = self.submission_deadline
         if deadline:
-            from apps.settings.services import SettingsService
-
             warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
             return bool(timezone.now() >= deadline - timedelta(hours=warning_hours))
         return False

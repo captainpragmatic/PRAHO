@@ -202,7 +202,9 @@ class XSDValidator:
         """
         return getattr(efactura_settings, key, default)
 
-    def validate(self, xml_content: str | bytes) -> XSDValidationResult:
+    def validate(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, xml_content: str | bytes
+    ) -> XSDValidationResult:  # Complexity: e-factura workflow  # Complexity: multi-step business logic
         """
         Validate XML content against appropriate XSD schema.
 

@@ -97,12 +97,10 @@ class DriftScannerService:
             self._process_report(report)
 
         InfrastructureAuditService.log_drift_scan_completed(
-            deployment=deployment, drift_count=len(all_reports),
+            deployment=deployment,
+            drift_count=len(all_reports),
         )
-        logger.info(
-            f"✅ [DriftScanner] Scan complete for {deployment.hostname}: "
-            f"{len(all_reports)} findings"
-        )
+        logger.info(f"✅ [DriftScanner] Scan complete for {deployment.hostname}: {len(all_reports)} findings")
         return Ok(all_reports)
 
     def _run_check(
@@ -134,48 +132,90 @@ class DriftScannerService:
 
         server_result = gateway.get_server(deployment.external_node_id)
         if server_result.is_err():
-            reports.append(self._create_report(
-                check, deployment, "server_deleted", "critical", "server_state",
-                expected="exists", actual=f"error: {server_result.unwrap_err()}",
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    "server_deleted",
+                    "critical",
+                    "server_state",
+                    expected="exists",
+                    actual=f"error: {server_result.unwrap_err()}",
+                )
+            )
             return reports
 
         server_info = server_result.unwrap()
         if server_info is None:
-            reports.append(self._create_report(
-                check, deployment, "server_deleted", "critical", "server_state",
-                expected="exists", actual="not found",
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    "server_deleted",
+                    "critical",
+                    "server_state",
+                    expected="exists",
+                    actual="not found",
+                )
+            )
             return reports
 
         # Compare server type
         expected_type = deployment.node_size.provider_type_id if deployment.node_size else ""
         if expected_type and server_info.server_type != expected_type:
-            reports.append(self._create_report(
-                check, deployment, "server_type", "high", "server_state",
-                expected=expected_type, actual=server_info.server_type,
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    "server_type",
+                    "high",
+                    "server_state",
+                    expected=expected_type,
+                    actual=server_info.server_type,
+                )
+            )
 
         # Compare status
         if server_info.status != "running":
-            reports.append(self._create_report(
-                check, deployment, "server_status", "high", "server_state",
-                expected="running", actual=server_info.status,
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    "server_status",
+                    "high",
+                    "server_state",
+                    expected="running",
+                    actual=server_info.status,
+                )
+            )
 
         # Compare IPv4
         if deployment.ipv4_address and server_info.ipv4_address != deployment.ipv4_address:
-            reports.append(self._create_report(
-                check, deployment, "ipv4_address", "critical", "network",
-                expected=str(deployment.ipv4_address), actual=server_info.ipv4_address,
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    "ipv4_address",
+                    "critical",
+                    "network",
+                    expected=str(deployment.ipv4_address),
+                    actual=server_info.ipv4_address,
+                )
+            )
 
         # Compare IPv6
         if deployment.ipv6_address and server_info.ipv6_address != deployment.ipv6_address:
-            reports.append(self._create_report(
-                check, deployment, "ipv6_address", "critical", "network",
-                expected=str(deployment.ipv6_address), actual=server_info.ipv6_address,
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    "ipv6_address",
+                    "critical",
+                    "network",
+                    expected=str(deployment.ipv6_address),
+                    actual=server_info.ipv6_address,
+                )
+            )
 
         # Compare labels
         expected_labels = {
@@ -185,11 +225,18 @@ class DriftScannerService:
         for key, expected_val in expected_labels.items():
             actual_val = server_info.labels.get(key, "")
             if actual_val != expected_val:
-                reports.append(self._create_report(
-                    check, deployment, "labels", "low", "server_state",
-                    expected=f"{key}={expected_val}", actual=f"{key}={actual_val}",
-                    auto_resolvable=True,
-                ))
+                reports.append(
+                    self._create_report(
+                        check,
+                        deployment,
+                        "labels",
+                        "low",
+                        "server_state",
+                        expected=f"{key}={expected_val}",
+                        actual=f"{key}={actual_val}",
+                        auto_resolvable=True,
+                    )
+                )
 
         return reports
 
@@ -216,10 +263,17 @@ class DriftScannerService:
                 severity = "high"
                 field_name = "network_unreachable"
 
-            reports.append(self._create_report(
-                check, deployment, field_name, severity, "network",
-                expected="reachable", actual="unreachable",
-            ))
+            reports.append(
+                self._create_report(
+                    check,
+                    deployment,
+                    field_name,
+                    severity,
+                    "network",
+                    expected="reachable",
+                    actual="unreachable",
+                )
+            )
 
         return reports
 
@@ -249,9 +303,7 @@ class DriftScannerService:
 
         # Audit: drift detected
         try:
-            InfrastructureAuditService.log_drift_detected(
-                report.deployment, report, InfrastructureAuditContext()
-            )
+            InfrastructureAuditService.log_drift_detected(report.deployment, report, InfrastructureAuditContext())
         except Exception:
             logger.warning(f"⚠️ [DriftScanner] Failed to log audit for {report}")
 
@@ -265,9 +317,7 @@ class DriftScannerService:
         logger.info(f"✅ [DriftScanner] Auto-resolved LOW drift: {report.field_name} for {report.deployment.hostname}")
 
         try:
-            InfrastructureAuditService.log_drift_auto_resolved(
-                report.deployment, report, InfrastructureAuditContext()
-            )
+            InfrastructureAuditService.log_drift_auto_resolved(report.deployment, report, InfrastructureAuditContext())
         except Exception:
             logger.warning(f"⚠️ [DriftScanner] Failed to log audit for auto-resolve: {report}")
 
@@ -284,9 +334,7 @@ class DriftScannerService:
         )
 
         try:
-            InfrastructureAuditService.log_drift_auto_resolved(
-                report.deployment, report, InfrastructureAuditContext()
-            )
+            InfrastructureAuditService.log_drift_auto_resolved(report.deployment, report, InfrastructureAuditContext())
         except Exception:
             logger.warning(f"⚠️ [DriftScanner] Failed to log audit for auto-resolve: {report}")
 
@@ -344,14 +392,11 @@ class DriftScannerService:
 
     def _count_consecutive_network_failures(self, deployment: NodeDeployment) -> int:
         """Count consecutive network check failures for a deployment."""
-        recent_checks = (
-            DriftCheck.objects.filter(
-                deployment=deployment,
-                check_type="network",
-                status="completed",
-            )
-            .order_by("-created_at")[:CONSECUTIVE_FAILURE_THRESHOLD]
-        )
+        recent_checks = DriftCheck.objects.filter(
+            deployment=deployment,
+            check_type="network",
+            status="completed",
+        ).order_by("-created_at")[:CONSECUTIVE_FAILURE_THRESHOLD]
 
         count = 0
         for check in recent_checks:
@@ -361,7 +406,7 @@ class DriftScannerService:
                 break
         return count
 
-    def _create_report(
+    def _create_report(  # drift scan parameters  # noqa: PLR0913  # Business logic parameters
         self,
         check: DriftCheck,
         deployment: NodeDeployment,
@@ -391,7 +436,7 @@ _scanner_service: DriftScannerService | None = None
 
 def get_drift_scanner_service() -> DriftScannerService:
     """Get global drift scanner service instance."""
-    global _scanner_service
+    global _scanner_service  # noqa: PLW0603  # Module-level singleton pattern
     if _scanner_service is None:
         _scanner_service = DriftScannerService()
     return _scanner_service

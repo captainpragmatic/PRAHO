@@ -30,7 +30,7 @@ security_logger = logging.getLogger("security")
 def validate_bank_details(bank_details: dict[str, Any]) -> None:
     """🔒 Validate bank details for security and compliance"""
     # Use logger from re-export module so patches work correctly
-    import apps.customers.models as models_module
+    import apps.customers.models as models_module  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger = models_module.security_logger
 
@@ -127,7 +127,7 @@ class SoftDeleteModel(models.Model):
         """🔒 Enhanced soft delete with comprehensive validation and cascading"""
         with transaction.atomic():
             # Use logger from re-export module so patches work correctly
-            import apps.customers.models as models_module
+            import apps.customers.models as models_module  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
             logger = models_module.security_logger
 
@@ -156,7 +156,7 @@ class SoftDeleteModel(models.Model):
         """🔒 Enhanced restore with validation and cascading"""
         with transaction.atomic():
             # Use logger from re-export module so patches work correctly
-            import apps.customers.models as models_module
+            import apps.customers.models as models_module  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
             logger = models_module.security_logger
 
@@ -297,7 +297,7 @@ class Customer(SoftDeleteModel):
 
     def get_tax_profile(self) -> CustomerTaxProfile | None:
         """Get customer tax profile"""
-        from .profile_models import CustomerTaxProfile
+        from .profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
             return cast(CustomerTaxProfile, CustomerTaxProfile.objects.get(customer=self))
@@ -306,7 +306,7 @@ class Customer(SoftDeleteModel):
 
     def get_billing_profile(self) -> CustomerBillingProfile | None:
         """Get customer billing profile"""
-        from .profile_models import CustomerBillingProfile
+        from .profile_models import CustomerBillingProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
             return cast(CustomerBillingProfile, CustomerBillingProfile.objects.get(customer=self))
@@ -315,7 +315,7 @@ class Customer(SoftDeleteModel):
 
     def get_primary_address(self) -> CustomerAddress | None:
         """Get primary address"""
-        from .contact_models import CustomerAddress
+        from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
         return cast(
             CustomerAddress | None,
@@ -324,7 +324,7 @@ class Customer(SoftDeleteModel):
 
     def get_billing_address(self) -> CustomerAddress | None:
         """Get billing address or fall back to primary"""
-        from .contact_models import CustomerAddress
+        from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
         billing_address = cast(
             CustomerAddress | None,

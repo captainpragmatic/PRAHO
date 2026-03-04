@@ -16,13 +16,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+
+from .metering_models import BillingCycle, UsageAggregation, UsageMeter
+from .subscription_models import Subscription
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +64,7 @@ class Result:
 def get_stripe() -> Any:
     """Get configured Stripe module"""
     try:
-        import stripe
+        import stripe  # Deferred: optional dependency  # noqa: PLC0415  # Deferred: avoids circular import
 
         stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", None)
         return stripe
@@ -302,8 +305,6 @@ class StripeSubscriptionMeterService:
             }
 
             if trial_days:
-                from datetime import timedelta
-
                 trial_end = timezone.now() + timedelta(days=trial_days)
                 sub_params["trial_end"] = int(trial_end.timestamp())
 
@@ -407,8 +408,6 @@ class StripeUsageSyncService:
 
         Reports the aggregated usage as a meter event to Stripe.
         """
-        from .metering_models import UsageAggregation
-
         try:
             aggregation = UsageAggregation.objects.select_related("meter", "customer", "subscription").get(
                 id=aggregation_id
@@ -462,8 +461,6 @@ class StripeUsageSyncService:
         """
         Sync all aggregations in a billing cycle to Stripe.
         """
-        from .metering_models import BillingCycle, UsageAggregation
-
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
@@ -555,8 +552,6 @@ class StripeMeterWebhookHandler:
         logger.info(f"Stripe Meter updated: {meter_data.id}")
 
         # Update local meter if it exists
-        from .metering_models import UsageMeter
-
         try:
             local_meter = UsageMeter.objects.get(stripe_meter_id=meter_data.id)
             local_meter.stripe_meter_event_name = meter_data.event_name
@@ -612,8 +607,6 @@ class StripeMeterWebhookHandler:
         subscription_id = invoice_data.get("subscription")
         if subscription_id:
             try:
-                from .subscription_models import Subscription
-
                 subscription = Subscription.objects.get(stripe_subscription_id=subscription_id)
                 billing_cycle = subscription.billing_cycles.filter(status="invoiced").order_by("-period_start").first()
 

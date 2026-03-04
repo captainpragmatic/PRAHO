@@ -16,7 +16,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import secrets
+import tarfile
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -712,10 +714,10 @@ class VirtualminBackupService:
             logger.error(f"Config backup execution failed: {e}")
             return Err(f"Config backup failed: {e!s}")
 
-    def _verify_backup_integrity(self, backup_id: str, metadata: dict[str, Any]) -> Result[None, str]:
+    def _verify_backup_integrity(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, backup_id: str, metadata: dict[str, Any]
+    ) -> Result[None, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """Verify backup file integrity and completeness."""
-        import os
-        import tarfile
 
         try:
             # Get backup file path from metadata or construct it
@@ -782,7 +784,6 @@ class VirtualminBackupService:
 
     def _upload_backup_to_s3(self, backup_id: str, metadata: dict[str, Any]) -> Result[dict[str, Any], str]:
         """Upload backup files to S3 with encryption."""
-        import os
 
         try:
             s3_client = self._get_s3_client()
@@ -874,9 +875,12 @@ class VirtualminBackupService:
         metadata.update({"status": "completed", "completed_at": timezone.now().isoformat(), "s3_info": upload_info})
         return metadata
 
-    def _download_backup_from_s3(self, backup_id: str) -> Result[tuple[str, dict[str, Any]], str]:
+    def _download_backup_from_s3(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, backup_id: str
+    ) -> Result[
+        tuple[str, dict[str, Any]], str
+    ]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """Download backup from S3 for restoration."""
-        import os
 
         try:
             s3_client = self._get_s3_client()

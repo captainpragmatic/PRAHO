@@ -331,7 +331,7 @@ def domain_detail(request: HttpRequest, domain_id: str) -> HttpResponse:
 
 
 @login_required
-def domain_register(
+def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Complexity: multi-step business logic
     request: HttpRequest,
 ) -> HttpResponse:
     """🆕 Domain registration form and availability check"""

@@ -344,9 +344,6 @@ class NodeDeployment(models.Model):
         verbose_name=_("Panel Type"),
     )
 
-    # Node identity (auto-generated from naming convention)
-    # Format: {env}-{type}-{provider.code}-{region.country_code}-{region.normalized_code}-{number}
-    # Example: prd-sha-het-de-fsn1-001
     hostname = models.CharField(
         max_length=23,
         unique=True,
@@ -533,6 +530,24 @@ class NodeDeployment(models.Model):
     def __str__(self) -> str:
         return self.hostname
 
+    # Size-based max_domains defaults
+    MAX_DOMAINS_BY_MEMORY: ClassVar[list[tuple[int, int]]] = [
+        (2, 25),
+        (4, 50),
+        (8, 100),
+        (16, 200),
+        (32, 500),
+    ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Auto-generate hostname and set max_domains on save"""
+        if not self.hostname:
+            self.hostname = self.generate_hostname()
+        # Set max_domains from size on creation if still at default
+        if not self.pk and self.max_domains == DEFAULT_MAX_DOMAINS and self.node_size:
+            self.set_max_domains_from_size()
+        super().save(*args, **kwargs)
+
     def generate_hostname(self) -> str:
         """Generate hostname from naming convention"""
         return (
@@ -544,15 +559,6 @@ class NodeDeployment(models.Model):
             f"{self.node_number:03d}"
         )
 
-    # Size-based max_domains defaults
-    MAX_DOMAINS_BY_MEMORY: ClassVar[list[tuple[int, int]]] = [
-        (2, 25),
-        (4, 50),
-        (8, 100),
-        (16, 200),
-        (32, 500),
-    ]
-
     def set_max_domains_from_size(self) -> None:
         """Set max_domains based on node_size memory if not explicitly overridden."""
         if not self.node_size:
@@ -563,15 +569,6 @@ class NodeDeployment(models.Model):
                 self.max_domains = domains
                 return
         self.max_domains = 25  # Minimum default
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate hostname and set max_domains on save"""
-        if not self.hostname:
-            self.hostname = self.generate_hostname()
-        # Set max_domains from size on creation if still at default
-        if not self.pk and self.max_domains == DEFAULT_MAX_DOMAINS and self.node_size:
-            self.set_max_domains_from_size()
-        super().save(*args, **kwargs)
 
     @classmethod
     def get_next_node_number(
@@ -686,7 +683,6 @@ class NodeDeployment(models.Model):
 
     def calculate_running_hours(self) -> float:
         """Calculate hours the node has been running"""
-        from django.utils import timezone
 
         if not self.started_at:
             return 0.0

@@ -22,6 +22,7 @@ from typing import Any, ClassVar
 
 from django.core.management.base import BaseCommand, CommandParser
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.audit.services import AuditIntegrityService
 from apps.common.types import Ok
@@ -131,8 +132,6 @@ class Command(BaseCommand):
     def _parse_period(self, options: dict[str, Any]) -> tuple[Any, Any]:
         """Parse the time period from options."""
         if options.get("start") and options.get("end"):
-            from django.utils.dateparse import parse_datetime
-
             period_start = parse_datetime(options["start"])
             period_end = parse_datetime(options["end"])
             if not period_start or not period_end:
@@ -267,7 +266,9 @@ class Command(BaseCommand):
     def _setup_scheduled_tasks(self) -> None:
         """Configure scheduled integrity check tasks using Django-Q2."""
         try:
-            from django_q.models import Schedule
+            from django_q.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Schedule,  # Deferred: optional dependency  # Deferred: avoids circular import
+            )
 
             # Hourly hash verification for critical events
             Schedule.objects.update_or_create(

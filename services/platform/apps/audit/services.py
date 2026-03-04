@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import EmailAddress, Err, Ok, Result
+from apps.settings.services import SettingsService
 from apps.tickets.models import Ticket  # Import for GDPR data export
 
 from .models import (
@@ -58,8 +59,6 @@ WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD = _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
 
 def get_high_complexity_filter_threshold() -> int:
     """Get high complexity filter threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
-
     return SettingsService.get_integer_setting(
         "audit.high_complexity_filter_threshold", _DEFAULT_HIGH_COMPLEXITY_FILTER_THRESHOLD
     )
@@ -67,8 +66,6 @@ def get_high_complexity_filter_threshold() -> int:
 
 def get_webhook_healthy_response_threshold() -> int:
     """Get webhook healthy response threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
-
     return SettingsService.get_integer_setting(
         "audit.webhook_healthy_response_threshold", _DEFAULT_WEBHOOK_HEALTHY_RESPONSE_THRESHOLD
     )
@@ -76,8 +73,6 @@ def get_webhook_healthy_response_threshold() -> int:
 
 def get_webhook_max_retry_threshold() -> int:
     """Get webhook max retry threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
-
     return SettingsService.get_integer_setting(
         "audit.webhook_max_retry_threshold", _DEFAULT_WEBHOOK_MAX_RETRY_THRESHOLD
     )
@@ -85,8 +80,6 @@ def get_webhook_max_retry_threshold() -> int:
 
 def get_webhook_suspicious_retry_threshold() -> int:
     """Get webhook suspicious retry threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
-
     return SettingsService.get_integer_setting(
         "audit.webhook_suspicious_retry_threshold", _DEFAULT_WEBHOOK_SUSPICIOUS_RETRY_THRESHOLD
     )
@@ -704,7 +697,7 @@ class AuditService:
             raise
 
     @staticmethod
-    def log_simple_event(
+    def log_simple_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         *,
         user: Any | None = None,
@@ -1052,7 +1045,7 @@ class AuditService:
     # ===============================================================================
 
     @staticmethod
-    def log_event_legacy(
+    def log_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         user: User | None = None,
         content_object: Any | None = None,
@@ -1088,7 +1081,7 @@ class AuditService:
         return AuditService.log_event(event_data, context)
 
     @staticmethod
-    def log_2fa_event_legacy(
+    def log_2fa_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         user: User,
         ip_address: str | None = None,
@@ -1112,7 +1105,7 @@ class AuditService:
         return AuditService.log_2fa_event(request)
 
     @staticmethod
-    def log_compliance_event_legacy(
+    def log_compliance_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         compliance_type: str,
         reference_id: str,
         description: str,
@@ -1702,7 +1695,7 @@ class GDPRConsentService:
 
     @classmethod
     @transaction.atomic
-    def record_cookie_consent(
+    def record_cookie_consent(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         cls,
         *,
         cookie_id: str,
@@ -1721,7 +1714,9 @@ class GDPRConsentService:
         When user_id is provided with a cookie_id, also links any prior anonymous
         CookieConsent records with the same cookie_id to this user.
         """
-        from .signals import cookie_consent_updated  # circular import
+        from .signals import (  # noqa: PLC0415  # Deferred: avoids circular import
+            cookie_consent_updated,  # Circular: signals<->services  # Deferred: avoids circular import
+        )
 
         try:
             status_map = {
@@ -2294,7 +2289,7 @@ class CustomersAuditService:
     """
 
     @staticmethod
-    def log_customer_event(
+    def log_customer_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         customer: Any,
         user: User | None = None,
@@ -2375,7 +2370,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_tax_profile_event(
+    def log_tax_profile_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         tax_profile: Any,
         user: User | None = None,
@@ -2432,7 +2427,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_billing_profile_event(
+    def log_billing_profile_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         billing_profile: Any,
         user: User | None = None,
@@ -2487,7 +2482,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_address_event(
+    def log_address_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         address: Any,
         user: User | None = None,
@@ -2550,7 +2545,7 @@ class CustomersAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_payment_method_event(
+    def log_payment_method_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         payment_method: Any,
         user: User | None = None,
@@ -2681,7 +2676,7 @@ class ProvisioningAuditService:
     """
 
     @staticmethod
-    def log_service_plan_event(
+    def log_service_plan_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         service_plan: Any,
         user: User | None = None,
@@ -2748,7 +2743,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_server_event(
+    def log_server_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         server: Any,
         user: User | None = None,
@@ -2828,7 +2823,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_service_event(
+    def log_service_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         service: Any,
         user: User | None = None,
@@ -2978,7 +2973,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_service_group_event(
+    def log_service_group_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         service_group: Any,
         user: User | None = None,
@@ -3041,7 +3036,7 @@ class ProvisioningAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_provisioning_task_event(
+    def log_provisioning_task_event(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         task: Any,
         user: User | None = None,
@@ -3844,7 +3839,7 @@ class TicketsAuditService:
     """
 
     @staticmethod
-    def log_ticket_opened(
+    def log_ticket_opened(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         ticket: Any,
         sla_metadata: dict[str, Any],
         should_escalate: bool = False,
@@ -3917,7 +3912,7 @@ class TicketsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_ticket_closed(
+    def log_ticket_closed(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         ticket: Any,
         old_status: str,
         new_status: str,
@@ -4159,7 +4154,7 @@ class ProductsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_product_pricing_changed(
+    def log_product_pricing_changed(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         product_price: Any,
         change_type: str,
         changes: dict[str, Any],
@@ -4273,7 +4268,7 @@ class DomainsAuditService:
     """
 
     @staticmethod
-    def log_domain_event(  # Domain audit requires multiple domain-specific parameters
+    def log_domain_event(  # Domain audit requires multiple domain-specific parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         domain: Any,
         user: User | None = None,
@@ -4347,7 +4342,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_tld_event(  # TLD audit requires multiple configuration parameters
+    def log_tld_event(  # TLD audit requires multiple configuration parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         tld: Any,
         user: User | None = None,
@@ -4415,7 +4410,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_registrar_event(  # Registrar audit requires multiple security parameters
+    def log_registrar_event(  # Registrar audit requires multiple security parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         registrar: Any,
         user: User | None = None,
@@ -4487,7 +4482,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_order_event(  # Order audit requires multiple order-specific parameters
+    def log_domain_order_event(  # Order audit requires multiple order-specific parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         domain_order_item: Any,
         user: User | None = None,
@@ -4556,7 +4551,7 @@ class DomainsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_domain_security_event(  # Security audit requires multiple security parameters
+    def log_domain_security_event(  # Security audit requires multiple security parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
         domain: Any,
         security_action: str,
@@ -4701,7 +4696,7 @@ class IntegrationsAuditService:
     """
 
     @staticmethod
-    def log_webhook_success(  # Webhook audit requires multiple related parameters
+    def log_webhook_success(  # Webhook audit requires multiple related parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         webhook_event: Any,
         response_time_ms: int,
         response_status: int = 200,
@@ -4787,7 +4782,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_failure(  # Webhook failure audit requires multiple error context parameters
+    def log_webhook_failure(  # Webhook failure audit requires multiple error context parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         webhook_event: Any,
         error_details: dict[str, Any],
         security_flags: dict[str, bool] | None = None,
@@ -4881,7 +4876,7 @@ class IntegrationsAuditService:
         return AuditService.log_event(audit_event_data, enhanced_context)
 
     @staticmethod
-    def log_webhook_retry_exhausted(  # Webhook retry exhaustion tracking needs comprehensive failure context
+    def log_webhook_retry_exhausted(  # Webhook retry exhaustion tracking needs comprehensive failure context  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         webhook_event: Any,
         total_attempts: int,
         final_error: str,

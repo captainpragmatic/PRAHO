@@ -13,6 +13,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.validators import log_security_event
+from apps.customers.models import (
+    Customer,
+)
+from apps.notifications.services import EmailService
 from apps.orders.models import Order
 
 from .currency_models import Currency
@@ -146,7 +150,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def create_payment_intent_direct(
+    def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913  # Business logic parameters
         order_id: str,
         amount_cents: int,
         currency: str = "RON",
@@ -199,10 +203,6 @@ class PaymentService:
                     customer_obj = None
                     if customer_id:
                         try:
-                            from apps.customers.models import (
-                                Customer,
-                            )
-
                             customer_obj = Customer.objects.get(id=customer_id)
                         except Customer.DoesNotExist:
                             logger.warning(f"⚠️ Customer {customer_id} not found in Platform database")
@@ -339,8 +339,6 @@ class PaymentService:
             SubscriptionResult with subscription details
         """
         try:
-            from apps.customers.models import Customer
-
             customer = Customer.objects.get(id=customer_id)
 
             logger.info(f"🔄 Creating subscription for customer {customer.name} (price: {price_id}) via {gateway}")
@@ -387,10 +385,12 @@ class PaymentService:
                 # Create local Subscription record linked to gateway subscription
                 subscription_id = result.get("subscription_id", "unknown")
                 try:
-                    from apps.billing.subscription_service import SubscriptionService
-
                     latest_sub = customer.subscriptions.first() if customer.subscriptions.exists() else None
                     if latest_sub is not None:
+                        from apps.billing.subscription_service import (  # noqa: PLC0415
+                            SubscriptionService,
+                        )
+
                         sub_result = SubscriptionService.create_subscription(
                             customer=customer,
                             product=latest_sub.product,
@@ -507,8 +507,6 @@ class PaymentService:
                             order.save(update_fields=["status"])
                             logger.info(f"✅ Order {order.order_number} completed after payment")
                             # Send confirmation email
-                            from apps.notifications.services import EmailService
-
                             EmailService.send_invoice_paid(payment.invoice) if payment.invoice else None
                     except Order.DoesNotExist:
                         logger.warning(f"⚠️ Order {order_id} not found for payment completion")
@@ -537,7 +535,9 @@ class PaymentService:
 
                 # Trigger dunning process for the invoice
                 if payment.invoice:
-                    from apps.billing.tasks import start_dunning_process_async
+                    from apps.billing.tasks import (  # noqa: PLC0415
+                        start_dunning_process_async,
+                    )
 
                     start_dunning_process_async(str(payment.invoice.id))
                     logger.info(f"⚠️ [Dunning] Triggered for invoice {payment.invoice.number}")
@@ -604,7 +604,9 @@ class PaymentService:
 
         try:
             # Delegate to RecurringBillingService which has the real implementation
-            from apps.billing.subscription_service import RecurringBillingService
+            from apps.billing.subscription_service import (  # noqa: PLC0415
+                RecurringBillingService,
+            )
 
             billing_result = RecurringBillingService.run_billing_cycle()
             results["processed"] = billing_result["subscriptions_processed"]

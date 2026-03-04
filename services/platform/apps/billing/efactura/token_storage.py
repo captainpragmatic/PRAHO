@@ -18,8 +18,16 @@ from django.utils.translation import gettext_lazy as _
 if TYPE_CHECKING:
     pass
 
+from django.core.cache import cache
+
+from apps.settings.encryption import SettingsEncryption
+
+from .settings import efactura_settings
+
 logger = logging.getLogger(__name__)
-DEFAULT_TOKEN_TYPE = "Bearer"
+DEFAULT_TOKEN_TYPE = (
+    "Bearer"  # Not a real secret: default token type string  # noqa: S105  # Not a real secret: config key name
+)
 
 
 class OAuthTokenManager(models.Manager["OAuthToken"]):
@@ -143,11 +151,11 @@ class OAuthToken(models.Model):
         db_table = "billing_efactura_oauth_token"
         verbose_name = _("e-Factura OAuth Token")
         verbose_name_plural = _("e-Factura OAuth Tokens")
-        ordering = ["-created_at"]
-        indexes = [
+        ordering = ("-created_at",)
+        indexes = (
             models.Index(fields=["cui", "is_active"]),
             models.Index(fields=["expires_at"]),
-        ]
+        )
 
     def __str__(self) -> str:
         status = "active" if self.is_active and not self.is_expired else "expired"
@@ -167,8 +175,6 @@ class OAuthToken(models.Model):
     def _encrypt(self, value: str) -> str:
         """Encrypt a value using settings encryption."""
         try:
-            from apps.settings.encryption import SettingsEncryption
-
             encryption = SettingsEncryption()
             encrypted = encryption.encrypt_value(value)
             return encrypted if encrypted is not None else value
@@ -182,8 +188,6 @@ class OAuthToken(models.Model):
     def _decrypt(self, value: str) -> str:
         """Decrypt a value using settings encryption."""
         try:
-            from apps.settings.encryption import SettingsEncryption
-
             encryption = SettingsEncryption()
             if encryption.is_encrypted(value):
                 return encryption.decrypt_value(value)
@@ -197,8 +201,6 @@ class OAuthToken(models.Model):
     def _is_encrypted(self, value: str) -> bool:
         """Check if a value is encrypted."""
         try:
-            from apps.settings.encryption import SettingsEncryption
-
             encryption = SettingsEncryption()
             return encryption.is_encrypted(value)
         except ImportError:
@@ -249,7 +251,7 @@ class OAuthToken(models.Model):
         self.save(update_fields=["is_active", "updated_at"])
 
     @classmethod
-    def store_token(
+    def store_token(  # token storage fields  # noqa: PLR0913  # Business logic parameters
         cls,
         cui: str,
         access_token: str,
@@ -348,8 +350,6 @@ class TokenStorageService:
 
     def __init__(self, settings: Any = None):
         """Initialize with optional settings override."""
-        from .settings import efactura_settings
-
         self._settings = settings or efactura_settings
 
     def _get_cache_key(self, cui: str) -> str:
@@ -368,8 +368,6 @@ class TokenStorageService:
         Returns:
             Access token or None
         """
-        from django.core.cache import cache
-
         cui = cui or self._settings.company_cui
         if not cui:
             logger.warning("No CUI provided and no company CUI in settings")
@@ -390,7 +388,7 @@ class TokenStorageService:
 
         return None
 
-    def store_token(
+    def store_token(  # token storage fields  # noqa: PLR0913  # Business logic parameters
         self,
         access_token: str,
         expires_in: int,
@@ -413,8 +411,6 @@ class TokenStorageService:
         Returns:
             Created OAuthToken
         """
-        from django.core.cache import cache
-
         cui = cui or self._settings.company_cui
         if not cui:
             raise ValueError("No CUI provided and no company CUI in settings")
@@ -443,8 +439,6 @@ class TokenStorageService:
         Args:
             cui: Company CUI. If None, uses company CUI from settings.
         """
-        from django.core.cache import cache
-
         cui = cui or self._settings.company_cui
         if not cui:
             return

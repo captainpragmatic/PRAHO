@@ -27,7 +27,9 @@ QUERY_WARNING_THRESHOLD = _DEFAULT_QUERY_WARNING_THRESHOLD
 
 def get_query_warning_threshold() -> int:
     """Get query warning threshold from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("common.query_warning_threshold", _DEFAULT_QUERY_WARNING_THRESHOLD)
 

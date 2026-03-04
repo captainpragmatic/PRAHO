@@ -1,3 +1,4 @@
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 """
 Vultr Cloud Service
 
@@ -17,10 +18,8 @@ from typing import Any
 
 import requests
 
+from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.common.types import Err, Ok, Result
-
-HTTP_NOT_FOUND = 404
-IPV4_VERSION = 4
 from apps.infrastructure.cloud_gateway import (
     CloudProviderGateway,
     FirewallRule,
@@ -36,33 +35,42 @@ from apps.infrastructure.cloud_gateway import (
 
 logger = logging.getLogger(__name__)
 
+HTTP_NOT_FOUND = 404
+IPV4_VERSION = 4
 VULTR_API_BASE = "https://api.vultr.com/v2"
 VULTR_POLL_INTERVAL = 5
 VULTR_POLL_TIMEOUT = 300
+VULTR_TIMEOUT_SECONDS = 30.0
+
+VULTR_POLICY = OutboundPolicy(
+    name="vultr",
+    allowed_domains=frozenset({"api.vultr.com"}),
+    timeout_seconds=VULTR_TIMEOUT_SECONDS,
+)
 
 
 class VultrService(CloudProviderGateway):
     """
     Vultr Cloud API v2 wrapper implementing CloudProviderGateway.
 
-    Uses requests with Bearer token auth against the Vultr REST API.
+    Uses safe_request() with Bearer token auth against the Vultr REST API.
     """
 
     def __init__(self, token: str, **_kwargs: Any) -> None:
-        self.session = requests.Session()
-        self.session.headers.update({
+        self._auth_headers: dict[str, str] = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-        })
+        }
 
     # =========================================================================
     # Internal helpers
     # =========================================================================
 
     def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
-        """Make an authenticated request to the Vultr API."""
+        """Make an authenticated request to the Vultr API via safe_request()."""
         url = f"{VULTR_API_BASE}{path}"
-        response = self.session.request(method, url, **kwargs)
+        headers = {**self._auth_headers, **kwargs.pop("headers", {})}
+        response = safe_request(method, url, policy=VULTR_POLICY, headers=headers, **kwargs)
         response.raise_for_status()
         return response
 
@@ -117,11 +125,13 @@ class VultrService(CloudProviderGateway):
                 existing = self._find_instance_by_label(correlation_id)
                 if existing:
                     logger.info(f"✅ [Vultr] Found existing instance for correlation_id={correlation_id}")
-                    return Ok(ServerCreateResult(
-                        server_id=existing["id"],
-                        ipv4_address=existing.get("main_ip", ""),
-                        ipv6_address=existing.get("v6_main_ip", ""),
-                    ))
+                    return Ok(
+                        ServerCreateResult(
+                            server_id=existing["id"],
+                            ipv4_address=existing.get("main_ip", ""),
+                            ipv6_address=existing.get("v6_main_ip", ""),
+                        )
+                    )
 
             payload: dict[str, Any] = {
                 "region": request.location,
@@ -158,11 +168,13 @@ class VultrService(CloudProviderGateway):
             ipv6 = str(active_instance.get("v6_main_ip", ""))
 
             logger.info(f"✅ [Vultr] Instance created: {request.name} (id={instance_id}, ip={ipv4})")
-            return Ok(ServerCreateResult(
-                server_id=instance_id,
-                ipv4_address=ipv4,
-                ipv6_address=ipv6,
-            ))
+            return Ok(
+                ServerCreateResult(
+                    server_id=instance_id,
+                    ipv4_address=ipv4,
+                    ipv6_address=ipv6,
+                )
+            )
 
         except Exception as e:
             logger.error(f"🔥 [Vultr] Instance creation failed: {e}")
@@ -200,16 +212,18 @@ class VultrService(CloudProviderGateway):
                     k, v = tag.split("=", 1)
                     labels[k] = v
 
-            return Ok(ServerInfo(
-                server_id=data.get("id", ""),
-                name=data.get("label", ""),
-                status=normalize_server_status(data.get("status", "")),
-                ipv4_address=data.get("main_ip", ""),
-                ipv6_address=data.get("v6_main_ip", ""),
-                server_type=data.get("plan", ""),
-                location=data.get("region", ""),
-                labels=labels,
-            ))
+            return Ok(
+                ServerInfo(
+                    server_id=data.get("id", ""),
+                    name=data.get("label", ""),
+                    status=normalize_server_status(data.get("status", "")),
+                    ipv4_address=data.get("main_ip", ""),
+                    ipv6_address=data.get("v6_main_ip", ""),
+                    server_type=data.get("plan", ""),
+                    location=data.get("region", ""),
+                    labels=labels,
+                )
+            )
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == HTTP_NOT_FOUND:
                 return Ok(None)
@@ -266,20 +280,24 @@ class VultrService(CloudProviderGateway):
                         logger.warning(f"⚠️ [Vultr] SSH key '{name}' exists with different content, replacing")
                         self._request("DELETE", f"/ssh-keys/{key['id']}")
                     else:
-                        return Ok(SSHKeyResult(
-                            key_id=key["id"],
-                            name=name,
-                            fingerprint=key.get("fingerprint", ""),
-                        ))
+                        return Ok(
+                            SSHKeyResult(
+                                key_id=key["id"],
+                                name=name,
+                                fingerprint=key.get("fingerprint", ""),
+                            )
+                        )
 
             resp = self._request("POST", "/ssh-keys", json={"name": name, "ssh_key": public_key})
             data: dict[str, Any] = resp.json().get("ssh_key", {})
             logger.info(f"✅ [Vultr] SSH key uploaded: {name}")
-            return Ok(SSHKeyResult(
-                key_id=data.get("id", ""),
-                name=name,
-                fingerprint=data.get("fingerprint", ""),
-            ))
+            return Ok(
+                SSHKeyResult(
+                    key_id=data.get("id", ""),
+                    name=name,
+                    fingerprint=data.get("fingerprint", ""),
+                )
+            )
         except Exception as e:
             return Err(f"SSH key upload failed: {e}")
 
@@ -379,7 +397,6 @@ class VultrService(CloudProviderGateway):
             return Ok(server_types)
         except Exception as e:
             return Err(f"Failed to get server types: {e}")
-
 
     # =========================================================================
     # Snapshot operations (stubs — not yet implemented for Vultr)

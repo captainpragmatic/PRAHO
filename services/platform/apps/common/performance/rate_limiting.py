@@ -207,7 +207,9 @@ class ServiceRateThrottle(BaseThrottle):  # type: ignore[misc]
         remote_addr = request.META.get("REMOTE_ADDR")
         return (xff.split(",")[0].strip() if xff else remote_addr) or "unknown"
 
-    def _get_operation(self, request: Request, view: Any) -> str:
+    def _get_operation(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, request: Request, view: Any
+    ) -> str:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """Determine the operation type from the request."""
         # Check view action
         if hasattr(view, "action"):

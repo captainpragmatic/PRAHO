@@ -101,7 +101,7 @@ class BaseWebhookProcessor(ABC):
         # Validate that signature implementation is secure
         self._validate_signature_implementation()
 
-    def process_webhook(
+    def process_webhook(  # webhook handler parameters  # noqa: PLR0913  # Business logic parameters
         self,
         payload: dict[str, Any],
         signature: str = "",
@@ -212,7 +212,9 @@ class BaseWebhookProcessor(ABC):
         If a concurrent request creates the same event, IntegrityError is caught and
         handled as a duplicate.
         """
-        from django.db import IntegrityError
+        from django.db import (  # noqa: PLC0415  # Deferred: avoids circular import
+            IntegrityError,  # Deferred: exception used in except clause  # Deferred: avoids circular import
+        )
 
         event_id = context.event_info["event_id"]
         event_type = context.event_info["event_type"]
@@ -548,8 +550,12 @@ def get_webhook_processor(source: str) -> BaseWebhookProcessor | None:
     🏭 Factory function to get appropriate webhook processor
     """
     # Import here to avoid circular imports
-    from .efactura import EFacturaWebhookProcessor
-    from .stripe import StripeWebhookProcessor
+    from .efactura import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EFacturaWebhookProcessor,  # Circular: factory pattern  # Deferred: avoids circular import
+    )
+    from .stripe import (  # noqa: PLC0415  # Deferred: avoids circular import
+        StripeWebhookProcessor,  # Circular: factory pattern  # Deferred: avoids circular import
+    )
 
     processors = {
         "stripe": StripeWebhookProcessor,

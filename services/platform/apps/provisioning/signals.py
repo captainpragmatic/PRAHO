@@ -99,7 +99,7 @@ CRITICAL_SERVICE_DOWNTIME_THRESHOLD = 5  # 5 minutes critical service downtime
 # ===============================================================================
 
 
-def _log_provisioning_model_event(
+def _log_provisioning_model_event(  # Django signal parameters  # noqa: PLR0913  # Business logic parameters
     *,
     event_type: str,
     instance: Any,

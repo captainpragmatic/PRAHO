@@ -136,7 +136,7 @@ class DomainValidationService:
     """
 
     @staticmethod
-    def validate_domain_name(
+    def validate_domain_name(  # Complexity: multi-step workflow  # noqa: PLR0911  # Complexity: multi-step business logic
         domain_name: str,
     ) -> tuple[bool, str]:
         """🔍 Validate domain name format and characters"""
@@ -519,7 +519,7 @@ class DomainOrderService:
     """
 
     @staticmethod
-    def create_domain_order_item(  # Domain order requires multiple configuration parameters
+    def create_domain_order_item(  # Domain order requires multiple configuration parameters  # domain registration fields  # noqa: PLR0913  # Business logic parameters
         order: Order,
         domain_name: str,
         action: str,

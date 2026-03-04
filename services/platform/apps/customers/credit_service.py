@@ -81,7 +81,9 @@ class CustomerCreditService:
         Returns:
             Dictionary with score update details
         """
-        from apps.audit.services import AuditService
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             # Get current credit score
@@ -174,7 +176,9 @@ class CustomerCreditService:
         Returns:
             Dictionary with reversion details
         """
-        from apps.audit.services import AuditService
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             current_score = CustomerCreditService.calculate_credit_score(customer)
@@ -325,7 +329,9 @@ class CustomerCreditService:
     def _get_payment_statistics(customer: Any) -> dict[str, int]:
         """Get payment statistics for credit calculation."""
         try:
-            from apps.billing.models import Payment
+            from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Payment,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             payments = Payment.objects.filter(invoice__customer=customer)
 
@@ -353,7 +359,9 @@ class CustomerCreditService:
     def _get_order_statistics(customer: Any) -> dict[str, int]:
         """Get order statistics for credit calculation."""
         try:
-            from apps.orders.models import Order
+            from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Order,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             orders = Order.objects.filter(customer=customer)
 
@@ -369,7 +377,9 @@ class CustomerCreditService:
     def _get_consecutive_on_time_payments(customer: Any) -> int:
         """Count consecutive on-time payments (for bonus calculation)."""
         try:
-            from apps.billing.models import Payment
+            from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Payment,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             # Get recent payments ordered by date
             recent_payments = Payment.objects.filter(invoice__customer=customer).order_by("-created_at")[:20]

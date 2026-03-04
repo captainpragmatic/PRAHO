@@ -26,15 +26,13 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
+from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
 
 # Security constants
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 HMAC_NONCE_MIN_LENGTH = 32
 HMAC_NONCE_MAX_LENGTH = 256
-
-# Import logging utilities for request ID propagation
-from apps.common.logging import clear_request_id, set_request_id
 
 # Import for session security - handle potential circular import gracefully
 try:
@@ -392,7 +390,9 @@ class PortalServiceHMACMiddleware:
             cache.set(key, current, timeout=self._rl_window)
         return current > self._rl_max_calls
 
-    def _validate_hmac_signature(self, request: HttpRequest) -> tuple[bool, str]:
+    def _validate_hmac_signature(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+        self, request: HttpRequest
+    ) -> tuple[bool, str]:  # Complexity: HMAC validation  # Complexity: multi-step business logic
         """
         Validate HMAC signature from portal service.
         Returns (is_valid, error_message)
@@ -545,14 +545,14 @@ class PortalServiceHMACMiddleware:
                 # Allow session-authenticated staff users to access specific API paths
                 # that platform templates call via browser fetch() (no HMAC headers).
                 # Restricted to an explicit allowlist to prevent broad bypass.
-                STAFF_SESSION_ALLOWED_PREFIXES = [
+                staff_session_allowed_prefixes = [
                     "/api/customers/",  # Ticket form: fetch customer services
                 ]
                 if (
                     getattr(request, "user", None)
                     and getattr(request.user, "is_authenticated", False)
                     and getattr(request.user, "is_staff", False)
-                    and any(request.path.startswith(p) for p in STAFF_SESSION_ALLOWED_PREFIXES)
+                    and any(request.path.startswith(p) for p in staff_session_allowed_prefixes)
                 ):
                     logger.debug(
                         f"🔓 [HMAC Auth] Allowing session-authenticated staff user {getattr(request.user, 'email', '')} for {request.path}"

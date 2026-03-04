@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.common.tax_service import TaxService
 from apps.provisioning.service_models import Server, Service, ServicePlan
 
 
@@ -295,16 +296,12 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
 
     def get_total_monthly_cost(self, obj: Service) -> Decimal:
         """Get total monthly cost including VAT"""
-        from apps.common.tax_service import TaxService
-
         base_price = self.get_monthly_price(obj)
         vat_multiplier = Decimal("1") + TaxService.get_vat_rate("RO", as_decimal=True)
         return round(base_price * vat_multiplier, 2)  # Romanian VAT (current rate)
 
     def get_vat_amount(self, obj: Service) -> Decimal:
         """Get VAT amount"""
-        from apps.common.tax_service import TaxService
-
         base_price = self.get_monthly_price(obj)
         vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
         return round(base_price * vat_rate, 2)  # Romanian VAT (current rate)

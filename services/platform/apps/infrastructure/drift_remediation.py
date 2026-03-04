@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import socket
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from django.db import transaction
@@ -175,7 +175,7 @@ class DriftRemediationService:
 
         return Ok(req)
 
-    def execute_remediation(
+    def execute_remediation(  # Complexity: drift scan  # noqa: PLR0915  # Complexity: multi-step business logic
         self,
         request: DriftRemediationRequest,
     ) -> Result[bool, str]:
@@ -290,8 +290,6 @@ class DriftRemediationService:
 
         if result.is_err():
             return Err(f"Snapshot creation failed: {result.unwrap_err()}")
-
-        from datetime import timedelta
 
         snapshot = DriftSnapshot.objects.create(
             deployment=deployment,
@@ -413,9 +411,7 @@ class DriftRemediationService:
         request.completed_at = timezone.now()
         request.save(update_fields=["status", "error_message", "completed_at"])
 
-        logger.error(
-            f"🔥 [DriftRemediation] Rollback failed for {request.deployment.hostname}: {error}"
-        )
+        logger.error(f"🔥 [DriftRemediation] Rollback failed for {request.deployment.hostname}: {error}")
 
         try:
             InfrastructureAuditService.log_drift_remediation_failed(
@@ -431,7 +427,7 @@ _remediation_service: DriftRemediationService | None = None
 
 def get_drift_remediation_service() -> DriftRemediationService:
     """Get global drift remediation service instance."""
-    global _remediation_service
+    global _remediation_service  # noqa: PLW0603  # Module-level singleton pattern
     if _remediation_service is None:
         _remediation_service = DriftRemediationService()
     return _remediation_service

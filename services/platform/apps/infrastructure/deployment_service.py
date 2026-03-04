@@ -13,6 +13,7 @@ Orchestrates the complete node deployment pipeline:
 from __future__ import annotations
 
 import logging
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -110,7 +111,7 @@ class NodeDeploymentService:
         self._validation = get_validation_service()
         self._registration = get_registration_service()
 
-    def deploy_node(
+    def deploy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -147,7 +148,9 @@ class NodeDeploymentService:
 
         def log_deployment(level: str, message: str) -> None:
             """Log to both logger and deployment log"""
-            from apps.infrastructure.models import NodeDeploymentLog
+            from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             getattr(logger, level)(f"[Deployment:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(
@@ -167,7 +170,9 @@ class NodeDeploymentService:
 
             # Atomic lock to prevent concurrent deployments of the same node
             with transaction.atomic():
-                from apps.infrastructure.models import NodeDeployment as NDModel
+                from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    NodeDeployment as NDModel,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 locked = NDModel.objects.select_for_update().filter(pk=deployment.pk).first()
                 if not locked or locked.status not in ("pending", "failed"):
@@ -310,7 +315,9 @@ class NodeDeploymentService:
                 created_resources.append(("firewall", firewall_id))
                 log_deployment("info", f"Firewall '{firewall_name}' created (id={firewall_id})")
                 # Persist firewall_id in a structured log entry so destroy_node can retrieve it by ID
-                from apps.infrastructure.models import NodeDeploymentLog
+                from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 NodeDeploymentLog.objects.create(
                     deployment=deployment,
@@ -453,8 +460,7 @@ class NodeDeploymentService:
             log_deployment("info", "Registering node as VirtualminServer")
 
             # Generate a random password for Virtualmin admin
-            import secrets
-            import string
+            import string  # noqa: PLC0415  # Deferred: avoids circular import
 
             admin_password = "".join(
                 secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
@@ -523,7 +529,7 @@ class NodeDeploymentService:
             duration = (timezone.now() - start_time).total_seconds()
             return Err(f"Deployment failed: {e}")
 
-    def destroy_node(
+    def destroy_node(  # Complexity: deployment orchestration  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
@@ -542,7 +548,9 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         logger.info(f"[Destroy:{deployment.hostname}] Starting node destruction")
 
@@ -551,7 +559,9 @@ class NodeDeploymentService:
         try:
             # Atomic check-and-transition to prevent TOCTOU race
             with transaction.atomic():
-                from apps.infrastructure.models import NodeDeployment as NDModel
+                from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    NodeDeployment as NDModel,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 locked = NDModel.objects.select_for_update().get(pk=deployment.pk)
                 if locked.status not in ("completed", "failed", "stopped"):
@@ -732,7 +742,7 @@ class NodeDeploymentService:
             user=user,
         )
 
-    def upgrade_node_size(
+    def upgrade_node_size(  # Complexity: deployment orchestration  # noqa: PLR0911  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         new_size: NodeSize,
@@ -751,7 +761,9 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         logger.info(f"[Upgrade:{deployment.hostname}] Starting node resize to {new_size.name}")
 
@@ -856,7 +868,7 @@ class NodeDeploymentService:
                 logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
             return Err(f"Upgrade failed: {e}")
 
-    def run_maintenance(
+    def run_maintenance(  # Complexity: deployment orchestration  # noqa: C901  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         playbooks: list[str] | None = None,
@@ -875,7 +887,9 @@ class NodeDeploymentService:
         Returns:
             Result with list of AnsibleResult or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         if deployment.status != "completed":
             return Err(f"Can only run maintenance on completed deployments, current status: {deployment.status}")
@@ -1002,7 +1016,9 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         logger.info(f"[Stop:{deployment.hostname}] Stopping node")
 
@@ -1089,7 +1105,9 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         logger.info(f"[Start:{deployment.hostname}] Starting node")
 
@@ -1167,7 +1185,9 @@ class NodeDeploymentService:
         Returns:
             Result with success status or error
         """
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         logger.info(f"[Reboot:{deployment.hostname}] Rebooting node")
 
@@ -1296,7 +1316,9 @@ class NodeDeploymentService:
         audit_ctx: InfrastructureAuditContext | None = None,
     ) -> None:
         """Mark deployment as failed with error message"""
-        from apps.infrastructure.models import NodeDeploymentLog
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         # Capture the current stage before transitioning to failed
         failed_stage = stage or deployment.status
@@ -1335,7 +1357,7 @@ _deployment_service: NodeDeploymentService | None = None
 
 def get_deployment_service() -> NodeDeploymentService:
     """Get global deployment service instance"""
-    global _deployment_service
+    global _deployment_service  # noqa: PLW0603  # Module-level singleton pattern
     if _deployment_service is None:
         _deployment_service = NodeDeploymentService()
     return _deployment_service

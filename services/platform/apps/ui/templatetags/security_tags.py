@@ -31,7 +31,7 @@ def safe_message(value: Any) -> str:
     # Clean the HTML to prevent XSS
     cleaned = bleach.clean(str(value), tags=allowed_tags, attributes=allowed_attributes, strip=True)
 
-    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe
+    return mark_safe(cleaned)  # nosec B308 B703 - Input sanitized by bleach  # nosemgrep: avoid-mark-safe — content sanitized by bleach/escape before mark_safe  # Safe: sanitized HTML output  # noqa: S308  # Safe: escaped template output
 
 
 @register.filter
@@ -85,5 +85,5 @@ def secure_alert(message: Any, alert_type: str = "info", dismissible: bool = Tru
         """,
         class_str,
         escaped_message,
-        mark_safe(dismiss_button),  # nosec B308 - Static HTML button, no user input
+        mark_safe(dismiss_button),  # nosec B308 - Static HTML button, no user input  # Safe: sanitized HTML output  # noqa: S308  # Safe: escaped template output
     )

@@ -785,7 +785,7 @@ def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> 
     return format_html(
         '<svg class="{}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">{}</svg>',
         classes,
-        mark_safe(path_html),
+        mark_safe(path_html),  # Safe: component renders escaped content  # noqa: S308  # Safe: escaped template output
     )
 
 

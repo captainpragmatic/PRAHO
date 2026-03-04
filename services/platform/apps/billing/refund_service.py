@@ -14,6 +14,7 @@ from typing import Any, TypedDict, cast
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, Sum
 
+from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
 from apps.orders.models import Order
 
@@ -1181,8 +1182,6 @@ class RefundService:
         payment: Any, refund_amount_cents: int | None, effective_amount: int
     ) -> Result[dict[str, Any], str]:
         """Execute refund via payment gateway or return local success for non-gateway payments."""
-        from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS
-
         payment_method = getattr(payment, "payment_method", "")
         gateway_txn_id = getattr(payment, "gateway_txn_id", "")
 
@@ -1210,8 +1209,6 @@ class RefundService:
                     "payments_refunded": 1 if payment else 0,
                 }
             )
-
-        from apps.billing.gateways.base import PaymentGatewayFactory
 
         gateway = PaymentGatewayFactory.create_gateway(payment.payment_method)
         refund_result = gateway.refund_payment(

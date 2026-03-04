@@ -45,9 +45,11 @@ class StripeGateway(BasePaymentGateway):
     def _initialize_stripe(self) -> None:
         """Initialize Stripe SDK with API keys from settings system"""
         try:
-            import stripe
+            import stripe  # Deferred: optional dependency  # noqa: PLC0415  # Deferred: avoids circular import
 
-            from apps.settings.services import SettingsService
+            from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                SettingsService,  # Deferred: optional dependency  # Deferred: avoids circular import
+            )
 
             # Get encrypted Stripe secret key from settings system
             api_key = SettingsService.get_setting("integrations.stripe_secret_key")
@@ -75,7 +77,9 @@ class StripeGateway(BasePaymentGateway):
     def validate_configuration(self) -> bool:
         """Validate Stripe configuration from settings system"""
         try:
-            from apps.settings.services import SettingsService
+            from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                SettingsService,  # Deferred: runtime config  # Deferred: avoids circular import
+            )
 
             # Check if Stripe integration is enabled
             stripe_enabled = SettingsService.get_setting("integrations.stripe_enabled", default=False)

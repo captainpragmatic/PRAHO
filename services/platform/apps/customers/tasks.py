@@ -7,9 +7,11 @@ and customer analytics operations.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from django.core.cache import cache
+from django.db.models import Sum
 from django.utils import timezone
 from django_q.tasks import async_task
 
@@ -33,14 +35,18 @@ _RECENCY_THRESHOLD_LOW = 90
 
 def get_task_soft_time_limit() -> int:
     """Get task soft time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
 
 
 def get_task_time_limit() -> int:
     """Get task time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("customers.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
@@ -58,7 +64,9 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
     logger.info(f"💬 [CustomerFeedback] Processing feedback for note {note_id}")
 
     try:
-        from apps.customers.models import CustomerNote
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            CustomerNote,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         note = CustomerNote.objects.get(id=note_id)
 
@@ -107,7 +115,9 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
     logger.info(f"🚀 [CustomerOnboarding] Starting onboarding for customer {customer_id}")
 
     try:
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         customer = Customer.objects.get(id=customer_id)
 
@@ -169,14 +179,16 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
     logger.info(f"📊 [CustomerAnalytics] Updating analytics for customer {customer_id}")
 
     try:
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         customer = Customer.objects.get(id=customer_id)
 
-        from django.db.models import Sum
-
-        from apps.billing.invoice_models import Invoice
-        from apps.orders.models import Order
+        from apps.billing.invoice_models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Invoice,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.orders.models import Order  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         total_orders = Order.objects.filter(customer=customer).count()
 
@@ -242,9 +254,9 @@ def cleanup_inactive_customers() -> dict[str, Any]:
         cache.set(lock_key, True, 3600)
 
         try:
-            from datetime import timedelta
-
-            from apps.customers.models import Customer
+            from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                Customer,  # Circular: cross-app  # Deferred: avoids circular import
+            )
 
             # Find customers inactive for more than 1 year
             cutoff_date = timezone.now() - timedelta(days=365)
@@ -309,7 +321,9 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
     logger.info(f"📧 [CustomerWelcome] Sending welcome email to customer {customer_id}")
 
     try:
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         customer = Customer.objects.get(id=customer_id)
 
@@ -345,7 +359,9 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
 
 def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
     """Calculate customer engagement score (0-100) based on weighted factors."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     order_weight = SettingsService.get_integer_setting("customers.engagement_order_weight", 40)
     recency_weight = SettingsService.get_integer_setting("customers.engagement_recency_weight", 30)

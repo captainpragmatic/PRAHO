@@ -9,14 +9,17 @@ Security hardening:
 - Safe previews and GDPR compliance warnings
 """
 
+import hashlib
 import logging
 import re
 import uuid
+from datetime import timedelta
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
@@ -39,21 +42,27 @@ MAX_NAME_LENGTH = _DEFAULT_MAX_NAME_LENGTH
 
 def get_max_template_size() -> int:
     """Get max template size from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("notifications.max_template_size", _DEFAULT_MAX_TEMPLATE_SIZE)
 
 
 def get_max_subject_length() -> int:
     """Get max subject length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("notifications.max_subject_length", _DEFAULT_MAX_SUBJECT_LENGTH)
 
 
 def get_max_name_length() -> int:
     """Get max name length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("notifications.max_name_length", _DEFAULT_MAX_NAME_LENGTH)
 
@@ -693,16 +702,9 @@ class EmailSuppression(models.Model):
             provider: Email provider that reported the issue
             expires_days: Days until suppression expires (None = permanent)
         """
-        import hashlib
-
-        from django.db import transaction
-        from django.utils import timezone
-
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
         expires_at = None
         if expires_days:
-            from datetime import timedelta
-
             expires_at = timezone.now() + timedelta(days=expires_days)
 
         now = timezone.now()
@@ -737,10 +739,6 @@ class EmailSuppression(models.Model):
     @classmethod
     def is_suppressed(cls, email: str) -> bool:
         """Check if an email is currently suppressed."""
-        import hashlib
-
-        from django.utils import timezone
-
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
         suppression = cls.objects.filter(email_hash=email_hash).first()
@@ -888,8 +886,6 @@ class EmailPreference(models.Model):
 
     def update_marketing_consent(self, consent: bool, source: str = "") -> None:
         """Update marketing consent with GDPR tracking."""
-        from django.utils import timezone
-
         self.marketing = consent
         if consent:
             self.marketing_consent_date = timezone.now()

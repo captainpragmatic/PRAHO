@@ -109,15 +109,17 @@ class Command(BaseCommand):
             CommandError: If node not found, invalid status for action,
                          credentials missing, or action fails.
         """
-        from apps.infrastructure.models import NodeDeployment
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         hostname = options["hostname"]
         action = options["action"]
 
         # Resolve deployment by hostname
-        deployment = NodeDeployment.objects.select_related(
-            "provider", "node_size", "region"
-        ).filter(hostname=hostname).first()
+        deployment = (
+            NodeDeployment.objects.select_related("provider", "node_size", "region").filter(hostname=hostname).first()
+        )
 
         if not deployment:
             raise CommandError(f"No deployment found with hostname '{hostname}'.")
@@ -150,8 +152,7 @@ class Command(BaseCommand):
         # Confirmation prompt for destroy — bypassed with --force for scripting
         if action == "destroy" and not options.get("force"):
             confirm = input(
-                f"⚠️  Destroy '{deployment.hostname}'? "
-                f"This will delete the cloud server. Type the hostname to confirm: "
+                f"⚠️  Destroy '{deployment.hostname}'? This will delete the cloud server. Type the hostname to confirm: "
             )
             if confirm.strip() != hostname:
                 raise CommandError("Confirmation failed. Destroy cancelled.")
@@ -186,7 +187,10 @@ class Command(BaseCommand):
             "stop": (stoppable, "Cannot stop a node in '{status}' status. Must be: completed."),
             "start": (startable, "Cannot start a node in '{status}' status. Must be: stopped."),
             "reboot": (rebootable, "Cannot reboot a node in '{status}' status. Must be: completed."),
-            "destroy": (destroyable, "Cannot destroy a node in '{status}' status. Must be: completed, stopped, or failed."),
+            "destroy": (
+                destroyable,
+                "Cannot destroy a node in '{status}' status. Must be: completed, stopped, or failed.",
+            ),
             "retry": (retryable, "Cannot retry a node in '{status}' status. Must be: failed."),
             "upgrade": (stoppable, "Cannot upgrade a node in '{status}' status. Must be: completed."),
         }
@@ -214,7 +218,7 @@ class Command(BaseCommand):
         # H14 fix: validate status before queuing (mirrors web UI checks)
         self._validate_status_for_action(deployment, action)
 
-        from apps.infrastructure.tasks import (
+        from apps.infrastructure.tasks import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
             queue_destroy_node,
             queue_reboot_node,
             queue_retry_deployment,
@@ -222,6 +226,7 @@ class Command(BaseCommand):
             queue_stop_node,
             queue_upgrade_node,
         )
+
         provider_id = deployment.provider_id
 
         # Action → queue function dispatch table
@@ -248,9 +253,7 @@ class Command(BaseCommand):
             raise CommandError(f"Unknown action: {action}")
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"✅ {action.capitalize()} queued for {deployment.hostname} (task_id={task_id})"
-            )
+            self.style.SUCCESS(f"✅ {action.capitalize()} queued for {deployment.hostname} (task_id={task_id})")
         )
 
     def _dispatch_sync(
@@ -266,7 +269,9 @@ class Command(BaseCommand):
         Calls the same service methods used by the async tasks, but directly
         in the current process. Provides immediate feedback.
         """
-        from apps.infrastructure.deployment_service import get_deployment_service
+        from apps.infrastructure.deployment_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_deployment_service,  # Circular: cross-app
+        )
 
         service = get_deployment_service()
 
@@ -296,9 +301,7 @@ class Command(BaseCommand):
         if node_result.is_err():
             raise CommandError(f"{action.capitalize()} failed: {node_result.unwrap_err()}")
 
-        self.stdout.write(
-            self.style.SUCCESS(f"✅ {action.capitalize()} completed for {deployment.hostname}")
-        )
+        self.stdout.write(self.style.SUCCESS(f"✅ {action.capitalize()} completed for {deployment.hostname}"))
 
     def _resolve_size(self, deployment: Any, size_slug: str) -> Any:
         """
@@ -307,7 +310,9 @@ class Command(BaseCommand):
         Raises:
             CommandError: If the size is not found or belongs to a different provider.
         """
-        from apps.infrastructure.models import NodeSize
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         size = NodeSize.objects.filter(
             provider=deployment.provider,
@@ -317,11 +322,11 @@ class Command(BaseCommand):
 
         if not size:
             available = list(
-                NodeSize.objects.filter(provider=deployment.provider, is_active=True)
-                .values_list("provider_type_id", flat=True)
+                NodeSize.objects.filter(provider=deployment.provider, is_active=True).values_list(
+                    "provider_type_id", flat=True
+                )
             )
             raise CommandError(
-                f"Size '{size_slug}' not found for {deployment.provider.name}. "
-                f"Available: {', '.join(available)}"
+                f"Size '{size_slug}' not found for {deployment.provider.name}. Available: {', '.join(available)}"
             )
         return size

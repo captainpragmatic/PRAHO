@@ -2,6 +2,8 @@
 PRAHO PLATFORM - Deployment Script
 ===============================================================================
 Automated deployment system for Romanian hosting provider production environment
+
+OUTBOUND_HTTP: out-of-scope — non-Django script, hardcoded health check URLs only
 """
 
 import argparse
@@ -195,7 +197,9 @@ class PragmaticHostDeployment:
                 return True
 
             cmd = [sys.executable, str(backup_script)]
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Backup failed: {result.stderr}")
@@ -215,7 +219,9 @@ class PragmaticHostDeployment:
 
             cmd = ["git", "clone", "--branch", branch, "--depth", "1", self.config["git_repo"], str(release_dir)]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Git clone failed: {result.stderr}")
@@ -286,7 +292,9 @@ class PragmaticHostDeployment:
 
             cmd = [self.config["pip_path"], "install", "--upgrade", "--requirement", str(requirements_file)]
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, cwd=str(release_dir), capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Pip install failed: {result.stderr}")
@@ -309,7 +317,9 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Migrations failed: {result.stderr}")
@@ -332,7 +342,9 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Static files collection failed: {result.stderr}")
@@ -377,7 +389,9 @@ class PragmaticHostDeployment:
                     logger.info(f"Restarting {service}...")
 
                     cmd = ["sudo", "systemctl", "restart", service]
-                    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+                    result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                        cmd, check=False, capture_output=True, text=True
+                    )  # Safe: shell=False  # Safe: shell=False
 
                     if result.returncode != 0:
                         logger.error(f"Failed to restart {service}: {result.stderr}")
@@ -470,7 +484,10 @@ class PragmaticHostDeployment:
 
             for release in to_remove:
                 logger.info(f"Removing old release: {release.name}")
-                subprocess.run(["rm", "-rf", str(release)], check=False)
+                subprocess.run(  # noqa: S603  # Safe: shell=False
+                    ["rm", "-rf", str(release)],  # noqa: S607  # Safe: known executable
+                    check=False,
+                )
 
             logger.info(f"Cleaned up {len(to_remove)} old releases")
 

@@ -43,7 +43,7 @@ MAX_PAYMENT_RETRIES = _DEFAULT_MAX_PAYMENT_RETRIES
 
 def get_max_payment_retries() -> int:
     """Get max payment retries from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
 
     return SettingsService.get_integer_setting("billing.max_payment_retries", _DEFAULT_MAX_PAYMENT_RETRIES)
 
@@ -117,7 +117,7 @@ class ProrationService:
     """
 
     @staticmethod
-    def calculate_proration(
+    def calculate_proration(  # subscription fields  # noqa: PLR0913  # Business logic parameters
         old_price_cents: int,
         new_price_cents: int,
         old_quantity: int,
@@ -251,9 +251,9 @@ class SubscriptionService:
             Result with created subscription or error message
         """
         try:
-            from .currency_models import Currency
-
             with transaction.atomic():
+                from .currency_models import Currency  # noqa: PLC0415  # Deferred: avoids circular import
+
                 # Get or create default currency
                 try:
                     currency = Currency.objects.get(code="RON")
@@ -284,7 +284,7 @@ class SubscriptionService:
                 quantity = data.get("quantity", 1)
 
                 # Calculate cycle days
-                from .subscription_models import BILLING_CYCLE_DAYS
+                from .subscription_models import BILLING_CYCLE_DAYS  # noqa: PLC0415  # Deferred: avoids circular import
 
                 cycle_days = BILLING_CYCLE_DAYS.get(billing_cycle, 30)
 
@@ -354,12 +354,12 @@ class SubscriptionService:
             Result with SubscriptionChange record or error message
         """
         try:
-            from apps.products.models import Product
-
             with transaction.atomic():
                 # Determine new values
                 new_product = subscription.product
                 if data.get("new_product_id"):
+                    from apps.products.models import Product  # noqa: PLC0415  # Deferred: avoids circular import
+
                     new_product = Product.objects.get(id=data["new_product_id"])
 
                 new_quantity = data.get("new_quantity", subscription.quantity)
@@ -439,10 +439,10 @@ class SubscriptionService:
         user: User | None = None,
     ) -> Invoice:
         """Create an invoice for proration charges."""
-        from .currency_models import Currency
-
         # Get sequence
         sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
+
+        from .currency_models import Currency  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Get currency
         try:
@@ -451,7 +451,7 @@ class SubscriptionService:
             currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
         # Calculate tax using centralized TaxService (ADR-0015)
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import TaxService  # noqa: PLC0415  # Deferred: avoids circular import
 
         subtotal_cents = change.proration_amount_cents
         vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
@@ -582,7 +582,7 @@ class GrandfatheringService:
     """
 
     @staticmethod
-    def apply_grandfathering_for_price_increase(
+    def apply_grandfathering_for_price_increase(  # subscription fields  # noqa: PLR0913  # Business logic parameters
         product: Product,
         old_price_cents: int,
         new_price_cents: int,
@@ -846,7 +846,7 @@ class RecurringBillingService:
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
             # Calculate amounts using centralized TaxService (ADR-0015)
-            from apps.common.tax_service import TaxService
+            from apps.common.tax_service import TaxService  # noqa: PLC0415  # Deferred: avoids circular import
 
             subtotal_cents = subscription.total_price_cents
             tax_rate = TaxService.get_vat_rate("RO", as_decimal=True)
@@ -897,8 +897,6 @@ class RecurringBillingService:
     @staticmethod
     def _process_payment(subscription: Subscription, invoice: Invoice) -> Result[bool, str]:
         """Process payment for a subscription invoice via Stripe."""
-        from apps.billing.payment_service import PaymentService
-
         if not subscription.payment_method_id:
             return Err("No payment method on file")
 
@@ -908,6 +906,8 @@ class RecurringBillingService:
         )
 
         try:
+            from apps.billing.payment_service import PaymentService  # noqa: PLC0415  # Deferred: avoids circular import
+
             # Create payment intent for the invoice amount
             result = PaymentService.create_payment_intent_direct(
                 order_id=str(invoice.id),

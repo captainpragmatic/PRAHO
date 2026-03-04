@@ -143,14 +143,16 @@ class Command(BaseCommand):
             CommandError: If any referenced object not found, credentials missing,
                          or deployment fails.
         """
-        from apps.infrastructure.models import (
+        from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
             CloudProvider,
             NodeDeployment,
             NodeRegion,
             NodeSize,
             PanelType,
         )
-        from apps.settings.services import SettingsService
+        from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         # Check if deployment is enabled globally (same check as web UI)
         if not SettingsService.get_setting("node_deployment.enabled", True):
@@ -173,8 +175,9 @@ class Command(BaseCommand):
         if not region:
             # Show available regions to help the user
             available = list(
-                NodeRegion.objects.filter(provider=provider, is_active=True)
-                .values_list("provider_region_id", flat=True)
+                NodeRegion.objects.filter(provider=provider, is_active=True).values_list(
+                    "provider_region_id", flat=True
+                )
             )
             raise CommandError(
                 f"Region '{options['region']}' not found for {provider.name}. "
@@ -189,8 +192,7 @@ class Command(BaseCommand):
         ).first()
         if not size:
             available = list(
-                NodeSize.objects.filter(provider=provider, is_active=True)
-                .values_list("provider_type_id", flat=True)
+                NodeSize.objects.filter(provider=provider, is_active=True).values_list("provider_type_id", flat=True)
             )
             raise CommandError(
                 f"Size '{options['size']}' not found for {provider.name}. "
@@ -206,8 +208,7 @@ class Command(BaseCommand):
         token_result = get_provider_token(provider)
         if token_result.is_err():
             raise CommandError(
-                f"No API token found for {provider.name}. "
-                f"Run: python manage.py store_credentials {options['provider']}"
+                f"No API token found for {provider.name}. Run: python manage.py store_credentials {options['provider']}"
             )
 
         # --- Dry run: show plan and exit WITHOUT creating DB records ---
@@ -245,9 +246,7 @@ class Command(BaseCommand):
             # else: save() calls generate_hostname() automatically
 
             # Set DNS zone from settings (same as web UI)
-            deployment.dns_zone = str(SettingsService.get_setting(
-                "node_deployment.dns_default_zone", ""
-            ) or "")
+            deployment.dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
 
             deployment.save()
 
@@ -267,18 +266,16 @@ class Command(BaseCommand):
         credential vault at task execution time, preventing cleartext secrets
         from being serialized to the Django-Q2 task queue.
         """
-        from apps.infrastructure.tasks import queue_deploy_node
+        from apps.infrastructure.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+            queue_deploy_node,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         task_id = queue_deploy_node(
             deployment_id=deployment.id,
             provider_id=provider.id,
         )
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"✅ Deployment queued: {deployment.hostname} (task_id={task_id})"
-            )
-        )
+        self.stdout.write(self.style.SUCCESS(f"✅ Deployment queued: {deployment.hostname} (task_id={task_id})"))
 
     def _deploy_sync(self, deployment: Any, token: str) -> None:
         """
@@ -288,7 +285,9 @@ class Command(BaseCommand):
         task, but directly in the current process. Useful for debugging
         and single-node deployments where you want immediate feedback.
         """
-        from apps.infrastructure.deployment_service import get_deployment_service
+        from apps.infrastructure.deployment_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_deployment_service,  # Circular: cross-app
+        )
 
         self.stdout.write("🚀 Starting synchronous deployment (this may take several minutes)...")
 

@@ -30,6 +30,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from functools import wraps
 from typing import Any
 
 from django.conf import settings
@@ -51,7 +52,9 @@ MAX_HEADER_JSON_LENGTH = _DEFAULT_MAX_HEADER_JSON_LENGTH
 
 def get_max_header_json_length() -> int:
     """Get max header json length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("common.max_header_json_length", _DEFAULT_MAX_HEADER_JSON_LENGTH)
 
@@ -321,7 +324,6 @@ def trace_view(
         def my_view(request):
             return render(request, "template.html")
     """
-    from functools import wraps
 
     def decorator(view_func: Callable[..., Any]) -> Any:
         @wraps(view_func)

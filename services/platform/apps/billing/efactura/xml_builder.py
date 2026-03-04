@@ -23,6 +23,8 @@ from lxml import etree
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice, InvoiceLine
 
+from apps.common.tax_service import TaxService
+
 logger = logging.getLogger(__name__)
 
 # UBL 2.1 Namespaces
@@ -257,8 +259,6 @@ class BaseUBLBuilder:
                     return (Decimal(str(tax_rate)) * 100).quantize(Decimal("0.01"))
 
         # Fallback: current rate from TaxService (only for invoices with no lines)
-        from apps.common.tax_service import TaxService
-
         return TaxService.get_vat_rate("RO", as_decimal=False)
 
     def _add_postal_address(self, parent: etree._Element, company: CompanyInfo) -> etree._Element:

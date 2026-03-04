@@ -41,9 +41,10 @@ class UserManager(BaseUserManager["User"]):
         if "staff_role" not in extra_fields or extra_fields.get("staff_role") is None:
             extra_fields["staff_role"] = ""
         user = self.model(email=email, **extra_fields)
-        user.set_password(
+        # SECURITY: validation done at form/serializer level per Django convention
+        user.set_password(  # nosemgrep: unvalidated-password
             password
-        )  # nosemgrep: unvalidated-password — AbstractBaseUser.create_user, validation done at form/serializer level
+        )
         user.save(using=self._db)
         return user
 

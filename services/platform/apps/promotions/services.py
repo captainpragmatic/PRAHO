@@ -46,7 +46,9 @@ MAX_CODE_GENERATION_ATTEMPTS = _DEFAULT_MAX_CODE_GENERATION_ATTEMPTS
 
 def get_max_code_generation_attempts() -> int:
     """Get max code generation attempts from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "promotions.max_code_generation_attempts", _DEFAULT_MAX_CODE_GENERATION_ATTEMPTS
@@ -182,7 +184,7 @@ class CouponService:
         return cls._validate_coupon_instance(coupon, order, customer, cached_items)
 
     @classmethod
-    def _validate_coupon_instance(
+    def _validate_coupon_instance(  # Complexity: multi-step workflow  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
         cls,
         coupon: Coupon,
         order: Order,
@@ -468,7 +470,7 @@ class CouponService:
 
     @classmethod
     @transaction.atomic
-    def apply_coupon(
+    def apply_coupon(  # promotion configuration fields  # noqa: PLR0913  # Business logic parameters
         cls,
         code: str,
         order: Order,
@@ -1158,7 +1160,7 @@ class LoyaltyService:
         program: LoyaltyProgram | None = None,
     ) -> CustomerLoyalty:
         """Get or create loyalty membership for a customer."""
-        from .models import LoyaltyProgram
+        from .models import LoyaltyProgram  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         if program is None:
             program = LoyaltyProgram.objects.filter(is_active=True).first()

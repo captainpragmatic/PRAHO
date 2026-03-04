@@ -5,7 +5,7 @@ Staging environment configuration for pre-production testing.
 
 from pathlib import Path
 
-from .base import *
+from .base import *  # noqa: F403  # Django settings pattern
 
 # ===============================================================================
 # STAGING ENVIRONMENT CONFIGURATION

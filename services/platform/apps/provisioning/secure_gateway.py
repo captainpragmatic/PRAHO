@@ -1,3 +1,4 @@
+# OUTBOUND_HTTP_MIGRATION: pending  # noqa: ERA001
 """
 Secure Server Management Gateway - PRAHO Platform
 Secure API integration for server provisioning and management.
@@ -9,13 +10,13 @@ import logging
 import secrets
 import time
 from typing import Any
-from urllib.parse import urlparse
 
 import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 from apps.common.validators import SecureInputValidator
 
 from .models import Server
@@ -62,6 +63,13 @@ WHITELISTED_SERVER_MANAGEMENT_DOMAINS = [
     "api.romarg.ro",
     "api.netconcept.ro",
 ]
+
+SERVER_MANAGEMENT_POLICY = OutboundPolicy(
+    name="server_management",
+    allowed_domains=frozenset(WHITELISTED_SERVER_MANAGEMENT_DOMAINS),
+    timeout_seconds=30.0,
+    max_retries=0,  # Retries handled by caller
+)
 
 
 class SecureServerGateway:
@@ -218,24 +226,23 @@ class SecureServerGateway:
 
     @staticmethod
     def _validate_server_endpoint(endpoint: str) -> bool:
-        """🛡️ Validate server management endpoint for SSRF protection"""
+        """🛡️ Validate server management endpoint for SSRF protection.
+
+        Note: With safe_request() migration, SSRF validation is handled by the
+        outbound HTTP policy. This method is kept for backward compatibility
+        but delegates to validate_and_resolve().
+        """
         if not endpoint:
             return False
 
         try:
-            # Use existing SSRF validation
-            SecureInputValidator.validate_safe_url(endpoint)
+            from apps.common.outbound_http import validate_and_resolve  # noqa: PLC0415
 
-            # Additional server management endpoint whitelist check
-            parsed = urlparse(endpoint)
-            hostname = parsed.hostname
-
-            if hostname not in WHITELISTED_SERVER_MANAGEMENT_DOMAINS:
-                logger.warning(f"🚨 [SSRF] Server endpoint not whitelisted: {hostname}")
-                return False
-
+            validate_and_resolve(endpoint, SERVER_MANAGEMENT_POLICY)
             return True
-
+        except OutboundSecurityError as e:
+            logger.warning(f"🚨 [SSRF] Server endpoint blocked: {e}")
+            return False
         except Exception as e:
             logger.error(f"🔥 [SSRF] Server endpoint validation failed: {e}")
             return False
@@ -374,15 +381,12 @@ class SecureServerGateway:
             f"(attempt {attempt + 1}/{max_retries})"
         )
         try:
-            # Use timeout from request_kwargs (already set by caller from settings)
-            request_timeout = request_kwargs.get("timeout", get_api_timeouts().get("REQUEST_TIMEOUT", 30))
-            response = requests.request(
-                method=request_kwargs["method"],
-                url=request_kwargs["url"],
+            response = safe_request(
+                request_kwargs["method"],
+                request_kwargs["url"],
+                policy=SERVER_MANAGEMENT_POLICY,
                 json=request_kwargs.get("json"),
                 headers=request_kwargs["headers"],
-                timeout=request_timeout,
-                verify=True,
             )
             is_success, resp_payload = SecureServerGateway._process_http_response(response)
             if is_success:

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -373,7 +373,6 @@ class InvoiceLine(models.Model):
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        from decimal import ROUND_HALF_EVEN
 
         subtotal = self.subtotal_cents
         # Use banker's rounding for VAT compliance (same as OrderItem)

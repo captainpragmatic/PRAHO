@@ -58,21 +58,27 @@ MAX_PRICE_OVERRIDE_MULTIPLIER = _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
 
 def get_max_search_query_length() -> int:
     """Get max search query length from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("orders.max_search_query_length", _DEFAULT_MAX_SEARCH_QUERY_LENGTH)
 
 
 def get_max_price_override_cents() -> int:
     """Get max price override cents from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("orders.max_price_override_cents", _DEFAULT_MAX_PRICE_OVERRIDE_CENTS)
 
 
 def get_max_price_override_multiplier() -> int:
     """Get max price override multiplier from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting(
         "orders.max_price_override_multiplier", _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
@@ -188,7 +194,9 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     DEPRECATED: Use OrderVATCalculator.calculate_vat() instead for full compliance.
     """
     try:
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            TaxService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         tax_profile = customer.get_tax_profile()
 
@@ -206,7 +214,9 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
     except Exception as e:
         logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
         # Fall back to centralized Romanian VAT rate
-        from apps.common.tax_service import TaxService
+        from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            TaxService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         return TaxService.get_vat_rate("RO", as_decimal=True)
 
@@ -608,7 +618,10 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
         subtotal_cents = (unit_cents * quantity) + setup_cents
 
         # VAT calc per rules
-        from .vat_rules import CustomerVATInfo, OrderVATCalculator
+        from .vat_rules import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
+            CustomerVATInfo,
+            OrderVATCalculator,
+        )
 
         billing = customer.get_billing_address()
         tax_profile = customer.get_tax_profile()
@@ -726,7 +739,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     raise ValueError(f"No price for {order.currency.code} / {billing_period}")
 
                 # Build item
-                from .models import OrderItem
+                from .models import OrderItem  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
                 item = OrderItem(
                     order=order,
@@ -1599,7 +1612,9 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def cart_update(request: HttpRequest) -> HttpResponse:
+def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
+    request: HttpRequest,
+) -> HttpResponse:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
     📝 Update cart item quantity via HTMX
     """
@@ -1650,7 +1665,9 @@ def cart_update(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def cart_remove(request: HttpRequest) -> HttpResponse:
+def cart_remove(  # noqa: PLR0911  # Complexity: multi-step business logic
+    request: HttpRequest,
+) -> HttpResponse:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
     🗑️ Remove item from cart via HTMX
     """

@@ -15,9 +15,9 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.infrastructure.provider_config import (
-    PROVIDER_SYNC_REGISTRY,
     get_provider_sync_fn,
     get_provider_token,
+    get_registered_sync_providers,
 )
 
 
@@ -28,7 +28,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--provider",
             type=str,
-            choices=list(PROVIDER_SYNC_REGISTRY.keys()),
+            choices=list(get_registered_sync_providers()),
             help="Sync only a specific provider (default: all registered)",
         )
         parser.add_argument(
@@ -44,13 +44,15 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(self.style.WARNING("DRY RUN — no changes will be made"))
 
-        providers_to_sync = [provider_filter] if provider_filter else list(PROVIDER_SYNC_REGISTRY.keys())
+        providers_to_sync = [provider_filter] if provider_filter else list(get_registered_sync_providers())
 
         for provider_type in providers_to_sync:
             self._sync_provider(provider_type, dry_run=dry_run)
 
     def _sync_provider(self, provider_type: str, dry_run: bool = False) -> None:
-        from apps.infrastructure.models import CloudProvider
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         self.stdout.write(f"🌐 Syncing {provider_type} provider catalog...")
 

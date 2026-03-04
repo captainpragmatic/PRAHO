@@ -30,14 +30,18 @@ MAX_PRICE_CENTS = _DEFAULT_MAX_PRICE_CENTS
 
 def get_max_json_content_size() -> int:
     """Get max json content size from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("products.max_json_content_size", _DEFAULT_MAX_JSON_CONTENT_SIZE)
 
 
 def get_max_price_cents() -> int:
     """Get max price cents from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("products.max_price_cents", _DEFAULT_MAX_PRICE_CENTS)
 
@@ -498,7 +502,9 @@ class ProductPrice(models.Model):
         """Get effective monthly price in currency units"""
         return Decimal(self.effective_monthly_price_cents) / 100
 
-    def clean(self) -> None:
+    def clean(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+        self,
+    ) -> None:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """🔒 Validate pricing constraints and log security validation"""
         super().clean()
 

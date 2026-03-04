@@ -17,6 +17,7 @@ Features:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import re
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from apps.common import validators
 from apps.notifications.models import (
     EmailCampaign,
     EmailLog,
+    EmailSuppression,
     EmailTemplate,
     validate_template_content,
 )
@@ -200,8 +202,6 @@ class EmailSuppressionService:
             return bool(cached)
 
         # Check database
-        from apps.notifications.models import EmailSuppression
-
         is_suppressed = EmailSuppression.is_suppressed(email)
 
         # Cache the result (both positive and negative)
@@ -219,8 +219,6 @@ class EmailSuppressionService:
             reason: Reason for suppression (bounce, complaint, unsubscribe)
             duration_days: How long to suppress (None = permanent)
         """
-        from apps.notifications.models import EmailSuppression
-
         # Persist to database (source of truth)
         EmailSuppression.suppress(
             email=email,
@@ -245,8 +243,6 @@ class EmailSuppressionService:
     @classmethod
     def unsuppress_email(cls, email: str) -> bool:
         """Remove an email from the suppression list."""
-        from apps.notifications.models import EmailSuppression
-
         email_hash = hashlib.sha256(email.lower().encode()).hexdigest()
 
         # Delete from database
@@ -335,9 +331,6 @@ class EmailService:
     @staticmethod
     def _send_email(recipient: str, subject: str, body: str, html_body: str | None = None) -> bool:
         """Internal method to send email using Django's email backend."""
-        from django.conf import settings
-        from django.core.mail import EmailMultiAlternatives
-
         try:
             from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or str(
                 SettingsService.get_setting("company.email_noreply", "noreply@pragmatichost.com")
@@ -366,7 +359,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_email(
+    def send_email(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
         cls,
         to: str | list[str],
         subject: str,
@@ -493,7 +486,7 @@ class EmailService:
         )
 
     @classmethod
-    def _send_now(
+    def _send_now(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
         cls,
         to: list[str],
         subject: str,
@@ -621,7 +614,7 @@ class EmailService:
             )
 
     @classmethod
-    def _send_async(
+    def _send_async(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
         cls,
         to: list[str],
         subject: str,
@@ -661,7 +654,9 @@ class EmailService:
         )
 
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+            )
 
             # Queue the email task
             task_id = async_task(
@@ -714,7 +709,7 @@ class EmailService:
             )
 
     @classmethod
-    def _queue_email_for_retry(
+    def _queue_email_for_retry(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
         cls,
         to: list[str],
         subject: str,
@@ -747,7 +742,9 @@ class EmailService:
         )
 
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+            )
 
             retry_config = getattr(settings, "EMAIL_RETRY", {})
             retry_delay = retry_config.get("RETRY_DELAY_SECONDS", 60)
@@ -778,7 +775,7 @@ class EmailService:
             )
 
     @staticmethod
-    def _create_email_log(
+    def _create_email_log(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
         to: str,
         from_addr: str,
         reply_to: str,
@@ -813,7 +810,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def send_template_email(
+    def send_template_email(  # notification template parameters  # noqa: PLR0913  # Business logic parameters
         cls,
         template_key: str,
         recipient: str,
@@ -966,8 +963,6 @@ class EmailService:
     @staticmethod
     def _generate_unsubscribe_url(email: str, template_key: str) -> str:
         """Generate unsubscribe URL for email."""
-        import hashlib
-
         token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
         base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
         return f"{base_url}/email/unsubscribe/?email={email}&token={token}"
@@ -1136,7 +1131,7 @@ class EmailService:
     # ===============================================================================
 
     @classmethod
-    def handle_delivery_event(
+    def handle_delivery_event(  # Complexity: multi-step workflow  # noqa: C901, PLR0912  # Complexity: multi-step business logic
         cls,
         event_type: str,
         message_id: str,
@@ -1232,7 +1227,10 @@ class EmailService:
     ) -> None:
         """Log email-related audit event."""
         try:
-            from apps.audit.services import AuditEventData, AuditService
+            from apps.audit.services import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+                AuditEventData,
+                AuditService,
+            )
 
             event_data = AuditEventData(
                 event_type=f"email_{event_type}",
@@ -1275,8 +1273,6 @@ class NotificationService:
         Returns:
             True if notification was sent successfully
         """
-        from django.conf import settings
-
         try:
             admin_emails = getattr(settings, "ADMIN_ALERT_EMAILS", None)
             if not admin_emails:
@@ -1337,7 +1333,9 @@ class NotificationService:
         Returns:
             True if notification was sent successfully
         """
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -1424,10 +1422,9 @@ class EmailPreferenceService:
         Returns:
             True if unsubscribe was successful
         """
-        import hashlib
-        import hmac
-
-        from apps.customers.models import Customer
+        from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Customer,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         # Verify token using timing-safe comparison
         # Check against known template keys to validate

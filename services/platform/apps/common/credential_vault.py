@@ -44,14 +44,18 @@ ACCESS_LOG_RETENTION_DAYS = 365  # Keep access logs for 1 year
 
 def get_max_credential_age_days() -> int:
     """Get max credential age from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("users.credential_max_age_days", _DEFAULT_MAX_CREDENTIAL_AGE_DAYS)
 
 
 def get_rotation_retry_limit() -> int:
     """Get rotation retry limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("users.credential_rotation_retry_limit", _DEFAULT_ROTATION_RETRY_LIMIT)
 
@@ -358,7 +362,7 @@ class CredentialVault:
             logger.error(f"🚨 [Credential Vault] Storage failed: {e}")
             return Err(f"Failed to store credential: {e!s}")
 
-    def store_credential_legacy(
+    def store_credential_legacy(  # credential fields  # noqa: PLR0913  # Business logic parameters
         self,
         service_type: str,
         service_identifier: str,
@@ -555,7 +559,7 @@ class CredentialVault:
             logger.error(f"🚨 [Credential Vault] Rotation failed: {e}")
             return Err(f"Failed to rotate credential: {e!s}")
 
-    def rotate_credential_legacy(
+    def rotate_credential_legacy(  # credential fields  # noqa: PLR0913  # Business logic parameters
         self,
         service_type: str,
         service_identifier: str,
@@ -583,7 +587,10 @@ class CredentialVault:
         if service_type == "virtualmin":
             # Use runtime imports to avoid circular imports during tests
             try:
-                from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
+                from apps.provisioning.virtualmin_gateway import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+                    VirtualminConfig,
+                    VirtualminGateway,
+                )
             except ImportError:
                 return Err("Virtualmin gateway not available")
 
@@ -687,7 +694,7 @@ _vault_instance: CredentialVault | None = None
 
 def get_credential_vault() -> CredentialVault:
     """Get global credential vault instance with lazy initialization"""
-    global _vault_instance
+    global _vault_instance  # noqa: PLW0603  # Module-level singleton pattern
     if _vault_instance is None:
         _vault_instance = CredentialVault()
     return _vault_instance

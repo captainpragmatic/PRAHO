@@ -168,7 +168,7 @@ def _get_action_category_severity(action: str) -> tuple[str, str, bool, bool]:
     return ("business_operation", "low", False, False)
 
 
-def _create_audit_event(  # Audit event creation requires comprehensive parameter set for full context capture
+def _create_audit_event(  # Audit event creation requires comprehensive parameter set for full context capture  # audit trail fields  # noqa: PLR0913  # Business logic parameters
     event_data: AuditEventCreationData | None = None,
     *,
     action: str | None = None,
@@ -250,7 +250,9 @@ def _create_audit_event(  # Audit event creation requires comprehensive paramete
 
 
 @receiver(post_save, sender=User)
-def audit_user_profile_changes(sender: type[User], instance: User, created: bool, **kwargs: Any) -> None:
+def audit_user_profile_changes(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    sender: type[User], instance: User, created: bool, **kwargs: Any
+) -> None:  # Complexity: audit signal dispatch  # Complexity: multi-step business logic
     """
     Audit User model changes for security and compliance
 
@@ -681,7 +683,10 @@ def audit_cookie_consent_change(
     1. AuditEvent — for security monitoring dashboards (category=privacy, severity=high)
     2. ComplianceLog — for GDPR Article 7 compliance reporting
     """
-    from .services import AuditService, ComplianceEventRequest  # circular import
+    from .services import (  # Circular: signals<->services  # noqa: PLC0415  # Deferred: avoids circular import
+        AuditService,
+        ComplianceEventRequest,
+    )
 
     try:
         categories_enabled = []

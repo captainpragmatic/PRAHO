@@ -102,7 +102,9 @@ class Command(BaseCommand):
             help="Output format (default: text)",
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+        self, *args: Any, **options: Any
+    ) -> None:  # Complexity: drift scan  # Complexity: multi-step business logic
         """
         Execute drift scans on the selected deployment set.
 
@@ -117,7 +119,9 @@ class Command(BaseCommand):
         Raises:
             CommandError: If no target specified or target deployment not found.
         """
-        from apps.infrastructure.drift_scanner import DriftScannerService
+        from apps.infrastructure.drift_scanner import (  # noqa: PLC0415  # Deferred: avoids circular import
+            DriftScannerService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         # Resolve the set of deployments to scan
         deployments = self._resolve_targets(options)
@@ -149,16 +153,16 @@ class Command(BaseCommand):
                 total_errors += 1
                 error_msg = result.unwrap_err()
                 if output_format == "text":
-                    self.stderr.write(
-                        self.style.WARNING(f"  ⚠️  Error scanning {deployment.hostname}: {error_msg}")
-                    )
-                all_results.append({
-                    "hostname": deployment.hostname,
-                    "provider": deployment.provider.provider_type,
-                    "status": "error",
-                    "error": error_msg,
-                    "drifts": [],
-                })
+                    self.stderr.write(self.style.WARNING(f"  ⚠️  Error scanning {deployment.hostname}: {error_msg}"))
+                all_results.append(
+                    {
+                        "hostname": deployment.hostname,
+                        "provider": deployment.provider.provider_type,
+                        "status": "error",
+                        "error": error_msg,
+                        "drifts": [],
+                    }
+                )
                 continue
 
             reports: list[DriftReport] = result.unwrap()
@@ -169,31 +173,31 @@ class Command(BaseCommand):
                 if drift_count == 0:
                     self.stdout.write(self.style.SUCCESS("  ✅ No drifts found"))
                 else:
-                    self.stdout.write(
-                        self.style.ERROR(f"  ⚠️  {drift_count} drift(s) found:")
-                    )
+                    self.stdout.write(self.style.ERROR(f"  ⚠️  {drift_count} drift(s) found:"))
                     for report in reports:
                         self.stdout.write(
                             f"    [{report.severity.upper()}] {report.category}: "
                             f"{report.field_name} (expected={report.expected_value}, actual={report.actual_value})"
                         )
 
-            all_results.append({
-                "hostname": deployment.hostname,
-                "provider": deployment.provider.provider_type,
-                "status": "ok",
-                "drift_count": drift_count,
-                "drifts": [
-                    {
-                        "severity": r.severity,
-                        "category": r.category,
-                        "field": r.field_name,
-                        "expected": r.expected_value,
-                        "actual": r.actual_value,
-                    }
-                    for r in reports
-                ],
-            })
+            all_results.append(
+                {
+                    "hostname": deployment.hostname,
+                    "provider": deployment.provider.provider_type,
+                    "status": "ok",
+                    "drift_count": drift_count,
+                    "drifts": [
+                        {
+                            "severity": r.severity,
+                            "category": r.category,
+                            "field": r.field_name,
+                            "expected": r.expected_value,
+                            "actual": r.actual_value,
+                        }
+                        for r in reports
+                    ],
+                }
+            )
 
         # Output summary
         if output_format == "json":
@@ -206,8 +210,7 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(json_output, indent=2))
         else:
             self.stdout.write(
-                f"\n📊 Summary: {total_deployments} scanned, "
-                f"{total_drifts} drift(s) found, {total_errors} error(s)"
+                f"\n📊 Summary: {total_deployments} scanned, {total_drifts} drift(s) found, {total_errors} error(s)"
             )
 
         # Exit code scheme for CI integration:
@@ -238,12 +241,18 @@ class Command(BaseCommand):
         Raises:
             CommandError: If no target specified or deployment not found.
         """
-        from apps.infrastructure.models import NodeDeployment
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         if options.get("deployment"):
-            deployment = NodeDeployment.objects.select_related("provider").filter(
-                hostname=options["deployment"],
-            ).first()
+            deployment = (
+                NodeDeployment.objects.select_related("provider")
+                .filter(
+                    hostname=options["deployment"],
+                )
+                .first()
+            )
             if not deployment:
                 raise CommandError(f"No deployment found with hostname '{options['deployment']}'.")
             return [deployment]
@@ -254,9 +263,7 @@ class Command(BaseCommand):
                 status="completed",
             )
             if not deployments.exists():
-                raise CommandError(
-                    f"No completed deployments found for provider '{options['provider']}'."
-                )
+                raise CommandError(f"No completed deployments found for provider '{options['provider']}'.")
             return deployments
 
         if options.get("scan_all"):
@@ -268,6 +275,4 @@ class Command(BaseCommand):
                 return []
             return deployments
 
-        raise CommandError(
-            "Specify a target: --deployment <hostname>, --provider <type>, or --all"
-        )
+        raise CommandError("Specify a target: --deployment <hostname>, --provider <type>, or --all")

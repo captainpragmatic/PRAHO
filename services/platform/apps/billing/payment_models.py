@@ -5,6 +5,7 @@ Payment tracking, credit ledger functionality, and retry policies.
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -161,8 +162,6 @@ class Payment(models.Model):
     @classmethod
     def generate_idempotency_key(cls, prefix: str = "pay") -> str:
         """Generate a unique idempotency key."""
-        import secrets
-
         return f"{prefix}_{secrets.token_hex(24)}"
 
     def set_idempotency_key(self, key: str | None = None) -> None:

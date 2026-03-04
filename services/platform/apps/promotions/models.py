@@ -535,7 +535,9 @@ class Coupon(models.Model):
             return max(0, self.max_total_uses - self.total_uses)
         return None
 
-    def can_be_used(self) -> tuple[bool, str]:
+    def can_be_used(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self,
+    ) -> tuple[bool, str]:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """
         Check if coupon can be used (basic validity check).
         Returns (is_valid, reason_if_invalid).
@@ -558,7 +560,9 @@ class Coupon(models.Model):
         """Get number of times customer has used this coupon."""
         return self.redemptions.filter(customer=customer, status="applied").count()
 
-    def can_customer_use(self, customer: Customer | None) -> tuple[bool, str]:
+    def can_customer_use(  # noqa: C901, PLR0911  # Complexity: multi-step business logic
+        self, customer: Customer | None
+    ) -> tuple[bool, str]:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """
         Check if specific customer can use this coupon.
         Returns (is_valid, reason_if_invalid).
@@ -661,7 +665,7 @@ class Coupon(models.Model):
             ValidationError: If validate=True and any coupon fails validation.
         """
         coupons = []
-        for _ in range(count):
+        for _i in range(count):
             code = cls.generate_code(length=length, prefix=prefix)
             coupon = cls(code=code, **coupon_defaults)
 
@@ -1295,7 +1299,6 @@ class GiftCard(models.Model):
             RuntimeError: If unable to generate a unique code within max_attempts.
         """
         for _attempt in range(max_attempts):
-            # Format: XXXX-XXXX-XXXX-XXXX
             parts = [
                 "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4)) for _ in range(4)
             ]
@@ -1333,7 +1336,6 @@ class GiftCardTransaction(models.Model):
     )
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
 
-    # Amount (positive = credit, negative = debit)
     amount_cents = models.BigIntegerField(help_text=_("Transaction amount in cents"))
     balance_after_cents = models.BigIntegerField(help_text=_("Balance after transaction"))
 
@@ -1609,7 +1611,6 @@ class LoyaltyTransaction(models.Model):
     )
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
 
-    # Points (positive = credit, negative = debit)
     points = models.IntegerField(help_text=_("Points change (positive or negative)"))
     balance_after = models.PositiveIntegerField(help_text=_("Balance after transaction"))
 

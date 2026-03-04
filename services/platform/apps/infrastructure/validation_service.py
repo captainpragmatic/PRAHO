@@ -11,14 +11,18 @@ Performs health checks on:
 
 from __future__ import annotations
 
+import io
 import logging
 import socket
 import ssl
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import paramiko
 
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_urlopen
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 
@@ -26,6 +30,16 @@ if TYPE_CHECKING:
     from apps.infrastructure.models import NodeDeployment
 
 logger = logging.getLogger(__name__)
+
+VIRTUALMIN_CHECK_POLICY = OutboundPolicy(
+    name="virtualmin_check",
+    require_https=False,
+    verify_tls=False,
+    allowed_schemes=frozenset({"https"}),
+    allowed_ports=frozenset({10000}),
+    timeout_seconds=30.0,
+    blocked_ports=frozenset(),  # Override: don't block 10000
+)
 
 
 @dataclass
@@ -182,10 +196,11 @@ class NodeValidationService:
 
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.set_missing_host_key_policy(
+                paramiko.AutoAddPolicy()  # noqa: S507  # Intentional: auto-trust for infra validation
+            )  # Intentional: auto-trust for infra validation  # Intentional: auto-trust for infra validation
 
             # Load private key
-            import io
 
             key_file = io.StringIO(private_key_content)
             pkey = paramiko.Ed25519Key.from_private_key(key_file)
@@ -268,43 +283,44 @@ class NodeValidationService:
             },
         )
 
-    def _check_virtualmin(self, deployment: NodeDeployment) -> ValidationResult:
+    def _check_virtualmin(  # noqa: PLR0911  # Complexity: multi-step business logic
+        self, deployment: NodeDeployment
+    ) -> ValidationResult:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """Check Virtualmin API is accessible"""
-        import urllib.error
-        import urllib.request
 
         url = f"https://{deployment.ipv4_address}:10000/"
 
         try:
-            # Create SSL context that doesn't verify (for self-signed certs)
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            response = safe_urlopen(
+                url,
+                policy=VIRTUALMIN_CHECK_POLICY,
+                method="HEAD",
+                timeout=self.timeout,
+            )
+            status_code = response.getcode()
 
-            request = urllib.request.Request(url, method="HEAD")
-            request.add_header("User-Agent", "PRAHO-Validation/1.0")
+            # Webmin typically returns 200 or 401 (needs auth)
+            if status_code in (200, 401, 403):
+                return ValidationResult(
+                    check_name="virtualmin",
+                    passed=True,
+                    message=f"Webmin/Virtualmin accessible (status: {status_code})",
+                    details={"status_code": status_code, "url": url},
+                )
+            else:
+                return ValidationResult(
+                    check_name="virtualmin",
+                    passed=False,
+                    message=f"Unexpected status code: {status_code}",
+                    details={"status_code": status_code},
+                )
 
-            with urllib.request.urlopen(
-                request, timeout=self.timeout, context=ctx
-            ) as response:  # nosemgrep: dynamic-urllib-use-detected — admin-managed server URL
-                status_code = response.getcode()
-
-                # Webmin typically returns 200 or 401 (needs auth)
-                if status_code in (200, 401, 403):
-                    return ValidationResult(
-                        check_name="virtualmin",
-                        passed=True,
-                        message=f"Webmin/Virtualmin accessible (status: {status_code})",
-                        details={"status_code": status_code, "url": url},
-                    )
-                else:
-                    return ValidationResult(
-                        check_name="virtualmin",
-                        passed=False,
-                        message=f"Unexpected status code: {status_code}",
-                        details={"status_code": status_code},
-                    )
-
+        except OutboundSecurityError as e:
+            return ValidationResult(
+                check_name="virtualmin",
+                passed=False,
+                message=f"Security check failed: {e}",
+            )
         except urllib.error.HTTPError as e:
             # 401/403 means Webmin is running (just needs auth)
             if e.code in (401, 403):
@@ -418,7 +434,7 @@ _validation_service: NodeValidationService | None = None
 
 def get_validation_service() -> NodeValidationService:
     """Get global validation service instance"""
-    global _validation_service
+    global _validation_service  # noqa: PLW0603  # Module-level singleton pattern
     if _validation_service is None:
         _validation_service = NodeValidationService()
     return _validation_service

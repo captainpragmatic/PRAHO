@@ -15,6 +15,8 @@ import logging
 
 from django.core.management.base import BaseCommand, CommandParser
 
+from apps.billing.efactura.settings import EFACTURA_DEFAULTS, EFacturaSettingKeys
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,15 +42,12 @@ class Command(BaseCommand):
         dry_run = options.get("dry_run", False)
 
         try:
-            from apps.settings.models import SystemSetting
+            from apps.settings.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                SystemSetting,  # Deferred: optional dependency  # Deferred: avoids circular import
+            )
         except ImportError:
             self.stderr.write(self.style.ERROR("Settings app not available. Please ensure apps.settings is installed."))
             return
-
-        from apps.billing.efactura.settings import (
-            EFACTURA_DEFAULTS,
-            EFacturaSettingKeys,
-        )
 
         # Setting definitions with metadata
         settings_definitions = [

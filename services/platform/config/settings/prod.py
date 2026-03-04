@@ -16,7 +16,7 @@ try:
 except ImportError:
     HAS_SENTRY = False
 
-from .base import *
+from .base import *  # noqa: F403  # Django settings pattern
 
 # ===============================================================================
 # PRODUCTION SECURITY VALIDATION

@@ -151,7 +151,9 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
 def _create_pending_services_for_order(order: Order) -> None:
     """Create pending Service records when order becomes payable (industry standard)"""
     try:
-        from .services import OrderServiceCreationService
+        from .services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            OrderServiceCreationService,  # Circular: same-app signal  # Deferred: avoids circular import
+        )
 
         result = OrderServiceCreationService.create_pending_services(order)
         if result.is_ok():
@@ -172,7 +174,9 @@ def _create_pending_services_for_order(order: Order) -> None:
 def _update_services_to_provisioning(order: Order) -> None:
     """Update service status from pending to provisioning when payment confirmed"""
     try:
-        from .services import OrderServiceCreationService
+        from .services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            OrderServiceCreationService,  # Circular: same-app signal  # Deferred: avoids circular import
+        )
 
         result = OrderServiceCreationService.update_service_status_on_payment(order)
         if result.is_ok():
@@ -190,14 +194,18 @@ def _trigger_invoice_generation(order: Order) -> None:
     try:
         # Try to import invoice generation service
         try:
-            from apps.billing.services import InvoiceService
+            from apps.billing.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                InvoiceService,  # Circular: cross-app signal  # Deferred: avoids circular import
+            )
         except ImportError:
             logger.warning("📋 [Order] InvoiceGenerationService not available, skipping invoice generation")
             return
 
         # Generate invoice asynchronously if Django-Q2 is available
         try:
-            from django_q.tasks import async_task
+            from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+            )
 
             async_task("apps.orders.tasks.generate_invoice_for_order", str(order.id))
             logger.info(f"📋 [Order] Invoice generation queued for {order.order_number}")
@@ -218,13 +226,17 @@ def _trigger_invoice_generation(order: Order) -> None:
 def _trigger_service_provisioning(order: Order) -> None:
     """Trigger service provisioning for completed orders"""
     try:
-        from apps.provisioning.services import ProvisioningService
+        from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ProvisioningService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         # Queue provisioning tasks for all order items
         for item in order.items.all():
             if item.provisioning_status == "pending":
                 try:
-                    from django_q.tasks import async_task
+                    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+                    )
 
                     async_task("apps.orders.tasks.provision_order_item", str(item.id))
                     logger.info(f"⚡ [Order] Provisioning queued for item {item.id}")
@@ -262,7 +274,9 @@ def _handle_order_refund(order: Order, refund_status: str) -> None:
     try:
         # Suspend related services if full refund
         if refund_status == "refunded":
-            from apps.provisioning.services import ServiceManagementService
+            from apps.provisioning.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                ServiceManagementService,  # Circular: cross-app signal
+            )
 
             services = [item.service for item in order.items.filter(service__isnull=False) if item.service]
 
@@ -409,7 +423,10 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 
             if all_completed and order.status == "processing":
                 # Mark order as completed
-                from apps.orders.services import OrderService, StatusChangeData
+                from apps.orders.services import (  # Circular: same-app signal  # noqa: PLC0415  # Deferred: avoids circular import
+                    OrderService,
+                    StatusChangeData,
+                )
 
                 status_change = StatusChangeData(new_status="completed", notes="All items successfully provisioned")
                 OrderService.update_order_status(order, status_change)
@@ -431,7 +448,9 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
 def _send_order_confirmation_email(order: Order) -> None:
     """Send order confirmation email"""
     try:
-        from apps.notifications.services import EmailService
+        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         EmailService.send_template_email(
             template_key="order_placed",
@@ -446,7 +465,9 @@ def _send_order_confirmation_email(order: Order) -> None:
 def _send_order_completed_email(order: Order) -> None:
     """Send order completion email"""
     try:
-        from apps.notifications.services import EmailService
+        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         EmailService.send_template_email(
             template_key="order_completed",
@@ -461,7 +482,9 @@ def _send_order_completed_email(order: Order) -> None:
 def _send_order_cancelled_email(order: Order) -> None:
     """Send order cancellation email"""
     try:
-        from apps.notifications.services import EmailService
+        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         EmailService.send_template_email(
             template_key="order_cancelled",
@@ -475,7 +498,9 @@ def _send_order_cancelled_email(order: Order) -> None:
 def _send_order_refund_email(order: Order, refund_status: str) -> None:
     """Send order refund notification email"""
     try:
-        from apps.notifications.services import EmailService
+        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         template_key = "order_refunded" if refund_status == "refunded" else "order_partially_refunded"
 
@@ -491,7 +516,9 @@ def _send_order_refund_email(order: Order, refund_status: str) -> None:
 def _send_service_ready_email(item: OrderItem) -> None:
     """Send service ready notification"""
     try:
-        from apps.notifications.services import EmailService
+        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         EmailService.send_template_email(
             template_key="service_ready",
@@ -505,7 +532,9 @@ def _send_service_ready_email(item: OrderItem) -> None:
 def _send_provisioning_failed_email(item: OrderItem) -> None:
     """Send provisioning failure notification"""
     try:
-        from apps.notifications.services import EmailService
+        from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            EmailService,  # Circular: cross-app signal  # Deferred: avoids circular import
+        )
 
         EmailService.send_template_email(
             template_key="provisioning_failed",

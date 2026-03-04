@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.utils import timezone
+
 from apps.common.types import Err, Ok, Result
 
 from .provisioning_service import ProvisioningService
@@ -39,7 +41,9 @@ class ServiceManagementService:
         Returns:
             Result with operation details or error message
         """
-        from apps.provisioning.models import Service
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         if action not in ServiceManagementService.VALID_ACTIONS:
             return Err(f"Invalid action '{action}'. Valid actions: {ServiceManagementService.VALID_ACTIONS}")
@@ -110,10 +114,12 @@ class ServiceManagementService:
         Returns:
             Result with review details or error message
         """
-        from django.utils import timezone
-
-        from apps.audit.services import AuditService
-        from apps.provisioning.models import Service
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         try:
             service = Service.objects.get(id=service_id)
@@ -170,7 +176,9 @@ class ServiceGroupService:
         Returns:
             Result with batch operation results or error message
         """
-        from apps.provisioning.models import Service
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Circular: same-app  # Deferred: avoids circular import
+        )
 
         if action not in ServiceGroupService.VALID_GROUP_ACTIONS:
             return Err(f"Invalid group action '{action}'. Valid: {ServiceGroupService.VALID_GROUP_ACTIONS}")

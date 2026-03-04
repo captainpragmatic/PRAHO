@@ -24,6 +24,100 @@ class SecurityViolation:
         return f"🚨 {self.severity}: {self.file_path}:{self.line_number} - {self.violation_type}: {self.message}"
 
 
+# ---------------------------------------------------------------------------
+# Outbound HTTP bypass detection
+# ---------------------------------------------------------------------------
+# Modules allowed to use raw requests/urllib (shrinks as migration progresses)
+_OUTBOUND_HTTP_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "outbound_http",
+        "virtualmin_gateway",
+        "efactura/client",
+        "secure_gateway",
+        "vultr_service",
+        "siem_integration",
+        "webhooks",
+        "api_client",
+        "connection_pool",
+        "deploy",
+    }
+)
+
+# Raw HTTP call patterns detected by the AST visitor
+_RAW_REQUESTS_METHODS: frozenset[str] = frozenset(
+    {
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "request",
+        "head",
+        "options",
+    }
+)
+
+
+class OutboundHTTPVisitor(ast.NodeVisitor):
+    """AST visitor that detects raw requests/urllib usage outside approved modules."""
+
+    def __init__(self, file_path: str) -> None:
+        self.file_path = file_path
+        self.violations: list[SecurityViolation] = []
+        self._is_allowed = any(allowed in file_path for allowed in _OUTBOUND_HTTP_ALLOWLIST)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self._is_allowed:
+            self.generic_visit(node)
+            return
+
+        # Check requests.get/post/... and requests.Session()
+        if isinstance(node.func, ast.Attribute):
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "requests":
+                attr = node.func.attr
+                if attr in _RAW_REQUESTS_METHODS or attr == "Session":
+                    self.violations.append(
+                        SecurityViolation(
+                            self.file_path,
+                            node.lineno,
+                            "RAW_OUTBOUND_HTTP",
+                            f"Use safe_request() from apps.common.outbound_http instead of requests.{attr}()",
+                            "WARNING",
+                        )
+                    )
+            # Check urllib.request.urlopen()
+            if (
+                isinstance(node.func.value, ast.Attribute)
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "urllib"
+                and node.func.value.attr == "request"
+                and node.func.attr == "urlopen"
+            ):
+                self.violations.append(
+                    SecurityViolation(
+                        self.file_path,
+                        node.lineno,
+                        "RAW_OUTBOUND_HTTP",
+                        "Use safe_urlopen() from apps.common.outbound_http instead of urllib.request.urlopen()",
+                        "WARNING",
+                    )
+                )
+
+        self.generic_visit(node)
+
+
+def check_outbound_http_bypass(file_path: Path, content: str) -> list[SecurityViolation]:
+    """Check a Python file for raw outbound HTTP usage outside approved modules."""
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return []
+
+    visitor = OutboundHTTPVisitor(str(file_path))
+    visitor.visit(tree)
+    return visitor.violations
+
+
 class APISecurityLinter:
     """
     🔒 Security linter for API endpoints
@@ -86,7 +180,9 @@ class APISecurityLinter:
         except Exception as e:
             print(f"❌ Error processing {file_path}: {e}")
 
-    def _check_ast_violations(self, file_path: Path, tree: ast.AST, content: str, lines: list[str]) -> None:
+    def _check_ast_violations(  # noqa: C901  # Complexity: multi-step business logic
+        self, file_path: Path, tree: ast.AST, content: str, lines: list[str]
+    ) -> None:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """Check for violations using AST analysis"""
 
         class APIVisitor(ast.NodeVisitor):

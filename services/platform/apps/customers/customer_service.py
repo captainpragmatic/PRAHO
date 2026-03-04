@@ -27,7 +27,7 @@ class CustomerService:
     def get_accessible_customers(user: User) -> QuerySet[Customer]:
         """Get customers accessible to the user based on their permissions."""
         # Late import to avoid circular dependencies
-        from .customer_models import Customer
+        from .customer_models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
         if user.is_staff:
             return Customer.objects.all()
@@ -44,7 +44,7 @@ class CustomerService:
     ) -> Customer:
         """Create a new customer with proper validation."""
         # Late import to avoid circular dependencies
-        from .customer_models import Customer
+        from .customer_models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Basic validation
         if not name.strip():

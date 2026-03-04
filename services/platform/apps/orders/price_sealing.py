@@ -6,13 +6,15 @@ Cryptographically seal prices to prevent manipulation during the order flow.
 
 import hashlib
 import hmac
+import ipaddress
 import json
+import logging
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.http import HttpRequest
 from django.utils.translation import gettext_lazy as _
 
@@ -63,8 +65,6 @@ def _is_valid_ip(ip: str) -> bool:
     """Basic IP address validation"""
     try:
         # Simple validation - just check it has correct format
-        import ipaddress
-
         ipaddress.ip_address(ip)
         return True
     except ValueError:
@@ -92,8 +92,6 @@ class PriceSealingService:
             # Check if we're in production (based on DEBUG setting)
             if not getattr(settings, "DEBUG", True):
                 # Production mode - require dedicated secret
-                from django.core.exceptions import ImproperlyConfigured
-
                 raise ImproperlyConfigured(
                     "🚨 [Security] PRICE_SEALING_SECRET environment variable is required for production. "
                     "Generate a secure 64-character secret key using: "
@@ -101,8 +99,6 @@ class PriceSealingService:
                 )
             else:
                 # Development mode - allow fallback with warning
-                import logging
-
                 logger = logging.getLogger(__name__)
                 logger.warning(
                     "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
@@ -245,7 +241,9 @@ class PriceSealingService:
         Raises:
             ValidationError: If prices don't match database or other validation fails
         """
-        from apps.products.models import ProductPrice
+        from apps.products.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            ProductPrice,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         try:
             product_price_id = uuid.UUID(unsealed_data["product_price_id"])

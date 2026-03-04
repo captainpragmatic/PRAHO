@@ -19,8 +19,10 @@ Part of Phase 2.4 developer tooling for type annotation migration.
 
 import argparse
 import ast
+import builtins
 import logging
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -719,9 +721,7 @@ class InteractiveTypeAdder:
     def _format_file(self) -> None:
         """Format the file using ruff"""
         try:
-            import subprocess
-
-            result = subprocess.run(
+            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
                 [sys.executable, "-m", "ruff", "format", str(self.file_path)],
                 capture_output=True,
                 text=True,
@@ -826,8 +826,6 @@ with Romanian business domain types and Result pattern for error handling.
         def mock_input(prompt: str) -> str:
             print(prompt + " a")
             return "a"
-
-        import builtins
 
         builtins.input = mock_input  # type: ignore[assignment]
 

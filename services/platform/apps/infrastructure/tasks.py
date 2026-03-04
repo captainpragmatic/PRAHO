@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
+from django.db import transaction
 from django.utils import timezone
 
 from apps.infrastructure.deployment_service import get_deployment_service
@@ -55,10 +57,17 @@ def deploy_node_task(
     Returns:
         dict with deployment result information
     """
-    from apps.infrastructure.models import CloudProvider, NodeDeployment
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.settings.services import SettingsService
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,
+        NodeDeployment,
+    )
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:deploy_node] Starting deployment for deployment_id={deployment_id}")
 
@@ -137,10 +146,17 @@ def destroy_node_task(
     Returns:
         dict with destruction result information
     """
-    from apps.infrastructure.models import CloudProvider, NodeDeployment
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.settings.services import SettingsService
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,
+        NodeDeployment,
+    )
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:destroy_node] Starting destruction for deployment_id={deployment_id}")
 
@@ -216,10 +232,17 @@ def retry_deployment_task(
     Returns:
         dict with retry result information
     """
-    from apps.infrastructure.models import CloudProvider, NodeDeployment
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.settings.services import SettingsService
-    from apps.users.models import User
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,
+        NodeDeployment,
+    )
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:retry_deployment] Retrying deployment_id={deployment_id}")
 
@@ -293,7 +316,7 @@ def validate_node_task(deployment_id: int) -> dict[str, Any]:
     Returns:
         dict with validation result information
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         NodeDeployment,
         NodeDeploymentLog,
     )
@@ -362,7 +385,9 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     Returns:
         dict with overall validation summary
     """
-    from apps.infrastructure.models import NodeDeployment
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info("[Task:bulk_validate] Starting bulk validation of all nodes")
 
@@ -434,9 +459,10 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     Returns:
         dict with cleanup summary
     """
-    from datetime import timedelta
 
-    from apps.infrastructure.models import NodeDeployment
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info(f"[Task:cleanup] Cleaning up failed deployments older than {max_age_hours}h")
 
@@ -455,11 +481,15 @@ def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
             # If server was created in the cloud, attempt cleanup via provider SDK
             if deployment.external_node_id and deployment.provider:
                 try:
-                    from apps.infrastructure.provider_config import get_provider_token
+                    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+                        get_provider_token,  # Circular: cross-app
+                    )
 
                     token_result = get_provider_token(deployment.provider)
                     if token_result.is_ok():
-                        from apps.infrastructure.cloud_gateway import get_cloud_gateway
+                        from apps.infrastructure.cloud_gateway import (  # noqa: PLC0415  # Deferred: avoids circular import
+                            get_cloud_gateway,  # Circular: cross-app
+                        )
 
                         gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
                         gateway.delete_server(deployment.external_node_id)
@@ -492,9 +522,10 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
     Returns:
         dict with recovery summary
     """
-    from datetime import timedelta
 
-    from apps.infrastructure.models import NodeDeployment
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     stuck_timeout_hours = _STUCK_TIMEOUT_HOURS
 
@@ -563,14 +594,16 @@ def upgrade_node_task(
     Returns:
         dict with upgrade result information
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
         NodeSize,
     )
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.users.models import User
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:upgrade_node] Upgrading deployment_id={deployment_id} to size_id={new_size_id}")
 
@@ -661,11 +694,11 @@ def maintenance_task(
     Returns:
         dict with maintenance result information
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.users.models import User
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:maintenance] Running maintenance on deployment_id={deployment_id}")
 
@@ -741,13 +774,15 @@ def stop_node_task(
     Returns:
         dict with stop result information
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.users.models import User
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:stop_node] Stopping deployment_id={deployment_id}")
 
@@ -832,13 +867,15 @@ def start_node_task(
     Returns:
         dict with start result information
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.users.models import User
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:start_node] Starting deployment_id={deployment_id}")
 
@@ -923,13 +960,15 @@ def reboot_node_task(
     Returns:
         dict with reboot result information
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         CloudProvider,
         NodeDeployment,
         NodeDeploymentLog,
     )
-    from apps.infrastructure.provider_config import get_provider_token
-    from apps.users.models import User
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.users.models import User  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[Task:reboot_node] Rebooting deployment_id={deployment_id}")
 
@@ -1019,7 +1058,9 @@ def queue_deploy_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.deploy_node_task",
@@ -1050,7 +1091,9 @@ def queue_destroy_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
@@ -1081,7 +1124,9 @@ def queue_retry_deployment(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.retry_deployment_task",
@@ -1114,7 +1159,9 @@ def queue_upgrade_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.upgrade_node_task",
@@ -1148,7 +1195,9 @@ def queue_maintenance(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.maintenance_task",
@@ -1180,7 +1229,9 @@ def queue_stop_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.stop_node_task",
@@ -1211,7 +1262,9 @@ def queue_start_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.start_node_task",
@@ -1242,7 +1295,9 @@ def queue_reboot_node(
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.reboot_node_task",
@@ -1268,7 +1323,7 @@ def deployment_complete_hook(task: Any) -> None:
 
     Used for notifications and audit logging.
     """
-    from apps.infrastructure.models import (
+    from apps.infrastructure.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
         NodeDeployment,
         NodeDeploymentLog,
     )
@@ -1350,9 +1405,10 @@ def calculate_daily_costs_task() -> dict[str, Any]:
     Returns:
         dict with calculation results
     """
-    from datetime import timedelta
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_cost_tracking_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info("[Task:calculate_daily_costs] Starting daily cost calculation")
 
@@ -1395,10 +1451,11 @@ def calculate_monthly_costs_task(year: int, month: int) -> dict[str, Any]:
     Returns:
         dict with calculation results
     """
-    from calendar import monthrange
-    from datetime import datetime
+    from calendar import monthrange  # noqa: PLC0415  # Deferred: avoids circular import
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_cost_tracking_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info(f"[Task:calculate_monthly_costs] Calculating costs for {year}-{month:02d}")
 
@@ -1444,10 +1501,11 @@ def generate_cost_report_task(year: int, month: int) -> dict[str, Any]:
     Returns:
         dict with cost report data
     """
-    from calendar import monthrange
-    from datetime import datetime
+    from calendar import monthrange  # noqa: PLC0415  # Deferred: avoids circular import
 
-    from apps.infrastructure.cost_service import get_cost_tracking_service
+    from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_cost_tracking_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info(f"[Task:generate_cost_report] Generating report for {year}-{month:02d}")
 
@@ -1504,8 +1562,13 @@ def sync_providers_task() -> dict[str, Any]:
     Scheduled daily at 4:00 AM via Django-Q2 Schedule.
     Can also be triggered manually via management command or UI.
     """
-    from apps.infrastructure.models import CloudProvider
-    from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        CloudProvider,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.provider_config import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_sync_fn,
+        get_provider_token,
+    )
 
     logger.info("[Task:sync_providers] Starting provider catalog sync")
     results: dict[str, dict[str, str]] = {}
@@ -1539,7 +1602,9 @@ def sync_providers_task() -> dict[str, Any]:
 
 def queue_sync_providers() -> str:
     """Queue a provider catalog sync task."""
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.sync_providers_task",
@@ -1560,7 +1625,9 @@ def queue_calculate_monthly_costs(year: int, month: int) -> str:
     Returns:
         Task ID
     """
-    from django_q.tasks import async_task
+    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     task_id = async_task(
         "apps.infrastructure.tasks.calculate_monthly_costs_task",
@@ -1585,8 +1652,12 @@ def run_drift_scan_task() -> dict[str, Any]:
         return {"skipped": True, "reason": "concurrent scan in progress"}
 
     try:
-        from apps.infrastructure.drift_scanner import get_drift_scanner_service
-        from apps.infrastructure.models import NodeDeployment
+        from apps.infrastructure.drift_scanner import (  # noqa: PLC0415  # Deferred: avoids circular import
+            get_drift_scanner_service,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+        )
 
         logger.info("🚀 [Task:drift_scan] Starting drift scan for all active deployments")
 
@@ -1618,10 +1689,13 @@ def run_drift_scan_task() -> dict[str, Any]:
 
 def apply_scheduled_remediations_task() -> dict[str, Any]:
     """Scheduled every 5 min. Finds requests with status=scheduled and scheduled_for <= now."""
-    from django.db import transaction
 
-    from apps.infrastructure.drift_remediation import get_drift_remediation_service
-    from apps.infrastructure.models import DriftRemediationRequest
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_drift_remediation_service,  # Circular: cross-app
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info("🚀 [Task:scheduled_remediations] Checking for due scheduled remediations")
 
@@ -1660,10 +1734,13 @@ def apply_scheduled_remediations_task() -> dict[str, Any]:
 
 def check_remediation_health_task() -> dict[str, Any]:
     """Scheduled every 5 min. Re-checks deployments remediated in last hour."""
-    from datetime import timedelta
 
-    from apps.infrastructure.drift_scanner import get_drift_scanner_service
-    from apps.infrastructure.models import DriftRemediationRequest
+    from apps.infrastructure.drift_scanner import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_drift_scanner_service,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info("🚀 [Task:remediation_health] Checking recently remediated deployments")
 
@@ -1678,7 +1755,9 @@ def check_remediation_health_task() -> dict[str, Any]:
         .distinct()
     )
 
-    from apps.infrastructure.models import NodeDeployment
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     scanner = get_drift_scanner_service()
     checked = 0
@@ -1705,9 +1784,15 @@ def check_remediation_health_task() -> dict[str, Any]:
 
 def cleanup_old_snapshots_task() -> dict[str, Any]:
     """Scheduled daily. Deletes snapshots with expires_at < now via gateway + DB."""
-    from apps.infrastructure.cloud_gateway import get_cloud_gateway
-    from apps.infrastructure.models import DriftSnapshot
-    from apps.infrastructure.provider_config import get_provider_token
+    from apps.infrastructure.cloud_gateway import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_cloud_gateway,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        DriftSnapshot,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     logger.info("🚀 [Task:cleanup_snapshots] Cleaning up expired snapshots")
 

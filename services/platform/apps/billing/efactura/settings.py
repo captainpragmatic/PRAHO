@@ -29,6 +29,8 @@ from django.utils import timezone
 if TYPE_CHECKING:
     pass
 
+from apps.settings.services import SettingsService
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,7 +129,7 @@ class EFacturaSettingKeys:
 
     # OAuth2 credentials
     CLIENT_ID = "efactura.oauth.client_id"
-    CLIENT_SECRET = "efactura.oauth.client_secret"
+    CLIENT_SECRET = "efactura.oauth.client_secret"  # Not a real secret: settings key name  # noqa: S105  # Not a real secret: config key name
     REDIRECT_URI = "efactura.oauth.redirect_uri"
 
     # Company information
@@ -369,8 +371,6 @@ class EFacturaSettings:
         """Lazy load SettingsService to avoid circular imports."""
         if self._settings_service is None:
             try:
-                from apps.settings.services import SettingsService
-
                 self._settings_service = SettingsService  # type: ignore[assignment]
             except ImportError:
                 logger.warning("SettingsService not available, using Django settings fallback")

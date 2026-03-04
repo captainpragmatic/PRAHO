@@ -81,14 +81,18 @@ TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
 def get_task_soft_time_limit() -> int:
     """Get task soft time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("provisioning.task_soft_time_limit", _DEFAULT_TASK_SOFT_TIME_LIMIT)
 
 
 def get_task_time_limit() -> int:
     """Get task time limit from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
 
     return SettingsService.get_integer_setting("provisioning.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 

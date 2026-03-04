@@ -7,7 +7,10 @@ Integrates with the audit module for compliance and security tracking.
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
@@ -37,7 +40,7 @@ logger = logging.getLogger(__name__)
 # ===============================================================================
 
 
-def create_audit_event(
+def create_audit_event(  # Django signal parameters  # noqa: PLR0913  # Business logic parameters
     action: str,
     instance: Any,
     category: str = "business_operation",
@@ -68,10 +71,6 @@ def create_audit_event(
 
 def _serialize_value(value: Any) -> Any:
     """Serialize a value for JSON storage in audit events."""
-    from datetime import date, datetime
-    from decimal import Decimal
-    from uuid import UUID
-
     if value is None:
         return None
     if isinstance(value, (date, datetime)):

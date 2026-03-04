@@ -43,7 +43,9 @@ class Command(BaseCommand):
             help="Force update existing settings",
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+        self, *args: Any, **options: Any
+    ) -> None:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """Execute the command"""
         force = options.get("force", False)
         secret_key = options.get("secret_key")

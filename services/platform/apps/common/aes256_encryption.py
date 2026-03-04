@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -294,7 +295,7 @@ _cipher_instance: AES256Cipher | None = None
 
 def get_aes256_cipher() -> AES256Cipher:
     """Get global AES-256 cipher instance with lazy initialization."""
-    global _cipher_instance
+    global _cipher_instance  # noqa: PLW0603  # Module-level singleton pattern
     if _cipher_instance is None:
         _cipher_instance = AES256Cipher()
     return _cipher_instance
@@ -324,7 +325,6 @@ def generate_aes256_key() -> str:
 
     Returns base64-encoded 32-byte key suitable for DJANGO_AES256_KEY.
     """
-    import secrets
 
     key = secrets.token_bytes(AES_KEY_SIZE)
     return base64.urlsafe_b64encode(key).decode("utf-8")

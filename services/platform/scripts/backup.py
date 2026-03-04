@@ -164,7 +164,9 @@ class PragmaticHostBackup:
                 env = os.environ.copy()
                 env["PGPASSWORD"] = db_config["PASSWORD"]
 
-                result = subprocess.run(cmd, check=False, env=env, capture_output=True, text=True)
+                result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                    cmd, check=False, env=env, capture_output=True, text=True
+                )  # Safe: shell=False  # Safe: shell=False
 
                 if result.returncode != 0:
                     logger.error(f"PostgreSQL backup failed: {result.stderr}")
@@ -218,7 +220,9 @@ class PragmaticHostBackup:
             # Use rsync for efficient copying
             cmd = ["rsync", "-av", "--progress", f"{media_root}/", f"{media_backup_path}/"]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Media backup failed: {result.stderr}")
@@ -276,7 +280,9 @@ class PragmaticHostBackup:
 
             cmd = ["tar", "-czf", str(archive_path), "-C", str(backup_path.parent), backup_path.name]
 
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                cmd, check=False, capture_output=True, text=True
+            )  # Safe: shell=False  # Safe: shell=False
 
             if result.returncode != 0:
                 logger.error(f"Archive creation failed: {result.stderr}")

@@ -13,7 +13,6 @@ from django.test import TestCase
 
 from apps.infrastructure.provider_config import (
     PROVIDER_CONFIG,
-    PROVIDER_SYNC_REGISTRY,
     ProviderCommandResult,
     get_cli_tool_path,
     get_provider_config,

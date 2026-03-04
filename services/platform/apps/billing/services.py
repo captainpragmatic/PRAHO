@@ -26,8 +26,12 @@ from decimal import Decimal
 # ===============================================================================
 from typing import Any
 
-# Import billing models - moved to top to fix PLC0415
+from django.db import IntegrityError, transaction
+from django.utils import timezone as tz
+
+from apps.billing.currency_models import Currency as CurrencyModel
 from apps.billing.models import Currency, Invoice, InvoiceLine, InvoiceSequence
+from apps.common.tax_service import TaxService
 
 # Add imports to fix PLC0415 linting issues
 # Ensure refund service uses the same log_security_event function for testing
@@ -110,8 +114,6 @@ class InvoiceService:
         Uses transaction.atomic and select_for_update to prevent race conditions
         in sequence number generation.
         """
-        from django.db import IntegrityError, transaction
-
         try:
             with transaction.atomic():
                 # Get default currency (RON) - use get_or_create with proper error handling
@@ -136,8 +138,6 @@ class InvoiceService:
                         sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
 
                 # Calculate totals using current Romanian VAT rate
-                from apps.common.tax_service import TaxService
-
                 vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
                 subtotal_amount = Decimal(order.total_cents) / 100
                 tax_amount = subtotal_amount * vat_rate
@@ -204,10 +204,11 @@ class PaymentRetryService:
     @staticmethod
     def retry_payment(payment_id: str) -> Result[bool, str]:
         """Find customer's retry policy and schedule a PaymentRetryAttempt."""
-        from django.utils import timezone as tz
-
-        from apps.billing.models import Payment
-        from apps.billing.payment_models import PaymentRetryAttempt, PaymentRetryPolicy
+        from apps.billing.models import Payment  # noqa: PLC0415  # Deferred: test mockability
+        from apps.billing.payment_models import (  # noqa: PLC0415  # Deferred: test mockability
+            PaymentRetryAttempt,
+            PaymentRetryPolicy,
+        )
 
         try:
             payment = Payment.objects.select_related("customer").get(id=payment_id)
@@ -252,8 +253,10 @@ class EFacturaService:
     @staticmethod
     def submit_invoice(invoice_id: str) -> Result[bool, str]:
         """Submit invoice to ANAF e-Factura via EFacturaSubmissionService."""
-        from apps.billing.efactura_service import EFacturaSubmissionService
-        from apps.billing.models import Invoice as InvoiceModel
+        from apps.billing.efactura_service import (  # noqa: PLC0415
+            EFacturaSubmissionService,
+        )
+        from apps.billing.models import Invoice as InvoiceModel  # noqa: PLC0415  # Deferred: test mockability
 
         try:
             invoice = InvoiceModel.objects.get(id=invoice_id)
@@ -284,11 +287,7 @@ class ProformaConversionService:
     @staticmethod
     def convert_to_invoice(proforma_id: str) -> Result[Any, str]:
         """Convert a proforma to a real invoice with tax recalculation."""
-        from django.db import transaction
-        from django.utils import timezone as tz
-
-        from apps.billing.models import ProformaInvoice
-        from apps.common.tax_service import TaxService
+        from apps.billing.models import ProformaInvoice  # noqa: PLC0415  # Deferred: test mockability
 
         try:
             proforma = ProformaInvoice.objects.select_related("customer", "currency").get(id=proforma_id)
@@ -305,8 +304,6 @@ class ProformaConversionService:
                 currency = proforma.currency
 
                 if not currency:
-                    from apps.billing.currency_models import Currency as CurrencyModel
-
                     currency, _ = CurrencyModel.objects.get_or_create(
                         code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
                     )

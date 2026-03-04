@@ -19,6 +19,8 @@ from typing import Any
 
 from django.utils import timezone
 
+from apps.audit.models import AuditAlert
+
 logger = logging.getLogger(__name__)
 
 # Expose imports at module scope for patching in tests
@@ -150,7 +152,9 @@ def poll_all_pending_status_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Polling status for all pending documents")
 
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
 
@@ -202,7 +206,9 @@ def process_pending_submissions_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Processing pending submissions")
 
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     batch_size = SettingsService.get_integer_setting("billing.efactura_batch_size", 100)
 
@@ -230,7 +236,9 @@ def check_efactura_deadlines_task() -> dict[str, Any]:
     """
     logger.info("[e-Factura Task] Checking e-Factura deadlines")
 
-    from apps.settings.services import SettingsService
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
 
     warning_hours = SettingsService.get_integer_setting("billing.efactura_deadline_warning_hours", 24)
 
@@ -263,7 +271,7 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
     Returns:
         Dict with download result
     """
-    from .models import EFacturaStatus
+    from .models import EFacturaStatus  # Deferred: django-q task  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info(f"[e-Factura Task] Downloading response for document {document_id}")
 
@@ -295,8 +303,6 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
 def _create_deadline_alerts(approaching_documents: list[Any]) -> None:
     """Create audit alerts for approaching deadlines."""
     try:
-        from apps.audit.models import AuditAlert
-
         for document in approaching_documents:
             deadline = document.submission_deadline
             hours_remaining = (deadline - timezone.now()).total_seconds() / 3600 if deadline else 0

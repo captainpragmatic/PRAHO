@@ -18,10 +18,13 @@ class InfrastructureConfig(AppConfig):
     def ready(self) -> None:
         """Connect signals when app is ready"""
         # Import signals to register them
-        from . import signals  # noqa: F401
+        from . import signals  # noqa: F401  # Circular: app registry
 
         # Import provider modules so register_cloud_gateway() fires at startup
-        from . import aws_service, digitalocean_service, hcloud_service, vultr_service  # noqa: F401
+        from . import aws_service, digitalocean_service, hcloud_service, vultr_service  # noqa: F401  # Circular: app registry
+
+        # Import provider_sync so register_sync_fn() calls fire at startup
+        from . import provider_sync  # noqa: F401  # Circular: app registry
 
         from django.db.models.signals import post_migrate
 

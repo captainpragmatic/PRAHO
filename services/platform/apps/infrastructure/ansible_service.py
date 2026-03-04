@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -193,12 +194,13 @@ class AnsibleService:
             logger.info(f"📜 [Ansible] Running: {playbook} on {deployment.ipv4_address}")
 
             # Execute
-            result = subprocess.run(
+            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
                 cmd,
                 cwd=ANSIBLE_BASE_PATH,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                check=False,
                 env={
                     **os.environ,
                     "ANSIBLE_HOST_KEY_CHECKING": "False",
@@ -322,7 +324,6 @@ ansible_python_interpreter=/usr/bin/python3
 
             # Try to extract host stats
             # Format: hostname : ok=X changed=Y unreachable=Z failed=W
-            import re
 
             match = re.search(
                 r"ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)",
@@ -353,7 +354,7 @@ _ansible_service: AnsibleService | None = None
 
 def get_ansible_service() -> AnsibleService:
     """Get global Ansible service instance"""
-    global _ansible_service
+    global _ansible_service  # noqa: PLW0603  # Module-level singleton pattern
     if _ansible_service is None:
         _ansible_service = AnsibleService()
     return _ansible_service

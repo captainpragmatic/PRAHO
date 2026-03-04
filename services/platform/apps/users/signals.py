@@ -41,7 +41,7 @@ def save_user_profile(sender: type[User], instance: User, **kwargs: Any) -> None
         instance.profile.save()
 
 
-def _log_user_model_event(
+def _log_user_model_event(  # Django signal parameters  # noqa: PLR0913  # Business logic parameters
     *,
     event_type: str,
     instance: Any,

@@ -230,7 +230,6 @@ class Order(models.Model):
     def generate_order_number(self) -> None:
         """Generate a unique order number based on date and sequence"""
         if not self.order_number:
-            # Format: ORD-YYYYMMDD-XXXXXX
             date_part = timezone.now().strftime("%Y%m%d")
             # Get last order number for today
             today_orders = Order.objects.filter(

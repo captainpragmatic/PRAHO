@@ -1,11 +1,9 @@
 import hashlib
-import ipaddress
 import json
 import secrets
 import uuid
 from datetime import timedelta
 from typing import Any, ClassVar
-from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
@@ -13,6 +11,8 @@ from django.db import models
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.outbound_http import STRICT_EXTERNAL, OutboundSecurityError, validate_and_resolve
 
 # ===============================================================================
 # WEBHOOK DEDUPLICATION SYSTEM
@@ -295,47 +295,15 @@ class WebhookDelivery(models.Model):
         super().save(*args, **kwargs)
 
     def clean(self) -> None:
-        """🔒 Validate webhook delivery for SSRF protection"""
-        # Skip the default URL validation to implement our own security checks
-
-        # Don't call super().clean() as it would validate the URL field normally
-        # Instead, we implement our own comprehensive validation
-
+        """🔒 Validate webhook delivery for SSRF protection via validate_and_resolve()."""
         if self.endpoint_url:
             try:
-                parsed = urlparse(self.endpoint_url)
-                hostname = parsed.hostname
-
-                # Special check for malformed IPv6 URLs like http://::1/path
-                # (should be http://[::1]/path)
-                if not hostname and "::" in self.endpoint_url:
-                    raise ValidationError(_("Webhook URLs cannot target localhost"))
-
-                if not hostname:
-                    raise ValidationError(_("Invalid webhook URL format"))
-
-                # Block localhost and loopback
-                if hostname in ["localhost", "127.0.0.1", "::1"]:
-                    raise ValidationError(_("Webhook URLs cannot target localhost"))
-
-                # Check for private IP ranges
-                try:
-                    ip = ipaddress.ip_address(hostname)
-                    if ip.is_private or ip.is_loopback or ip.is_link_local:
-                        raise ValidationError(_("Webhook URLs cannot target private networks"))
-                except (ipaddress.AddressValueError, ValueError):
-                    # Not an IP address, continue with other checks
-                    pass
-
-                # Block dangerous ports
-                dangerous_ports = [22, 23, 25, 53, 135, 139, 445, 993, 995, 1433, 1521, 3306, 3389, 5432, 6379]
-                if parsed.port in dangerous_ports:
-                    # Lowercase message fragment to satisfy tests expecting 'port {n}'
-                    raise ValidationError(_("port %(port)s is not allowed for webhooks") % {"port": parsed.port})
-
-            except ValidationError:
-                # Re-raise ValidationError as-is
-                raise
-            except Exception as e:
-                # Only catch non-ValidationError exceptions
-                raise ValidationError(_("Invalid webhook URL format")) from e
+                validate_and_resolve(self.endpoint_url, STRICT_EXTERNAL)
+            except OutboundSecurityError as e:
+                error_msg = str(e)
+                # Provide user-friendly messages for common cases
+                if "blocked IP" in error_msg:
+                    raise ValidationError(_("Webhook URLs cannot target private networks")) from e
+                if "blocked" in error_msg.lower() and "port" in error_msg.lower():
+                    raise ValidationError(_("%(msg)s") % {"msg": error_msg}) from e
+                raise ValidationError(_("Invalid webhook URL: %(msg)s") % {"msg": error_msg}) from e

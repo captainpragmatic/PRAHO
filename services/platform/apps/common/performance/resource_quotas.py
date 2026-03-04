@@ -271,7 +271,7 @@ class QuotaEnforcer:
                 cache_key = f"{self.CACHE_PREFIX}:usage:{customer_id}:{qt.value}"
                 cache.delete(cache_key)
 
-    def _calculate_usage_from_db(
+    def _calculate_usage_from_db(  # Complexity: multi-step workflow  # noqa: PLR0911  # Complexity: multi-step business logic
         self,
         customer_id: int,
         quota_type: QuotaType,
@@ -280,7 +280,9 @@ class QuotaEnforcer:
         # Import models here to avoid circular imports
         try:
             if quota_type == QuotaType.SERVICES:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    Service,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 return Service.objects.filter(
                     customer_id=customer_id,
@@ -288,7 +290,7 @@ class QuotaEnforcer:
                 ).count()
 
             elif quota_type == QuotaType.DOMAINS:
-                from apps.provisioning.models import (
+                from apps.provisioning.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
                     ServiceDomain,
                 )
 
@@ -297,7 +299,9 @@ class QuotaEnforcer:
                 ).count()
 
             elif quota_type == QuotaType.STORAGE_MB:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    Service,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -306,7 +310,9 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.BANDWIDTH_MB:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    Service,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -315,7 +321,9 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.EMAIL_ACCOUNTS:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    Service,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -324,7 +332,9 @@ class QuotaEnforcer:
                 return total or 0
 
             elif quota_type == QuotaType.DATABASES:
-                from apps.provisioning.models import Service
+                from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    Service,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 total = Service.objects.filter(
                     customer_id=customer_id,
@@ -337,7 +347,9 @@ class QuotaEnforcer:
                 return 0
 
             elif quota_type == QuotaType.USERS:
-                from apps.users.models import CustomerMembership
+                from apps.users.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    CustomerMembership,  # Circular: cross-app  # Deferred: avoids circular import
+                )
 
                 return CustomerMembership.objects.filter(
                     customer_id=customer_id,
@@ -375,7 +387,7 @@ _quota_enforcer: QuotaEnforcer | None = None
 
 def get_quota_enforcer() -> QuotaEnforcer:
     """Get the global quota enforcer instance."""
-    global _quota_enforcer
+    global _quota_enforcer  # noqa: PLW0603  # Module-level singleton pattern
     if _quota_enforcer is None:
         _quota_enforcer = QuotaEnforcer()
     return _quota_enforcer

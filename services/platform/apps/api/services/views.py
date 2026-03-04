@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.api.secure_auth import require_customer_authentication
+from apps.common.tax_service import TaxService
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Service, ServicePlan
 
@@ -241,8 +242,6 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             service.service_plan.get_monthly_equivalent_price(service.billing_cycle) for service in active_services
         )
         # Calculate cost with current Romanian VAT rate
-        from apps.common.tax_service import TaxService
-
         vat_multiplier = Decimal("1") + TaxService.get_vat_rate("RO", as_decimal=True)
         total_monthly_cost_with_vat = total_monthly_cost * vat_multiplier  # Romanian VAT (current rate)
 
