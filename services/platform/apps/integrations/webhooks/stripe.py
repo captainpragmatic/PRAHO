@@ -394,12 +394,18 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 logger.warning("⚠️ PORTAL_PAYMENT_WEBHOOK_URL not configured - skipping notification")
                 return
 
-            # Send POST request to Portal
-            response = requests.post(
+            # Send POST request to Portal via safe_request (internal service)
+            from apps.common.outbound_http import (  # noqa: PLC0415  # Deferred: avoids circular import
+                INTERNAL_SERVICE,
+                safe_request,
+            )
+
+            response = safe_request(
+                "POST",
                 portal_webhook_url,
+                policy=INTERNAL_SERVICE,
                 json=data,
-                timeout=10,
-                headers={"Content-Type": "application/json", "User-Agent": "PRAHO-Platform/1.0"},
+                headers={"Content-Type": "application/json"},
             )
 
             if response.status_code == HTTPStatus.OK:

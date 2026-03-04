@@ -324,7 +324,6 @@ class SecureServerGateway:
         max_retries = timeouts.get("MAX_RETRIES", 3)
 
         headers = {
-            "User-Agent": "PRAHO-Platform/1.0",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
             "X-Server-ID": str(server.id),

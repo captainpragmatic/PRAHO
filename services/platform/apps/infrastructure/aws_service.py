@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]  # botocore has no py.typed marker
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.cloud_gateway import (

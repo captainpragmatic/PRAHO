@@ -17,6 +17,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 PORTAL_DEFAULT_TIMEOUT: float = 30.0
+DEFAULT_USER_AGENT = "PRAHO-Portal/1.0 (+https://pragmatichost.com)"
 
 
 class OutboundSecurityError(Exception):
@@ -58,5 +59,9 @@ def portal_request(
     kwargs["allow_redirects"] = False
     kwargs["timeout"] = timeout or getattr(settings, "PLATFORM_API_TIMEOUT", PORTAL_DEFAULT_TIMEOUT)
     kwargs["verify"] = True
+
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers.setdefault("User-Agent", DEFAULT_USER_AGENT)
+    kwargs["headers"] = headers
 
     return requests.request(method=method, url=url, **kwargs)  # noqa: S113  # timeout set via kwargs

@@ -39,8 +39,16 @@ HTTP_NOT_FOUND = 404
 IPV4_VERSION = 4
 VULTR_API_BASE = "https://api.vultr.com/v2"
 VULTR_POLL_INTERVAL = 5
-VULTR_POLL_TIMEOUT = 300
+_DEFAULT_VULTR_POLL_TIMEOUT = 300
 VULTR_TIMEOUT_SECONDS = 30.0
+
+
+def _get_vultr_poll_timeout() -> int:
+    """Read Vultr poll timeout from SettingsService with DB-cache layer."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return SettingsService.get_integer_setting("infrastructure.vultr_poll_timeout_seconds", _DEFAULT_VULTR_POLL_TIMEOUT)
+
 
 VULTR_POLICY = OutboundPolicy(
     name="vultr",
@@ -76,18 +84,20 @@ class VultrService(CloudProviderGateway):
 
     def _wait_for_active(self, instance_id: str) -> Result[dict[str, Any], str]:
         """Poll instance until status is 'active' or timeout."""
-        deadline = time.monotonic() + VULTR_POLL_TIMEOUT
+        poll_timeout = _get_vultr_poll_timeout()
+        deadline = time.monotonic() + poll_timeout
         while time.monotonic() < deadline:
             resp = self._request("GET", f"/instances/{instance_id}")
             data: dict[str, Any] = resp.json().get("instance", {})
             if data.get("status") == "active" and data.get("power_status") == "running":
                 return Ok(data)
             time.sleep(VULTR_POLL_INTERVAL)
-        return Err(f"Instance {instance_id} did not become active within {VULTR_POLL_TIMEOUT}s")
+        return Err(f"Instance {instance_id} did not become active within {poll_timeout}s")
 
     def _wait_for_status(self, instance_id: str, target_statuses: list[str]) -> Result[bool, str]:
         """Poll instance until normalized status is in target_statuses or timeout."""
-        deadline = time.monotonic() + VULTR_POLL_TIMEOUT
+        poll_timeout = _get_vultr_poll_timeout()
+        deadline = time.monotonic() + poll_timeout
         while time.monotonic() < deadline:
             result = self.get_server(instance_id)
             if result.is_err():
@@ -96,7 +106,7 @@ class VultrService(CloudProviderGateway):
             if server is not None and server.status in target_statuses:
                 return Ok(True)
             time.sleep(VULTR_POLL_INTERVAL)
-        return Err(f"Instance {instance_id} did not reach {target_statuses} within {VULTR_POLL_TIMEOUT}s")
+        return Err(f"Instance {instance_id} did not reach {target_statuses} within {poll_timeout}s")
 
     def _find_instance_by_label(self, label_value: str) -> dict[str, Any] | None:
         """Find an instance by its label (used for idempotency)."""

@@ -304,6 +304,12 @@ class SettingsService:
         "common.value_summary_limit": 50,
         "common.default_orphans": 3,
         "common.proximity_line_threshold": 5,
+        # ── Infrastructure ─────────────────────────────────────────────
+        "infrastructure.do_action_timeout_seconds": 300,
+        "infrastructure.health_check_timeout_seconds": 10,
+        "infrastructure.network_probe_timeout_seconds": 10,
+        "infrastructure.consecutive_failure_threshold": 3,
+        "infrastructure.vultr_poll_timeout_seconds": 300,
         # ── System Configuration ────────────────────────────────────────
         "system.maintenance_mode": False,
         "system.backup_retention_days": 30,

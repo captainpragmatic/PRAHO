@@ -257,6 +257,15 @@ RATELIMIT_ENABLE = True
 RATELIMIT_USE_CACHE = "default"
 
 # ===============================================================================
+# OUTBOUND HTTP — INTERNAL SERVICE DOMAINS (Production)
+# ===============================================================================
+
+# Docker: "platform,portal"  |  Multi-server: FQDNs  |  Single: "localhost,127.0.0.1"
+INTERNAL_SERVICE_ALLOWED_DOMAINS = [
+    d.strip() for d in os.environ.get("INTERNAL_SERVICE_ALLOWED_DOMAINS", "platform,portal").split(",") if d.strip()
+]
+
+# ===============================================================================
 # SECURE IP DETECTION - PRODUCTION CONFIGURATION 🔒
 # ===============================================================================
 

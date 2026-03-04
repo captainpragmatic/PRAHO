@@ -669,11 +669,10 @@ def _sync_vultr_plans(
         NodeSize,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    # Fetch raw plan data via the service's authenticated session (public attr)
+    # Fetch raw plan data via the service's internal request helper
     # to access pricing fields not exposed by get_server_types()
     try:
-        resp = vultr_svc.session.get("https://api.vultr.com/v2/plans", timeout=30)
-        resp.raise_for_status()
+        resp = vultr_svc._request("GET", "/plans")  # internal helper, no public API for raw plans
         raw_plans: list[dict[str, Any]] = resp.json().get("plans", [])
     except Exception as e:
         return f"Failed to fetch plans: {e}"

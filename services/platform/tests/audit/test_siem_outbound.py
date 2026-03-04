@@ -87,7 +87,6 @@ class SIEMOutboundHTTPTests(TestCase):
             provider=SIEMProvider.GENERIC_WEBHOOK,
             endpoint_url="https://siem.example.com/events",
             api_key="key",
-            verify_ssl=False,  # This should be ignored now
         )
         service = SIEMIntegrationService(config)
         event = self._make_audit_event()

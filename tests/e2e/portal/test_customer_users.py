@@ -1364,22 +1364,41 @@ def test_customer_switch_customer_single_org(monitored_customer_page: Page) -> N
     page = monitored_customer_page
 
 
-    page.goto(f"{BASE_URL}/switch-customer/")
-    page.wait_for_load_state("networkidle")
+    # switch-customer reads from POST data; use fetch() to send proper POST
+    result: dict = page.evaluate("""
+        async () => {
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+                || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+            const resp = await fetch('/switch-customer/', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: '',
+                redirect: 'follow',
+            });
+            return { status: resp.status, url: resp.url, html: await resp.text() };
+        }
+    """)
 
-    page_content_lower: str = page.content().lower()
-    current_url: str = page.url
+    page_content_lower: str = result.get("html", "").lower()
+    status: int = result.get("status", 0)
+    result_url: str = result.get("url", "")
 
-    if "404" in page.title().lower() or "not found" in page_content_lower:
+    if status == 404 or "not found" in page_content_lower:
         print("  [i] Switch customer page not available (404)")
         print("  ✅ Customer switch customer test completed")
         return
 
-    # Case 1: Redirected (single org auto-selects)
-    if "/switch-customer/" not in current_url:
-        print(f"  ✅ Redirected to {current_url} (auto-selected)")
+    # Case 1: Redirected (single org auto-selects — empty POST body triggers redirect)
+    if "/switch-customer/" not in result_url:
+        print(f"  ✅ Redirected to {result_url} (auto-selected or no customer_id)")
         print("  ✅ Customer switch customer test completed")
         return
+
+    current_url: str = result_url
 
     # Case 2: Page shows organization list or current org
     org_list = page.locator(

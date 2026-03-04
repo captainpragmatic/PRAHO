@@ -69,5 +69,6 @@ class SNSConfirmationOutboundTests(TestCase):
         request = self._make_confirmation_request(url)
         response = self.view.post(request)
 
-        # Should still return OK (error is logged, not propagated to SNS)
-        self.assertEqual(response.status_code, 200)
+        # Should return 400 — SSRF attempt is rejected; SNS retries are benign since
+        # the SNS_CONFIRMATION_POLICY will block any non-amazonaws.com domain on retry.
+        self.assertEqual(response.status_code, 400)

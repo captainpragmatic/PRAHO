@@ -259,8 +259,8 @@ class EFacturaClientTestCase(TestCase):
     def test_context_manager(self):
         """Test client as context manager."""
         with EFacturaClient(self.config) as client:
-            self.assertIsNotNone(client.session)
-        # Session should be closed after exiting context
+            self.assertIsNotNone(client)
+        # close() is a no-op; safe_request manages sessions internally
 
     def test_get_authorization_url(self):
         """Test OAuth authorization URL generation."""
@@ -373,19 +373,19 @@ class EFacturaClientTestCase(TestCase):
         with self.assertRaises(AuthenticationError):
             self.client.upload_invoice("<Invoice/>")
 
-    @patch.object(EFacturaClient, "session")
-    def test_request_with_retry_success(self, mock_session):
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_request_with_retry_success(self, mock_safe_request):
         """Test request with successful response."""
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_session.request.return_value = mock_response
+        mock_safe_request.return_value = mock_response
 
-        result = self.client._request_with_retry("GET", "http://test.com")
+        result = self.client._request_with_retry("GET", "https://test.anaf.ro/test")
         self.assertEqual(result.status_code, 200)
 
-    @patch.object(EFacturaClient, "session")
+    @patch("apps.billing.efactura.client.safe_request")
     @patch("apps.billing.efactura.client.time.sleep")
-    def test_request_with_retry_rate_limit(self, mock_sleep, mock_session):
+    def test_request_with_retry_rate_limit(self, mock_sleep, mock_safe_request):
         """Test request with rate limit retry."""
         rate_limited = Mock()
         rate_limited.status_code = 429
@@ -394,25 +394,25 @@ class EFacturaClientTestCase(TestCase):
         success = Mock()
         success.status_code = 200
 
-        mock_session.request.side_effect = [rate_limited, success]
+        mock_safe_request.side_effect = [rate_limited, success]
 
-        result = self.client._request_with_retry("GET", "http://test.com")
+        result = self.client._request_with_retry("GET", "https://test.anaf.ro/test")
         self.assertEqual(result.status_code, 200)
         mock_sleep.assert_called_once_with(1)
 
-    @patch.object(EFacturaClient, "session")
+    @patch("apps.billing.efactura.client.safe_request")
     @patch("apps.billing.efactura.client.time.sleep")
-    def test_request_with_retry_timeout(self, mock_sleep, mock_session):
+    def test_request_with_retry_timeout(self, mock_sleep, mock_safe_request):
         """Test request with timeout retry."""
         import requests
 
-        mock_session.request.side_effect = requests.Timeout()
+        mock_safe_request.side_effect = requests.Timeout()
 
         with self.assertRaises(NetworkError):
-            self.client._request_with_retry("GET", "http://test.com")
+            self.client._request_with_retry("GET", "https://test.anaf.ro/test")
 
         # Should have retried max_retries times
-        self.assertEqual(mock_session.request.call_count, self.config.max_retries)
+        self.assertEqual(mock_safe_request.call_count, self.config.max_retries)
 
     @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
     @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
@@ -522,9 +522,9 @@ class AuthenticationFlowTestCase(TestCase):
         )
         self.client = EFacturaClient(self.config)
 
-    @patch.object(EFacturaClient, "session")
+    @patch("apps.billing.efactura.client.safe_request")
     @patch.object(EFacturaClient, "_cache_token")
-    def test_exchange_code_for_token(self, mock_cache, mock_session):
+    def test_exchange_code_for_token(self, mock_cache, mock_safe_request):
         """Test exchanging auth code for token."""
         mock_response = Mock()
         mock_response.status_code = 200
@@ -535,7 +535,7 @@ class AuthenticationFlowTestCase(TestCase):
             "refresh_token": "new-refresh",
         }
         mock_response.raise_for_status = Mock()
-        mock_session.post.return_value = mock_response
+        mock_safe_request.return_value = mock_response
 
         token = self.client.exchange_code_for_token(
             code="auth-code",
@@ -545,19 +545,19 @@ class AuthenticationFlowTestCase(TestCase):
         self.assertEqual(token.access_token, "new-token")
         mock_cache.assert_called_once()
 
-    @patch.object(EFacturaClient, "session")
-    def test_exchange_code_failure(self, mock_session):
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_exchange_code_failure(self, mock_safe_request):
         """Test auth code exchange failure."""
         import requests
 
-        mock_session.post.side_effect = requests.RequestException("Connection failed")
+        mock_safe_request.side_effect = requests.RequestException("Connection failed")
 
         with self.assertRaises(AuthenticationError):
             self.client.exchange_code_for_token("code", "redirect")
 
-    @patch.object(EFacturaClient, "session")
+    @patch("apps.billing.efactura.client.safe_request")
     @patch.object(EFacturaClient, "_cache_token")
-    def test_refresh_token(self, mock_cache, mock_session):
+    def test_refresh_token(self, mock_cache, mock_safe_request):
         """Test refreshing token."""
         mock_response = Mock()
         mock_response.status_code = 200
@@ -567,7 +567,7 @@ class AuthenticationFlowTestCase(TestCase):
             "expires_in": 3600,
         }
         mock_response.raise_for_status = Mock()
-        mock_session.post.return_value = mock_response
+        mock_safe_request.return_value = mock_response
 
         token = self.client.refresh_token("old-refresh-token")
 

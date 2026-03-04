@@ -53,6 +53,26 @@ def _coerce_security_response(result: HttpResponse | object | None) -> HttpRespo
     return JsonResponse({"error": _("Request blocked by security policy.")}, status=status_code)
 
 
+HTTP_UNPROCESSABLE_ENTITY = 422
+
+
+def _cart_error_response(
+    request: HttpRequest,
+    template: str,
+    context: dict[str, Any],
+) -> HttpResponse:
+    """Return an HTMX-friendly error response with retarget headers.
+
+    Uses HTTP 422 so HTMX's ``event.detail.successful`` is False,
+    preventing success toasts on error. HX-Retarget/HX-Reswap headers
+    instruct HTMX where to render the error fragment.
+    """
+    response = render(request, template, context, status=HTTP_UNPROCESSABLE_ENTITY)
+    response["HX-Retarget"] = "#cart-notifications"
+    response["HX-Reswap"] = "innerHTML"
+    return response
+
+
 def require_customer_authentication(view_func: Callable[..., Any]) -> Any:
     """Decorator to ensure customer is authenticated"""
 
@@ -297,8 +317,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
             )
         else:
             # No item was added (likely due to pricing issues)
-            # Return with status 200 so HTMX processes it, but with error content
-            return render(
+            return _cart_error_response(
                 request,
                 "orders/partials/cart_error_notification.html",
                 {
@@ -306,20 +325,18 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
                     "cart_count": cart.get_item_count(),
                     "cart_total_quantity": cart.get_total_quantity(),
                 },
-                status=200,
             )
 
     except ValidationError as e:
         logger.warning(f"⚠️ [Cart] Validation error: {e}")
-        return render(
+        return _cart_error_response(
             request,
             "orders/partials/cart_error_notification.html",
             {"error": str(e), "cart_count": 0, "cart_total_quantity": 0},
-            status=200,
         )
     except Exception as e:
         logger.error(f"🔥 [Cart] Unexpected error adding to cart: {e}")
-        return render(
+        return _cart_error_response(
             request,
             "orders/partials/cart_error_notification.html",
             {
@@ -327,7 +344,6 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
                 "cart_count": 0,
                 "cart_total_quantity": 0,
             },
-            status=200,
         )
 
 
@@ -388,11 +404,11 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         )
 
     except ValidationError as e:
-        return render(request, "orders/partials/cart_empty.html", {"error": str(e)}, status=200)
+        return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": str(e)})
     except Exception as e:
         logger.error(f"🔥 [Cart] Error updating cart item: {e}")
-        return render(
-            request, "orders/partials/cart_empty.html", {"error": _("Eroare la actualizarea coșului.")}, status=200
+        return _cart_error_response(
+            request, "orders/partials/cart_empty.html", {"error": _("Eroare la actualizarea coșului.")}
         )
 
 
@@ -452,11 +468,11 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         )
 
     except ValidationError as e:
-        return render(request, "orders/partials/cart_empty.html", {"error": str(e)}, status=200)
+        return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": str(e)})
     except Exception as e:
         logger.error(f"🔥 [Cart] Error removing from cart: {e}")
-        return render(
-            request, "orders/partials/cart_empty.html", {"error": _("Eroare la eliminarea din coș.")}, status=200
+        return _cart_error_response(
+            request, "orders/partials/cart_empty.html", {"error": _("Eroare la eliminarea din coș.")}
         )
 
 

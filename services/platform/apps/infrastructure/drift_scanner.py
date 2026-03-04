@@ -44,13 +44,31 @@ SEVERITY_MAP: dict[str, str] = {
 }
 
 # TCP probe timeout in seconds
-NETWORK_PROBE_TIMEOUT = 10
+_DEFAULT_NETWORK_PROBE_TIMEOUT = 10
 
 # Port to probe for network checks
 NETWORK_PROBE_PORT = 22
 
 # Number of consecutive failures for critical network drift
-CONSECUTIVE_FAILURE_THRESHOLD = 3
+_DEFAULT_CONSECUTIVE_FAILURE_THRESHOLD = 3
+
+
+def _get_network_probe_timeout() -> int:
+    """Read network probe timeout from SettingsService with DB-cache layer."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return SettingsService.get_integer_setting(
+        "infrastructure.network_probe_timeout_seconds", _DEFAULT_NETWORK_PROBE_TIMEOUT
+    )
+
+
+def _get_consecutive_failure_threshold() -> int:
+    """Read consecutive failure threshold from SettingsService with DB-cache layer."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return SettingsService.get_integer_setting(
+        "infrastructure.consecutive_failure_threshold", _DEFAULT_CONSECUTIVE_FAILURE_THRESHOLD
+    )
 
 
 class DriftScannerService:
@@ -256,7 +274,7 @@ class DriftScannerService:
         if not reachable:
             # Check consecutive failures
             consecutive = self._count_consecutive_network_failures(deployment)
-            if consecutive >= CONSECUTIVE_FAILURE_THRESHOLD - 1:
+            if consecutive >= _get_consecutive_failure_threshold() - 1:
                 severity = "critical"
                 field_name = "network_unreachable_consecutive"
             else:
@@ -385,7 +403,7 @@ class DriftScannerService:
     def _tcp_probe(self, host: str, port: int) -> bool:
         """TCP probe with timeout. Returns True if reachable."""
         try:
-            with socket.create_connection((host, port), timeout=NETWORK_PROBE_TIMEOUT):
+            with socket.create_connection((host, port), timeout=_get_network_probe_timeout()):
                 return True
         except (OSError, TimeoutError):
             return False
@@ -396,7 +414,7 @@ class DriftScannerService:
             deployment=deployment,
             check_type="network",
             status="completed",
-        ).order_by("-created_at")[:CONSECUTIVE_FAILURE_THRESHOLD]
+        ).order_by("-created_at")[: _get_consecutive_failure_threshold()]
 
         count = 0
         for check in recent_checks:

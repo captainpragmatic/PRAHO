@@ -342,6 +342,12 @@ ROMANIAN_BUSINESS_CONTEXT.update(
 PLATFORM_API_SECRET = "dev-shared-secret-change-in-production"
 
 # ===============================================================================
+# OUTBOUND HTTP — INTERNAL SERVICE DOMAINS (Development)
+# ===============================================================================
+
+INTERNAL_SERVICE_ALLOWED_DOMAINS = ["localhost", "127.0.0.1"]
+
+# ===============================================================================
 # SECURE IP DETECTION - DEVELOPMENT CONFIGURATION 🔒
 # ===============================================================================
 

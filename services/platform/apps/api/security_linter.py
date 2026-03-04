@@ -5,8 +5,9 @@ Automated detection of security vulnerabilities in API endpoints.
 """
 
 import ast
+import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -32,7 +33,7 @@ _OUTBOUND_HTTP_ALLOWLIST: frozenset[str] = frozenset(
     {
         "outbound_http",
         "virtualmin_gateway",
-        "efactura/client",
+        "efactura",
         "secure_gateway",
         "vultr_service",
         "siem_integration",
@@ -64,7 +65,11 @@ class OutboundHTTPVisitor(ast.NodeVisitor):
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
         self.violations: list[SecurityViolation] = []
-        self._is_allowed = any(allowed in file_path for allowed in _OUTBOUND_HTTP_ALLOWLIST)
+        # Match against path segments and file stem — not substrings — to prevent bypass
+        path_obj = PurePosixPath(file_path.replace(os.sep, "/"))
+        path_parts = set(path_obj.parts)
+        stem = path_obj.stem
+        self._is_allowed = any(allowed == stem or allowed in path_parts for allowed in _OUTBOUND_HTTP_ALLOWLIST)
 
     def visit_Call(self, node: ast.Call) -> None:
         if self._is_allowed:
@@ -85,6 +90,34 @@ class OutboundHTTPVisitor(ast.NodeVisitor):
                             "WARNING",
                         )
                     )
+            # Check httpx.get/post/... and httpx.Client/AsyncClient (no DNS pinning)
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "httpx":
+                attr = node.func.attr
+                if attr in _RAW_REQUESTS_METHODS or attr in ("Client", "AsyncClient"):
+                    self.violations.append(
+                        SecurityViolation(
+                            self.file_path,
+                            node.lineno,
+                            "RAW_OUTBOUND_HTTP",
+                            f"Use safe_request() from apps.common.outbound_http instead of httpx.{attr}()",
+                            "WARNING",
+                        )
+                    )
+            # Check aiohttp.ClientSession() (no DNS pinning)
+            if (
+                isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "aiohttp"
+                and node.func.attr == "ClientSession"
+            ):
+                self.violations.append(
+                    SecurityViolation(
+                        self.file_path,
+                        node.lineno,
+                        "RAW_OUTBOUND_HTTP",
+                        "Use safe_request() from apps.common.outbound_http instead of aiohttp.ClientSession()",
+                        "WARNING",
+                    )
+                )
             # Check urllib.request.urlopen()
             if (
                 isinstance(node.func.value, ast.Attribute)

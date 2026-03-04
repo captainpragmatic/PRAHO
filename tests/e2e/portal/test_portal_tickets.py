@@ -357,3 +357,8 @@ def test_ticket_isolation(monitored_customer_page: Page) -> None:
         assert "/login/" in page.url or f"/tickets/{fake_id}/" not in page.url, (
             f"Should not be able to view ticket {fake_id} — expected redirect away"
         )
+        # Also verify no ticket data leaked in the response body
+        body = page.content()
+        assert f"ticket-{fake_id}" not in body.lower(), (
+            f"Ticket data for {fake_id} leaked in response body"
+        )

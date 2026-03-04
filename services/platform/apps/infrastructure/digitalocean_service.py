@@ -34,7 +34,16 @@ logger = logging.getLogger(__name__)
 
 # Polling configuration for async DigitalOcean actions
 DO_ACTION_POLL_INTERVAL = 5  # seconds between polls
-DO_ACTION_TIMEOUT = 300  # max seconds to wait for action completion
+_DEFAULT_DO_ACTION_TIMEOUT = 300  # max seconds to wait for action completion
+
+
+def _get_do_action_timeout() -> int:
+    """Read DO action timeout from SettingsService with DB-cache layer."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return SettingsService.get_integer_setting("infrastructure.do_action_timeout_seconds", _DEFAULT_DO_ACTION_TIMEOUT)
+
+
 DO_LIST_PER_PAGE = 200  # max items per page for list operations
 
 # Map DigitalOcean region slug prefixes to ISO 3166-1 alpha-2 country codes
@@ -134,7 +143,7 @@ class DigitalOceanService(CloudProviderGateway):
             return Err(f"Droplet deletion failed: {e}")
 
         # Poll until droplet is gone
-        deadline = time.monotonic() + DO_ACTION_TIMEOUT
+        deadline = time.monotonic() + _get_do_action_timeout()
         while time.monotonic() < deadline:
             result = self.get_server(server_id)
             if result.is_ok() and result.unwrap() is None:
@@ -349,7 +358,7 @@ class DigitalOceanService(CloudProviderGateway):
 
     def _wait_for_action(self, action_id: int) -> None:
         """Poll an action until it completes or times out."""
-        deadline = time.monotonic() + DO_ACTION_TIMEOUT
+        deadline = time.monotonic() + _get_do_action_timeout()
         while time.monotonic() < deadline:
             response = self.client.actions.get(action_id=action_id)
             status = response["action"]["status"]
@@ -358,7 +367,7 @@ class DigitalOceanService(CloudProviderGateway):
             if status == "errored":
                 raise RuntimeError(f"Action {action_id} errored")
             time.sleep(DO_ACTION_POLL_INTERVAL)
-        raise TimeoutError(f"Action {action_id} timed out after {DO_ACTION_TIMEOUT}s")
+        raise TimeoutError(f"Action {action_id} timed out after {_get_do_action_timeout()}s")
 
     def _find_droplet_by_tag(self, tag: str) -> dict[str, Any] | None:
         """Find a droplet by tag name. Returns first match or None."""

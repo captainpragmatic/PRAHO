@@ -27,7 +27,13 @@ class TypeIgnoreChecker:
         self.allow_legacy = allow_legacy
         self.strict_mode = strict_mode
 
-        # Pattern to match type ignore comments
+        # Pattern to match bare type ignore (no error code or no explanation)
+        # Allowed:   # type: ign ore[arg-type]  # botocore has no py.typed  (split to avoid self-match)
+        # Blocked:   # type: ign ore  (bare, no error code)
+        # Blocked:   # type: ign ore[arg-type]   (no explanation after bracket)
+        self.bare_type_ignore_pattern = re.compile(r"#\s*type:\s*ignore\b(?!\[)", re.IGNORECASE)
+        self.typed_ignore_no_reason_pattern = re.compile(r"#\s*type:\s*ignore\[[^\]]+\]\s*$", re.IGNORECASE)
+        # Combined: matches any type: ignore comment (for detection)
         self.type_ignore_pattern = re.compile(r"#\s*type:\s*ignore\b", re.IGNORECASE)
 
         # Files where type ignore is still acceptable (legacy)
@@ -98,6 +104,11 @@ class TypeIgnoreChecker:
         for line_no, line in enumerate(lines, 1):
             match = self.type_ignore_pattern.search(line)
             if match:
+                # Classify: bare ignore, typed but no reason, or typed with reason
+                is_bare = bool(self.bare_type_ignore_pattern.search(line))
+                is_no_reason = bool(self.typed_ignore_no_reason_pattern.search(line))
+                is_justified = not is_bare and not is_no_reason
+
                 violation = {
                     "file": file_path,
                     "line": line_no,
@@ -105,6 +116,7 @@ class TypeIgnoreChecker:
                     "position": match.start(),
                     "is_legacy": self.is_legacy_file(file_path),
                     "is_strict": self.is_strict_file(file_path),
+                    "is_justified": is_justified,
                 }
                 violations.append(violation)
 
@@ -129,13 +141,16 @@ class TypeIgnoreChecker:
             message_parts.append(f"\n📁 {file_path}:")
 
             for v in file_violations:
-                icon = "🚨" if v["is_strict"] else ("⚠️" if not v["is_legacy"] else "i")
-                message_parts.append(f"  {icon} Line {v['line']}: {v['content']}")
-
-                if v["is_strict"]:
+                if v.get("is_justified"):
+                    message_parts.append(f"  ✅ Line {v['line']}: {v['content']}  (justified)")
+                elif v["is_strict"]:
+                    message_parts.append(f"  🚨 Line {v['line']}: {v['content']}")
                     message_parts.append("     🚨 STRICT MODULE: # type: ignore not allowed")
                 elif not v["is_legacy"]:
-                    message_parts.append("     ⚠️  Consider fixing type issues instead of ignoring")
+                    message_parts.append(f"  ⚠️ Line {v['line']}: {v['content']}")
+                    message_parts.append("     ⚠️  Add error code + explanation: # type: ignore[code]  # reason")
+                else:
+                    message_parts.append(f"  i Line {v['line']}: {v['content']}")
 
         return "\n".join(message_parts)
 
@@ -158,6 +173,9 @@ class TypeIgnoreChecker:
         blocking_violations = []
 
         for violation in all_violations:
+            # Justified type: ignore[code]  # reason — always allowed
+            if violation.get("is_justified"):
+                continue
             # Always fail for strict modules
             if violation["is_strict"] or (self.strict_mode and not violation["is_legacy"]):
                 should_fail = True
@@ -169,11 +187,10 @@ class TypeIgnoreChecker:
             message += self.format_violation_message(all_violations)
 
             if should_fail:
-                message += "\n\n💡 To fix type issues instead of ignoring them:"
+                message += "\n\n💡 Fix the type issue, or if it's unavoidable (e.g. wrong third-party stubs):"
+                message += "\n  • Use: # type: ignore[error-code]  # explanation why"
+                message += "\n  • Bare type-ignore and typed without explanation are blocked"
                 message += "\n  • Run: mypy --config-file=pyproject.toml <file>"
-                message += "\n  • Add proper type annotations"
-                message += "\n  • Use Union types for mixed types"
-                message += "\n  • Consider cast() for unavoidable cases"
 
                 if not self.strict_mode:
                     message += "\n  • Use --allow-legacy flag for transition period"
@@ -240,6 +257,10 @@ class TypeIgnoreChecker:
                 if not match:
                     continue
 
+                is_bare = bool(self.bare_type_ignore_pattern.search(line))
+                is_no_reason = bool(self.typed_ignore_no_reason_pattern.search(line))
+                is_justified = not is_bare and not is_no_reason
+
                 violations.append(
                     {
                         "file": file_path,
@@ -248,15 +269,18 @@ class TypeIgnoreChecker:
                         "position": match.start(),
                         "is_legacy": self.is_legacy_file(file_path),
                         "is_strict": self.is_strict_file(file_path),
+                        "is_justified": is_justified,
                     }
                 )
 
         if not violations:
             return False, "✅ No new type ignore comments in staged changes"
 
-        # Reuse existing decision logic.
+        # Reuse existing decision logic — justified ignores are allowed.
         should_fail = False
         for violation in violations:
+            if violation.get("is_justified"):
+                continue
             if violation["is_strict"] or (self.strict_mode and not violation["is_legacy"]):
                 should_fail = True
                 break

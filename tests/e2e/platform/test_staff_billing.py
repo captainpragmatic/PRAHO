@@ -18,6 +18,7 @@ Uses shared utilities from tests.e2e.helpers for consistency.
 Based on real staff workflows for Romanian billing operations.
 """
 
+import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
@@ -670,10 +671,7 @@ def test_staff_complete_billing_workflow(monitored_staff_page: Page) -> None:
     print("    Step 2: Converting proforma to invoice...")
     invoice_ready = _convert_proforma_to_invoice(page)
     if not invoice_ready:
-        # Proforma may not be in convertible state (expired, wrong status, or already converted)
-        print("  [i] Proforma not convertible — skipping invoice conversion steps")
-        print("  ✅ Complete staff billing workflow successful (partial — conversion unavailable)")
-        return
+        pytest.skip("Proforma not in convertible state — conversion flow not tested")
 
     # Step 3: Test PDF generation
     print("    Step 3: Testing PDF generation...")

@@ -88,7 +88,6 @@ class SecureAPIClient:
     def _build_headers(api_key: str, api_secret: str) -> dict[str, str]:
         """🔑 Build secure request headers"""
         headers = {
-            "User-Agent": "PRAHO-Platform/1.0",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }

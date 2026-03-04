@@ -22,7 +22,7 @@ connection pooling, timeout enforcement) used by all external-facing services.
 
 ### Fixed — Portal E2E: Ticket 500s, URL Name Mismatches, Cart HTMX Errors
 
-Resolved 3 root causes that cascaded into 47 of the 52 E2E test failures:
+Resolved 3 root causes responsible for the majority of the 52 E2E test failures (52 → 8):
 
 #### RC-1: Tickets 500 — `VariableDoesNotExist` on `date_created` (fixed 28 tests)
 Portal ticket views passed raw API response dicts to Django templates. The `|date` filter
@@ -54,7 +54,8 @@ matching the target ID (`#cart-widget` or `#cart-totals`). The ID mismatch cause
 - `update_cart_item` and `remove_from_cart` errors now return `cart_empty.html` (id="cart-totals")
 - `calculate_totals_htmx` errors already return `cart_empty.html` (fixed in prior session)
 - Added `#cart-widget` placeholder to `product_detail.html` (was missing — `hx-target` had no match)
-- Error responses return HTTP 200 so HTMX processes the swap (4xx/5xx are ignored by default)
+- Error responses now return HTTP 422 with `HX-Retarget`/`HX-Reswap` headers so HTMX
+  routes errors to `#cart-notifications` and `event.detail.successful` correctly returns false
 
 ### Fixed — E2E Test Fixtures & Assertions (52 → ~8 failures)
 

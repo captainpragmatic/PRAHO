@@ -34,7 +34,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # TCP probe timeout for health checks
-HEALTH_CHECK_TIMEOUT = 10
+_DEFAULT_HEALTH_CHECK_TIMEOUT = 10
+
+
+def _get_health_check_timeout() -> int:
+    """Read health check timeout from SettingsService with DB-cache layer."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return SettingsService.get_integer_setting(
+        "infrastructure.health_check_timeout_seconds", _DEFAULT_HEALTH_CHECK_TIMEOUT
+    )
+
 
 # Snapshot expiry in days
 SNAPSHOT_EXPIRY_DAYS = 7
@@ -339,7 +349,7 @@ class DriftRemediationService:
         try:
             with socket.create_connection(
                 (str(deployment.ipv4_address), 22),
-                timeout=HEALTH_CHECK_TIMEOUT,
+                timeout=_get_health_check_timeout(),
             ):
                 pass
         except (OSError, TimeoutError):

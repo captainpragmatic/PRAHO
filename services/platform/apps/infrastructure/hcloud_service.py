@@ -273,7 +273,7 @@ class HcloudService(CloudProviderGateway):
             response = self.client.firewalls.create(
                 name=name,
                 rules=hcloud_rules,
-                labels=labels,
+                labels=labels,  # type: ignore[arg-type]  # hcloud stubs declare str but runtime accepts dict
             )
             firewall = response.firewall
             logger.info(f"✅ [Hcloud] Firewall created: {name} (id={firewall.id})")

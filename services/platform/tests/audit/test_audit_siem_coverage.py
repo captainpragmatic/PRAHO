@@ -463,7 +463,8 @@ class TestSIEMTransport(TestCase):
     def test_connect_tcp(self):
         config = _make_siem_config(protocol="tcp", use_tls=False)
         transport = SIEMTransport(config)
-        with patch("apps.audit.siem.socket.socket") as mock_sock_cls:
+        with patch("apps.audit.siem.socket.socket") as mock_sock_cls, \
+             patch("apps.audit.siem.validate_and_resolve"):
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
             assert transport.connect() is True
@@ -473,7 +474,8 @@ class TestSIEMTransport(TestCase):
         config = _make_siem_config(protocol="tcp", use_tls=True)
         transport = SIEMTransport(config)
         with patch("apps.audit.siem.socket.socket") as mock_sock_cls, \
-             patch("apps.audit.siem.ssl.create_default_context") as mock_ctx:
+             patch("apps.audit.siem.ssl.create_default_context") as mock_ctx, \
+             patch("apps.audit.siem.validate_and_resolve"):
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
             mock_wrapped = MagicMock()
@@ -485,7 +487,8 @@ class TestSIEMTransport(TestCase):
         config = _make_siem_config(protocol="tcp", use_tls=True, certificate_path="/etc/cert.pem")
         transport = SIEMTransport(config)
         with patch("apps.audit.siem.socket.socket") as mock_sock_cls, \
-             patch("apps.audit.siem.ssl.create_default_context") as mock_ctx:
+             patch("apps.audit.siem.ssl.create_default_context") as mock_ctx, \
+             patch("apps.audit.siem.validate_and_resolve"):
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
             mock_wrapped = MagicMock()
@@ -497,7 +500,8 @@ class TestSIEMTransport(TestCase):
     def test_connect_udp(self):
         config = _make_siem_config(protocol="udp")
         transport = SIEMTransport(config)
-        with patch("apps.audit.siem.socket.socket") as mock_sock_cls:
+        with patch("apps.audit.siem.socket.socket") as mock_sock_cls, \
+             patch("apps.audit.siem.validate_and_resolve"):
             mock_sock = MagicMock()
             mock_sock_cls.return_value = mock_sock
             assert transport.connect() is True
@@ -1017,22 +1021,22 @@ class TestSIEMIntegrationService(TestCase):
     def test_setup_session_generic(self):
         cfg = self._make_config(provider=SIEMProvider.GENERIC_WEBHOOK)
         svc = SIEMIntegrationService(cfg)
-        assert svc._session.headers.get("Authorization") == "Bearer test-key"
+        assert svc._default_headers.get("Authorization") == "Bearer test-key"
 
     def test_setup_session_splunk(self):
         cfg = self._make_config(provider=SIEMProvider.SPLUNK)
         svc = SIEMIntegrationService(cfg)
-        assert svc._session.headers.get("Authorization") == "Splunk test-key"
+        assert svc._default_headers.get("Authorization") == "Splunk test-key"
 
     def test_setup_session_datadog(self):
         cfg = self._make_config(provider=SIEMProvider.DATADOG)
         svc = SIEMIntegrationService(cfg)
-        assert svc._session.headers.get("DD-API-KEY") == "test-key"
+        assert svc._default_headers.get("DD-API-KEY") == "test-key"
 
     def test_setup_session_elasticsearch(self):
         cfg = self._make_config(provider=SIEMProvider.ELASTICSEARCH, api_secret="secret")
         svc = SIEMIntegrationService(cfg)
-        auth = svc._session.headers.get("Authorization")
+        auth = svc._default_headers.get("Authorization")
         assert auth is not None
         assert auth.startswith("Basic ")
 
@@ -1040,17 +1044,17 @@ class TestSIEMIntegrationService(TestCase):
         cfg = self._make_config(provider=SIEMProvider.SUMO_LOGIC)
         svc = SIEMIntegrationService(cfg)
         # Sumo Logic uses URL auth, no special header
-        assert "Authorization" not in svc._session.headers
+        assert "Authorization" not in svc._default_headers
 
     def test_setup_session_custom_headers(self):
         cfg = self._make_config(custom_headers={"X-Custom": "value"})
         svc = SIEMIntegrationService(cfg)
-        assert svc._session.headers.get("X-Custom") == "value"
+        assert svc._default_headers.get("X-Custom") == "value"
 
     def test_setup_session_generic_no_key(self):
         cfg = self._make_config(provider=SIEMProvider.GENERIC_WEBHOOK, api_key=None)
         svc = SIEMIntegrationService(cfg)
-        assert "Authorization" not in svc._session.headers
+        assert "Authorization" not in svc._default_headers
 
     def test_convert_to_siem_event(self):
         cfg = self._make_config()
@@ -1157,7 +1161,7 @@ class TestSIEMIntegrationService(TestCase):
         data = json.loads(payload)
         assert isinstance(data, list)
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_success(self, mock_post):
         mock_post.return_value = Mock(status_code=200, raise_for_status=Mock())
         cfg = self._make_config()
@@ -1165,7 +1169,7 @@ class TestSIEMIntegrationService(TestCase):
         mock_event = _make_audit_event_mock()
         assert svc.send_events([mock_event]) is True
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_failure(self, mock_post):
         import requests as req  # noqa: PLC0415
         mock_post.side_effect = req.exceptions.ConnectionError("fail")
@@ -1174,14 +1178,14 @@ class TestSIEMIntegrationService(TestCase):
         mock_event = _make_audit_event_mock()
         assert svc.send_events([mock_event]) is False
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_empty(self, mock_post):
         cfg = self._make_config()
         svc = SIEMIntegrationService(cfg)
         assert svc.send_events([]) is True
         mock_post.assert_not_called()
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_severity_filter(self, mock_post):
         cfg = self._make_config(min_severity=IntegrationSIEMSeverity.HIGH)
         svc = SIEMIntegrationService(cfg)
@@ -1189,7 +1193,7 @@ class TestSIEMIntegrationService(TestCase):
         assert svc.send_events([mock_event]) is True
         mock_post.assert_not_called()
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_sensitive_filter(self, mock_post):
         cfg = self._make_config(include_sensitive=False)
         svc = SIEMIntegrationService(cfg)
@@ -1197,7 +1201,7 @@ class TestSIEMIntegrationService(TestCase):
         assert svc.send_events([mock_event]) is True
         mock_post.assert_not_called()
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_include_sensitive(self, mock_post):
         mock_post.return_value = Mock(status_code=200, raise_for_status=Mock())
         cfg = self._make_config(include_sensitive=True)
@@ -1206,7 +1210,7 @@ class TestSIEMIntegrationService(TestCase):
         assert svc.send_events([mock_event]) is True
         mock_post.assert_called_once()
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_events_with_signature(self, mock_post):
         mock_post.return_value = Mock(status_code=200, raise_for_status=Mock())
         cfg = self._make_config(api_secret="secret")
@@ -1217,7 +1221,7 @@ class TestSIEMIntegrationService(TestCase):
         assert "X-PRAHO-Signature" in call_kwargs.kwargs.get("headers", {}) or \
                "X-PRAHO-Signature" in (call_kwargs[1].get("headers", {}) if len(call_kwargs) > 1 else {})
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_send_event_single(self, mock_post):
         mock_post.return_value = Mock(status_code=200, raise_for_status=Mock())
         cfg = self._make_config()
@@ -1232,7 +1236,7 @@ class TestSIEMIntegrationService(TestCase):
 
 
 class TestExportEvents(TestCase):
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_export_events_no_events(self, mock_post):
         cfg = IntegrationSIEMConfig(
             provider=SIEMProvider.GENERIC_WEBHOOK,
@@ -1246,7 +1250,7 @@ class TestExportEvents(TestCase):
         assert sent == 0
         assert failed == 0
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_export_events_with_categories(self, mock_post):
         cfg = IntegrationSIEMConfig(
             provider=SIEMProvider.GENERIC_WEBHOOK,
@@ -1257,7 +1261,7 @@ class TestExportEvents(TestCase):
         assert sent == 0
         assert failed == 0
 
-    @patch("apps.audit.siem_integration.requests.Session.post")
+    @patch("apps.audit.siem_integration.safe_request")
     def test_export_events_with_limit(self, mock_post):
         cfg = IntegrationSIEMConfig(
             provider=SIEMProvider.GENERIC_WEBHOOK,
@@ -1287,7 +1291,6 @@ class TestGetSIEMConfigFromSettings(TestCase):
         "include_sensitive": True,
         "batch_size": 50,
         "timeout_seconds": 15,
-        "verify_ssl": False,
         "custom_headers": {"X-Test": "value"},
     })
     def test_full_config(self):
@@ -1299,7 +1302,6 @@ class TestGetSIEMConfigFromSettings(TestCase):
         assert cfg.min_severity == IntegrationSIEMSeverity.MEDIUM
         assert cfg.include_sensitive is True
         assert cfg.batch_size == 50
-        assert cfg.verify_ssl is False
 
     @override_settings(SIEM_INTEGRATION={
         "enabled": True,

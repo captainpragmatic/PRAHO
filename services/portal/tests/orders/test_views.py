@@ -5,6 +5,7 @@ Tests authentication, cart operations, and order creation flows.
 
 import json
 from unittest.mock import patch, Mock
+from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, Client, override_settings
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.messages.middleware import MessageMiddleware
@@ -285,6 +286,55 @@ class TestOrderViews(SimpleTestCase):
 
         response = self.client.get('/order/create/')
         self.assertEqual(response.status_code, 405)  # Method not allowed
+
+
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class TestCartErrorResponses(SimpleTestCase):
+    """Cart error responses must return 422 with HX-Retarget headers for HTMX."""
+
+    def setUp(self):
+        self.client = Client()
+        session = self.client.session
+        session['customer_id'] = 123
+        session['user_id'] = 456
+        session.save()
+
+    @patch('apps.orders.views.OrderSecurityHardening')
+    @patch('apps.orders.views.CartRateLimiter')
+    @patch('apps.orders.views.GDPRCompliantCartSession')
+    def test_add_to_cart_validation_error_returns_422(self, mock_cart_class, mock_rate_limiter, mock_sec):
+        """Validation errors in add_to_cart must return HTTP 422, not 200."""
+        mock_sec.fail_closed_on_cache_failure.return_value = None
+        mock_sec.check_suspicious_patterns.return_value = None
+        mock_sec.validate_request_size.return_value = None
+        mock_sec.uniform_response_delay.return_value = None
+        mock_rate_limiter.check_rate_limit.return_value = True
+        mock_rate_limiter.get_client_ip.return_value = "127.0.0.1"
+        mock_cart_class.side_effect = ValidationError("Bad input")
+
+        response = self.client.post('/order/cart/add/', {
+            'product_slug': 'x', 'quantity': 1, 'billing_period': 'monthly',
+        })
+        self.assertEqual(response.status_code, 422)
+
+    @patch('apps.orders.views.OrderSecurityHardening')
+    @patch('apps.orders.views.CartRateLimiter')
+    @patch('apps.orders.views.GDPRCompliantCartSession')
+    def test_add_to_cart_error_has_retarget_header(self, mock_cart_class, mock_rate_limiter, mock_sec):
+        """Error responses must include HX-Retarget header for HTMX processing."""
+        mock_sec.fail_closed_on_cache_failure.return_value = None
+        mock_sec.check_suspicious_patterns.return_value = None
+        mock_sec.validate_request_size.return_value = None
+        mock_sec.uniform_response_delay.return_value = None
+        mock_rate_limiter.check_rate_limit.return_value = True
+        mock_rate_limiter.get_client_ip.return_value = "127.0.0.1"
+        mock_cart_class.side_effect = ValidationError("Bad input")
+
+        response = self.client.post('/order/cart/add/', {
+            'product_slug': 'x', 'quantity': 1, 'billing_period': 'monthly',
+        })
+        self.assertEqual(response["HX-Retarget"], "#cart-notifications")
+        self.assertEqual(response["HX-Reswap"], "innerHTML")
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')

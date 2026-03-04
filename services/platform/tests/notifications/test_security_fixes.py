@@ -22,6 +22,7 @@ from django.core.cache import cache
 from django.http import HttpRequest
 from django.test import TestCase, override_settings
 
+from apps.common.outbound_http import OutboundSecurityError
 from config.settings.test import LOCMEM_TEST_CACHE
 
 
@@ -105,12 +106,12 @@ class SSRFProtectionTests(TestCase):
 
         for url in valid_urls:
             data = {"SubscribeURL": url}
-            with patch("requests.get") as mock_get:
-                mock_get.return_value = MagicMock(status_code=200)
+            with patch("apps.notifications.webhooks.safe_request") as mock_req:
+                mock_req.return_value = MagicMock(status_code=200)
                 response = view._handle_subscription_confirmation(data)
                 self.assertEqual(response.status_code, 200, f"URL should be accepted: {url}")
-                mock_get.assert_called_once()
-                mock_get.reset_mock()
+                mock_req.assert_called_once()
+                mock_req.reset_mock()
 
     def test_non_aws_url_rejected(self):
         """Test non-AWS URLs are rejected (SSRF protection)."""
@@ -127,10 +128,11 @@ class SSRFProtectionTests(TestCase):
 
         for url in malicious_urls:
             data = {"SubscribeURL": url}
-            with patch("requests.get") as mock_get:
+            with patch("apps.notifications.webhooks.safe_request") as mock_req:
+                mock_req.side_effect = OutboundSecurityError("Rejected by policy")
                 response = view._handle_subscription_confirmation(data)
                 self.assertEqual(response.status_code, 400, f"URL should be rejected: {url}")
-                mock_get.assert_not_called()
+                mock_req.reset_mock()
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)

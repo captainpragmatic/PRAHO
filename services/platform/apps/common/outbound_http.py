@@ -17,9 +17,12 @@ import socket
 import ssl
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import requests
+from django.utils.functional import SimpleLazyObject
 from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+DEFAULT_USER_AGENT = "PRAHO-Platform/1.0 (+https://pragmatichost.com)"
+
 DANGEROUS_PORTS: frozenset[int] = frozenset(
     {
         21,  # FTP
@@ -101,11 +106,32 @@ TRUSTED_PROVIDER = OutboundPolicy(
     max_retries=3,
 )
 
-INTERNAL_SERVICE = OutboundPolicy(
-    name="internal_service",
-    require_https=False,
-    allowed_schemes=frozenset({"http", "https"}),
-)
+
+def get_internal_service_policy() -> OutboundPolicy:
+    """Build INTERNAL_SERVICE policy from settings, with domain restriction in prod.
+
+    Reads ``settings.INTERNAL_SERVICE_ALLOWED_DOMAINS``.  An empty list means
+    *unrestricted* (backwards-compatible default for dev).
+    """
+    return _build_internal_service_policy()
+
+
+@lru_cache(maxsize=1)
+def _build_internal_service_policy() -> OutboundPolicy:
+    from django.conf import settings  # noqa: PLC0415
+
+    domains: list[str] = getattr(settings, "INTERNAL_SERVICE_ALLOWED_DOMAINS", [])
+    return OutboundPolicy(
+        name="internal_service",
+        require_https=False,
+        allowed_schemes=frozenset({"http", "https"}),
+        allowed_domains=frozenset(domains) if domains else None,
+        check_dns=False,
+    )
+
+
+# Backward-compatible module-level alias — evaluates lazily on first attribute access.
+INTERNAL_SERVICE: OutboundPolicy = SimpleLazyObject(get_internal_service_policy)  # type: ignore[assignment]  # SimpleLazyObject proxies all attribute access to OutboundPolicy at runtime
 
 
 # ---------------------------------------------------------------------------
@@ -121,18 +147,24 @@ class ResolvedTarget:
     port: int
     pinned_ips: list[str]
     path: str
+    query: str = ""
 
 
 # ---------------------------------------------------------------------------
 # IP validation helpers
 # ---------------------------------------------------------------------------
 def _is_dangerous_ip(ip_str: str) -> bool:
-    """Check if an IP address is private, loopback, link-local, multicast, or reserved."""
+    """Block all non-globally-routable IPs (SSRF prevention).
+
+    Uses ``ip.is_global`` which covers private, loopback, link-local,
+    multicast, reserved **and** CGNAT (100.64.0.0/10) on all Python versions.
+    Unparseable addresses are treated as dangerous (fail-closed).
+    """
     try:
         ip = ipaddress.ip_address(ip_str)
-        return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved)
+        return not ip.is_global
     except ValueError:
-        return False
+        return True  # Fail-closed: unparseable IPs are blocked
 
 
 def _is_valid_domain_suffix(domain: str, allowed_domains: frozenset[str]) -> bool:
@@ -193,10 +225,10 @@ def _detect_ip_encoding_tricks(hostname: str) -> str | None:
 # ---------------------------------------------------------------------------
 # URL parsing and policy checks (extracted from validate_and_resolve)
 # ---------------------------------------------------------------------------
-def _parse_and_check_url(url: str, policy: OutboundPolicy) -> tuple[str, str, int | None, str]:
+def _parse_and_check_url(url: str, policy: OutboundPolicy) -> tuple[str, str, int | None, str, str]:
     """Parse URL and validate scheme, credentials, hostname basics.
 
-    Returns (scheme, hostname, port, path).
+    Returns (scheme, hostname, port, path, query).
     """
     try:
         parsed = urllib.parse.urlparse(url)
@@ -207,6 +239,7 @@ def _parse_and_check_url(url: str, policy: OutboundPolicy) -> tuple[str, str, in
     hostname = (parsed.hostname or "").lower()
     port = parsed.port
     path = parsed.path or "/"
+    query = parsed.query or ""
 
     if not scheme:
         raise OutboundSecurityError("Missing URL scheme")
@@ -219,7 +252,7 @@ def _parse_and_check_url(url: str, policy: OutboundPolicy) -> tuple[str, str, in
     if "%" in hostname:
         raise OutboundSecurityError("IPv6 zone IDs not allowed")
 
-    return scheme, hostname, port, path
+    return scheme, hostname, port, path, query
 
 
 def _check_port(port: int, policy: OutboundPolicy) -> None:
@@ -280,7 +313,7 @@ def validate_and_resolve(url: str, policy: OutboundPolicy = STRICT_EXTERNAL) -> 
     if len(url) > MAX_URL_LENGTH:
         raise OutboundSecurityError("URL too long")
 
-    scheme, hostname, raw_port, path = _parse_and_check_url(url, policy)
+    scheme, hostname, raw_port, path, query = _parse_and_check_url(url, policy)
 
     # Detect IP encoding tricks
     decoded_ip = _detect_ip_encoding_tricks(hostname)
@@ -308,6 +341,7 @@ def validate_and_resolve(url: str, policy: OutboundPolicy = STRICT_EXTERNAL) -> 
             port=port,
             pinned_ips=[str(ipaddress.ip_address(hostname_for_resolve))],
             path=path,
+            query=query,
         )
 
     # Skip DNS if policy says so
@@ -319,6 +353,7 @@ def validate_and_resolve(url: str, policy: OutboundPolicy = STRICT_EXTERNAL) -> 
             port=port,
             pinned_ips=[],
             path=path,
+            query=query,
         )
 
     # DNS resolution with IP validation
@@ -330,7 +365,32 @@ def validate_and_resolve(url: str, policy: OutboundPolicy = STRICT_EXTERNAL) -> 
         port=port,
         pinned_ips=pinned_ips,
         path=path,
+        query=query,
     )
+
+
+# ---------------------------------------------------------------------------
+# DNS fallback audit helper
+# ---------------------------------------------------------------------------
+def _log_dns_fallback(hostname: str, old_ip: str, new_ip: str) -> None:
+    """Best-effort warning log + audit event when DNS fallback activates."""
+    logger.warning(
+        "⚠️ [OutboundHTTP] DNS fallback: %s changed %s → %s",
+        hostname,
+        old_ip,
+        new_ip,
+    )
+    try:
+        from apps.audit.services import AuditService  # noqa: PLC0415
+
+        AuditService.log_simple_event(
+            "dns_fallback",
+            description=f"DNS fallback activated for {hostname}: {old_ip} → {new_ip}",
+            metadata={"hostname": hostname, "old_ip": old_ip, "new_ip": new_ip},
+            actor_type="system",
+        )
+    except Exception:  # noqa: S110  # Audit must never block real requests
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -341,30 +401,58 @@ class PinnedIPAdapter(HTTPAdapter):
 
     _pinned_ip: str
     _hostname: str
+    _port: int
 
-    def __init__(self, pinned_ip: str, hostname: str) -> None:
+    def __init__(self, pinned_ip: str, hostname: str, port: int = 443) -> None:
         self._pinned_ip = pinned_ip
         self._hostname = hostname
+        self._port = port
         super().__init__()
 
     def init_poolmanager(self, *args: object, **kwargs: object) -> None:
         kwargs["server_hostname"] = self._hostname
         super().init_poolmanager(*args, **kwargs)
 
-    def send(
-        self,
-        request: requests.PreparedRequest,
-        **kwargs: object,
-    ) -> requests.Response:
-        """Rewrite URL to pinned IP, preserve Host header for routing."""
+    def _rewrite_url_to_ip(self, request: requests.PreparedRequest, ip: str) -> None:
+        """Rewrite request URL to connect to a specific IP."""
         if request.url:
             parsed = urllib.parse.urlparse(request.url)
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            ip_part = f"[{self._pinned_ip}]" if ":" in self._pinned_ip else self._pinned_ip
+            ip_part = f"[{ip}]" if ":" in ip else ip
             request.url = parsed._replace(netloc=f"{ip_part}:{port}").geturl()
         if request.headers is not None:
             request.headers.setdefault("Host", self._hostname)
-        return super().send(request, **kwargs)
+
+    def send(  # noqa: PLR0913  # must match HTTPAdapter.send() signature
+        self,
+        request: requests.PreparedRequest,
+        stream: bool = False,
+        timeout: float | tuple[float, float] | tuple[float, None] | None = None,
+        verify: bool | str = True,
+        cert: bytes | str | tuple[bytes | str, bytes | str] | None = None,
+        proxies: Mapping[str, str] | None = None,
+    ) -> requests.Response:
+        """Rewrite URL to pinned IP with DNS fallback on ConnectionError."""
+        # Save original URL for potential retry
+        original_url = request.url
+        self._rewrite_url_to_ip(request, self._pinned_ip)
+        try:
+            return super().send(request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
+        except requests.ConnectionError:
+            # Re-resolve DNS — _resolve_dns already validates IPs are public
+            try:
+                fresh_ips = _resolve_dns(self._hostname, self._port)
+            except OutboundSecurityError:
+                raise  # DNS failure or private IP — no fallback possible
+            new_candidates = [ip for ip in fresh_ips if ip != self._pinned_ip]
+            if not new_candidates:
+                raise  # Same IPs — re-raise original ConnectionError
+            new_ip = new_candidates[0]
+            _log_dns_fallback(self._hostname, self._pinned_ip, new_ip)
+            # Retry once with the fresh IP
+            request.url = original_url
+            self._rewrite_url_to_ip(request, new_ip)
+            return super().send(request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +479,7 @@ def _follow_redirects(
 
         pinned_ip = target.pinned_ips[0] if target.pinned_ips else target.hostname
         prefix = f"{target.scheme}://{target.hostname}"
-        session.mount(prefix, PinnedIPAdapter(pinned_ip=pinned_ip, hostname=target.hostname))
+        session.mount(prefix, PinnedIPAdapter(pinned_ip=pinned_ip, hostname=target.hostname, port=target.port))
 
         if response.status_code == HTTP_STATUS_SEE_OTHER:
             method = "GET"
@@ -440,6 +528,7 @@ def safe_request(
         raise
 
     session = requests.Session()
+    session.headers["User-Agent"] = DEFAULT_USER_AGENT
     try:
         return _execute_pinned_request(session, target, method, url, policy, **kwargs)
     finally:
@@ -457,7 +546,9 @@ def _execute_pinned_request(
     """Mount pinned adapter, send request, handle redirects."""
     if target.pinned_ips:
         prefix = f"{target.scheme}://"
-        session.mount(prefix, PinnedIPAdapter(pinned_ip=target.pinned_ips[0], hostname=target.hostname))
+        session.mount(
+            prefix, PinnedIPAdapter(pinned_ip=target.pinned_ips[0], hostname=target.hostname, port=target.port)
+        )
 
     # Strip transport kwargs from Request constructor kwargs
     req = requests.Request(method=method.upper(), url=url, **kwargs)
@@ -508,20 +599,22 @@ def safe_urlopen(
     target = validate_and_resolve(url, policy)
     effective_timeout = timeout if timeout is not None else policy.timeout_seconds
 
-    # Build URL pointing to pinned IP
+    # Build URL pointing to pinned IP (preserving query string)
+    query_suffix = f"?{target.query}" if target.query else ""
     if target.pinned_ips:
         pinned_ip = target.pinned_ips[0]
         ip_part = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
-        pinned_url = f"{target.scheme}://{ip_part}:{target.port}{target.path}"
+        pinned_url = f"{target.scheme}://{ip_part}:{target.port}{target.path}{query_suffix}"
     else:
         pinned_url = url
 
     req = urllib.request.Request(pinned_url, method=method)  # noqa: S310
     req.add_header("Host", target.hostname)
+    req.add_header("User-Agent", DEFAULT_USER_AGENT)
 
     # SSL context
     ctx = _build_ssl_context(target, policy, ssl_context)
-    result: http.client.HTTPResponse = urllib.request.urlopen(  # noqa: S310
+    result: http.client.HTTPResponse = urllib.request.urlopen(  # noqa: S310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         req,
         timeout=effective_timeout,
         context=ctx,

@@ -753,3 +753,6 @@ API_TIMEOUTS = {
 
 # Portal service specific timeout (can be overridden)
 PORTAL_API_TIMEOUT = int(os.environ.get("PORTAL_API_TIMEOUT", "30"))
+
+# Outbound HTTP: allowed domains for INTERNAL_SERVICE policy (empty = unrestricted)
+INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = []

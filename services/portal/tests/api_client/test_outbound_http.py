@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, override_settings
 
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 
 
@@ -129,4 +130,23 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
         custom_headers = {"X-Portal-Id": "portal-1", "X-Signature": "sig123", "X-Nonce": "nonce"}
         portal_request("POST", "http://localhost:8700/api/test/", headers=custom_headers)
         _, kwargs = mock_request.call_args
-        self.assertEqual(kwargs["headers"], custom_headers)
+        # portal_request merges in User-Agent; verify custom headers are present
+        for key, value in custom_headers.items():
+            self.assertEqual(kwargs["headers"][key], value)
+
+
+class PlatformAPIClientSecurityErrorTest(SimpleTestCase):
+    """OutboundSecurityError must be caught and wrapped as PlatformAPIError."""
+
+    @override_settings(
+        PLATFORM_API_URL="http://localhost:8700",
+        PLATFORM_API_KEY="test-key",
+        PLATFORM_API_SECRET="test-secret",
+        DEBUG=True,
+    )
+    @patch("apps.api_client.services.portal_request", side_effect=OutboundSecurityError("SSRF blocked"))
+    def test_outbound_security_error_wrapped_as_platform_api_error(self, _mock_request):
+        client = PlatformAPIClient()
+        with self.assertRaises(PlatformAPIError) as ctx:
+            client._make_request("GET", "/api/test/")
+        self.assertIn("Security policy violation", str(ctx.exception))

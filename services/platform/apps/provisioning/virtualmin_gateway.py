@@ -558,7 +558,6 @@ class VirtualminGateway:
     def __init__(self, config: VirtualminConfig):
         self.config = config
         self.server = config.server
-        self._session = self._create_session()
         self._auth_manager: VirtualminAuthenticationManager | None = None
         self._credential_vault: CredentialVault | None = None
 
@@ -666,39 +665,7 @@ class VirtualminGateway:
         """Direct API call without authentication fallback (legacy method)"""
         raise NotImplementedError("Direct API call not implemented")
 
-    def _create_session(self) -> requests.Session:
-        """Create configured requests session"""
-        session = requests.Session()
-
-        # Configure connection pooling
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=VIRTUALMIN_CONNECTION_POOL_SIZE,
-            pool_maxsize=VIRTUALMIN_CONNECTION_POOL_SIZE,
-            max_retries=0,  # Handle retries manually
-        )
-        # SECURITY: session.mount("http://") registers the connection adapter — it does NOT make
-        # an HTTP request. Both HTTP and HTTPS adapters must be mounted for requests.Session.
-        session.mount(
-            "http://",
-            adapter,  # nosemgrep: request-session-with-http
-        )
-        session.mount("https://", adapter)
-
-        # Set authentication
-        session.auth = (self.server.api_username, self.server.get_api_password())
-
-        # Configure headers
-        site_url = getattr(settings, "SITE_URL", "https://pragmatichost.com")
-        session.headers.update(
-            {
-                "User-Agent": f"PRAHO-Platform/1.0 (+{site_url})",
-                "Accept": "application/json, application/xml, text/plain",
-                "Accept-Encoding": "gzip, deflate",
-                "Connection": "keep-alive",
-            }
-        )
-
-        return session
+    # _create_session removed — safe_request() handles sessions with DNS-pinned adapters
 
     def _check_rate_limit(self, operation: str) -> bool:
         """Check if server is within rate limits"""
@@ -1778,6 +1745,4 @@ class VirtualminGateway:
             return 0
 
     def close(self) -> None:
-        """Close the gateway and clean up resources"""
-        if hasattr(self, "_session"):
-            self._session.close()
+        """Close the gateway and clean up resources."""

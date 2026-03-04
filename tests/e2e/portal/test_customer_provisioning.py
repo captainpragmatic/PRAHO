@@ -25,6 +25,8 @@ Created: 2025-08-29
 Framework: Playwright + pytest
 """
 
+import re
+
 from playwright.sync_api import Page
 
 # Import shared utilities
@@ -126,11 +128,22 @@ def test_customer_cannot_access_service_management_actions(monitored_customer_pa
     page = monitored_customer_page
     print("⚡ Testing customer cannot access service management actions")
 
-    # Test service management actions that should be staff-only
+    # Discover a real service ID from the services list page
+    page.goto(f"{BASE_URL}/services/")
+    page.wait_for_load_state("networkidle")
+    service_link = page.locator('a[href*="/services/"][href$="/"]').first
+    service_id = "1"  # fallback
+    if service_link.count() > 0:
+        href = service_link.get_attribute("href") or ""
+        match = re.search(r"/services/(\d+)/", href)
+        if match:
+            service_id = match.group(1)
+
+    # Test staff-only management routes that must NOT exist in the portal
     management_actions = [
-        ("/services/1/suspend/", "suspend service"),
-        ("/services/1/activate/", "activate service"),
-        ("/services/1/edit/", "edit service"),
+        (f"/services/{service_id}/suspend/", "suspend service"),
+        (f"/services/{service_id}/activate/", "activate service"),
+        (f"/services/{service_id}/edit/", "edit service"),
     ]
 
     blocked_actions = 0
@@ -141,9 +154,8 @@ def test_customer_cannot_access_service_management_actions(monitored_customer_pa
 
         # Check if action is blocked: redirected away, 404, or no management form present
         current_url = page.url
-        page_content = page.content().lower()
+        is_404 = page.locator('h1:has-text("404")').count() > 0
         has_mgmt_form = page.locator('form:has(button[type="submit"])').count() > 0
-        is_404 = "not found" in page_content or "404" in page_content
         is_redirected = url not in current_url
 
         if is_redirected or is_404 or not has_mgmt_form:
@@ -223,7 +235,7 @@ def test_customer_provisioning_navigation_not_available(monitored_customer_page:
     print("  ✅ No direct provisioning links found in customer interface")
 
 
-def test_customer_provisioning_comprehensive_security_validation(monitored_customer_page: Page) -> None:
+def test_customer_provisioning_comprehensive_security_validation(monitored_customer_page: Page) -> None:  # noqa: PLR0912, PLR0915
     """
     Comprehensive security validation for customer provisioning access.
 
@@ -234,17 +246,28 @@ def test_customer_provisioning_comprehensive_security_validation(monitored_custo
 
     print("  🔍 Phase 1: Direct URL access attempts")
 
+    # Discover a real service ID from the services list page
+    page.goto(f"{BASE_URL}/services/")
+    page.wait_for_load_state("networkidle")
+    service_link = page.locator('a[href*="/services/"][href$="/"]').first
+    svc_id = "1"  # fallback
+    if service_link.count() > 0:
+        href = service_link.get_attribute("href") or ""
+        match = re.search(r"/services/(\d+)/", href)
+        if match:
+            svc_id = match.group(1)
+
     # Test various provisioning URLs with correct security expectations
     test_urls = [
-        # Should be BLOCKED (staff-only management)
+        # Should be BLOCKED (staff-only management — routes don't exist in portal)
         ("/services/create/", False, "service creation"),
-        ("/services/1/edit/", False, "service editing"),
-        ("/services/1/suspend/", False, "service suspension"),
-        ("/services/1/activate/", False, "service activation"),
+        (f"/services/{svc_id}/edit/", False, "service editing"),
+        (f"/services/{svc_id}/suspend/", False, "service suspension"),
+        (f"/services/{svc_id}/activate/", False, "service activation"),
 
         # Should be ALLOWED (customer viewing)
         ("/services/", True, "services list"),
-        ("/services/1/", True, "service details"),
+        (f"/services/{svc_id}/", True, "service details"),
         ("/services/plans/", True, "plans catalog"),
     ]
 

@@ -160,7 +160,6 @@ class SIEMConfig:
     include_sensitive: bool = False
     batch_size: int = 100
     timeout_seconds: int = 30
-    verify_ssl: bool = True
     custom_headers: dict[str, str] = field(default_factory=dict)
 
 
@@ -509,6 +508,5 @@ def get_siem_config_from_settings() -> SIEMConfig | None:
         include_sensitive=config.get("include_sensitive", False),
         batch_size=config.get("batch_size", 100),
         timeout_seconds=config.get("timeout_seconds", 30),
-        verify_ssl=config.get("verify_ssl", True),
         custom_headers=config.get("custom_headers", {}),
     )

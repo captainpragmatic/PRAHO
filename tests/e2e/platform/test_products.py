@@ -17,6 +17,7 @@ Based on real user workflows identified during manual testing.
 
 import re
 
+import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect
 
@@ -314,7 +315,7 @@ def _submit_and_verify_pricing(page: Page) -> None:
         print("      ⚠️ RON pricing not immediately visible - form may need validation fixes")
 
 
-def test_product_pricing_management(monitored_staff_page: Page) -> None:
+def test_product_pricing_management(monitored_staff_page: Page) -> None:  # noqa: PLR0912, PLR0915
     """
     Test product pricing management including RON currency and Romanian business context.
 
@@ -349,13 +350,21 @@ def test_product_pricing_management(monitored_staff_page: Page) -> None:
     if romanian_context.count() > 0:
         print("      ✅ Romanian business pricing context visible")
 
-    # Check which currencies already have prices before navigating away
-    existing_rows = page.locator("table tbody tr").all()
+    # Check which currencies already have prices — works with both table and card layouts
     used_currencies: set[str] = set()
-    for row in existing_rows:
-        row_text = row.text_content() or ""
+    # Try table layout first, fall back to card layout
+    existing_rows = page.locator("table tbody tr").all()
+    if existing_rows:
+        for row in existing_rows:
+            row_text = row.text_content() or ""
+            for cur in ["RON", "EUR", "USD"]:
+                if cur in row_text:
+                    used_currencies.add(cur)
+    else:
+        # Card-based layout: look for currency indicators in headings or badges
+        page_text = page.locator("main").text_content() or ""
         for cur in ["RON", "EUR", "USD"]:
-            if cur in row_text:
+            if cur in page_text:
                 used_currencies.add(cur)
 
     # Click "Add Price" button
@@ -381,9 +390,7 @@ def test_product_pricing_management(monitored_staff_page: Page) -> None:
     ]
     unused = [c for c in dropdown_currencies if c not in used_currencies]
     if not unused:
-        print("  [i] All available currencies already have prices — skipping add")
-        print("  ✅ Product pricing management completed with Romanian business context")
-        return
+        pytest.skip("All available currencies already have prices — add-price flow not tested")
 
     # Select the first unused currency from the dropdown
     currency = unused[0]

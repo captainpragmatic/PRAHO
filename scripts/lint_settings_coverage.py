@@ -30,7 +30,6 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +97,10 @@ class Finding:
 
 def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
     """Load allowlisted entries from file (one per line, # comments).
+
+    Supports category headers (lines starting with ``# @category``) for
+    documentation, but all non-dotted entries are treated as constant names
+    regardless of category.
 
     Returns:
         (constant_names, orphan_setting_keys) — two separate sets.
@@ -449,11 +452,58 @@ def check_unwired_constants(
     return findings
 
 
-# ─── Check 3: Hardcoded Candidates ───────────────────────────────────────────
+# ─── Check 3: Hardcoded Candidates (AST-aware semantic classification) ───────
+
+
+def _classify_constant_value(node: ast.expr, const_name: str) -> str | None:
+    """Classify AST value node. Returns skip-reason string or None if tunable."""
+    # Hex literals / bitmasks → protocol/bitwise constant
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        # Power of 2 minus 1 (bitmasks: 0xFF, 0xFFFF, 0xFFFFFFFF)
+        if node.value > 255 and (node.value & (node.value + 1)) == 0:
+            return "bitmask"
+    # Constants with VALUE/COUNT/SIZE/LENGTH in name + small-to-medium int → protocol boundary
+    boundary_suffixes = ("_VALUE", "_COUNT", "_SIZE", "_LENGTH")
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        if any(const_name.endswith(s) for s in boundary_suffixes):
+            return "boundary"
+    # frozenset/set/tuple constructors → structural collection
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id in ("frozenset", "set", "tuple"):
+            return "collection"
+    # Set/Dict/List literals → structural
+    if isinstance(node, ast.Set | ast.Dict | ast.List | ast.Tuple):
+        return "collection"
+    # String values → not a tunable numeric
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return "string"
+    # Bool values → feature flag (usually structural)
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return "boolean"
+    return None
+
+
+def _is_model_field_default(const_name: str, tree: ast.Module) -> bool:
+    """Check if constant is used as default= in a Django model field."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.keyword):
+            continue
+        if node.arg != "default":
+            continue
+        if isinstance(node.value, ast.Name) and node.value.id == const_name:
+            return True
+    return False
 
 
 def check_hardcoded_candidates(app_files: list[Path], allowlist: set[str]) -> list[Finding]:
-    """Find module-level constants that could be settings candidates."""
+    """Find module-level constants that could be settings candidates.
+
+    Uses AST-based semantic classification to auto-skip:
+    - Bitmask constants (0xFFFFFFFF, powers-of-2-minus-1)
+    - Collection constants (frozenset, set, tuple, list, dict literals)
+    - String/boolean constants
+    - Constants used as Django model field defaults (default=CONST)
+    """
     findings: list[Finding] = []
 
     for filepath in app_files:
@@ -477,6 +527,22 @@ def check_hardcoded_candidates(app_files: list[Path], allowlist: set[str]) -> li
         if "SettingsService" in content:
             continue
 
+        # AST-parse for semantic classification
+        try:
+            tree = ast.parse(content, filename=str(filepath))
+        except SyntaxError:
+            continue
+
+        # Build map of module-level constant assignments: name → (line, value_node)
+        const_assignments: dict[str, tuple[int, ast.expr]] = {}
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                if node.value is not None:
+                    const_assignments[name] = (node.lineno, node.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+                const_assignments[node.target.id] = (node.lineno, node.value)
+
         lines = content.splitlines()
 
         for i, line in enumerate(lines, start=1):
@@ -493,6 +559,19 @@ def check_hardcoded_candidates(app_files: list[Path], allowlist: set[str]) -> li
 
                 if const_name in allowlist:
                     continue
+
+                # ── AST semantic classification ──────────────────────────
+                if const_name in const_assignments:
+                    _lineno, value_node = const_assignments[const_name]
+
+                    # 1. Value-based classification (hex, collection, string, bool, boundary)
+                    skip_reason = _classify_constant_value(value_node, const_name)
+                    if skip_reason:
+                        continue
+
+                    # 2. Model field default (default=CONST in same file)
+                    if _is_model_field_default(const_name, tree):
+                        continue
 
                 findings.append(
                     Finding(

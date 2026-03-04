@@ -155,6 +155,7 @@ class SESWebhookView(View):
                 logger.info("✅ [SNS] Subscription confirmed")
             except OutboundSecurityError as e:
                 logger.warning(f"⚠️ [SNS] Rejected SubscribeURL: {e}")
+                return HttpResponse("Invalid SubscribeURL", status=400)
             except Exception as e:
                 logger.error(f"🔥 [SNS] Failed to confirm subscription: {e}")
 

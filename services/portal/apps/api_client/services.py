@@ -33,7 +33,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 
-from apps.common.outbound_http import portal_request
+from apps.common.outbound_http import OutboundSecurityError, portal_request
 
 # HTTP status code constants
 HTTP_OK = 200
@@ -352,6 +352,9 @@ class PlatformAPIClient:
 
                 return self._handle_api_response(response, endpoint)
 
+        except OutboundSecurityError as e:
+            logger.error("🔥 [API Client] Outbound security violation: %s", e)
+            raise PlatformAPIError(f"Security policy violation: {e}") from e
         except requests.exceptions.ConnectionError as e:
             logger.error(f"🔥 [API Client] Connection failed to platform service: {url}")
             raise PlatformAPIError("Platform service unavailable") from e
@@ -403,6 +406,9 @@ class PlatformAPIClient:
             logger.debug(f"🌐 [API Client Binary] {method} {url} -> {response.status_code}")
             return self._handle_binary_response(response, endpoint)
 
+        except OutboundSecurityError as e:
+            logger.error("🔥 [API Client Binary] Outbound security violation: %s", e)
+            raise PlatformAPIError(f"Security policy violation: {e}") from e
         except requests.exceptions.ConnectionError as e:
             logger.error(f"🔥 [API Client Binary] Connection failed to platform service: {url}")
             raise PlatformAPIError("Platform service unavailable") from e
@@ -437,6 +443,9 @@ class PlatformAPIClient:
             content = self._handle_binary_response(response, endpoint)
             return content, dict(response.headers)
 
+        except OutboundSecurityError as e:
+            logger.error("🔥 [API Client Binary+Headers] Outbound security violation: %s", e)
+            raise PlatformAPIError(f"Security policy violation: {e}") from e
         except requests.exceptions.ConnectionError as e:
             logger.error(f"🔥 [API Client Binary+Headers] Connection failed to platform service: {url}")
             raise PlatformAPIError("Platform service unavailable") from e
