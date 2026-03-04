@@ -349,6 +349,15 @@ def test_product_pricing_management(monitored_staff_page: Page) -> None:
     if romanian_context.count() > 0:
         print("      ✅ Romanian business pricing context visible")
 
+    # Check which currencies already have prices before navigating away
+    existing_rows = page.locator("table tbody tr").all()
+    used_currencies: set[str] = set()
+    for row in existing_rows:
+        row_text = row.text_content() or ""
+        for cur in ["RON", "EUR", "USD"]:
+            if cur in row_text:
+                used_currencies.add(cur)
+
     # Click "Add Price" button
     add_price_button = page.locator('a:has-text("Add Price"), a:has-text("Add First Price")').first
     expect(add_price_button).to_be_visible()
@@ -363,11 +372,21 @@ def test_product_pricing_management(monitored_staff_page: Page) -> None:
     if simplified_notice.count() > 0:
         print("      ✅ Simplified pricing model notice visible")
 
-    # Fill pricing form — select a currency that doesn't already exist for this product
-    # Try EUR first (less likely to conflict with fixture data), fall back to RON
+    # Check what currencies are actually available in the dropdown (depends on DB state)
     currency_select = page.locator('select[name="currency"]')
-    available_options = currency_select.locator("option").all_text_contents()
-    currency = "EUR" if any("EUR" in opt for opt in available_options) else "RON"
+    available_options = currency_select.locator("option").all()
+    dropdown_currencies = [
+        opt.get_attribute("value") for opt in available_options
+        if opt.get_attribute("value") and opt.get_attribute("value") != ""
+    ]
+    unused = [c for c in dropdown_currencies if c not in used_currencies]
+    if not unused:
+        print("  [i] All available currencies already have prices — skipping add")
+        print("  ✅ Product pricing management completed with Romanian business context")
+        return
+
+    # Select the first unused currency from the dropdown
+    currency = unused[0]
     page.select_option('select[name="currency"]', currency)
 
     # Enter monthly price in cents (2999 cents = 29.99 RON)

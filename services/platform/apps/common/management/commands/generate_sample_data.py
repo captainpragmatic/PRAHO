@@ -201,6 +201,19 @@ class Command(BaseCommand):
         e2e_admin.save()
         self.stdout.write("  ✓ E2E admin: e2e-admin@test.local")
 
+        # Ensure E2E admin has a customer membership (required for portal login)
+        CustomerMembership.objects.update_or_create(
+            user=e2e_admin,
+            customer=test_customer,
+            defaults={
+                "role": "owner",
+                "is_primary": True,
+                "is_active": True,
+                "created_by": e2e_admin,
+            },
+        )
+        self.stdout.write(f"  ✓ Linked E2E admin to: {test_customer.get_display_name()}")
+
         # E2E customer for portal login helpers
         e2e_customer, _ = User.objects.get_or_create(
             email="e2e-customer@test.local",

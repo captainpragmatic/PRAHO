@@ -344,9 +344,15 @@ def test_ticket_isolation(monitored_customer_page: Page) -> None:
         attempted_url = f"{BASE_URL}/tickets/{fake_id}/"
         response = page.goto(attempted_url)
         if response:
-            assert response.status in (302, 403, 404, 429), (
-                f"Accessing ticket {fake_id} returned {response.status} — expected redirect or denial, not 200"
-            )
+            # Allow 200 if we were redirected away from the fake ticket (e.g., to /tickets/ list)
+            if response.status == 200:
+                assert f"/tickets/{fake_id}/" not in page.url, (
+                    f"Accessing ticket {fake_id} returned 200 on the detail page — expected denial"
+                )
+            else:
+                assert response.status in (302, 403, 404, 429), (
+                    f"Accessing ticket {fake_id} returned {response.status} — expected redirect or denial"
+                )
         # After navigation, verify we're not on the ticket detail page with content
         assert "/login/" in page.url or f"/tickets/{fake_id}/" not in page.url, (
             f"Should not be able to view ticket {fake_id} — expected redirect away"

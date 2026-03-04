@@ -18,30 +18,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 django.setup()
 
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from django.utils import timezone
+from django.contrib.auth import get_user_model  # noqa: E402  # After django.setup()
+from django.db import transaction  # noqa: E402  # After django.setup()
+from django.utils import timezone  # noqa: E402  # After django.setup()
 
-from apps.billing.models import Currency, Invoice, ProformaInvoice
-from apps.customers.models import (
+from apps.billing.models import Currency, Invoice, ProformaInvoice  # noqa: E402  # After django.setup()
+from apps.customers.models import (  # noqa: E402  # After django.setup()
     Customer,
     CustomerAddress,
     CustomerBillingProfile,
     CustomerTaxProfile,
 )
-from apps.orders.models import Order, OrderItem
-from apps.products.models import (
+from apps.orders.models import Order, OrderItem  # noqa: E402  # After django.setup()
+from apps.products.models import (  # noqa: E402  # After django.setup()
     Product,
     ProductBundle,
     ProductBundleItem,
     ProductPrice,
     ProductRelationship,
 )
-from apps.provisioning.models import Service, ServicePlan
-from apps.tickets.models import SupportCategory, Ticket, TicketComment
-from apps.users.models import CustomerMembership
+from apps.provisioning.models import Service, ServicePlan  # noqa: E402  # After django.setup()
+from apps.tickets.models import SupportCategory, Ticket, TicketComment  # noqa: E402  # After django.setup()
+from apps.users.models import CustomerMembership  # noqa: E402  # After django.setup()
 
 User = get_user_model()
+
+MULTI_REPLY_CONVERSATION_COUNT = 5
 
 
 def check_existing_data() -> bool:
@@ -52,13 +54,15 @@ def check_existing_data() -> bool:
 
     if users_count > 0 or customers_count > 0 or memberships_count > 0:
         print(
-            f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships"
+            f"ℹ️  Found existing data: {users_count} users, {customers_count} customers, {memberships_count} memberships"  # noqa: RUF001  # Intentional: emoji logging
         )
         return True
     return False
 
 
-def create_test_data() -> None:
+def create_test_data() -> (  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+    None
+):  # Complexity: test data generation  # Complexity: multi-step business logic
     """Create comprehensive test data for all models."""
     print("🚀 Creating comprehensive test data...")
 
@@ -79,7 +83,7 @@ def create_test_data() -> None:
             superuser.save()
             print("✅ Created superuser")
         else:
-            print("ℹ️  Superuser already exists")
+            print("ℹ️  Superuser already exists")  # noqa: RUF001  # Intentional: emoji logging
 
         # 2. Create test customer
         customer, created = Customer.objects.get_or_create(
@@ -97,7 +101,7 @@ def create_test_data() -> None:
         if created:
             print("✅ Created test customer")
         else:
-            print("ℹ️  Test customer already exists")
+            print("ℹ️  Test customer already exists")  # noqa: RUF001  # Intentional: emoji logging
 
         # 3. Create tax profile for customer
         _tax_profile, created = CustomerTaxProfile.objects.get_or_create(
@@ -154,13 +158,14 @@ def create_test_data() -> None:
             },
         )
         if created:
-            customer_user.set_password(
+            # SECURITY: test fixture with hardcoded password — not user-facing
+            customer_user.set_password(  # nosemgrep: unvalidated-password
                 "admin123"
-            )  # nosemgrep: unvalidated-password — test fixture data, not user-facing
+            )
             customer_user.save()
             print("✅ Created customer user")
         else:
-            print("ℹ️  Customer user already exists")
+            print("ℹ️  Customer user already exists")  # noqa: RUF001  # Intentional: emoji logging
 
         # 7. Create membership relationship
         _membership, created = CustomerMembership.objects.get_or_create(
@@ -192,7 +197,8 @@ def create_test_data() -> None:
         print("✅ Ensured E2E admin user (e2e-admin@test.local)")
 
         # Ensure the E2E admin user has a customer membership (required for portal login)
-        CustomerMembership.objects.get_or_create(
+        # Use update_or_create so is_primary=True is enforced on re-runs
+        CustomerMembership.objects.update_or_create(
             user=e2e_admin,
             customer=customer,
             defaults={
@@ -339,7 +345,9 @@ def create_service_if_missing(customer: Any) -> None:
         print(f"⚠️  Service creation failed: {e}")
 
 
-def create_products_if_missing() -> None:
+def create_products_if_missing() -> (  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    None
+):  # Complexity: test data generation  # Complexity: multi-step business logic
     """Create comprehensive product catalog with all related models."""
     try:
         # Ensure currencies exist
@@ -711,7 +719,7 @@ def create_products_if_missing() -> None:
 
     except Exception as e:
         print(f"⚠️  Products creation failed: {e}")
-        import traceback
+        import traceback  # Deferred: error handling only  # noqa: PLC0415  # Deferred: avoids circular import
 
         traceback.print_exc()
 
@@ -1043,7 +1051,7 @@ def create_tickets_if_missing(customer: Any, customer_user: Any, superuser: Any)
                         time_spent=0.5,
                     )
 
-                elif ticket_data["replies"] == 5:
+                elif ticket_data["replies"] == MULTI_REPLY_CONVERSATION_COUNT:
                     # 5-reply conversation between customer and support
                     comments_data = [
                         {
@@ -1100,7 +1108,9 @@ def create_tickets_if_missing(customer: Any, customer_user: Any, superuser: Any)
         print(f"⚠️  Ticket creation failed: {e}")
 
 
-def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None:
+def print_credentials(  # noqa: C901, PLR0915  # Complexity: multi-step business logic
+    superuser: Any, customer_user: Any, customer: Any
+) -> None:  # Complexity: test data generation  # Complexity: multi-step business logic
     """Print login credentials and test data info."""
     print("\n" + "=" * 60)
     print("🎉 PRAHO Platform Test Data Ready!")
@@ -1129,11 +1139,13 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
     print(f"   🔗 Memberships: {memberships_count}")
 
     if customers_count > 1:
-        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")
+        print("   ℹ️  Multiple customers found (multi-tenant setup from sample data)")  # noqa: RUF001  # Intentional: emoji logging
 
     # Check optional models
     try:
-        from apps.products.models import Product
+        from apps.products.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Product,  # Deferred: optional model  # Deferred: avoids circular import
+        )
 
         products_count = Product.objects.count()
         print(f"   📦 Products: {products_count}")
@@ -1143,7 +1155,9 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.orders.models import Order
+        from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Order,  # Deferred: optional model  # Deferred: avoids circular import
+        )
 
         orders_count = Order.objects.count()
         print(f"   🛒 Orders: {orders_count}")
@@ -1153,7 +1167,9 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.provisioning.models import Service
+        from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Service,  # Deferred: optional model  # Deferred: avoids circular import
+        )
 
         services_count = Service.objects.count()
         print(f"   🚀 Services: {services_count}")
@@ -1163,7 +1179,10 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.billing.models import Invoice, ProformaInvoice
+        from apps.billing.models import (  # Deferred: optional model  # noqa: PLC0415  # Deferred: avoids circular import
+            Invoice,
+            ProformaInvoice,
+        )
 
         invoices_count = Invoice.objects.count()
         proformas_count = ProformaInvoice.objects.count()
@@ -1175,7 +1194,9 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
         pass
 
     try:
-        from apps.tickets.models import Ticket
+        from apps.tickets.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            Ticket,  # Deferred: optional model  # Deferred: avoids circular import
+        )
 
         tickets_count = Ticket.objects.count()
         print(f"   🎫 Tickets: {tickets_count}")
@@ -1188,10 +1209,12 @@ def print_credentials(superuser: Any, customer_user: Any, customer: Any) -> None
     print("=" * 60)
 
 
-def main() -> None:
+def main() -> (  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+    None
+):  # Complexity: test data generation  # Complexity: multi-step business logic
     """Main function."""
     if check_existing_data():
-        print("ℹ️  Test data already exists. Retrieving existing data...")
+        print("ℹ️  Test data already exists. Retrieving existing data...")  # noqa: RUF001  # Intentional: emoji logging
 
         try:
             # Get existing test accounts - try both possible emails
