@@ -522,14 +522,18 @@ class GDPRCompliantCartSession:
         """Get cart items formatted for platform API calls with sealed price tokens"""
         api_items = []
         for item in self.cart.get("items", []):
-            api_item = {
-                "product_id": item.get("product_id", ""),
+            api_item: dict[str, Any] = {
                 "product_slug": item.get("product_slug", ""),
                 "quantity": item["quantity"],
                 "billing_period": item["billing_period"],
                 "config": item.get("config", {}),
                 "domain_name": item.get("domain_name", ""),
             }
+
+            # Include product_id only when present and non-empty
+            product_id = item.get("product_id")
+            if product_id:
+                api_item["product_id"] = product_id
 
             # 🔒 SECURITY: Include sealed price token if available
             sealed_token = item.get("sealed_price_token")

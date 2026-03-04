@@ -8,11 +8,10 @@ Verifies that CartService (GDPRCompliantCartSession):
 No database access — session-backed with locmem cache.
 """
 
-import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase, override_settings
 from django.contrib.sessions.backends.cache import SessionStore
+from django.test import SimpleTestCase, override_settings
 
 from apps.orders.services import GDPRCompliantCartSession
 
@@ -75,8 +74,8 @@ class CartServiceProductIdTestCase(SimpleTestCase):
         self.assertEqual(items[0]['product_slug'], 'shared-hosting-basic')
 
     @patch('apps.orders.services.PlatformAPIClient')
-    def test_add_item_get_api_items_defaults_product_id(self, mock_cls: MagicMock) -> None:
-        """get_api_items() returns empty string for product_id when not stored in cart."""
+    def test_add_item_get_api_items_omits_empty_product_id(self, mock_cls: MagicMock) -> None:
+        """get_api_items() omits product_id key when not stored in cart (slug-only payload)."""
         mock_cls.return_value = self._make_mock_api(product_id=42)
 
         cart = GDPRCompliantCartSession(self.session)
@@ -87,8 +86,9 @@ class CartServiceProductIdTestCase(SimpleTestCase):
         )
 
         api_items = cart.get_api_items()
-        # product_id defaults to "" because add_item intentionally omits it
-        self.assertEqual(api_items[0]['product_id'], '')
+        # product_id is omitted — slug is the primary identifier
+        self.assertNotIn('product_id', api_items[0])
+        self.assertEqual(api_items[0]['product_slug'], 'shared-hosting-basic')
 
 
 @override_settings(
@@ -161,7 +161,7 @@ class CartServiceGetApiItemsTestCase(SimpleTestCase):
         self.assertEqual(cart.get_api_items(), [])
 
     def test_get_api_items_multiple_items_all_have_required_keys(self) -> None:
-        """All items returned by get_api_items() have both product_id and product_slug."""
+        """All items returned by get_api_items() have product_slug; product_id included when present."""
         cart = GDPRCompliantCartSession(self.session)
         self._seed_cart_item(cart, product_id='p1', product_slug='product-one')
         self._seed_cart_item(cart, product_id='p2', product_slug='product-two')
@@ -176,10 +176,10 @@ class CartServiceGetApiItemsTestCase(SimpleTestCase):
                 self.assertIn('product_id', item)
                 self.assertIn('product_slug', item)
 
-    def test_get_api_items_missing_product_id_defaults_to_empty_string(self) -> None:
-        """If an old cart item lacks product_id, get_api_items() defaults to empty string."""
+    def test_get_api_items_missing_product_id_omits_key(self) -> None:
+        """If a cart item lacks product_id, get_api_items() omits the key entirely."""
         cart = GDPRCompliantCartSession(self.session)
-        # Insert an item without product_id (legacy format)
+        # Insert an item without product_id (slug-only format)
         cart.cart['items'].append({
             'item_id': 'legacy-001',
             'product_slug': 'old-product',
@@ -194,4 +194,5 @@ class CartServiceGetApiItemsTestCase(SimpleTestCase):
         api_items = cart.get_api_items()
 
         self.assertEqual(len(api_items), 1)
-        self.assertEqual(api_items[0]['product_id'], '')
+        self.assertNotIn('product_id', api_items[0])
+        self.assertEqual(api_items[0]['product_slug'], 'old-product')

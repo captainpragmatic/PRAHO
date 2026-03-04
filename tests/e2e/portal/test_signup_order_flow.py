@@ -1615,3 +1615,112 @@ def test_cart_order_summary_loads_without_error(monitored_customer_page: Page) -
     print(f"    ✅ Mini-cart partial: status={status}, {len(html)} chars, no errors")
 
     print("  ✅ Cart order summary loads cleanly test completed")
+
+
+def test_cart_quantity_change_recalculates_totals_no_400(monitored_customer_page: Page) -> None:
+    """C1: Changing quantity in cart does not trigger a 400 UUID error."""
+    page = monitored_customer_page
+    print("🧪 Testing cart quantity change works without 400")
+
+    if not _add_product_to_cart(page):
+        print("  ⚠️ Could not add product — skipping quantity change test")
+        return
+
+    page.goto(f"{BASE_URL}/order/cart/")
+    page.wait_for_load_state("networkidle")
+
+    # Look for quantity input
+    qty_input: Locator = page.locator('input[name*="quantity"], select[name*="quantity"]')
+    if qty_input.count() == 0:
+        print("  [i] No quantity input found on cart page — skipping")
+        return
+
+    # Try to change quantity
+    if qty_input.first.get_attribute("type") == "number":
+        qty_input.first.fill("2")
+        qty_input.first.press("Tab")  # trigger change event
+    else:
+        qty_input.first.select_option(value="2")
+
+    # Wait for any HTMX recalculation
+    page.wait_for_timeout(1500)
+
+    page_content: str = page.content().lower()
+
+    # Must not show UUID error or server error
+    assert "must be a valid uuid" not in page_content, (
+        "Cart quantity change must not trigger UUID validation error"
+    )
+    assert "traceback" not in page_content, (
+        "Cart quantity change must not trigger server traceback"
+    )
+    print("  ✅ Cart quantity change completed without UUID/server error")
+
+
+def test_cart_remove_item_updates_summary_cleanly(monitored_customer_page: Page) -> None:
+    """C1: Removing an item from cart works without server error."""
+    page = monitored_customer_page
+    print("🧪 Testing cart item removal works cleanly")
+
+    if not _add_product_to_cart(page):
+        print("  ⚠️ Could not add product — skipping remove test")
+        return
+
+    page.goto(f"{BASE_URL}/order/cart/")
+    page.wait_for_load_state("networkidle")
+
+    # Look for remove button
+    remove_btn: Locator = page.locator(
+        'button:has-text("Remove"), a:has-text("Remove"), '
+        'button:has-text("Șterge"), button:has-text("Elimină")'
+    )
+    if remove_btn.count() == 0:
+        print("  [i] No remove button found on cart page — skipping")
+        return
+
+    remove_btn.first.click()
+    page.wait_for_load_state("networkidle")
+
+    page_content: str = page.content().lower()
+
+    # Must not show server error
+    assert "traceback" not in page_content, (
+        "Cart item removal must not trigger server traceback"
+    )
+    assert "internal server error" not in page_content, (
+        "Cart item removal must not cause 500 error"
+    )
+    print("  ✅ Cart item removal completed cleanly")
+
+
+def test_checkout_preflight_slug_only_path_no_uuid_error(monitored_customer_page: Page) -> None:
+    """C1: Checkout preflight works with slug-only cart items (no UUID in payload)."""
+    page = monitored_customer_page
+    print("🧪 Testing checkout preflight with slug-only items")
+
+    if not _add_product_to_cart(page):
+        print("  ⚠️ Could not add product — skipping preflight test")
+        return
+
+    # Navigate to checkout which triggers preflight
+    page.goto(f"{BASE_URL}/order/checkout/")
+    page.wait_for_load_state("networkidle")
+
+    page_content: str = page.content().lower()
+
+    # Must not show UUID validation error (the C1 bug symptom)
+    assert "must be a valid uuid" not in page_content, (
+        "Checkout preflight must not show UUID validation error — "
+        "the cart should use product_slug for product identification"
+    )
+    assert "traceback" not in page_content, (
+        "Checkout page must not show server traceback"
+    )
+
+    # Page should show checkout content or a graceful redirect
+    current_url: str = page.url
+    assert any(p in current_url for p in ["/checkout/", "/cart/", "/order/"]), (
+        f"After preflight, expected to be in order flow, got: {current_url}"
+    )
+    print(f"  ✅ Checkout preflight completed — on {current_url}")
+    print("  ✅ Checkout preflight slug-only test completed")

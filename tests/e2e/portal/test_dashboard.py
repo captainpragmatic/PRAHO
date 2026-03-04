@@ -505,3 +505,58 @@ def test_account_status_card_reflects_actual_state(page: Page) -> None:
 
         except AuthenticationError:
             pytest.fail("Lost authentication during account status card test")
+
+
+def test_account_overview_shows_customer_data(page: Page) -> None:
+    """M6: Account overview page should show email and customer identification, not blank."""
+    print("🧪 Testing account overview page data completeness")
+
+    with ComprehensivePageMonitor(
+        page,
+        "account overview data",
+        check_console=True,
+        check_network=True,
+        check_html=True,
+        check_css=True,
+        check_accessibility=False,
+        allow_accessibility_skip=True,
+        check_performance=False,
+    ):
+        ensure_fresh_session(page)
+        if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
+            pytest.fail("Login failed — is the E2E service running? (make dev-e2e)")
+
+        try:
+            require_authentication(page)
+
+            page.goto(f"{BASE_URL}/dashboard/account/")
+            page.wait_for_load_state("networkidle")
+
+            current_url: str = page.url
+            if "/login/" in current_url:
+                pytest.fail("Redirected to login — authentication lost")
+
+            page_text: str = page.text_content("body") or ""
+
+            # Account overview must show the customer's email
+            assert CUSTOMER_EMAIL in page_text or "@" in page_text, (
+                "Account overview must display the customer's email address"
+            )
+            print("    ✅ Email visible on account overview page")
+
+            # Must not be dominated by N/A placeholders
+            na_count: int = page_text.count("N/A")
+            assert na_count < 5, (
+                f"Account overview has {na_count} 'N/A' values — data not loading"
+            )
+            print(f"    ✅ Account overview has {na_count} N/A values (acceptable)")
+
+            # Quick action links must be present
+            edit_profile_link: Locator = page.locator('a[href*="profile"], a:has-text("Edit Profile")')
+            assert edit_profile_link.count() > 0, "Account overview should link to profile editing"
+            print("    ✅ Edit Profile link present")
+
+            print("  ✅ Account overview data completeness test completed")
+
+        except AuthenticationError:
+            pytest.fail("Lost authentication during account overview test")

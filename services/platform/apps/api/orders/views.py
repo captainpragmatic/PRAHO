@@ -319,20 +319,23 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
         subtotal_cents = 0
 
         for cart_item in cart_items:
-            # Get product and pricing
+            # Get product and pricing — resolve by UUID or slug
             try:
                 product_id = cart_item.get("product_id")
-                if not product_id:
+                product_slug = cart_item.get("product_slug")
+                if product_id:
+                    product = Product.objects.get(id=product_id)
+                elif product_slug:
+                    product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
+                else:
                     return Response(
                         {
                             "success": False,
-                            "errors": [f"Missing product_id in cart item: {cart_item}"],
+                            "errors": ["Cart item missing product_id and product_slug"],
                             "warnings": [],
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-
-                product = Product.objects.get(id=product_id)
                 logger.info(f"🔎 [API] Found product: {product.name} (id={product.id})")
 
                 price = product.get_price_for_period(currency.code, cart_item["billing_period"])
@@ -371,10 +374,11 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
                 )
 
             except Product.DoesNotExist:
+                identifier = product_id or product_slug
                 return Response(
                     {
                         "success": False,
-                        "errors": [f"Product not found: {cart_item['product_id']}"],
+                        "errors": [f"Product not found: {identifier}"],
                         "warnings": [],
                     },
                     status=status.HTTP_400_BAD_REQUEST,
@@ -537,11 +541,20 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
         currency_code = validated_data["currency"]
 
         for item_data in validated_data["items"]:
-            # Fetch product and price for selected billing period
+            # Fetch product and price — resolve by UUID or slug
             try:
-                product = Product.objects.get(id=item_data["product_id"], is_active=True)
+                product_id = item_data.get("product_id")
+                product_slug = item_data.get("product_slug")
+                if product_id:
+                    product = Product.objects.get(id=product_id, is_active=True)
+                elif product_slug:
+                    product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
+                else:
+                    logger.warning("⚠️ [API] Cart item missing product_id and product_slug during create_order")
+                    continue
             except Product.DoesNotExist:
-                logger.warning(f"⚠️ [API] Product not found during create_order: {item_data['product_id']}")
+                identifier = product_id or product_slug
+                logger.warning(f"⚠️ [API] Product not found during create_order: {identifier}")
                 continue
 
             billing_period = item_data["billing_period"]

@@ -747,3 +747,47 @@ def test_service_detail_shows_actual_dates_not_calculating(monitored_customer_pa
                 print(f"    ✅ Date field has value: '{value_text}'")
 
     print("  ✅ Service detail dates test completed")
+
+
+def test_service_detail_domain_section_no_server_error(monitored_customer_page: Page) -> None:
+    """M5: Service detail domain section must not cause a server error (KeyError 'results')."""
+    page = monitored_customer_page
+    print("🧪 Testing service detail domain section loads without error")
+
+    page.goto(f"{BASE_URL}/services/")
+    page.wait_for_load_state("networkidle")
+
+    first_row: Locator = page.locator("tr[onclick], div[onclick]").first
+    if first_row.count() == 0:
+        print("  [i] No services found, skipping domain section test")
+        return
+
+    first_row.click()
+    page.wait_for_load_state("networkidle")
+
+    current_url: str = page.url
+    if not re.search(r"/services/\\d+/", current_url):
+        print(f"  [i] Not on service detail URL: {current_url}")
+        return
+
+    page_text: str = page.text_content("body") or ""
+
+    # Must not show Python traceback or KeyError
+    error_indicators = ["traceback", "keyerror", "internal server error"]
+    for indicator in error_indicators:
+        assert indicator not in page_text.lower(), (
+            f"Service detail must not show '{indicator}' — check domain retrieval code"
+        )
+    print("    ✅ No server error indicators on service detail page")
+
+    # Domain section should exist or gracefully show empty state
+    has_domain_content = any(
+        keyword in page_text.lower()
+        for keyword in ["domain", "domeniu", "server", "hostname", "ip"]
+    )
+    if has_domain_content:
+        print("    ✅ Domain/server information present on service detail")
+    else:
+        print("    [i] No domain section found (may not be applicable for this service type)")
+
+    print("  ✅ Service detail domain section test completed")

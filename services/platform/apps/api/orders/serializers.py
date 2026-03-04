@@ -5,6 +5,7 @@ DRF serializers for order and product catalog endpoints with Romanian compliance
 
 import logging
 import traceback
+from typing import Any
 
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
@@ -215,7 +216,8 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 class CartItemInputSerializer(serializers.Serializer):
     """Input serializer for cart items in calculations and order creation (Simplified Model)"""
 
-    product_id = serializers.UUIDField()
+    product_id = serializers.UUIDField(required=False, allow_null=True)
+    product_slug = serializers.CharField(max_length=255, required=False, allow_blank=True)
     quantity = serializers.IntegerField(min_value=1, max_value=50)
     billing_period = serializers.ChoiceField(
         choices=[("monthly", "Monthly"), ("semiannual", "Semi-Annual"), ("annual", "Annual")],
@@ -226,6 +228,13 @@ class CartItemInputSerializer(serializers.Serializer):
     sealed_price_token = serializers.CharField(
         max_length=2000, required=False, allow_blank=True, help_text="🔒 Sealed price token for price validation"
     )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        product_id = attrs.get("product_id")
+        product_slug = attrs.get("product_slug", "").strip()
+        if not product_id and not product_slug:
+            raise serializers.ValidationError(_("At least one of product_id or product_slug is required."))
+        return attrs
 
 
 class CartCalculationInputSerializer(serializers.Serializer):
