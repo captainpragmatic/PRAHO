@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.22.0] - 2026-03-04
+
 ### Fixed — Platform Ruff Auto-Fixes & Type Safety (196 files)
 
 Comprehensive ruff auto-fix pass across all 21 platform apps plus scripts and config.

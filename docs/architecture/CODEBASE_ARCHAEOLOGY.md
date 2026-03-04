@@ -2,7 +2,7 @@
 
 **Analysis Date:** March 1, 2026
 **Author:** PRAHO Development Team
-**Project Version:** 0.21.0 (Alpha)
+**Project Version:** 0.22.0 (Alpha)
 
 ---
 
