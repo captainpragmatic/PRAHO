@@ -22,6 +22,11 @@
       - lsb-release
     state: present
 
+- name: Create project group
+  group:
+    name: "{{ project_group }}"
+    state: present
+
 - name: Create project user
   user:
     name: "{{ project_user }}"
@@ -46,7 +51,7 @@
     - "{{ project_root }}/scripts"
 
 - name: Configure firewall (UFW)
-  when: firewall_enabled
+  when: firewall_enabled | default(true) | bool
   block:
     - name: Reset UFW
       ufw:

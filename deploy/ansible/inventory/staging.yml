@@ -38,4 +38,4 @@ all:
         deploy_caddy: true
         is_primary: false
         environment: staging
-        platform_api_url: "https://{{ hostvars['praho-staging-platform']['domain'] }}/api"
+        platform_api_url: "https://{{ hostvars['praho-staging-platform']['platform_domain'] }}/api"

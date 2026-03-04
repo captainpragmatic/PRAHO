@@ -20,8 +20,32 @@ if not SECRET_KEY:
         'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )
 
-# Allowed hosts from environment
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "portal.pragmatichost.com").split(",")
+# Allowed hosts — required in production, no fallback
+_allowed_hosts_raw = os.environ.get("ALLOWED_HOSTS", "").strip()
+if not _allowed_hosts_raw:
+    raise ValueError(
+        "SECURITY ERROR: ALLOWED_HOSTS must be set in production. "
+        "Set it to your portal FQDN, e.g.: portal.pragmatichost.com,localhost,127.0.0.1"
+    )
+
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
+
+if "*" in ALLOWED_HOSTS:
+    raise ValueError(
+        "SECURITY ERROR: ALLOWED_HOSTS contains '*' — this disables host validation "
+        "and enables host header injection attacks. Use specific FQDNs."
+    )
+
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in {"localhost", "127.0.0.1"}]
+
+# Explicit domain setting for safe absolute URL construction
+PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "")
+if not PORTAL_DOMAIN:
+    raise ValueError(
+        "SECURITY ERROR: PORTAL_DOMAIN must be set in production. "
+        "This is used for absolute URL construction in emails and links. "
+        "Example: PORTAL_DOMAIN=portal.pragmatichost.com"
+    )
 
 # Platform API configuration
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://platform:8700/api")
@@ -58,6 +82,7 @@ except ImportError as e:
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
+SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"

@@ -30,4 +30,4 @@ all:
         deploy_database: false
         deploy_caddy: true
         is_primary: false
-        platform_api_url: "https://{{ hostvars['platform-server']['domain'] }}/api"
+        platform_api_url: "https://{{ hostvars['platform-server']['platform_domain'] }}/api"

@@ -8,7 +8,8 @@
 #   ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
 #
 # Required environment variables:
-#   PRAHO_DEV_DOMAIN (or defaults to dev.pragmatichost.com)
+#   PRAHO_PORTAL_DOMAIN (customer-facing domain)
+#   PRAHO_PLATFORM_DOMAIN (staff/admin domain)
 #   PRAHO_DB_PASSWORD
 #   PRAHO_SECRET_KEY
 
@@ -29,10 +30,50 @@
     - name: Validate required variables
       assert:
         that:
-          - domain is defined and domain != 'praho.example.com'
+          - portal_domain is defined and portal_domain != 'portal.pragmatichost.com'
+          - platform_domain is defined and platform_domain != 'platform.pragmatichost.com'
           - db_password is defined and db_password != 'changeme'
           - secret_key is defined and secret_key != 'generate-a-strong-key'
-        fail_msg: "Required variables not set. Export PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY, and PRAHO_DEV_DOMAIN."
+        fail_msg: "Required variables not set. Export PRAHO_PORTAL_DOMAIN, PRAHO_PLATFORM_DOMAIN, PRAHO_DB_PASSWORD, and PRAHO_SECRET_KEY."
+
+    # -------------------------------------------------------------------
+    # DNS pre-flight: verify both FQDNs resolve to this server's IP
+    # -------------------------------------------------------------------
+    - name: Resolve portal_domain DNS
+      command: "dig +short {{ portal_domain }} A"
+      register: portal_dns
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      tags: [preflight, dns]
+
+    - name: Resolve platform_domain DNS
+      command: "dig +short {{ platform_domain }} A"
+      register: platform_dns
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      tags: [preflight, dns]
+
+    - name: Verify portal_domain resolves to this server
+      assert:
+        that:
+          - portal_dns.stdout | trim == ansible_host
+        fail_msg: >
+          DNS MISMATCH: {{ portal_domain }} resolves to '{{ portal_dns.stdout | trim }}'
+          but this server is '{{ ansible_host }}'.
+          Update your DNS A record before deploying — Caddy ACME will fail without it.
+      tags: [preflight, dns]
+
+    - name: Verify platform_domain resolves to this server
+      assert:
+        that:
+          - platform_dns.stdout | trim == ansible_host
+        fail_msg: >
+          DNS MISMATCH: {{ platform_domain }} resolves to '{{ platform_dns.stdout | trim }}'
+          but this server is '{{ ansible_host }}'.
+          Update your DNS A record before deploying — Caddy ACME will fail without it.
+      tags: [preflight, dns]
 
   roles:
     - common
@@ -41,8 +82,9 @@
   post_tasks:
     - name: Verify platform HTTP
       uri:
-        url: "http://localhost:{{ platform_port }}/health/"
+        url: "http://localhost:{{ platform_port }}/api/users/health/"
         status_code: 200
+        follow_redirects: none
       register: post_platform_check
       retries: 3
       delay: 5
@@ -53,26 +95,48 @@
         url: "http://localhost:{{ portal_port }}/"
         status_code:
           - 200
+          - 301
           - 302
+        follow_redirects: none
       register: post_portal_check
       retries: 3
       delay: 5
-      until: post_portal_check.status in [200, 302]
+      until: post_portal_check.status in [200, 301, 302]
 
-    - name: Verify HTTPS endpoint
+    - name: Verify Portal HTTPS endpoint
       uri:
-        url: "https://{{ domain }}/health/"
+        url: "https://{{ portal_domain }}/"
+        status_code:
+          - 200
+          - 301
+          - 302
+        validate_certs: yes
+        follow_redirects: none
+      register: post_portal_https
+      retries: 15
+      delay: 10
+      until: post_portal_https.status | default(0) in [200, 301, 302]
+      tags: [post-verify]
+
+    - name: Verify Platform HTTPS endpoint
+      uri:
+        url: "https://{{ platform_domain }}/api/users/health/"
         status_code: 200
         validate_certs: yes
-      register: post_https_check
-      retries: 10
+        follow_redirects: none
+      register: post_platform_https
+      retries: 15
       delay: 10
-      until: post_https_check.status == 200
-      ignore_errors: yes
+      until: post_platform_https.status | default(0) == 200
+      tags: [post-verify]
 
-    - name: Report HTTPS status
+    - name: Report deployment status
       debug:
-        msg: >-
-          {{ 'HTTPS is live at https://' ~ domain ~ '/health/'
-             if post_https_check.status | default(0) == 200
-             else 'HTTPS not yet available (DNS may need propagation). Check: curl https://' ~ domain ~ '/health/' }}
+        msg: |
+          ================================================
+          PRAHO Deployment Verified!
+          ================================================
+          Portal:   https://{{ portal_domain }}
+          Platform: https://{{ platform_domain }}
+          ================================================
+      tags: [post-verify]

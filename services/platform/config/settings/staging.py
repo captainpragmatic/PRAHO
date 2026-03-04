@@ -3,9 +3,24 @@ Staging settings for PRAHO Platform
 Staging environment configuration for pre-production testing.
 """
 
+import os as _os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured as _ImproperlyConfigured
+
 from .base import *  # noqa: F403  # Django settings pattern
+
+# ===============================================================================
+# STAGING SECURITY VALIDATION
+# ===============================================================================
+
+validate_production_secret_key()  # Rejects django-insecure-* prefix
+
+_db_password = _os.environ.get("DB_PASSWORD", "")
+if not _db_password or _db_password in {"changeme", "development_password", "password", "postgres"}:
+    raise _ImproperlyConfigured(
+        "DB_PASSWORD must be set to a strong value in staging. Current value is missing or a known default."
+    )
 
 # ===============================================================================
 # STAGING ENVIRONMENT CONFIGURATION
@@ -15,9 +30,26 @@ from .base import *  # noqa: F403  # Django settings pattern
 DEBUG = False  # Set to True only if needed for staging debugging
 TEMPLATE_DEBUG = False
 
-# Staging hosts
-ALLOWED_HOSTS = ["staging.pragmatichost.com", "staging-app.pragmatichost.com"]
-CSRF_TRUSTED_ORIGINS = ["https://staging.pragmatichost.com", "https://staging-app.pragmatichost.com"]
+_allowed_hosts_raw = _os.environ.get("ALLOWED_HOSTS", "").strip()
+if not _allowed_hosts_raw:
+    raise _ImproperlyConfigured(
+        "ALLOWED_HOSTS must be set in staging. "
+        "Set it to your portal and platform FQDNs, e.g.: "
+        "portal-staging.pragmatichost.com,platform-staging.pragmatichost.com,localhost,127.0.0.1"
+    )
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
+if "*" in ALLOWED_HOSTS:
+    raise _ImproperlyConfigured("ALLOWED_HOSTS contains '*' — use specific FQDNs.")
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in {"localhost", "127.0.0.1"}]
+
+# Explicit domain settings
+PORTAL_DOMAIN = _os.environ.get("PORTAL_DOMAIN", "")
+PLATFORM_DOMAIN = _os.environ.get("PLATFORM_DOMAIN", "")
+if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
+    raise _ImproperlyConfigured(
+        f"PORTAL_DOMAIN and PLATFORM_DOMAIN must both be set in staging. "
+        f"Got PORTAL_DOMAIN={PORTAL_DOMAIN!r}, PLATFORM_DOMAIN={PLATFORM_DOMAIN!r}."
+    )
 
 # ===============================================================================
 # HTTPS SECURITY HARDENING - STAGING 🔒
@@ -48,6 +80,7 @@ MIDDLEWARE = [
 # Set SECURE_SSL_REDIRECT = False if staging uses HTTP
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True  # Set to False if staging is HTTP-only
+SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
 
 # Cookie Security - Match production if staging has HTTPS
 SESSION_COOKIE_SECURE = True  # Set to False if staging is HTTP-only

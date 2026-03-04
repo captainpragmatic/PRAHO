@@ -9,7 +9,8 @@ debug: true
 environment: dev
 
 # Domain
-domain: "{{ lookup('env', 'PRAHO_DEV_DOMAIN') | default('dev.pragmatichost.com', true) }}"
+portal_domain: "{{ lookup('env', 'PRAHO_PORTAL_DOMAIN') | default('portal-dev.pragmatichost.com', true) }}"
+platform_domain: "{{ lookup('env', 'PRAHO_PLATFORM_DOMAIN') | default('platform-dev.pragmatichost.com', true) }}"
 
 # Docker
 praho_version: "{{ lookup('env', 'PRAHO_VERSION') | default('latest', true) }}"

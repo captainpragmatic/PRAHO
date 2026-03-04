@@ -22,8 +22,27 @@ from .base import *  # noqa: F403  # Django settings pattern
 # PRODUCTION SECURITY VALIDATION
 # ===============================================================================
 
-# Validate SECRET_KEY meets production security requirements
+# Validate critical secrets — fail hard if missing or insecure
 validate_production_secret_key()
+
+_db_password = os.environ.get("DB_PASSWORD", "")
+if not _db_password or _db_password in {"changeme", "development_password", "password", "postgres"}:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "DB_PASSWORD must be set to a strong value in production. "
+        "Current value is missing or a known default. "
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
+_hmac_secret = os.environ.get("HMAC_SECRET", "")
+if not _hmac_secret:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "HMAC_SECRET must be set in production for portal↔platform authentication. "
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
 
 # ===============================================================================
 # PRODUCTION FLAGS
@@ -38,10 +57,42 @@ TEMPLATE_DEBUG = False
 # HTTPS SECURITY HARDENING - PRODUCTION 🔒
 # ===============================================================================
 
-# Production security - app.pragmatichost.com
+# Production security — explicit domain configuration
 DEBUG = False
-ALLOWED_HOSTS = ["app.pragmatichost.com"]
-CSRF_TRUSTED_ORIGINS = ["https://app.pragmatichost.com"]
+
+_allowed_hosts_raw = os.environ.get("ALLOWED_HOSTS", "").strip()
+if not _allowed_hosts_raw:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS must be set in production. "
+        "Set it to your portal and platform FQDNs, e.g.: "
+        "portal.pragmatichost.com,platform.pragmatichost.com,localhost,127.0.0.1"
+    )
+
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
+
+if "*" in ALLOWED_HOSTS:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS contains '*' — this disables host validation entirely "
+        "and enables host header injection attacks. Use specific FQDNs."
+    )
+
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in {"localhost", "127.0.0.1"}]
+
+# Explicit domain settings for safe absolute URL construction (emails, links)
+PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "")
+PLATFORM_DOMAIN = os.environ.get("PLATFORM_DOMAIN", "")
+if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        f"PORTAL_DOMAIN and PLATFORM_DOMAIN must both be set in production. "
+        f"Got PORTAL_DOMAIN={PORTAL_DOMAIN!r}, PLATFORM_DOMAIN={PLATFORM_DOMAIN!r}. "
+        f"These are used for absolute URL construction in emails and links."
+    )
 
 # Ensure SecurityMiddleware is FIRST in middleware stack
 MIDDLEWARE = [
@@ -66,6 +117,7 @@ MIDDLEWARE = [
 # SSL/TLS Configuration - Behind TLS-terminating load balancer
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
+SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
 
 # Cookie Security - Require HTTPS for all cookies
 SESSION_COOKIE_SECURE = True
@@ -114,7 +166,7 @@ DATABASES["default"].update(
         "CONN_MAX_AGE": 600,
         "OPTIONS": {
             "application_name": "pragmatichost_crm_prod",
-            "sslmode": "require",
+            "sslmode": os.environ.get("DB_SSLMODE", "require"),
         },
     }
 )
@@ -324,7 +376,8 @@ BACKUP_ENCRYPTION_KEY = os.environ.get("BACKUP_ENCRYPTION_KEY")
 # ===============================================================================
 
 # Database connection pooling
-DATABASES["default"]["OPTIONS"]["MAX_CONNS"] = 20
+# Note: MAX_CONNS is not a valid psycopg2 option. Use CONN_MAX_AGE (set above)
+# and Django's connection pool settings for connection reuse.
 
 # Template caching
 TEMPLATE_LOADERS = [

@@ -73,8 +73,9 @@
 
 - name: Wait for services to be healthy
   uri:
-    url: "http://localhost:{{ platform_port }}/health/"
+    url: "http://localhost:{{ platform_port }}/api/users/health/"
     status_code: 200
+    follow_redirects: none
   register: health_check
   until: health_check.status == 200
   retries: 30
@@ -96,8 +97,7 @@
       ================================================
       PRAHO Deployment Complete!
       ================================================
-      Domain: {{ domain }}
-      Platform: {{ 'Deployed' if deploy_platform else 'Not deployed' }}
-      Portal: {{ 'Deployed' if deploy_portal else 'Not deployed' }}
-      Database: {{ 'Deployed' if deploy_database else 'External' }}
+      Portal:    https://{{ portal_domain }} {{ '(Deployed)' if deploy_portal else '(Not deployed)' }}
+      Platform:  https://{{ platform_domain }} {{ '(Deployed)' if deploy_platform else '(Not deployed)' }}
+      Database:  {{ 'Deployed' if deploy_database else 'External' }}
       ================================================

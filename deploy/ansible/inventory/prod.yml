@@ -38,4 +38,4 @@ all:
         deploy_caddy: true
         is_primary: false
         environment: prod
-        platform_api_url: "https://{{ hostvars['praho-prod-platform']['domain'] }}/api"
+        platform_api_url: "https://{{ hostvars['praho-prod-platform']['platform_domain'] }}/api"

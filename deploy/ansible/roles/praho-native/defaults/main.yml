@@ -32,3 +32,6 @@ django_settings_module: config.settings.prod
 
 # PostgreSQL
 db_port: 5432
+
+# Platform access restriction (empty = unrestricted)
+platform_allowed_ips: []

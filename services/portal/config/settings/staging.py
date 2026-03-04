@@ -15,10 +15,24 @@ if not SECRET_KEY:
         'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )
 
-# Allowed hosts for staging
-ALLOWED_HOSTS = os.environ.get(
-    "ALLOWED_HOSTS", "staging-portal.pragmatichost.com,portal-staging.pragmatichost.com"
-).split(",")
+# Allowed hosts — env-driven, no hardcoded fallback
+_allowed_hosts_raw = os.environ.get("ALLOWED_HOSTS", "").strip()
+if not _allowed_hosts_raw:
+    raise ValueError(
+        "SECURITY ERROR: ALLOWED_HOSTS must be set in staging. "
+        "Set it to your portal FQDN, e.g.: portal-staging.pragmatichost.com,localhost,127.0.0.1"
+    )
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
+if "*" in ALLOWED_HOSTS:
+    raise ValueError("SECURITY ERROR: ALLOWED_HOSTS contains '*' — use specific FQDNs.")
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in {"localhost", "127.0.0.1"}]
+
+# Explicit domain setting
+PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "")
+if not PORTAL_DOMAIN:
+    raise ValueError(
+        "SECURITY ERROR: PORTAL_DOMAIN must be set in staging. Example: PORTAL_DOMAIN=portal-staging.pragmatichost.com"
+    )
 
 # Platform API configuration for staging
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://platform-staging:8700/api")
@@ -34,6 +48,7 @@ PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "20"))
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
+SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"

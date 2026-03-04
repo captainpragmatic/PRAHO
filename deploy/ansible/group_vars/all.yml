@@ -9,7 +9,8 @@ project_group: praho
 project_root: /opt/praho
 
 # Domain and SSL
-domain: "{{ lookup('env', 'PRAHO_DOMAIN') | default('praho.example.com', true) }}"
+portal_domain: "{{ lookup('env', 'PRAHO_PORTAL_DOMAIN') | default('portal.pragmatichost.com', true) }}"
+platform_domain: "{{ lookup('env', 'PRAHO_PLATFORM_DOMAIN') | default('platform.pragmatichost.com', true) }}"
 acme_email: "{{ lookup('env', 'PRAHO_ACME_EMAIL') | default('admin@example.com', true) }}"
 
 # Database

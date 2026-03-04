@@ -7,7 +7,7 @@
 #   ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
 #
 # Required environment variables:
-#   PRAHO_SERVER_IP, PRAHO_DOMAIN, PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY
+#   PRAHO_SERVER_IP, PRAHO_PORTAL_DOMAIN, PRAHO_PLATFORM_DOMAIN, PRAHO_DB_PASSWORD, PRAHO_SECRET_KEY
 
 ---
 - name: Deploy PRAHO - Single Server
@@ -25,7 +25,8 @@
     - name: Validate required variables
       assert:
         that:
-          - domain is defined and domain != 'praho.example.com'
+          - portal_domain is defined and portal_domain != 'portal.pragmatichost.com'
+          - platform_domain is defined and platform_domain != 'platform.pragmatichost.com'
           - db_password is defined and db_password != 'changeme'
           - secret_key is defined and secret_key != 'generate-a-strong-key'
         fail_msg: "Required variables not set. Check environment variables."
@@ -58,7 +59,7 @@
 
     - name: Verify deployment
       uri:
-        url: "https://{{ domain }}/health/"
+        url: "https://{{ portal_domain }}/"
         status_code: 200
         validate_certs: yes
       register: final_health_check

@@ -30,11 +30,14 @@ services:
     environment:
       - DEBUG=0
       - DATABASE_URL=${DATABASE_URL}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - SECRET_KEY=${SECRET_KEY}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - ALLOWED_HOSTS=${DOMAIN},platform
-      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN}
+      - ALLOWED_HOSTS={{ platform_domain }},{{ portal_domain }},localhost
+      - CSRF_TRUSTED_ORIGINS=https://{{ platform_domain }},https://{{ portal_domain }}
       - SERVICE_NAME=platform
+      - HMAC_SECRET=${HMAC_SECRET}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/media
@@ -46,7 +49,7 @@ services:
 {% endif %}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:{{ platform_port }}/health/"]
+      test: ["CMD", "curl", "-f", "http://localhost:{{ platform_port }}/api/users/health/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -63,11 +66,14 @@ services:
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL}
+      - PLATFORM_API_SECRET=${PLATFORM_API_SECRET}
+      - PLATFORM_API_ALLOW_INSECURE_HTTP=true
       - SECRET_KEY=${SECRET_KEY}
-      - DJANGO_SETTINGS_MODULE=config.settings
-      - ALLOWED_HOSTS=${DOMAIN},portal
-      - CSRF_TRUSTED_ORIGINS=https://${DOMAIN}
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - ALLOWED_HOSTS={{ portal_domain }},localhost
+      - CSRF_TRUSTED_ORIGINS=https://{{ portal_domain }}
       - SERVICE_NAME=portal
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - portal_static:/app/staticfiles
       - portal_logs:/app/logs
@@ -78,13 +84,16 @@ services:
 {% endif %}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:{{ portal_port }}/health/"]
+      test: ["CMD", "curl", "-f", "http://localhost:{{ portal_port }}/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
     networks:
       - web
+{% if deploy_platform %}
+      - internal
+{% endif %}
 {% endif %}
 
 {% if deploy_caddy %}
@@ -96,7 +105,6 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      - DOMAIN=${DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

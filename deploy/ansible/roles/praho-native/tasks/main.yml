@@ -33,6 +33,11 @@
     state: started
     enabled: yes
 
+- name: Install psycopg2 for Ansible PostgreSQL modules
+  apt:
+    name: python3-psycopg2
+    state: present
+
 - name: Create PostgreSQL user
   become_user: postgres
   community.postgresql.postgresql_user:
@@ -103,7 +108,7 @@
     group: "{{ project_group }}"
     mode: "0755"
 
-- name: Create static and media directories
+- name: Create static, media, and log directories
   file:
     path: "{{ item }}"
     state: directory
@@ -113,6 +118,8 @@
   loop:
     - "{{ project_root }}/static"
     - "{{ project_root }}/media"
+    - /var/log/praho
+    - /var/log/praho/portal
 
 - name: Deploy code via rsync
   synchronize:
@@ -131,6 +138,8 @@
       - "--exclude=.pytest_cache"
       - "--exclude=htmlcov"
       - "--exclude=.ruff_cache"
+      - "--exclude=.vscode"
+      - "--exclude=.idea"
   when: deploy_method == 'rsync'
   notify:
     - restart praho-platform
@@ -208,10 +217,16 @@
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
       DATABASE_URL: "postgresql://{{ db_user }}:{{ db_password }}@localhost:{{ db_port }}/{{ db_name }}"
-      SECRET_KEY: "{{ secret_key }}"
+      DB_NAME: "{{ db_name }}"
+      DB_USER: "{{ db_user }}"
+      DB_PASSWORD: "{{ db_password }}"
+      DB_HOST: "localhost"
+      DB_PORT: "{{ db_port }}"
+      DB_SSLMODE: "disable"
+      DJANGO_SECRET_KEY: "{{ secret_key }}"
       STATIC_ROOT: "{{ project_root }}/static"
       MEDIA_ROOT: "{{ project_root }}/media"
-      ALLOWED_HOSTS: "{{ domain }},localhost,127.0.0.1"
+      ALLOWED_HOSTS: "{{ portal_domain }},{{ platform_domain }},localhost,127.0.0.1"
 
 - name: Run database migrations
   command: >
@@ -406,8 +421,9 @@
 
 - name: Wait for platform to be healthy
   uri:
-    url: "http://localhost:{{ platform_port }}/health/"
+    url: "http://localhost:{{ platform_port }}/api/users/health/"
     status_code: 200
+    follow_redirects: none
   register: platform_health
   until: platform_health.status == 200
   retries: 30
@@ -418,9 +434,11 @@
     url: "http://localhost:{{ portal_port }}/"
     status_code:
       - 200
+      - 301
       - 302
+    follow_redirects: none
   register: portal_health
-  until: portal_health.status in [200, 302]
+  until: portal_health.status in [200, 301, 302]
   retries: 15
   delay: 5
 
@@ -430,9 +448,9 @@
       ================================================
       PRAHO Native Deployment Complete!
       ================================================
-      Domain:    {{ domain }}
-      Platform:  http://localhost:{{ platform_port }}
-      Portal:    http://localhost:{{ portal_port }}
+      Portal:    https://{{ portal_domain }}
+      Platform:  https://{{ platform_domain }}
+      Local:     http://localhost:{{ platform_port }} / http://localhost:{{ portal_port }}
       Q-Cluster: running ({{ qcluster_workers }} workers)
       Database:  PostgreSQL 15 (localhost:{{ db_port }})
       Method:    {{ deploy_method }}
