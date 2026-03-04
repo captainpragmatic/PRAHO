@@ -64,6 +64,7 @@ def _call_create_order(customer: Customer, items: list[dict], currency: str = "R
     idempotency_key = secrets.token_urlsafe(32)
     body = json.dumps(
         {
+            "customer_id": customer.id,
             "items": items,
             "currency": currency,
             "Idempotency-Key": idempotency_key,
@@ -109,10 +110,74 @@ class CreateOrderSlugFallbackTestCase(TestCase):
 
         self.assertIn(status_code, (201, 400), f"Expected 201 or 400, got {status_code}: {data}")
 
-    def test_create_order_missing_both_identifiers_skips_item(self) -> None:
-        """POST with neither identifier → item skipped, likely fails with empty order."""
+    def test_create_order_uuid_inactive_product_returns_400(self) -> None:
+        """UUID lookup of inactive product returns 400."""
+        self.product.is_active = False
+        self.product.save()
+
+        items = [{"product_id": str(self.product.id), "quantity": 1, "billing_period": BILLING_PERIOD}]
+        status_code, data = _call_create_order(self.customer, items)
+
+        self.assertEqual(status_code, 400, f"Expected 400 for inactive product, got {status_code}: {data}")
+        self.assertIn("not found", data.get("error", "").lower())
+
+    def test_create_order_uuid_non_public_product_returns_400(self) -> None:
+        """UUID lookup of non-public product returns 400."""
+        self.product.is_public = False
+        self.product.save()
+
+        items = [{"product_id": str(self.product.id), "quantity": 1, "billing_period": BILLING_PERIOD}]
+        status_code, data = _call_create_order(self.customer, items)
+
+        self.assertEqual(status_code, 400, f"Expected 400 for non-public product, got {status_code}: {data}")
+        self.assertIn("not found", data.get("error", "").lower())
+
+    def test_create_order_missing_both_identifiers_returns_400(self) -> None:
+        """POST with neither identifier → 400 error (serializer or view rejects)."""
         items = [{"quantity": 1, "billing_period": BILLING_PERIOD}]
         status_code, data = _call_create_order(self.customer, items)
 
         # Serializer should reject — at least one identifier required
         self.assertEqual(status_code, 400, f"Expected 400 for missing identifiers, got {status_code}: {data}")
+
+
+class CreateOrderSealedPriceTokenTestCase(TestCase):
+    """Sealed price token validation in create_order — fail-closed on invalid tokens."""
+
+    def setUp(self) -> None:
+        self.currency = _make_currency()
+        self.customer = _make_customer()
+        self.product = _make_product("sealed-token-product")
+        self.price = _make_price(self.product, self.currency, monthly_price_cents=4000)
+
+    def test_invalid_sealed_token_returns_400(self) -> None:
+        """Providing a bad sealed_price_token must return 400, not silently fall back."""
+        items = [
+            {
+                "product_id": str(self.product.id),
+                "quantity": 1,
+                "billing_period": BILLING_PERIOD,
+                "sealed_price_token": "invalid-token-data-here",
+            }
+        ]
+        status_code, data = _call_create_order(self.customer, items)
+
+        self.assertEqual(status_code, 400, f"Expected 400 for invalid token, got {status_code}: {data}")
+        self.assertIn("sealed price token", data.get("error", "").lower())
+
+    def test_no_sealed_token_uses_current_pricing(self) -> None:
+        """Without a sealed token, order should proceed with current pricing (no token error)."""
+        items = [
+            {
+                "product_id": str(self.product.id),
+                "quantity": 1,
+                "billing_period": BILLING_PERIOD,
+            }
+        ]
+        status_code, data = _call_create_order(self.customer, items)
+
+        # Should succeed (201) or fail for non-token reasons (400 from billing profile etc.)
+        self.assertIn(status_code, (201, 400), f"Unexpected status {status_code}: {data}")
+        # Must NOT be a token-related error
+        if status_code == 400:
+            self.assertNotIn("sealed price token", data.get("error", "").lower())

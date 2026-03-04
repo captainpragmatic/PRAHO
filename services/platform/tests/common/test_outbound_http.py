@@ -17,9 +17,9 @@ from apps.common.outbound_http import (
     OutboundSecurityError,
     PinnedIPAdapter,
     ResolvedTarget,
-    _build_internal_service_policy,
     _is_dangerous_ip,
     _log_dns_fallback,
+    clear_internal_service_policy_cache,
     get_internal_service_policy,
     validate_and_resolve,
 )
@@ -446,22 +446,27 @@ class TestDNSFallback(TestCase):
         self.assertEqual(call_kwargs["metadata"]["old_ip"], "1.2.3.4")
         self.assertEqual(call_kwargs["metadata"]["new_ip"], "5.6.7.8")
 
-    def test_log_dns_fallback_swallows_exceptions(self):
-        """Audit failure must never block real requests."""
-        with patch("apps.audit.services.AuditService.log_simple_event", side_effect=RuntimeError("DB down")):
+    def test_log_dns_fallback_logs_audit_error(self):
+        """Audit failure must not block real requests but must log the error."""
+        with (
+            patch("apps.audit.services.AuditService.log_simple_event", side_effect=RuntimeError("DB down")),
+            patch("apps.common.outbound_http.logger") as mock_logger,
+        ):
             # Should not raise
             _log_dns_fallback("api.stripe.com", "1.2.3.4", "5.6.7.8")
+        mock_logger.error.assert_called_once()
+        call_args = mock_logger.error.call_args
+        self.assertIn("Audit logging failed", call_args[0][0])
 
 
 class TestInternalServicePolicy(TestCase):
     """Environment-aware INTERNAL_SERVICE policy from settings."""
 
     def setUp(self):
-        # Clear lru_cache between tests
-        _build_internal_service_policy.cache_clear()
+        clear_internal_service_policy_cache()
 
     def tearDown(self):
-        _build_internal_service_policy.cache_clear()
+        clear_internal_service_policy_cache()
 
     @override_settings(INTERNAL_SERVICE_ALLOWED_DOMAINS=["localhost", "testserver"])
     def test_reads_allowed_domains_from_settings(self):

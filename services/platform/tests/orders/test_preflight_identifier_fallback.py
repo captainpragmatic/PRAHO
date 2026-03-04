@@ -110,6 +110,28 @@ class PreflightSlugFallbackTestCase(TestCase):
         self.assertEqual(status_code, 400)
         self.assertFalse(data.get("success"))
 
+    def test_preflight_uuid_inactive_product_returns_400(self) -> None:
+        """UUID lookup of inactive product returns 400."""
+        self.product.is_active = False
+        self.product.save()
+
+        items = [{"product_id": str(self.product.id), "quantity": 1, "billing_period": BILLING_PERIOD}]
+        status_code, data = _call_preflight(self.customer, items)
+
+        self.assertEqual(status_code, 400)
+        self.assertFalse(data.get("success"))
+
+    def test_preflight_uuid_non_public_product_returns_400(self) -> None:
+        """UUID lookup of non-public product returns 400."""
+        self.product.is_public = False
+        self.product.save()
+
+        items = [{"product_id": str(self.product.id), "quantity": 1, "billing_period": BILLING_PERIOD}]
+        status_code, data = _call_preflight(self.customer, items)
+
+        self.assertEqual(status_code, 400)
+        self.assertFalse(data.get("success"))
+
     def test_preflight_nonexistent_slug_returns_400(self) -> None:
         """POST with unknown product_slug → 400 product not found."""
         items = [{"product_slug": "nonexistent-product", "quantity": 1, "billing_period": BILLING_PERIOD}]

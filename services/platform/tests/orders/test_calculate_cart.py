@@ -158,6 +158,28 @@ class CartCalculateProductByUUIDTestCase(TestCase):
         missing_warnings = [w for w in data.get("warnings", []) if w.get("type") == "missing_identifier"]
         self.assertEqual(missing_warnings, [])
 
+    def test_product_id_uuid_skips_inactive_product_with_warning(self) -> None:
+        """UUID lookup of inactive product emits product_not_found warning (is_active=True filter on query)."""
+        self.product.is_active = False
+        self.product.save()
+
+        items = [_cart_item(product_id=self.product.id, quantity=1)]
+        data = _call_calculate(self.customer, self.currency, items)
+
+        warning_types = [w.get("type") for w in data.get("warnings", [])]
+        self.assertIn("product_not_found", warning_types)
+
+    def test_product_id_uuid_skips_non_public_product_with_warning(self) -> None:
+        """UUID lookup of non-public product emits product_not_found warning (is_public=True filter on query)."""
+        self.product.is_public = False
+        self.product.save()
+
+        items = [_cart_item(product_id=self.product.id, quantity=1)]
+        data = _call_calculate(self.customer, self.currency, items)
+
+        warning_types = [w.get("type") for w in data.get("warnings", [])]
+        self.assertIn("product_not_found", warning_types)
+
     def test_product_id_quantity_multiplier_applied(self) -> None:
         """Subtotal reflects quantity × unit price."""
         items = [_cart_item(product_id=self.product.id, quantity=3)]

@@ -19,7 +19,6 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from functools import lru_cache
 
 import requests
 from django.utils.functional import SimpleLazyObject
@@ -107,6 +106,9 @@ TRUSTED_PROVIDER = OutboundPolicy(
 )
 
 
+_cached_internal_service_policy: OutboundPolicy | None = None
+
+
 def get_internal_service_policy() -> OutboundPolicy:
     """Build INTERNAL_SERVICE policy from settings, with domain restriction in prod.
 
@@ -116,18 +118,29 @@ def get_internal_service_policy() -> OutboundPolicy:
     return _build_internal_service_policy()
 
 
-@lru_cache(maxsize=1)
+def clear_internal_service_policy_cache() -> None:
+    """Reset the cached INTERNAL_SERVICE policy so the next call rebuilds from settings."""
+    global _cached_internal_service_policy  # noqa: PLW0603
+    _cached_internal_service_policy = None
+
+
 def _build_internal_service_policy() -> OutboundPolicy:
+    global _cached_internal_service_policy  # noqa: PLW0603
+    if _cached_internal_service_policy is not None:
+        return _cached_internal_service_policy
+
     from django.conf import settings  # noqa: PLC0415
 
     domains: list[str] = getattr(settings, "INTERNAL_SERVICE_ALLOWED_DOMAINS", [])
-    return OutboundPolicy(
+    policy = OutboundPolicy(
         name="internal_service",
         require_https=False,
         allowed_schemes=frozenset({"http", "https"}),
         allowed_domains=frozenset(domains) if domains else None,
         check_dns=False,
     )
+    _cached_internal_service_policy = policy
+    return policy
 
 
 # Backward-compatible module-level alias — evaluates lazily on first attribute access.
@@ -389,8 +402,8 @@ def _log_dns_fallback(hostname: str, old_ip: str, new_ip: str) -> None:
             metadata={"hostname": hostname, "old_ip": old_ip, "new_ip": new_ip},
             actor_type="system",
         )
-    except Exception:  # noqa: S110  # Audit must never block real requests
-        pass
+    except Exception:
+        logger.error("🔥 [OutboundHTTP] Audit logging failed for DNS fallback: %s → %s", old_ip, new_ip, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

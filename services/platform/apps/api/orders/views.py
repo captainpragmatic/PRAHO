@@ -128,7 +128,7 @@ def product_detail(request: Request, slug: str) -> Response:
 @permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -168,23 +168,12 @@ def calculate_cart_totals(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-
                 product_id = item_data.get("product_id")
                 product_slug = item_data.get("product_slug")
                 if product_id:
-                    product = Product.objects.get(id=product_id)
+                    product = Product.objects.get(id=product_id, is_active=True, is_public=True)
                 elif product_slug:
                     product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
                 else:
                     warnings.append(
                         {"type": "missing_identifier", "message": "Cart item missing product_id and product_slug"}
-                    )
-                    continue
-
-                # Validate product is active
-                if not product.is_active:
-                    warnings.append(
-                        {
-                            "type": "product_inactive",
-                            "product_name": product.name,
-                            "message": f"Product {product.name} is no longer available",
-                        }
                     )
                     continue
 
@@ -324,7 +313,7 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
                 product_id = cart_item.get("product_id")
                 product_slug = cart_item.get("product_slug")
                 if product_id:
-                    product = Product.objects.get(id=product_id)
+                    product = Product.objects.get(id=product_id, is_active=True, is_public=True)
                 elif product_slug:
                     product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
                 else:
@@ -546,24 +535,28 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 product_id = item_data.get("product_id")
                 product_slug = item_data.get("product_slug")
                 if product_id:
-                    product = Product.objects.get(id=product_id, is_active=True)
+                    product = Product.objects.get(id=product_id, is_active=True, is_public=True)
                 elif product_slug:
                     product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
                 else:
-                    logger.warning("⚠️ [API] Cart item missing product_id and product_slug during create_order")
-                    continue
+                    return Response(
+                        {"error": "Cart item missing product_id and product_slug"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             except Product.DoesNotExist:
                 identifier = product_id or product_slug
-                logger.warning(f"⚠️ [API] Product not found during create_order: {identifier}")
-                continue
+                return Response(
+                    {"error": f"Product not found: {identifier}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             billing_period = item_data["billing_period"]
             price = product.get_price_for_period(currency_code, billing_period)
             if not price:
-                logger.warning(
-                    f"⚠️ [API] Pricing not found for product {product.slug} period {billing_period} currency {currency_code}"
+                return Response(
+                    {"error": f"Pricing not available for {product.slug} ({billing_period}/{currency_code})"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-                continue
 
             # 🔒 SECURITY: Validate sealed price token if provided
             sealed_token = item_data.get("sealed_price_token", "").strip()
@@ -604,8 +597,10 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 
                 except Exception as e:
                     logger.error(f"🔥 [API] Price token validation failed for {product.slug}: {e}")
-                    # For now, continue with current pricing but log the issue
-                    # In production, you might want to reject the order
+                    return Response(
+                        {"error": f"Invalid sealed price token for {product.name}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             # Build order item with price snapshot in meta
             item_meta = item_data.get("config", {})
