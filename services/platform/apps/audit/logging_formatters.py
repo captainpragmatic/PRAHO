@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import socket
 import threading
 import traceback
@@ -20,6 +21,17 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from django.conf import settings
+
+
+def _detect_environment() -> str:
+    """Derive environment name from DJANGO_SETTINGS_MODULE."""
+    module = os.environ.get("DJANGO_SETTINGS_MODULE", "")
+    if "staging" in module:
+        return "staging"
+    if "prod" in module:
+        return "production"
+    return "development"
+
 
 # =============================================================================
 # THREAD-LOCAL STORAGE FOR REQUEST CONTEXT
@@ -197,7 +209,7 @@ class SIEMJSONFormatter(logging.Formatter):
             # PRAHO-specific fields
             "praho": {
                 "customer_id": getattr(record, "customer_id", None),
-                "environment": getattr(record, "environment", "production"),
+                "environment": getattr(record, "environment", _detect_environment()),
             },
         }
 

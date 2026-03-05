@@ -86,11 +86,9 @@ node_modules/
 
 # Production secrets
 *.env
-.env.local
-.env.production
-secrets.json
-# Keep env example files (tracked templates)
+.env.*
 !.env.example.*
+secrets.json
 
 # Romanian specific
 facturi/

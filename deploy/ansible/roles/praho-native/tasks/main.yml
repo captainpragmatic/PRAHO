@@ -75,7 +75,7 @@
     state: present
 
 # ---------------------------------------------------------------------------
-# 2. Python 3.11 + build dependencies
+# 2. Python 3.13 + build dependencies
 # ---------------------------------------------------------------------------
 
 - name: Install prerequisites for deadsnakes PPA
@@ -152,6 +152,8 @@
       - "--exclude=node_modules"
       - "--exclude=*.pyc"
       - "--exclude=.env"
+      - "--exclude=.env.*"
+      - "--exclude=.envrc"
       - "--exclude=db.sqlite3"
       - "--exclude=.mypy_cache"
       - "--exclude=.pytest_cache"
