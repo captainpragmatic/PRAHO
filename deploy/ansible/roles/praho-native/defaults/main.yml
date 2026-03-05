@@ -7,8 +7,7 @@
 deploy_method: rsync
 
 # Git settings (used when deploy_method: git)
-praho_git_repo: "https://github.com/your-org/praho.git"
-praho_git_branch: master
+praho_git_repo: "https://github.com/captainpragmatic/PRAHO.git"
 
 # Python
 python_version: "3.13"

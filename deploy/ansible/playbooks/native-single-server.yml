@@ -70,10 +70,62 @@
           Ensure PORTAL_DOMAIN, PLATFORM_DOMAIN, SECRET_KEY, DB_PASSWORD, and HMAC_SECRET are set.
 
     # -------------------------------------------------------------------
+    # Deploy method + version resolution
+    # -------------------------------------------------------------------
+    - name: Resolve deploy_method from env file
+      set_fact:
+        deploy_method: >-
+          {{ (praho_env == 'prod') | ternary('git', preflight_env.DEPLOY_METHOD | default('git')) }}
+
+    - name: Resolve deploy_git_version from env file
+      set_fact:
+        deploy_git_version: >-
+          {{ cli_version | default(
+               (praho_env == 'prod') | ternary(
+                 preflight_env.PRAHO_VERSION | default(''),
+                 preflight_env.DEPLOY_BRANCH | default('staging')
+               )
+             )
+          }}
+
+    - name: Enforce git-only deploy for production
+      fail:
+        msg: "Production deploys MUST use git. Remove DEPLOY_METHOD=rsync from .env.prod."
+      when: praho_env == 'prod' and deploy_method != 'git'
+
+    - name: Enforce PRAHO_VERSION is set for production
+      fail:
+        msg: >
+          Production requires PRAHO_VERSION in .env.prod (e.g. PRAHO_VERSION=v0.13.0)
+          or CLI override: make deploy-prod VERSION=v0.14.0
+      when: praho_env == 'prod' and deploy_git_version | length == 0
+
+    - name: Verify git tag exists in remote repository
+      command: git ls-remote --tags {{ praho_git_repo }} refs/tags/{{ deploy_git_version }}
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      register: tag_check
+      when: praho_env == 'prod'
+
+    - name: Fail if git tag not found
+      fail:
+        msg: "Tag '{{ deploy_git_version }}' not found in {{ praho_git_repo }}. Check the tag name."
+      when: praho_env == 'prod' and tag_check.stdout | trim | length == 0
+
+    - name: Display deploy plan
+      debug:
+        msg: |
+          Deploy Plan ({{ praho_env }}):
+            Method:  {{ deploy_method }}
+            Version: {{ deploy_git_version if deploy_method == 'git' else 'rsync (local)' }}
+            Target:  {{ ansible_host }}
+
+    # -------------------------------------------------------------------
     # DNS pre-flight: verify both FQDNs resolve to this server's IP
     # -------------------------------------------------------------------
     - name: Resolve portal_domain DNS
-      command: "dig +short {{ preflight_env.PORTAL_DOMAIN }} A"
+      command: "dig +short {{ preflight_env.PORTAL_DOMAIN }} A @8.8.8.8"
       register: portal_dns
       changed_when: false
       delegate_to: localhost
@@ -81,7 +133,7 @@
       tags: [preflight, dns]
 
     - name: Resolve platform_domain DNS
-      command: "dig +short {{ preflight_env.PLATFORM_DOMAIN }} A"
+      command: "dig +short {{ preflight_env.PLATFORM_DOMAIN }} A @8.8.8.8"
       register: platform_dns
       changed_when: false
       delegate_to: localhost
@@ -170,6 +222,8 @@
           PRAHO Deployment Verified! ({{ praho_env }})
           ================================================
           Environment: {{ praho_env }}
+          Method:      {{ deploy_method }}
+          Version:     {{ deploy_git_version if deploy_method == 'git' else 'rsync (local)' }}
           Settings:    {{ django_settings_module }}
           Portal:      https://{{ deployed_env.PORTAL_DOMAIN }}
           Platform:    https://{{ deployed_env.PLATFORM_DOMAIN }}

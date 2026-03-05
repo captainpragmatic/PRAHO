@@ -35,6 +35,9 @@ backup_enabled: true
 backup_retention_days: 30
 backup_directory: /opt/praho/backups
 
+# Git repository (needed in pre_tasks for tag validation — role defaults aren't loaded yet)
+praho_git_repo: "https://github.com/captainpragmatic/PRAHO.git"
+
 # Firewall
 firewall_enabled: true
 allowed_ports:

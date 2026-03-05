@@ -112,8 +112,9 @@ help:
 	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
 	@echo "  make deploy-dev            - Deploy PRAHO to dev (Docker)"
 	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
-	@echo "  make deploy-staging        - Deploy PRAHO to staging (reads .env.staging)"
-	@echo "  make deploy-prod           - Deploy PRAHO to production (reads .env.prod)"
+	@echo "  make deploy-staging                - Deploy to staging (git HEAD of DEPLOY_BRANCH, or rsync)"
+	@echo "  make deploy-prod                   - Deploy to production (git tag from PRAHO_VERSION)"
+	@echo "  make deploy-prod VERSION=v0.14.0   - Deploy specific version to production"
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
@@ -906,7 +907,9 @@ deploy-prod:
 	@set -a && . $(PWD)/.env.prod && set +a && \
 		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
 		playbooks/native-single-server.yml -e praho_env=prod \
-		-e env_file_path=$(PWD)/.env.prod -v
+		-e env_file_path=$(PWD)/.env.prod \
+		$(if $(VERSION),-e cli_version=$(VERSION),) \
+		-v
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜

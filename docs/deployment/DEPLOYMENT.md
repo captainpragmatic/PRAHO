@@ -196,11 +196,24 @@ Before deploying, the playbook checks:
 
 After deployment completes, the playbook verifies all services over HTTP and HTTPS.
 
-**First login:** The `setup_initial_data` management command creates a superuser if none exists:
-- Email: `admin@pragmatichost.com`
-- Password: from `DJANGO_SUPERUSER_PASSWORD` env var, or a random password printed to the Ansible log
+**Step 3: Create the first admin user:**
 
-Access the Platform admin at `https://<platform-domain>/admin/`.
+The database starts empty — no users exist. Create a superuser on the server:
+
+```bash
+# SSH to the server and create the admin user interactively
+ssh root@<server-ip>
+cd /opt/praho/src
+sudo -u praho bash -c 'set -a && source /opt/praho/.env && set +a && \
+  source /opt/praho/.venv/bin/activate && \
+  python services/platform/manage.py createsuperuser --email admin@pragmatichost.com'
+```
+
+You will be prompted for a password. This is the only time credentials need to be entered manually — they are **not** stored in `.env` files or Ansible logs.
+
+Access Platform at `https://<platform-domain>/` (redirects to login).
+
+> **Why not automate this?** Storing admin passwords in `.env` files or Ansible logs is a security risk. The interactive `createsuperuser` method ensures the password is entered once and never written to disk in plaintext.
 
 #### Post-Deploy Configuration (Optional Integrations)
 
