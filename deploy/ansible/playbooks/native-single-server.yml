@@ -88,6 +88,11 @@
              )
           }}
 
+    - name: Validate deploy_method value
+      fail:
+        msg: "deploy_method must be 'git' or 'rsync', got '{{ deploy_method }}'. Check DEPLOY_METHOD in .env.{{ praho_env }}."
+      when: deploy_method not in ['git', 'rsync']
+
     - name: Enforce git-only deploy for production
       fail:
         msg: "Production deploys MUST use git. Remove DEPLOY_METHOD=rsync from .env.prod."
