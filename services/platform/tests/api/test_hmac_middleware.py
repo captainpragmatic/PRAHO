@@ -2,7 +2,9 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
+from unittest.mock import patch
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -12,7 +14,15 @@ from apps.common import middleware as _middleware_module
 from apps.common.middleware import PortalServiceHMACMiddleware
 from config.settings.test import LOCMEM_TEST_CACHE
 
+LOCMEM_TEST_CACHE = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "hmac-middleware-tests",
+    }
+}
 
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class PortalHMACTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
@@ -198,6 +208,11 @@ class PortalHMACTests(TestCase):
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r2.status_code, 200)
         self.assertEqual(r3.status_code, 429)
+        self.assertEqual(r3["Retry-After"], "60")
+        payload = json.loads(r3.content.decode())
+        self.assertEqual(payload["error"], "Too many requests")
+        self.assertEqual(payload["status"], 429)
+        self.assertEqual(payload["retry_after"], 60)
 
     @override_settings(PLATFORM_API_SECRET="unit-test-secret", CACHES=LOCMEM_TEST_CACHE)
     def test_nonce_replay_rejected(self):

@@ -273,6 +273,8 @@ class TicketsAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error retrieving ticket summary for customer {customer_id}: {e}")
+            if e.is_rate_limited:
+                raise
             # Return empty summary on error to avoid breaking dashboard
             return {
                 "total_tickets": 0,

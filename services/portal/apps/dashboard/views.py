@@ -14,10 +14,27 @@ from django.utils.translation import gettext as _
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
 from apps.common.api_utils import DictAsObj
+from apps.common.rate_limit_feedback import (
+    get_rate_limit_message,
+    get_retry_after_from_error,
+    is_rate_limited_error,
+    record_rate_limit_banner,
+)
 from apps.services.services import ServicesAPIClient
 from apps.tickets.services import TicketFilters, TicketsAPIClient
 
 logger = logging.getLogger(__name__)
+
+
+def _rate_limited_context(request: HttpRequest, error: Exception) -> dict[str, str | bool | int | None]:
+    retry_after = get_retry_after_from_error(error)
+    record_rate_limit_banner(request, retry_after)
+    return {
+        "rate_limited": True,
+        "rate_limit_retry_after": retry_after,
+        "rate_limit_message": get_rate_limit_message(retry_after),
+        "rate_limit_retry_url": request.get_full_path(),
+    }
 
 
 def _get_billing_data(
@@ -53,6 +70,8 @@ def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str |
             customer_obj = DictAsObj(response["customer"])
             customers = [customer_obj]
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.warning(f"⚠️ [Dashboard] Failed to load customer details: {e}")
 
     # Resolve greeting name preference: profile.first_name > customer contact person > email
@@ -61,6 +80,8 @@ def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str |
         if profile and profile.get("first_name"):
             greeting_name = profile.get("first_name")
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.debug(f"⚠️ [Dashboard] Failed to load profile for greeting name: {e}")
 
     if not greeting_name and customers:
@@ -83,6 +104,8 @@ def _get_ticket_data(tickets_api: TicketsAPIClient, customer_id: str, user_id: i
         tickets_summary = tickets_api.get_tickets_summary(int(customer_id), user_id)
         open_tickets_count = tickets_summary.get("open_tickets", len(recent_tickets))
     except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
+        if is_rate_limited_error(e):
+            raise
         logger.debug(f"⚠️ [Dashboard] Failed to load ticket data: {e}")
         open_tickets_count = len(recent_tickets)
 
@@ -95,6 +118,8 @@ def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_i
         services_summary = services_api.get_services_summary(int(customer_id), user_id)
         return int(services_summary.get("active_services", 0))
     except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
+        if is_rate_limited_error(e):
+            raise
         logger.debug(f"⚠️ [Dashboard] Failed to load services summary: {e}")
         return 0
 
@@ -162,6 +187,19 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
         logger.debug(f"✅ [Dashboard] Loaded data for customer {customer_id}")
 
+    except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            logger.warning("⚠️ [Dashboard] Rate limited for customer %s: %s", customer_id, e)
+            context.update(_rate_limited_context(request, e))
+        else:
+            logger.error(f"🔥 [Dashboard] Failed to load data for customer {customer_id}: {e}")
+            context["platform_available"] = False
+            messages.error(
+                request,
+                _(
+                    "Could not load account information. Please try again later or contact support if the problem persists."
+                ),
+            )
     except Exception as e:
         logger.error(f"🔥 [Dashboard] Failed to load data for customer {customer_id}: {e}")
         context["platform_available"] = False

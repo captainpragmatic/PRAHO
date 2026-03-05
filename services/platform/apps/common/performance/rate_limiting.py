@@ -22,6 +22,88 @@ from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
 logger = logging.getLogger(__name__)
 
 
+def _is_portal_authenticated(request: Request) -> bool:
+    """True when request passed HMAC service authentication middleware."""
+    return bool(getattr(request, "_portal_authenticated", False))
+
+
+def _extract_hmac_identity(request: Request) -> str:
+    """
+    Build a stable throttle identity from signed request context.
+
+    Priority:
+    1) customer_id in signed body
+    2) user_id in signed body
+    3) portal_id only
+    """
+    portal_id = request.headers.get("X-Portal-Id", "unknown")
+    identity = ""
+    try:
+        payload = request.data if hasattr(request, "data") else {}
+        if isinstance(payload, dict):
+            if payload.get("customer_id") is not None:
+                identity = f"customer_{payload['customer_id']}"
+            elif payload.get("user_id") is not None:
+                identity = f"user_{payload['user_id']}"
+    except Exception:
+        # Fall back to portal-only identity when body is unavailable.
+        identity = ""
+
+    return f"{portal_id}:{identity}" if identity else portal_id
+
+
+class _CustomTimeRateMixin:
+    """Support custom shorthand rates such as `50/10s`."""
+
+    def parse_rate(self, rate: str) -> tuple[int, int]:
+        num, period = rate.split("/")
+        num_requests = int(num)
+
+        if period.endswith("s"):
+            duration = int(period[:-1])
+        elif period == "sec":
+            duration = 1
+        elif period in {"min", "minute"}:
+            duration = 60
+        elif period == "hour":
+            duration = 3600
+        elif period == "day":
+            duration = 86400
+        else:
+            duration = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(period[-1], 1)
+            if period[:-1].isdigit():
+                duration *= int(period[:-1])
+
+        return (num_requests, duration)
+
+
+class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Per-portal throttling for service-to-service HMAC requests."""
+
+    scope = "portal_hmac"
+    cache_format = "throttle_portal_hmac_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if not _is_portal_authenticated(request):
+            return None
+        ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Burst throttling for HMAC traffic to protect against request spikes."""
+
+    scope = "portal_hmac_burst"
+    cache_format = "throttle_portal_hmac_%(scope)s_%(ident)s"
+    rate = "50/10s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if not _is_portal_authenticated(request):
+            return None
+        ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
 class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Rate throttling based on customer account.
@@ -45,6 +127,10 @@ class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         """Generate a cache key based on customer ID."""
+        if _is_portal_authenticated(request):
+            # Portal HMAC traffic is handled by PortalHMAC*Throttle classes.
+            return None
+
         if not request.user or not request.user.is_authenticated:
             # Use IP for unauthenticated requests
             ident = self.get_ident(request)
@@ -67,7 +153,7 @@ class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
         return getattr(settings, "DEFAULT_CUSTOMER_THROTTLE_RATE", "100/minute")
 
 
-class BurstRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
+class BurstRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """
     Throttle for burst traffic - short-term high-frequency limiting.
     Prevents API abuse from rapid requests.
@@ -80,31 +166,12 @@ class BurstRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         """Generate cache key based on user or IP for burst limiting."""
+        if _is_portal_authenticated(request):
+            # Portal HMAC traffic is handled by PortalHMAC*Throttle classes.
+            return None
+
         ident = str(request.user.pk) if request.user and request.user.is_authenticated else self.get_ident(request)
         return cast("str | None", self.cache_format % {"scope": self.scope, "ident": ident})
-
-    def parse_rate(self, rate: str) -> tuple[int, int]:
-        """Parse rate string with custom time units."""
-        num, period = rate.split("/")
-        num_requests = int(num)
-
-        # Handle custom time periods
-        if period.endswith("s"):
-            duration = int(period[:-1])
-        elif period == "sec":
-            duration = 1
-        elif period in {"min", "minute"}:
-            duration = 60
-        elif period == "hour":
-            duration = 3600
-        elif period == "day":
-            duration = 86400
-        else:
-            duration = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(period[-1], 1)
-            if period[:-1].isdigit():
-                duration *= int(period[:-1])
-
-        return (num_requests, duration)
 
 
 class SustainedRateThrottle(SimpleRateThrottle):  # type: ignore[misc]

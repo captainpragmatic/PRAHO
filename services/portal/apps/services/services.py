@@ -184,6 +184,8 @@ class ServicesAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services summary for customer {customer_id}: {e}")
+            if e.is_rate_limited:
+                raise
             # Return empty summary on error
             return {
                 "total_services": 0,

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from apps.api_client.services import PlatformAPIClient
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 from .schemas import Currency, Invoice, Proforma
 from .serializers import (
@@ -65,6 +65,8 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving invoices for customer {customer_id}: {e}")
+            if isinstance(e, PlatformAPIError) and e.is_rate_limited:
+                raise
             return []
 
     def get_invoice_detail(
@@ -137,6 +139,8 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving summary for customer {customer_id}: {e}")
+            if isinstance(e, PlatformAPIError) and e.is_rate_limited:
+                raise
             return self._empty_summary()
 
     def get_customer_proformas(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Proforma]:
@@ -170,6 +174,8 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Proforma API] Error retrieving proformas for customer {customer_id}: {e}")
+            if isinstance(e, PlatformAPIError) and e.is_rate_limited:
+                raise
             return []
 
     def get_proforma_detail(

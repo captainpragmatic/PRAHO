@@ -10,6 +10,12 @@ from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 
 from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.rate_limit_feedback import (
+    get_rate_limit_message,
+    get_retry_after_from_error,
+    is_rate_limited_error,
+    record_rate_limit_banner,
+)
 
 from .services import PlatformAPIError, services_api
 
@@ -23,6 +29,17 @@ SERVICE_STATUS_TABS = [
     {"value": "pending", "label": _("Pending"), "border_class": "border-yellow-500", "text_class": "text-yellow-400"},
     {"value": "cancelled", "label": _("Cancelled"), "border_class": "border-red-500", "text_class": "text-red-400"},
 ]
+
+
+def _rate_limited_context(request: HttpRequest, error: Exception) -> dict[str, str | bool | int | None]:
+    retry_after = get_retry_after_from_error(error)
+    record_rate_limit_banner(request, retry_after)
+    return {
+        "rate_limited": True,
+        "rate_limit_retry_after": retry_after,
+        "rate_limit_message": get_rate_limit_message(retry_after),
+        "rate_limit_retry_url": request.get_full_path(),
+    }
 
 
 def _filter_services_by_query(services: list[dict], query: str) -> list[dict]:
@@ -115,7 +132,9 @@ def service_list(request: HttpRequest) -> HttpResponse:
 
     except PlatformAPIError as e:
         logger.error(f"🔥 [Services View] Error loading services for customer {customer_id}: {e}")
-        messages.error(request, _("Unable to load hosting services. Please try again later."))
+        rate_limited = is_rate_limited_error(e)
+        if not rate_limited:
+            messages.error(request, _("Unable to load hosting services. Please try again later."))
         context = {
             "services": [],
             "error": True,
@@ -123,6 +142,8 @@ def service_list(request: HttpRequest) -> HttpResponse:
             "pagination_params": "",
             **_services_base_context(status_filter, search_query),
         }
+        if rate_limited:
+            context.update(_rate_limited_context(request, e))
 
     return render(request, "services/service_list.html", context)
 
@@ -167,15 +188,14 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
 
     except PlatformAPIError as e:
         logger.error(f"🔥 [Services View] Error searching services for customer {customer_id}: {e}")
-        return render(
-            request,
-            "services/partials/services_table.html",
-            {
-                "services": [],
-                "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
-                "pagination_params": "",
-            },
-        )
+        context = {
+            "services": [],
+            "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
+            "pagination_params": "",
+        }
+        if is_rate_limited_error(e):
+            context.update(_rate_limited_context(request, e))
+        return render(request, "services/partials/services_table.html", context)
 
 
 def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:

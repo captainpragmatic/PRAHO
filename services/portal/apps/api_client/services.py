@@ -22,10 +22,12 @@ import hmac
 import json
 import logging
 import math
+import random
 import re
 import secrets
 import time
 import urllib.parse
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -49,15 +51,38 @@ _HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
 _HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 # Int-only — platform validates with int(), floats would fail
 _HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
+_READ_ONLY_POST_RETRY_ENDPOINTS = {
+    "/users/profile/",
+    "/users/customers/",
+    "/customers/details/",
+    "/services/",
+    "/services/summary/",
+    "/tickets/",
+    "/tickets/summary/",
+    "/billing/invoices/",
+    "/billing/proformas/",
+    "/billing/summary/",
+}
 
 
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
 
-    def __init__(self, message: str, status_code: int | None = None, response_data: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response_data: dict[str, Any] | None = None,
+        retry_after: int | None = None,
+        is_rate_limited: bool | None = None,
+    ):
         self.message = message
         self.status_code = status_code
         self.response_data = response_data
+        self.retry_after = retry_after
+        self.is_rate_limited = bool(
+            is_rate_limited if is_rate_limited is not None else status_code == HTTPStatus.TOO_MANY_REQUESTS
+        )
         super().__init__(message)
 
 
@@ -79,6 +104,8 @@ class PlatformAPIClient:
         self.timeout = settings.PLATFORM_API_TIMEOUT
         # Keep retries conservative by default; callers can opt in per request.
         self.retry_backoff_seconds = float(getattr(settings, "PLATFORM_API_RETRY_BACKOFF_SECONDS", 0.05))
+        self.max_read_retry_attempts = int(getattr(settings, "PLATFORM_API_READ_MAX_RETRIES", 2))
+        self.max_retry_wait_seconds = float(getattr(settings, "PLATFORM_API_MAX_RETRY_WAIT_SECONDS", 2.5))
         self._last_request_headers: dict[str, str] = {}
 
     def _generate_hmac_headers(
@@ -253,6 +280,79 @@ class PlatformAPIClient:
             return False
         return math.isfinite(timestamp_value) and timestamp_value > 0
 
+    def _normalize_endpoint(self, endpoint: str) -> str:
+        normalized = "/" + endpoint.strip()
+        if normalized.startswith("//"):
+            normalized = normalized[1:]
+        if not normalized.endswith("/"):
+            normalized = f"{normalized}/"
+        if normalized.startswith("/api/"):
+            normalized = normalized[len("/api") :]
+        return normalized
+
+    def _is_read_retry_candidate(self, method: str, endpoint: str) -> bool:
+        normalized_method = method.upper()
+        if normalized_method == "GET":
+            return True
+        if normalized_method != "POST":
+            return False
+        return self._normalize_endpoint(endpoint) in _READ_ONLY_POST_RETRY_ENDPOINTS
+
+    def _coerce_retry_after(self, value: Any) -> int | None:
+        if value is None:
+            return None
+
+        parsed: int | None = None
+        if isinstance(value, (int, float)):
+            if not math.isfinite(float(value)):
+                return None
+            parsed = max(1, math.ceil(float(value)))
+            return parsed
+
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.isdigit():
+            parsed = int(text)
+        else:
+            try:
+                target_dt = parsedate_to_datetime(text)
+            except (TypeError, ValueError, IndexError):
+                return None
+            parsed = math.ceil(target_dt.timestamp() - time.time())
+        return max(1, parsed)
+
+    def _get_retry_after_seconds(self, response: requests.Response) -> int | None:
+        header_retry_after = self._coerce_retry_after(response.headers.get("Retry-After"))
+        if header_retry_after is not None:
+            return header_retry_after
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        if isinstance(payload, dict):
+            return self._coerce_retry_after(payload.get("retry_after"))
+        return None
+
+    def _extract_error_message(self, error_data: dict[str, Any]) -> str:
+        for key in ("error", "detail", "message"):
+            value = error_data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "Request failed"
+
+    def _compute_retry_delay(self, response: requests.Response, attempt: int) -> float:
+        """
+        Exponential backoff with full jitter, bounded by a hard wait cap.
+        `attempt` is zero-based.
+        """
+        retry_after_seconds = self._get_retry_after_seconds(response)
+        exponential_backoff = self.retry_backoff_seconds * (2**attempt)
+        jitter = random.uniform(0.0, max(exponential_backoff, 0.001))  # noqa: S311
+        chosen_delay = max(retry_after_seconds or 0, jitter)
+        return min(chosen_delay, self.max_retry_wait_seconds)
+
     def _handle_api_response(self, response: requests.Response, endpoint: str) -> dict[str, Any]:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             try:
@@ -264,14 +364,21 @@ class PlatformAPIClient:
             error_data = response.json()
         except ValueError:
             error_data = {"error": "Invalid response format"}
+        if not isinstance(error_data, dict):
+            error_data = {"error": str(error_data)}
+
+        error_message = self._extract_error_message(error_data)
+        retry_after = self._get_retry_after_seconds(response)
 
         raise PlatformAPIError(
-            message=f"API request failed: {error_data.get('error', 'Unknown error')}",
+            message=f"API request failed: {error_message}",
             status_code=response.status_code,
             response_data=error_data,
+            retry_after=retry_after,
+            is_rate_limited=response.status_code == HTTPStatus.TOO_MANY_REQUESTS,
         )
 
-    def _make_request(  # noqa: PLR0913
+    def _make_request(  # noqa: C901, PLR0912, PLR0913, PLR0915
         self,
         method: str,
         endpoint: str,
@@ -287,14 +394,22 @@ class PlatformAPIClient:
         # Prepare JSON body and headers
         body_bytes, payload = self._prepare_json_body(data, user_id)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
-        headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
-        self._last_request_headers = dict(headers)
 
-        retry_statuses = retry_on_status or set()
+        auto_retry = self._is_read_retry_candidate(method, endpoint)
+        retry_statuses = retry_on_status or ({429, 503} if auto_retry else set())
+        if auto_retry and max_retries == 0:
+            max_retries = self.max_read_retry_attempts
+        use_legacy_canonical = False
         legacy_retry_attempted = False
 
         try:
             for attempt in range(max_retries + 1):
+                if use_legacy_canonical:
+                    headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
+                else:
+                    headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
+                self._last_request_headers = dict(headers)
+
                 response = portal_request(
                     method=method,
                     url=url,
@@ -308,13 +423,13 @@ class PlatformAPIClient:
 
                 should_retry = response.status_code in retry_statuses and attempt < max_retries
                 if should_retry:
-                    # Short bounded retry for transient upstream overload.
-                    backoff = self.retry_backoff_seconds * (attempt + 1)
+                    backoff = self._compute_retry_delay(response, attempt)
                     logger.warning(
-                        "⚠️ [API Client] Retrying %s %s after %s (%d/%d)",
+                        "⚠️ [API Client] Retrying %s %s after %s in %.2fs (%d/%d)",
                         method,
                         endpoint,
                         response.status_code,
+                        backoff,
                         attempt + 1,
                         max_retries,
                     )
@@ -325,7 +440,7 @@ class PlatformAPIClient:
                     not legacy_retry_attempted
                     and response.status_code == HTTPStatus.UNAUTHORIZED
                     and urllib.parse.urlsplit(url).scheme.lower() == "https"
-                    and not self._should_use_legacy_canonical(url)
+                    and not use_legacy_canonical
                 ):
                     try:
                         error_data = response.json()
@@ -333,9 +448,7 @@ class PlatformAPIClient:
                         error_data = {}
                     error_text = str(error_data.get("error", "")).lower()
                     if "hmac" in error_text:
-                        legacy_headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
-                        headers = legacy_headers
-                        self._last_request_headers = dict(headers)
+                        use_legacy_canonical = True
                         legacy_retry_attempted = True
                         continue
 
@@ -345,10 +458,13 @@ class PlatformAPIClient:
                         error_data = response.json()
                     except ValueError:
                         error_data = {"error": "Authentication failed"}
+                    if not isinstance(error_data, dict):
+                        error_data = {"error": "Authentication failed"}
+                    error_msg = self._extract_error_message(error_data)
                     return {
                         "success": False,
                         "authenticated": False,
-                        "error": error_data.get("error", "Authentication failed"),
+                        "error": error_msg,
                     }
 
                 return self._handle_api_response(response, endpoint)
@@ -376,11 +492,17 @@ class PlatformAPIClient:
             error_data = response.json()
         except ValueError:
             error_data = {"error": "Invalid response format"}
+        if not isinstance(error_data, dict):
+            error_data = {"error": str(error_data)}
+
+        error_message = self._extract_error_message(error_data)
 
         raise PlatformAPIError(
-            message=f"Binary API request failed: {error_data.get('error', 'Unknown error')}",
+            message=f"Binary API request failed: {error_message}",
             status_code=response.status_code,
             response_data=error_data,
+            retry_after=self._get_retry_after_seconds(response),
+            is_rate_limited=response.status_code == HTTPStatus.TOO_MANY_REQUESTS,
         )
 
     def _make_binary_request(

@@ -343,6 +343,7 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
+    "EXCEPTION_HANDLER": "apps.api.exception_handlers.platform_exception_handler",
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
@@ -604,13 +605,16 @@ THROTTLE_RATES = {
     "2fa_verify": "10/minute",
     # Customer-based rates (per customer account)
     "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "100/minute"),
-    "customer_burst": "30/10s",
+    "customer_burst": "50/10s",
+    # Internal portal HMAC traffic (service-to-service)
+    "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", "100/minute"),
+    "portal_hmac_burst": "50/10s",
     # Anonymous rates
     "anon": "20/minute",
     "anon_burst": "10/10s",
     # Standard authenticated rates
-    "user": "60/minute",
-    "user_burst": "20/10s",
+    "user": "100/minute",
+    "user_burst": "50/10s",
     # Service operations
     "provision": "10/minute",
     "backup": "5/minute",
@@ -626,6 +630,8 @@ THROTTLE_RATES = {
 
 # Add throttling classes to REST_FRAMEWORK
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = [
+    "apps.common.performance.rate_limiting.PortalHMACRateThrottle",
+    "apps.common.performance.rate_limiting.PortalHMACBurstThrottle",
     "apps.common.performance.rate_limiting.CustomerRateThrottle",
     "apps.common.performance.rate_limiting.BurstRateThrottle",
 ]

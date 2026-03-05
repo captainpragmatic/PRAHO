@@ -1,7 +1,22 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% if tickets %}
+{% if rate_limited %}
+<div class="bg-amber-900/30 border border-amber-500/50 rounded-lg p-6">
+  <div class="flex items-start gap-3">
+    <div class="mt-0.5">
+      {% icon "warning" size="sm" css_class="text-amber-300" %}
+    </div>
+    <div>
+      <h3 class="text-amber-200 font-medium">{% trans "Temporarily rate limited" %}</h3>
+      <p class="text-amber-100/90 mt-1">{{ rate_limit_message }}</p>
+      <a href="{{ rate_limit_retry_url|default:request.get_full_path }}" class="mt-4 inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-500 transition-colors">
+        {% trans "Try again" %}
+      </a>
+    </div>
+  </div>
+</div>
+{% elif tickets %}
 
 <!-- Desktop Table View (hidden on mobile) -->
 <div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
