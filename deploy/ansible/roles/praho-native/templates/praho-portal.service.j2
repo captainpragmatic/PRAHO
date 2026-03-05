@@ -30,7 +30,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths={{ project_root }}/logs /var/log/praho/portal /var/log/praho/portal-staging
+ReadWritePaths={{ project_root }}/logs /var/log/praho/portal /var/log/praho/portal-staging {{ project_root }}/src/services/portal
 
 [Install]
 WantedBy=multi-user.target

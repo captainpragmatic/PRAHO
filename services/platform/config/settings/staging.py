@@ -79,7 +79,7 @@ MIDDLEWARE = [
 # Set SECURE_SSL_REDIRECT = False if staging uses HTTP
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True  # Set to False if staging is HTTP-only
-SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"health/", r"^api/"]  # Allow health checks and internal API over HTTP from localhost
 
 # Cookie Security - Match production if staging has HTTPS
 SESSION_COOKIE_SECURE = True  # Set to False if staging is HTTP-only

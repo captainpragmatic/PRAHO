@@ -117,7 +117,7 @@ MIDDLEWARE = [
 # SSL/TLS Configuration - Behind TLS-terminating load balancer
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
-SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"health/", r"^api/"]  # Allow health checks and internal API over HTTP from localhost
 
 # Cookie Security - Require HTTPS for all cookies
 SESSION_COOKIE_SECURE = True

@@ -44,6 +44,13 @@ if not PLATFORM_API_SECRET:
     )
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "20"))
 
+# Allow HTTP for internal Platform communication (native deploys use localhost)
+PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_HTTP", "False").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
 # Security settings (less strict than production for testing)
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True

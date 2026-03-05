@@ -47,6 +47,7 @@ class PortalAuthenticationMiddleware:
         "/media/",
         "/status/",
         "/favicon.ico",
+        "/robots.txt",
         "/cookie-policy/",
         "/api/cookie-consent/",
     ]

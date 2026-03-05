@@ -18,6 +18,8 @@ _PROD_ENV = {
     "SECRET_KEY": "test-secret-key-for-logging-config-tests-only-not-real",
     "PLATFORM_API_SECRET": "dGVzdC1zZWNyZXQtZm9yLWxvZ2dpbmctY29uZmlnLXRlc3Rz",
     "PLATFORM_API_ALLOW_INSECURE_HTTP": "true",
+    "ALLOWED_HOSTS": "portal.pragmatichost.com",
+    "PORTAL_DOMAIN": "portal.pragmatichost.com",
 }
 
 

@@ -4,7 +4,7 @@ Customer-facing URLs only - authentication handled via platform API.
 """
 
 from django.conf import settings
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.urls import include, path
 
@@ -14,6 +14,21 @@ from apps.common.views import cookie_consent_view, cookie_policy_view
 # Portal status endpoint
 def portal_status(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "healthy", "service": "portal"})
+
+
+def robots_txt(request: HttpRequest) -> HttpResponse:
+    lines = [
+        "User-agent: *",
+        "Disallow: /dashboard/",
+        "Disallow: /billing/",
+        "Disallow: /tickets/",
+        "Disallow: /services/",
+        "Disallow: /order/",
+        "Disallow: /api/",
+        "Allow: /login/",
+        "Allow: /register/",
+    ]
+    return HttpResponse("\n".join(lines), content_type="text/plain")
 
 
 urlpatterns = [
@@ -32,6 +47,8 @@ urlpatterns = [
     # GDPR / Legal pages (public, no auth required)
     path("cookie-policy/", cookie_policy_view, name="cookie_policy"),
     path("api/cookie-consent/", cookie_consent_view, name="cookie_consent"),
+    # SEO / Crawlers
+    path("robots.txt", robots_txt, name="robots_txt"),
     # API client health check
     path("status/", portal_status, name="portal_status"),
     # API proxy endpoints
