@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **Portal Design System**: Complete component library, design tokens, and living styleguide
+  - Design tokens (colors, spacing, typography) in Tailwind config
+  - 10+ reusable template components: `page_header`, `section_card`, `modal`, `toast`,
+    `badge`, `empty_state`, `form_actions`, `form_error_summary`, `stat_tile`, `table`
+  - Living styleguide at `/styleguide/` (DEBUG-only) with all component variants
+  - Extracted modal and toast JS into static modules
+  - Bridge template tags for auth form componentization
+  - Consolidated inline styles into `input.css`
+  - Standardized icons (SVG-only, removed emoji from templates)
+  - Canonicalized mobile header and cookie banner
+- **QA Tooling**: 4 new Makefile targets for design system quality
+  - `make lint-templates` — Template lint with 9 rules (TMPL001–TMPL009)
+  - `make check-parity` — Platform↔portal template component parity check
+  - `make audit-a11y` — Accessibility audit (lang, labels, autofocus, captions)
+  - `make audit-dark-mode` — Dark mode coverage and contrast audit
+- **Testing**: 30+ UI regression tests covering template tags, filters, and components
+  - 12 new test files: alert, badge, button, card, icon, input, modal, page primitives,
+    SVG policy, toast, design tokens, mobile layouts, XSS sanitization
+  - Integration tests for template lint rules
+
+### Changed
+
+- **Portal**: Normalized billing detail templates with status components
+- **Portal**: Migrated `page_header` and `section_card` across 20+ templates (billing,
+  tickets, services, MFA, account security, dashboard)
+- **Docs**: Added `docs/architecture/ui-ux/portal-design-system.md` as canonical design
+  system specification
+
+### Fixed
+
+- **Deployment**: Validate `deploy_method` value (must be `git` or `rsync`) — fails fast
+  on typos like `GIT` or `Git` that would silently skip code deployment
+- **Deployment**: Cleared stale `PRAHO_VERSION` default in `.env.example.prod` to force
+  explicit version setting
+- **Tooling**: A11Y004 (missing `lang` on `<html>`), A11Y007 (autofocus on non-first input)
+- **Tooling**: DM005 double-counting fix, TMPL005/008 precision, TMPL001 unquoted fix
+- **Tooling**: Dead code removal (`EXCLUDE_FROM_INPUT_CHECK`, `DARK_VARIANT`, `IGNORECASE`)
+
+### Removed
+
+- Deleted `table_enhanced.html` (merged into `table.html`)
+- Deleted `portal_mobile_header.html` (replaced by canonicalized header)
+- Deleted 5 stale docs: `portal-ui-ux-backlog.md`, `phase-b1-pattern-audit.md`,
+  `8-agent-consolidated-audit.md`, `setup-initial-data.md`, `orders.md`
 
 ---
 
