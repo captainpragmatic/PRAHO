@@ -144,7 +144,7 @@ def require_authentication(view_func: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.session.get("customer_id") or not request.session.get("user_id"):
             if request.headers.get("Accept") == "application/json":
-                return JsonResponse({"error": _("Autentificare necesară")}, status=401)
+                return JsonResponse({"error": _("Authentication required")}, status=401)
             return redirect("/login/")
 
         return cast(HttpResponse, view_func(request, *args, **kwargs))
@@ -171,15 +171,15 @@ def require_customer_role(  # noqa: C901
             # Check basic authentication first
             if not request.session.get("customer_id") or not request.session.get("user_id"):
                 if request.headers.get("Accept") == "application/json":
-                    return JsonResponse({"error": _("Autentificare necesară")}, status=401)
+                    return JsonResponse({"error": _("Authentication required")}, status=401)
                 return redirect("/login/")
 
             customer_id = _get_selected_customer_id(request)
             if not customer_id:
                 logger.warning(f"🚨 [Security] No customer selected for user {request.session.get('user_id')}")
                 if request.headers.get("Accept") == "application/json":
-                    return JsonResponse({"error": _("Niciun client selectat")}, status=403)
-                return HttpResponseForbidden(_("Niciun client selectat"), content_type="text/plain")
+                    return JsonResponse({"error": _("No customer selected")}, status=403)
+                return HttpResponseForbidden(_("No customer selected"), content_type="text/plain")
 
             # Real-time verification if requested
             if realtime_verification:
@@ -190,8 +190,8 @@ def require_customer_role(  # noqa: C901
                         f"user {request.session.get('user_id')} -> customer {customer_id}"
                     )
                     if request.headers.get("Accept") == "application/json":
-                        return JsonResponse({"error": _("Acces interzis")}, status=403)
-                    return HttpResponseForbidden(_("Acces interzis"), content_type="text/plain")
+                        return JsonResponse({"error": _("Access denied")}, status=403)
+                    return HttpResponseForbidden(_("Access denied"), content_type="text/plain")
 
                 user_role = verification.get("role", "viewer")
             else:
@@ -203,8 +203,8 @@ def require_customer_role(  # noqa: C901
                     f"🚨 [Security] No role found for user {request.session.get('user_id')} in customer {customer_id}"
                 )
                 if request.headers.get("Accept") == "application/json":
-                    return JsonResponse({"error": _("Rol inexistent")}, status=403)
-                return HttpResponseForbidden(_("Rol inexistent"), content_type="text/plain")
+                    return JsonResponse({"error": _("Role not found")}, status=403)
+                return HttpResponseForbidden(_("Role not found"), content_type="text/plain")
 
             # Check role permissions
             if user_role not in required_roles:
@@ -213,8 +213,8 @@ def require_customer_role(  # noqa: C901
                     f"has role '{user_role}' but requires one of {required_roles}"
                 )
                 if request.headers.get("Accept") == "application/json":
-                    return JsonResponse({"error": _("Permisiuni insuficiente")}, status=403)
-                return HttpResponseForbidden(_("Permisiuni insuficiente"), content_type="text/plain")
+                    return JsonResponse({"error": _("Insufficient permissions")}, status=403)
+                return HttpResponseForbidden(_("Insufficient permissions"), content_type="text/plain")
 
             # Store current role in request for use in view
             request.user_role = user_role  # type: ignore[attr-defined]

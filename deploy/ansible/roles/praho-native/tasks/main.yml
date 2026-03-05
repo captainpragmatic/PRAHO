@@ -320,7 +320,19 @@
     owner: caddy
     group: caddy
     mode: "0755"
-    recurse: yes
+
+- name: Create Caddy log files with correct ownership
+  file:
+    path: "/var/log/caddy/{{ item }}"
+    state: touch
+    owner: caddy
+    group: caddy
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve
+  loop:
+    - portal-access.log
+    - platform-access.log
 
 - name: Template Caddyfile
   template:

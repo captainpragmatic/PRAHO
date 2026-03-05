@@ -79,6 +79,7 @@ except ImportError as e:
     logging.getLogger(__name__).warning(f"⚠️ [Security] Could not import security validation: {e}")
 
 # Security settings
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # TLS terminated by reverse proxy
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True

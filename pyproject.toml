@@ -182,7 +182,6 @@ platform = [
 
     # File handling & Storage
     "Pillow>=12.1.1",  # CVE-2026-25990: OOB write in PSD parser
-    "django-storages>=1.14.0",
     "boto3>=1.28.0",
 
     # PDF Generation
