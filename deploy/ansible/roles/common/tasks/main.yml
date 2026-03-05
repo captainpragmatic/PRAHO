@@ -2,6 +2,11 @@
 # PRAHO - Common Role Tasks
 # =============================================================================
 
+# Fix cffi/cryptography on fresh Ubuntu 24.04 — required by Ansible's apt module
+- name: Ensure Python cffi backend is available
+  raw: apt-get install -y python3-cffi-backend python3-apt
+  changed_when: false
+
 - name: Update apt cache
   apt:
     update_cache: yes

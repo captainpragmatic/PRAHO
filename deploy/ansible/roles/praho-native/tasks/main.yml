@@ -253,32 +253,13 @@
   become_user: "{{ project_user }}"
   environment: "{{ django_env }}"
 
-- name: Setup categories
+- name: Set up initial data (categories, settings, tasks, templates, superuser)
   command: >
-    {{ project_root }}/.venv/bin/python manage.py setup_categories
+    {{ project_root }}/.venv/bin/python manage.py setup_initial_data
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
   environment: "{{ django_env }}"
-  failed_when: false
-
-- name: Setup default settings
-  command: >
-    {{ project_root }}/.venv/bin/python manage.py setup_default_settings
-  args:
-    chdir: "{{ project_root }}/src/services/platform"
-  become_user: "{{ project_user }}"
-  environment: "{{ django_env }}"
-  failed_when: false
-
-- name: Setup scheduled tasks
-  command: >
-    {{ project_root }}/.venv/bin/python manage.py setup_scheduled_tasks
-  args:
-    chdir: "{{ project_root }}/src/services/platform"
-  become_user: "{{ project_user }}"
-  environment: "{{ django_env }}"
-  failed_when: false
 
 # ---------------------------------------------------------------------------
 # 8. Caddy reverse proxy

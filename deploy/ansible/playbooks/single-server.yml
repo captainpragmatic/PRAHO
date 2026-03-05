@@ -48,7 +48,7 @@
     - name: Run post-deploy setup commands
       command: "docker exec praho_platform python manage.py {{ item }}"
       loop:
-        - setup_categories
+        - setup_settings_categories
         - setup_default_settings
         - setup_email_templates
         - setup_tax_rules

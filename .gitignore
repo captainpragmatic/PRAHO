@@ -167,3 +167,7 @@ services/platform/logs/*
 services/portal/logs/*
 !services/portal/logs/.gitkeep
 i18n-review-*.yaml
+
+# Deployment secrets
+deploy/.env.*
+!deploy/.env.*.example

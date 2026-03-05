@@ -53,6 +53,9 @@ RUN uv sync --group platform --group prod --frozen --no-dev
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ ./
 
+# Copy entrypoint script
+COPY deploy/platform/entrypoint.sh /app/entrypoint.sh
+
 # ===============================================================================
 # STATIC FILES & ASSETS 📁
 # ===============================================================================
@@ -72,7 +75,8 @@ RUN addgroup --system django \
     && adduser --system --group django
 
 # Set proper permissions
-RUN chown -R django:django /app
+RUN chmod +x /app/entrypoint.sh \
+    && chown -R django:django /app
 USER django
 
 # ===============================================================================
@@ -87,5 +91,5 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # ===============================================================================
 EXPOSE 8700
 
-# Default command - can be overridden
-CMD ["gunicorn", "--bind", "0.0.0.0:8700", "--workers", "4", "--timeout", "120", "config.wsgi:application"]
+# Entrypoint runs migrations, collectstatic, and setup_initial_data before Gunicorn
+ENTRYPOINT ["/app/entrypoint.sh"]

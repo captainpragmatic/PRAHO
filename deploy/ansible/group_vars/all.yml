@@ -22,6 +22,7 @@ db_port: 5432
 
 # Application
 secret_key: "{{ lookup('env', 'PRAHO_SECRET_KEY') | default('generate-a-strong-key', true) }}"
+hmac_secret: "{{ lookup('env', 'PRAHO_HMAC_SECRET') | default('', true) }}"
 debug: false
 
 # Docker

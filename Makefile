@@ -179,14 +179,10 @@ dev-platform: check-env build-css
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
 	@echo "🗄️ Running migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
-	@echo "🏷️ Setting up default setting categories..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
-	@echo "⚙️ Setting up default system settings..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
-	@echo "🔧 Setting up comprehensive test data..."
+	@echo "🎯 Setting up initial data..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --settings=config.settings.dev || echo "⚠️ Initial data setup skipped"
+	@echo "🔧 Loading dev sample data..."
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
-	@echo "⚙️ Setting up scheduled tasks..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --settings=config.settings.dev || echo "⚠️ Scheduled tasks setup skipped"
 	@echo "🚀 Starting Django-Q2 workers in background..."
 	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 &
 	@QCLUSTER_PID=$$!; \
@@ -412,24 +408,16 @@ migrate:
 
 fixtures:
 	@echo "📊 [Platform] Loading comprehensive sample data..."
-	@echo "🏷️ Setting up default setting categories..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
-	@echo "⚙️ Setting up default system settings..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
-	@echo "📧 Setting up email templates..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_email_templates --settings=config.settings.dev || echo "⚠️ Email templates setup skipped"
+	@echo "🎯 Setting up initial data (core + business)..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --include-business --settings=config.settings.dev
 	@echo "🌐 Syncing infrastructure providers..."
 	@$(PYTHON_PLATFORM_MANAGE) sync_providers --settings=config.settings.dev || echo "⚠️ Provider sync skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --settings=config.settings.dev
 
 fixtures-light:
 	@echo "📊 [Platform] Loading minimal sample data (fast)..."
-	@echo "🏷️ Setting up default setting categories..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_categories --settings=config.settings.dev || echo "⚠️ Categories setup skipped"
-	@echo "⚙️ Setting up default system settings..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_default_settings --settings=config.settings.dev || echo "⚠️ Default settings setup skipped"
-	@echo "📧 Setting up email templates..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_email_templates --settings=config.settings.dev || echo "⚠️ Email templates setup skipped"
+	@echo "🎯 Setting up initial data (core + business)..."
+	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --include-business --settings=config.settings.dev
 	@echo "🌐 Syncing infrastructure providers..."
 	@$(PYTHON_PLATFORM_MANAGE) sync_providers --settings=config.settings.dev || echo "⚠️ Provider sync skipped"
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev
@@ -890,7 +878,7 @@ infra-destroy-dev:
 # ENVIRONMENT DEPLOYMENT (Ansible) 🚀
 # ===============================================================================
 
-.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-prod
+.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-staging-native deploy-prod
 
 deploy-dev:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (Docker)..."
@@ -903,9 +891,18 @@ deploy-dev-native:
 	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
 
 deploy-staging:
-	@echo "🚀 [Deploy] Deploying PRAHO to staging..."
+	@echo "🚀 [Deploy] Deploying PRAHO to staging (two-server)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@cd deploy/ansible && ansible-playbook -i inventory/staging.yml playbooks/two-servers.yml
+
+deploy-staging-native:
+	@for var in PRAHO_STAGING_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
+		eval val=\$$$$var; \
+		if [ -z "$$val" ]; then echo "❌ Missing env var: $$var"; echo "  source deploy/.env.staging && make deploy-staging-native"; exit 1; fi; \
+	done
+	@echo "🚀 [Deploy] Deploying PRAHO to staging (native single server)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd deploy/ansible && ansible-playbook -i inventory/staging-single-server.yml playbooks/native-single-server.yml -v
 
 deploy-prod:
 	@echo "🚀 [Deploy] Deploying PRAHO to production..."
