@@ -34,68 +34,22 @@
 
   <!-- Stats Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-    <!-- My Services -->
-    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-      <div class="flex items-center">
-        <div class="flex-shrink-0">
-          {% icon "services" size="xl" css_class="text-blue-400" %}
-        </div>
-        <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'My Services' %}</p>
-          <p class="text-2xl font-semibold text-white">{{ dashboard_data.stats.active_services }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- My Tickets -->
-    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-      <div class="flex items-center">
-        <div class="flex-shrink-0">
-          {% icon "tickets" size="xl" css_class="text-amber-400" %}
-        </div>
-        <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'My Open Tickets' %}</p>
-          <p class="text-2xl font-semibold text-white">{{ dashboard_data.stats.open_tickets }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Account Status -->
-    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-      <div class="flex items-center">
-        <div class="flex-shrink-0">
-          {% icon "check" size="xl" css_class="text-green-400" %}
-        </div>
-        <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</p>
-          <p class="text-2xl font-semibold text-green-400">{% trans 'Active' %}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Next Invoice -->
-    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
-      <div class="flex items-center">
-        <div class="flex-shrink-0">
-          {% icon "clipboard" size="xl" css_class="text-purple-400" %}
-        </div>
-        <div class="ml-4">
-          <p class="text-sm font-medium text-slate-400">{% trans 'Next Billing' %}</p>
-          <p class="text-sm font-semibold text-white">{% trans 'End of Month' %}</p>
-        </div>
-      </div>
-    </div>
+    {% trans 'My Services' as lbl_services %}
+    {% stat_tile label=lbl_services value=dashboard_data.stats.active_services icon="services" variant="primary" %}
+    {% trans 'My Open Tickets' as lbl_tickets %}
+    {% stat_tile label=lbl_tickets value=dashboard_data.stats.open_tickets icon="tickets" variant="warning" %}
+    {% trans 'Account Status' as lbl_status %}
+    {% trans 'Active' as val_active %}
+    {% stat_tile label=lbl_status value=val_active icon="check" variant="success" %}
+    {% trans 'Next Billing' as lbl_billing %}
+    {% trans 'End of Month' as val_billing %}
+    {% stat_tile label=lbl_billing value=val_billing icon="clipboard" variant="info" %}
   </div>
 
   <!-- Main Content Grid -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
     <!-- Recent Invoices -->
-    <div class="bg-slate-800 rounded-lg border border-slate-700">
-      <div class="p-6">
-        <h3 class="text-lg font-medium text-white mb-4">
-          {% icon "receipt" size="md" css_class="text-slate-400 mr-1" %} {% trans 'My Recent Invoices & Proformas' %}
-        </h3>
-
+    {% section_card title="My Recent Invoices & Proformas" icon="receipt" %}
         <div class="space-y-3">
           {% for invoice in dashboard_data.recent_documents %}
           <a href="{% if invoice.document_type == 'proforma' %}{% url 'billing:proforma_detail' invoice.number %}{% else %}{% url 'billing:invoice_detail' invoice.number %}{% endif %}" class="block group">
@@ -140,15 +94,10 @@
             {% trans 'View all' %} →
           </a>
         </div>
-      </div>
-    </div>
+    {% end_section_card %}
 
     <!-- Recent Tickets -->
-    <div class="bg-slate-800 rounded-lg border border-slate-700">
-      <div class="p-6">
-        <h3 class="text-lg font-medium text-white mb-4">
-          {% icon "tickets" size="md" css_class="text-slate-400 mr-1" %} {% trans 'My Recent Tickets' %}
-        </h3>
+    {% section_card title="My Recent Tickets" icon="tickets" %}
 
         <div class="space-y-3">
           {% for ticket in dashboard_data.recent_tickets %}
@@ -194,15 +143,10 @@
             {% trans 'View all' %} →
           </a>
         </div>
-      </div>
-    </div>
+    {% end_section_card %}
 
     <!-- Quick Actions -->
-    <div class="bg-slate-800 rounded-lg border border-slate-700">
-      <div class="p-6">
-        <h3 class="text-lg font-medium text-white mb-4">
-          {% icon "lightning" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Quick Actions' %}
-        </h3>
+    {% section_card title="Quick Actions" icon="lightning" %}
 
         <div class="grid grid-cols-2 gap-3">
           <a href="{% url 'tickets:create' %}" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-red-600 rounded-lg hover:bg-red-700 focus:ring-4 focus:ring-red-300 transition-all duration-200">
@@ -218,15 +162,10 @@
             {% icon "user" size="sm" css_class="mr-1" %} {% trans 'My Profile' %}
           </a>
         </div>
-      </div>
-    </div>
+    {% end_section_card %}
 
     <!-- Account Information -->
-    <div class="bg-slate-800 rounded-lg border border-slate-700">
-      <div class="p-6">
-        <h3 class="text-lg font-medium text-white mb-4">
-          {% icon "building" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Account Information' %}
-        </h3>
+    {% section_card title="Account Information" icon="building" %}
 
         <div class="space-y-3">
           {% with primary_customer=dashboard_data.customers.0 %}
@@ -250,8 +189,7 @@
           {% endif %}
           {% endwith %}
         </div>
-      </div>
-    </div>
+    {% end_section_card %}
   </div>
   </div>
 

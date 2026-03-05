@@ -32,7 +32,7 @@ Optional:
 ===============================================================================
 {% endcomment %}
 
-{% load i18n %}
+{% load i18n ui_components %}
 
 <div class="space-y-4">
 
@@ -66,9 +66,7 @@ Optional:
           <label for="list-filter-search" class="sr-only">{% trans 'Search' %}</label>
           <div class="relative">
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg class="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
+              {% icon "search" css_class="text-slate-400" %}
             </div>
             <input type="text" id="list-filter-search" name="q" value="{{ filter_search_value }}" autocomplete="off" hx-get="{{ filter_search_url }}" hx-target="#{{ filter_content_id }}" hx-trigger="keyup changed delay:600ms" hx-include="#list-filter-active-tab{% if filter_extra_selects_include %}, .list-filter-extra-select{% endif %}" hx-indicator="#{{ filter_skeleton_id }}" class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="{{ filter_search_placeholder|default:'Search…' }}">
           </div>
@@ -92,9 +90,7 @@ Optional:
         <label for="list-filter-search" class="sr-only">{% trans 'Search' %}</label>
         <div class="relative">
           <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <svg class="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+            {% icon "search" css_class="text-slate-400" %}
           </div>
           <input type="text" id="list-filter-search" name="q" value="{{ filter_search_value }}" autocomplete="off" hx-get="{{ filter_search_url }}" hx-target="#{{ filter_content_id }}" hx-trigger="keyup changed delay:600ms" hx-include="{% if filter_extra_selects_include %}.list-filter-extra-select{% endif %}" hx-indicator="#{{ filter_skeleton_id }}" class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="{{ filter_search_placeholder|default:'Search…' }}">
         </div>

@@ -1,0 +1,306 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}Design System Styleguide — PRAHO Portal{% endblock %}
+
+{% block content %}
+<div class="flex gap-6">
+
+  {# ── Sticky sidebar navigation ────────────────────────────────────────── #}
+  <aside class="hidden lg:block w-48 shrink-0">
+    <div class="sticky top-6">
+      <p class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">Styleguide</p>
+      <nav class="space-y-1" aria-label="Styleguide sections">
+        {% for section in sections %}
+        <a href="#{{ section.id }}"
+           class="block px-3 py-1.5 rounded text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors">
+          {{ section.label }}
+        </a>
+        {% endfor %}
+      </nav>
+      <div class="mt-6 pt-4 border-t border-slate-700">
+        <p class="text-xs text-slate-500">DEBUG only</p>
+      </div>
+    </div>
+  </aside>
+
+  {# ── Main content ─────────────────────────────────────────────────────── #}
+  <div class="flex-1 min-w-0 space-y-12">
+
+    {# Header #}
+    <div class="border-b border-slate-700 pb-6">
+      <h1 class="text-2xl font-bold text-white">PRAHO Design System</h1>
+      <p class="text-slate-400 mt-1 text-sm">
+        Living styleguide — all components, all variants. Available only in DEBUG mode.
+      </p>
+    </div>
+
+    {# ── § Colors & Typography ────────────────────────────────────────── #}
+    <section id="colors">
+      <h2 class="text-lg font-semibold text-white mb-4">Colors &amp; Typography</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+        <div>
+          <p class="text-xs text-slate-400 mb-2">Headings</p>
+          <div class="space-y-1">
+            <p class="text-2xl font-bold text-white">Heading 2XL — Page title</p>
+            <p class="text-xl font-semibold text-white">Heading XL — Section title</p>
+            <p class="text-lg font-medium text-white">Heading LG — Sub-section</p>
+            <p class="text-base font-medium text-slate-200">Body Medium — Standard text</p>
+            <p class="text-sm text-slate-300">Body SM — Secondary text</p>
+            <p class="text-xs text-slate-400">Caption — Metadata, small labels</p>
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-slate-400 mb-2">Design Token Colors</p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1 rounded bg-blue-600 text-white text-xs">primary (blue-600)</span>
+            <span class="px-3 py-1 rounded bg-green-600 text-white text-xs">success (green-600)</span>
+            <span class="px-3 py-1 rounded bg-yellow-600 text-white text-xs">warning (yellow-600)</span>
+            <span class="px-3 py-1 rounded bg-red-600 text-white text-xs">danger (red-600)</span>
+            <span class="px-3 py-1 rounded bg-slate-600 text-white text-xs">secondary (slate-600)</span>
+            <span class="px-3 py-1 rounded bg-cyan-600 text-white text-xs">info (cyan-600)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# ── § Icons ────────────────────────────────────────────────── #}
+    <section id="icons">
+      <h2 class="text-lg font-semibold text-white mb-4">Icons</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+        <p class="text-xs text-slate-400 mb-4">
+          Usage: <code class="text-green-400">{% verbatim %}{% icon "name" size="sm|md|lg" %}{% endverbatim %}</code>
+        </p>
+        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+          {% for name in icon_names %}
+          <div class="flex flex-col items-center gap-1 p-2 rounded hover:bg-slate-700 transition-colors" title="{{ name }}">
+            {% icon name size="md" css_class="text-slate-100" %}
+            <span class="text-xs text-slate-400 text-center truncate w-full">{{ name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Badges ──────────────────────────────────────────────── #}
+    <section id="badges">
+      <h2 class="text-lg font-semibold text-white mb-4">Badges</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+        <p class="text-xs text-slate-400">
+          Usage: <code class="text-green-400">{% verbatim %}{% badge "Text" variant="success" %}{% endverbatim %}</code>
+        </p>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">Standard</p>
+          <div class="flex flex-wrap gap-2">
+            {% for label, variant in badge_variants %}
+            {% badge label variant=variant %}
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">Rounded (pills)</p>
+          <div class="flex flex-wrap gap-2">
+            {% for label, variant in badge_variants %}
+            {% badge label variant=variant rounded="full" %}
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">With icons</p>
+          <div class="flex flex-wrap gap-2">
+            {% badge "Active" variant="success" icon="check" %}
+            {% badge "Warning" variant="warning" icon="alert-triangle" %}
+            {% badge "Error" variant="danger" icon="x" %}
+            {% badge "Info" variant="info" icon="info" %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# ── § Buttons ──────────────────────────────────────────────── #}
+    <section id="buttons">
+      <h2 class="text-lg font-semibold text-white mb-4">Buttons</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+        <p class="text-xs text-slate-400">
+          Usage: <code class="text-green-400">{% verbatim %}{% button "Label" variant="primary" %}{% endverbatim %}</code>
+        </p>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">Variants</p>
+          <div class="flex flex-wrap gap-2">
+            {% for variant in button_variants %}
+            {% button variant|capfirst variant=variant %}
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">With icons</p>
+          <div class="flex flex-wrap gap-2">
+            {% button "Add" variant="primary" icon="plus" %}
+            {% button "Delete" variant="danger" icon="trash" %}
+            {% button "Download" variant="secondary" icon="download" %}
+            {% button "Settings" variant="info" icon="settings" %}
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">Sizes</p>
+          <div class="flex flex-wrap items-center gap-2">
+            {% button "Small" variant="primary" size="sm" %}
+            {% button "Medium (default)" variant="primary" %}
+            {% button "Large" variant="primary" size="lg" %}
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-slate-500 mb-2">Disabled</p>
+          <div class="flex flex-wrap gap-2">
+            {% button "Disabled Primary" variant="primary" disabled=True %}
+            {% button "Disabled Danger" variant="danger" disabled=True %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# ── § Alerts ───────────────────────────────────────────────── #}
+    <section id="alerts">
+      <h2 class="text-lg font-semibold text-white mb-4">Alerts</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-3">
+        <p class="text-xs text-slate-400 mb-2">
+          Usage: <code class="text-green-400">{% verbatim %}{% alert "message" variant="success" title="X" %}{% endverbatim %}</code>
+        </p>
+        {% for sample in alert_samples %}
+        {% alert sample.message variant=sample.variant title=sample.title %}
+        {% endfor %}
+        <div>
+          <p class="text-xs text-slate-500 mt-4 mb-2">Dismissible</p>
+          {% alert "This alert can be dismissed." variant="info" dismissible=True %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Status Labels ───────────────────────────────────────────────── #}
+    <section id="status">
+      <h2 class="text-lg font-semibold text-white mb-4">Status Labels</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+        <p class="text-xs text-slate-400 mb-4">
+          Usage: <code class="text-green-400">{% verbatim %}{% badge status|status_label variant=status|status_variant icon=status|status_icon %}{% endverbatim %}</code>
+        </p>
+        <div class="flex flex-wrap gap-2">
+          {% for status in status_samples %}
+          {% badge status|status_label variant=status|status_variant icon=status|status_icon %}
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Stat Tiles ──────────────────────────────────────────────────── #}
+    <section id="stat-tiles">
+      <h2 class="text-lg font-semibold text-white mb-4">Stat Tiles</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+        <p class="text-xs text-slate-400 mb-4">
+          Usage: <code class="text-green-400">{% verbatim %}{% stat_tile "Label" "Value" icon="currency" variant="success" %}{% endverbatim %}</code>
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 auto-rows-fr">
+          {% for tile in stat_tile_samples %}
+          {% stat_tile tile.label tile.value icon=tile.icon variant=tile.variant meta=tile.meta css_class="h-full" %}
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Breadcrumbs ─────────────────────────────────────────────────── #}
+    <section id="breadcrumbs">
+      <h2 class="text-lg font-semibold text-white mb-4">Breadcrumbs</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+        <p class="text-xs text-slate-400 mb-4">
+          Usage: <code class="text-green-400">{% verbatim %}{% breadcrumb items %}{% endverbatim %}</code>
+        </p>
+        {% breadcrumb breadcrumb_items %}
+      </div>
+    </section>
+
+    {# ── § Cards ───────────────────────────────────────────────── #}
+    <section id="cards">
+      <h2 class="text-lg font-semibold text-white mb-4">Cards</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+        <p class="text-xs text-slate-400 mb-4">
+          Usage: <code class="text-green-400">{% verbatim %}{% section_card title="Title" %}...{% end_section_card %}{% endverbatim %}</code>
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {% section_card title="Simple Card" icon="grid" %}
+            <p class="text-slate-300 text-sm">Standard card content with a title and body.</p>
+          {% end_section_card %}
+          {% section_card title="Card with Actions" icon="edit" %}
+            <p class="text-slate-300 text-sm">Card with action buttons in the footer area.</p>
+            {% form_actions submit_label="Save" cancel_url="#" %}
+          {% end_section_card %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Tables ──────────────────────────────────────────────── #}
+    <section id="tables">
+      <h2 class="text-lg font-semibold text-white mb-4">Tables</h2>
+      <div class="rounded-lg p-6 border border-slate-700 space-y-6">
+        <div>
+          <p class="text-xs text-slate-400 mb-3">
+            Usage: <code class="text-green-400">{% verbatim %}{% data_table columns rows %}{% endverbatim %}</code>
+          </p>
+          {% data_table table_headers table_rows show_actions=False pagination=False %}
+        </div>
+        <div>
+          <p class="text-xs text-slate-400 mb-3">Empty state</p>
+          {% empty_state "No records" icon="server" body="No data to display at this time." %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Forms ───────────────────────────────────────────────── #}
+    <section id="forms">
+      <h2 class="text-lg font-semibold text-white mb-4">Forms</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+        <p class="text-xs text-slate-400">
+          Usage: <code class="text-green-400">{% verbatim %}{% input_field name="field" label="Label" %}{% endverbatim %}</code>
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+          {% input_field "email" label="Email address" type="email" placeholder="user@example.com" icon_left="email" %}
+          {% input_field "domain" label="Domain name" placeholder="example.com" icon_left="domain" %}
+          {% input_field "password" label="Password" type="password" icon_left="lock" %}
+          {% input_field "notes" label="Notes" type="textarea" placeholder="Additional details..." %}
+          {% checkbox_field "agree" label="I agree to the terms and conditions" variant="primary" %}
+        </div>
+        <div class="max-w-2xl">
+          {% form_actions submit_label="Save Changes" cancel_url="#" %}
+        </div>
+      </div>
+    </section>
+
+    {# ── § Modals ───────────────────────────────────────────────── #}
+    <section id="modals">
+      <h2 class="text-lg font-semibold text-white mb-4">Modals</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+        <p class="text-xs text-slate-400">
+          Usage: <code class="text-green-400">{% verbatim %}{% modal "modal-id" "Title" %}...{% endmodal %}{% endverbatim %}</code>
+        </p>
+        <p class="text-sm text-slate-300">
+          Modals are controlled via HTMX or Alpine.js. The <code class="text-green-400">{% verbatim %}{% modal %}{% endverbatim %}</code> tag generates
+          the modal HTML shell — open via <code class="text-green-400">hx-target</code> or Alpine.
+        </p>
+        <div class="mt-4 p-4 rounded-lg bg-slate-700 border border-slate-600">
+          <p class="text-xs text-slate-400 mb-2">Standard modal (HTML shell)</p>
+          <button type="button" onclick="if (window.openModal) { openModal('modal-styleguide-modal-1'); } else { var el = document.getElementById('modal-styleguide-modal-1'); if (el) { el.style.display = 'block'; } }" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">Open Modal</button>
+          {% modal "styleguide-modal-1" "Modal Title" content="This is a sample modal body for styleguide verification." %}
+        </div>
+      </div>
+    </section>
+
+    {# ── Footer ────────────────────────────────────────────────────────── #}
+    <div class="border-t border-slate-700 pt-6 pb-12">
+      <p class="text-xs text-slate-500 text-center">
+        PRAHO Design System Styleguide — dynamically generated from
+        <code class="text-slate-400">apps/ui/templatetags/ui_components.py</code>
+      </p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

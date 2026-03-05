@@ -42,36 +42,4 @@ Usage: {% trans "Label" as bt1 %}{% button bt1 variant="primary" href="/url" hx_
 </button>
 {% endif %}
 
-<style>
-  /* HTMX loading indicator styles (scoped to this button only) */
-  .ui-btn.htmx-request .htmx-indicator {
-    display: inline-flex !important;
-  }
-
-  .ui-btn.htmx-request .htmx-indicator-text {
-    display: none !important;
-  }
-
-  /* Support the case when the indicator element itself is targeted */
-  .htmx-indicator.htmx-request {
-    display: inline-flex !important;
-  }
-
-  /* Override any global rules when some ancestor has .htmx-request */
-  .htmx-request .ui-btn .htmx-indicator {
-    display: none !important;
-  }
-  .htmx-request .ui-btn .htmx-indicator-text {
-    display: inline !important;
-  }
-
-  /* Normal form-submit loading state controlled by JS */
-  .ui-btn.is-loading .btn-label {
-    display: none !important;
-  }
-  .ui-btn.is-loading .btn-spinner {
-    display: inline-flex !important;
-    visibility: visible;
-    opacity: 1;
-  }
-</style>
+<!-- All button HTMX loading styles now live in assets/css/input.css -->

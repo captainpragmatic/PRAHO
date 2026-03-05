@@ -20,7 +20,7 @@ Optional Parameters:
 ===============================================================================
 {% endcomment %}
 
-{% load i18n %}
+{% load i18n ui_components %}
 
 <!-- Navigation Item -->
 {% if not staff_only or user.is_staff %}
@@ -34,9 +34,7 @@ Optional Parameters:
                     <div class="text-xl font-semibold text-slate-400">{{ title }}</div>
                     <div class="text-base text-slate-500">{{ subtitle }}</div>
                 </div>
-                <svg class="h-6 w-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                </svg>
+                {% icon "lock" size="lg" css_class="text-slate-500" %}
             </div>
         </div>
     {% elif is_button %}
@@ -65,9 +63,7 @@ Optional Parameters:
                     <div class="text-xl font-semibold text-slate-200 group-hover:text-white">{{ title }}</div>
                     <div class="text-base text-slate-400">{{ subtitle }}</div>
                 </div>
-                <svg class="h-6 w-6 text-slate-400 group-hover:text-slate-300 transition-transform group-hover:translate-x-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                </svg>
+                {% icon "chevron-right" size="lg" css_class="text-slate-400 group-hover:text-slate-300 transition-transform group-hover:translate-x-2" %}
             </div>
         </a>
     {% endif %}

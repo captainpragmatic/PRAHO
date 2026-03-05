@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n ui_components %}
 {# Cookie Consent Banner - GDPR Compliant (Portal) #}
 {# Included in base.html before closing </body> tag #}
 
@@ -12,7 +12,7 @@
      x-transition:leave="transition ease-in duration-200"
      x-transition:leave-start="opacity-100 translate-y-0"
      x-transition:leave-end="opacity-0 translate-y-4"
-     class="fixed bottom-0 inset-x-0 z-50 p-4"
+     class="fixed bottom-0 inset-x-0 z-40 p-4 max-h-[85vh] overflow-y-auto"
      role="dialog"
      aria-label="{% trans 'Cookie consent' %}"
      aria-modal="false">
@@ -23,7 +23,7 @@
             <div class="flex flex-col md:flex-row md:items-center gap-4">
                 <div class="flex-1">
                     <h3 class="text-lg font-semibold text-white mb-2">
-                        &#127850; {% trans "We Value Your Privacy" %}
+                        {% trans "We Value Your Privacy" %}
                     </h3>
                     <p class="text-slate-300 text-sm">
                         {% filter force_escape %}{% blocktrans %}
@@ -58,9 +58,7 @@
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-semibold text-white">{% trans "Cookie Preferences" %}</h3>
                 <button @click="showPreferences = false" class="text-slate-400 hover:text-white" aria-label="{% trans 'Close preferences' %}">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
+                    {% icon "x" %}
                 </button>
             </div>
 

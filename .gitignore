@@ -48,7 +48,7 @@ env/
 
 # IDE
 .idea/
-.vscode/
+.vscode/settings.json
 *.swp
 *.swo
 *~
@@ -162,6 +162,7 @@ django_q.log
 # Logs directory - ignore all contents but keep the directory structure
 logs/*
 !logs/.gitkeep
+QA/logs/
 services/platform/logs/*
 !services/platform/logs/.gitkeep
 services/portal/logs/*
@@ -171,3 +172,7 @@ i18n-review-*.yaml
 # Deployment secrets (legacy — env files now live at project root)
 deploy/.env.*
 deploy/ansible/.env.*
+
+# QA session artifacts (logs, screenshots) are excluded; planning docs are tracked
+QA/logs/
+QA/screenshots/

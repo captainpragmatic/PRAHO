@@ -17,6 +17,43 @@ from apps.common.pagination import PaginatorData, build_pagination_params
 
 from .services import BillingDataSyncService, InvoiceViewService
 
+logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# STATUS → BADGE VARIANT MAPS 🏷️
+# ===============================================================================
+
+INVOICE_STATUS_VARIANT_MAP: dict[str, str] = {
+    "paid": "success",
+    "issued": "primary",
+    "overdue": "danger",
+    "draft": "secondary",
+    "void": "secondary",
+    "refunded": "warning",
+    "sent": "primary",
+    "cancelled": "danger",
+}
+
+PROFORMA_STATUS_VARIANT_MAP: dict[str, str] = {
+    "draft": "secondary",
+    "sent": "primary",
+    "accepted": "success",
+    "expired": "danger",
+    "converted": "success",
+    "cancelled": "danger",
+}
+
+PROFORMA_STATUS_ICON_MAP: dict[str, str] = {
+    "draft": "document",
+    "sent": "mail",
+    "accepted": "check",
+    "expired": "x",
+    "converted": "check",
+    "cancelled": "x",
+}
+
+
 # Tab configuration for document type filtering
 INVOICE_DOC_TYPE_TABS = [
     {"value": "all", "label": _("All Documents"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
@@ -43,8 +80,6 @@ INVOICE_STATUS_CHOICES = [
 ]
 
 ALLOWED_STATUSES = {"draft", "issued", "paid", "overdue", "void", "refunded", "sent", "accepted", "expired"}
-
-logger = logging.getLogger(__name__)
 
 
 def _fetch_filtered_documents(  # noqa: PLR0913
@@ -337,7 +372,11 @@ def invoice_detail_view(request: HttpRequest, invoice_number: str) -> HttpRespon
             messages.error(request, _("Invoice not found or access denied."))
             return render(request, "billing/invoice_not_found.html", {"invoice_number": invoice_number})
 
-        context = {"invoice": invoice, "invoice_number": invoice_number}
+        context = {
+            "invoice": invoice,
+            "invoice_number": invoice_number,
+            "status_variant": INVOICE_STATUS_VARIANT_MAP.get(invoice.status, "secondary"),
+        }
 
         logger.info(f"✅ [Portal Billing] Invoice detail displayed: {invoice_number} for customer {customer_id}")
         return render(request, "billing/invoice_detail.html", context)
@@ -556,6 +595,8 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
             "is_staff_user": False,  # Portal customers are not staff
             "can_edit": False,  # Portal customers cannot edit proformas
             "can_convert": False,  # Portal customers cannot convert proformas
+            "status_variant": PROFORMA_STATUS_VARIANT_MAP.get(proforma.status, "secondary"),
+            "status_icon": PROFORMA_STATUS_ICON_MAP.get(proforma.status, ""),
         }
 
         logger.info(f"✅ [Portal Billing] Proforma detail displayed: {proforma_number} for customer {customer_id}")

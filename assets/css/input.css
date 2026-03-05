@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
-/* Custom styles can be added here */
+/* ===============================================================================
+   DESIGN TOKENS 🎨
+   ===============================================================================
+   Single source of truth for brand colors and CSS custom properties.
+   Duplicates from base.html inline <style> have been consolidated here.
+   =============================================================================== */
 
-/* Romanian Hosting Brand Colors - moved from inline styles */
 :root {
   --brand-h: 220;
   --brand-s: 90%;
@@ -11,7 +15,51 @@
   --bg-elev: #111217;
   --content: #e6e8eb;
   --primary: hsl(var(--brand-h) var(--brand-s) var(--brand-l));
+
+  /* -----------------------------------------------------------------------
+     TYPOGRAPHY TOKENS 🔤
+     ----------------------------------------------------------------------- */
+  --font-size-page-title: 1.875rem;
+  /* 30px — main page heading */
+  --font-size-section-title: 1.125rem;
+  /* 18px — card / section heading */
+  --font-size-body: 0.875rem;
+  /* 14px — default body text (sm) */
+  --font-size-meta: 0.75rem;
+  /* 12px — timestamps, labels (xs) */
+  --font-size-caption: 0.625rem;
+  /* 10px — fine print, badges */
+
+  --font-weight-page-title: 700;
+  /* bold */
+  --font-weight-section-title: 600;
+  /* semibold */
+  --font-weight-body: 400;
+  /* normal */
+
+  --line-height-page-title: 2.25rem;
+  /* 36px */
+  --line-height-section-title: 1.75rem;
+  /* 28px */
+  --line-height-body: 1.25rem;
+  /* 20px */
+
+  /* -----------------------------------------------------------------------
+     SPACING TOKENS 📏
+     ----------------------------------------------------------------------- */
+  --space-page-gutter: 1rem;
+  /* px-4 default, grows via breakpoints */
+  --space-section-stack: 1.5rem;
+  /* gap between major sections (6) */
+  --space-card-padding: 1.5rem;
+  /* p-6 inside cards */
+  --space-field-stack: 1rem;
+  /* gap between form fields (4) */
 }
+
+/* ===============================================================================
+   BRAND UTILITIES
+   =============================================================================== */
 
 .brand-gradient {
   background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
@@ -20,4 +68,289 @@
 .romanian-flag::before {
   content: "🇷🇴";
   margin-right: 0.5rem;
+}
+
+/* ===============================================================================
+   TYPOGRAPHY UTILITY CLASSES 🔤
+   ===============================================================================
+   Named classes consuming the CSS custom-property tokens above.
+   Use these instead of raw Tailwind size/weight combos for portal headings,
+   body text, and meta labels so the design stays consistent and can be
+   updated from a single location.
+   =============================================================================== */
+
+.text-page-title {
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-page-title);
+  line-height: var(--line-height-page-title);
+  color: #ffffff;
+}
+
+.text-section-title {
+  font-size: var(--font-size-section-title);
+  font-weight: var(--font-weight-section-title);
+  line-height: var(--line-height-section-title);
+  color: #ffffff;
+}
+
+.text-body {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-body);
+  line-height: var(--line-height-body);
+  color: #94a3b8;
+  /* slate-400 */
+}
+
+.text-meta {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-body);
+  line-height: 1rem;
+  color: #64748b;
+  /* slate-500 */
+}
+
+.text-caption {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-body);
+  line-height: 0.875rem;
+  color: #64748b;
+  /* slate-500 */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ===============================================================================
+   SPACING UTILITY CLASSES 📏
+   ===============================================================================
+   Named spacing classes for consistent page layout rhythm.
+   =============================================================================== */
+
+.space-page-gutter {
+  padding-left: var(--space-page-gutter);
+  padding-right: var(--space-page-gutter);
+}
+
+@media (min-width: 640px) {
+  .space-page-gutter {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .space-page-gutter {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+.space-section-stack>*+* {
+  margin-top: var(--space-section-stack);
+}
+
+.space-card-padding {
+  padding: var(--space-card-padding);
+}
+
+.space-field-stack>*+* {
+  margin-top: var(--space-field-stack);
+}
+
+/* ===============================================================================
+   HTMX INDICATORS
+   ===============================================================================
+   Global HTMX request/loading indicator visibility rules.
+   Extracted from base.html inline <style>.
+   =============================================================================== */
+
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: block;
+}
+
+.htmx-request.htmx-indicator {
+  display: block;
+}
+
+/* ===============================================================================
+   BUTTON HTMX LOADING STATES
+   ===============================================================================
+   Extracted from components/button.html inline <style>.
+   Controls spinner/label toggle during HTMX requests on .ui-btn elements.
+   =============================================================================== */
+
+/* Show spinner, hide label when THIS button is the htmx-request target */
+.ui-btn.htmx-request .htmx-indicator {
+  display: inline-flex !important;
+}
+
+.ui-btn.htmx-request .htmx-indicator-text {
+  display: none !important;
+}
+
+/* Indicator element itself is the request target */
+.htmx-indicator.htmx-request {
+  display: inline-flex !important;
+}
+
+/* Override: ancestor has .htmx-request but button is NOT the target — keep label */
+.htmx-request .ui-btn .htmx-indicator {
+  display: none !important;
+}
+
+.htmx-request .ui-btn .htmx-indicator-text {
+  display: inline !important;
+}
+
+/* Normal form-submit loading state controlled by JS */
+.ui-btn.is-loading .btn-label {
+  display: none !important;
+}
+
+.ui-btn.is-loading .btn-spinner {
+  display: inline-flex !important;
+  visibility: visible;
+  opacity: 1;
+}
+
+/* ===============================================================================
+   TICKET SKELETON STYLES
+   ===============================================================================
+   Extracted from base.html inline <style>.
+   =============================================================================== */
+
+#tickets-skeleton.htmx-indicator {
+  display: none;
+}
+
+.htmx-request #tickets-skeleton.htmx-indicator {
+  display: block !important;
+}
+
+#tickets-container {
+  min-height: 400px;
+}
+
+/* ===============================================================================
+   CUSTOM SCROLLBAR 🖱️
+   ===============================================================================
+   Global webkit scrollbar styling for the dark portal theme.
+   Extracted from base.html inline <style>.
+   =============================================================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* ===============================================================================
+   MOBILE NAVIGATION 📱
+   ===============================================================================
+   Extracted from components/mobile_header.html inline <style>.
+   Uses @apply directives (processed by Tailwind at build time).
+   =============================================================================== */
+
+.mobile-nav-item {
+  @apply block w-full text-left rounded-2xl transition-all duration-200 ease-in-out;
+  @apply hover:bg-slate-800/70 active:scale-[0.98] active:bg-slate-700/50 shadow-sm;
+}
+
+#mobile-menu {
+  animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(8px);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mobile-nav-item .flex-shrink-0 {
+  transition: all 0.2s ease-in-out;
+}
+
+.mobile-nav-item:hover svg:last-child {
+  transform: translateX(4px);
+  transition: transform 0.2s ease-in-out;
+}
+
+.mobile-nav-item.active {
+  @apply bg-slate-700/70 border border-slate-600/50;
+}
+
+.mobile-nav-item.active .flex-shrink-0 {
+  @apply bg-slate-600/80;
+}
+
+/* Mobile menu scrollbar (scoped to menu panel) */
+.max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar {
+  width: 6px;
+}
+
+.max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 3px;
+}
+
+.max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.5);
+  border-radius: 3px;
+}
+
+.max-h-\[calc\(100vh-4rem\)\]::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.7);
+}
+
+/* iOS safe area support */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  #mobile-menu .px-3 {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+}
+
+.mobile-nav-item:focus {
+  @apply outline-none ring-2 ring-blue-500/50 ring-offset-2 ring-offset-slate-900;
+}
+
+button.mobile-nav-item:active {
+  transform: scale(0.98);
+}
+
+body.mobile-menu-open {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+/* ===============================================================================
+   AUTH PAGE OVERRIDES 🔒
+   ===============================================================================
+   Hide non-essential overlays on auth pages to prevent obstruction.
+   Auth templates set body_class="auth-page" via {% block body_class %}.
+   =============================================================================== */
+
+body.auth-page #cookie-consent-banner {
+  display: none !important;
 }

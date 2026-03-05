@@ -37,9 +37,7 @@
   {% if error %}
   <div class="mb-6 bg-red-900/20 border border-red-700 rounded-lg p-4">
     <div class="flex items-center space-x-3">
-      <svg class="w-5 h-5 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4v2m0-10a9 9 0 110 18 9 9 0 010-18z"></path>
-      </svg>
+      {% icon "exclamation-circle" size="xl" css_class="text-red-400" %}
       <p class="text-red-200 text-sm">
         {% trans "Unable to load hosting plans. Please try again later." %}
       </p>
@@ -68,54 +66,42 @@
         <div class="space-y-2 text-sm text-slate-300">
           {% if plan.disk_space_gb %}
           <div class="flex items-center space-x-2">
-            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
+            {% icon "check" size="sm" css_class="text-green-400" %}
             <span>{{ plan.disk_space_gb }} GB {% trans "disk space" %}</span>
           </div>
           {% endif %}
 
           {% if plan.bandwidth_gb %}
           <div class="flex items-center space-x-2">
-            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
+            {% icon "check" size="sm" css_class="text-green-400" %}
             <span>{{ plan.bandwidth_gb }} GB {% trans "bandwidth" %}</span>
           </div>
           {% endif %}
 
           {% if plan.email_accounts %}
           <div class="flex items-center space-x-2">
-            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
+            {% icon "check" size="sm" css_class="text-green-400" %}
             <span>{{ plan.email_accounts }} {% trans "email accounts" %}</span>
           </div>
           {% endif %}
 
           {% if plan.databases %}
           <div class="flex items-center space-x-2">
-            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
+            {% icon "check" size="sm" css_class="text-green-400" %}
             <span>{{ plan.databases }} {% trans "databases" %}</span>
           </div>
           {% endif %}
 
           {% if plan.cpu_cores %}
           <div class="flex items-center space-x-2">
-            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
+            {% icon "check" size="sm" css_class="text-green-400" %}
             <span>{{ plan.cpu_cores }} {% trans "CPU cores" %}</span>
           </div>
           {% endif %}
 
           {% if plan.ram_gb %}
           <div class="flex items-center space-x-2">
-            <svg class="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-            </svg>
+            {% icon "check" size="sm" css_class="text-green-400" %}
             <span>{{ plan.ram_gb }} GB {% trans "RAM" %}</span>
           </div>
           {% endif %}
@@ -178,9 +164,7 @@
   {% else %}
   <!-- Empty State -->
   <div class="flex flex-col items-center justify-center py-12">
-    <svg class="w-16 h-16 text-slate-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
-    </svg>
+    {% icon "document" size="2xl" css_class="text-slate-400" %}
     <h3 class="text-lg font-semibold text-white mb-2">{% trans "No Plans Available" %}</h3>
     <p class="text-slate-400 text-center mb-6">
       {% if service_type %}
@@ -190,9 +174,7 @@
       {% endif %}
     </p>
     <a href="{% url 'services:list' %}" class="inline-flex items-center space-x-2 text-blue-400 hover:text-blue-300 transition-colors">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
-      </svg>
+      {% icon "arrow-left" size="sm" %}
       <span>{% trans "Back to Services" %}</span>
     </a>
   </div>

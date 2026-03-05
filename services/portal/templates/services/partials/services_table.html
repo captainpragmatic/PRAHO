@@ -42,39 +42,7 @@
             <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}/mo</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
-            {% if service.status == 'active' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 w-28 justify-center">
-                {% icon "check" size="xs" %} {% trans 'Active' %}
-              </span>
-            {% elif service.status == 'suspended' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
-                {% icon "ban" size="xs" %} {% trans 'Suspended' %}
-              </span>
-            {% elif service.status == 'pending' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 w-28 justify-center">
-                {% icon "clock" size="xs" %} {% trans 'Pending' %}
-              </span>
-            {% elif service.status == 'provisioning' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-28 justify-center">
-                {% icon "lightning" size="xs" %} {% trans 'Provisioning' %}
-              </span>
-            {% elif service.status == 'expired' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
-                {% icon "clock" size="xs" %} {% trans 'Expired' %}
-              </span>
-            {% elif service.status == 'terminated' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
-                {% icon "x" size="xs" %} {% trans 'Terminated' %}
-              </span>
-            {% elif service.status == 'cancelled' %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
-                {% icon "x" size="xs" %} {% trans 'Cancelled' %}
-              </span>
-            {% else %}
-              <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
-                {{ service.status|title }}
-              </span>
-            {% endif %}
+            {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" css_class="w-28 justify-center" %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
             {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
@@ -98,39 +66,7 @@
         {% endif %}
       </div>
       <div class="ml-3">
-        {% if service.status == 'active' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 w-28 justify-center">
-            {% icon "check" size="xs" %} {% trans 'Active' %}
-          </span>
-        {% elif service.status == 'suspended' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
-            {% icon "ban" size="xs" %} {% trans 'Suspended' %}
-          </span>
-        {% elif service.status == 'pending' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 w-28 justify-center">
-            {% icon "clock" size="xs" %} {% trans 'Pending' %}
-          </span>
-        {% elif service.status == 'provisioning' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-28 justify-center">
-            {% icon "lightning" size="xs" %} {% trans 'Provisioning' %}
-          </span>
-        {% elif service.status == 'expired' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 w-28 justify-center">
-            {% icon "clock" size="xs" %} {% trans 'Expired' %}
-          </span>
-        {% elif service.status == 'terminated' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
-            {% icon "x" size="xs" %} {% trans 'Terminated' %}
-          </span>
-        {% elif service.status == 'cancelled' %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
-            {% icon "x" size="xs" %} {% trans 'Cancelled' %}
-          </span>
-        {% else %}
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 w-28 justify-center">
-            {{ service.status|title }}
-          </span>
-        {% endif %}
+        {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" css_class="w-28 justify-center" %}
       </div>
     </div>
 
@@ -156,9 +92,7 @@
 <div class="bg-slate-800/50 border border-slate-700 rounded-lg">
   <div class="text-center py-12 px-6">
     <div class="mx-auto h-16 w-16 bg-slate-700 rounded-full flex items-center justify-center mb-4">
-      <svg class="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-      </svg>
+      {% icon "server" size="xl" css_class="text-slate-400" %}
     </div>
     <h3 class="text-lg font-medium text-white mb-2">{% trans 'No services found' %}</h3>
     <p class="text-slate-400 mb-6 max-w-sm mx-auto">

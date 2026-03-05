@@ -6,15 +6,8 @@
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
-  <!-- Header -->
-  <div class="mb-6">
-    <h1 class="text-2xl font-bold text-white romanian-flag">
-      {% trans 'Account Settings' %}
-    </h1>
-    <p class="mt-2 text-sm text-slate-400">
-      {% trans 'Manage your account settings and personal information' %}
-    </p>
-  </div>
+  {% trans 'Account Settings' as ph_title %}{% trans 'Manage your account settings and personal information' as ph_subtitle %}
+  {% page_header title=ph_title subtitle=ph_subtitle icon="user" %}{% end_page_header %}
 
   <!-- Customer Selector (for multi-customer users) -->
   {% if user_memberships|length > 1 %}
@@ -24,11 +17,8 @@
   {% endif %}
 
   <!-- Profile Form -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-6">
-        {% icon "user" size="md" css_class="text-white" %} {% trans 'Personal Information' %}
-      </h3>
+  {% trans 'Personal Information' as sc_title %}
+  {% section_card title=sc_title icon="user" %}
 
       <form method="post" class="space-y-6">
         {% csrf_token %}
@@ -98,8 +88,8 @@
               </label>
               <select name="preferred_language" id="preferred_language"
                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="ro" {% if profile.profile.preferred_language == 'ro' %}selected{% endif %}>🇷🇴 Română</option>
-                <option value="en" {% if profile.profile.preferred_language == 'en' %}selected{% endif %}>🇬🇧 English</option>
+                <option value="ro" {% if profile.profile.preferred_language == 'ro' %}selected{% endif %}>Română (RO)</option>
+                <option value="en" {% if profile.profile.preferred_language == 'en' %}selected{% endif %}>English (EN)</option>
               </select>
             </div>
 
@@ -109,10 +99,10 @@
               </label>
               <select name="timezone" id="timezone"
                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="Europe/Bucharest" {% if profile.profile.timezone == 'Europe/Bucharest' or not profile.profile.timezone %}selected{% endif %}>🇷🇴 Europe/Bucharest</option>
-                <option value="UTC" {% if profile.profile.timezone == 'UTC' %}selected{% endif %}>🌍 UTC</option>
-                <option value="Europe/London" {% if profile.profile.timezone == 'Europe/London' %}selected{% endif %}>🇬🇧 Europe/London</option>
-                <option value="Europe/Paris" {% if profile.profile.timezone == 'Europe/Paris' %}selected{% endif %}>🇫🇷 Europe/Paris</option>
+                <option value="Europe/Bucharest" {% if profile.profile.timezone == 'Europe/Bucharest' or not profile.profile.timezone %}selected{% endif %}>Europe/Bucharest (RO)</option>
+                <option value="UTC" {% if profile.profile.timezone == 'UTC' %}selected{% endif %}>UTC</option>
+                <option value="Europe/London" {% if profile.profile.timezone == 'Europe/London' %}selected{% endif %}>Europe/London (UK)</option>
+                <option value="Europe/Paris" {% if profile.profile.timezone == 'Europe/Paris' %}selected{% endif %}>Europe/Paris (FR)</option>
               </select>
             </div>
           </div>
@@ -120,21 +110,15 @@
 
         <!-- Action Buttons -->
         <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
-          <button type="submit"
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
-            {% trans 'Save Changes' %}
-          </button>
+          {% trans 'Save Changes' as btn_save %}
+          {% button btn_save variant="primary" type="submit" %}
         </div>
       </form>
-    </div>
-  </div>
+  {% end_section_card %}
 
   <!-- Account Information Card -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-6">
-        {% icon "lock" size="md" css_class="text-white" %} {% trans 'Account Information' %}
-      </h3>
+  {% trans 'Account Information' as sc2_title %}
+  {% section_card title=sc2_title icon="lock" css_class="mt-6" %}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="space-y-4">
@@ -201,18 +185,14 @@
           </div>
         </div>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 
   <!-- Multi-Customer Company Profile Management -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
-    <div class="p-6">
+  {% trans 'Company Profiles' as sc3_title %}
+  {% section_card title=sc3_title icon="building" css_class="mt-6" %}
       <div class="mb-6">
         <!-- Header - Mobile Stacked, Desktop Side-by-Side -->
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-          <h3 class="text-lg font-medium text-white">
-            {% icon "building" size="md" css_class="text-white" %} {% trans 'Company Profiles' %}
-          </h3>
 
           <!-- Customer Context Summary - Mobile Full Width -->
           {% if user_memberships %}
@@ -231,9 +211,7 @@
                 </option>
                 {% endfor %}
               </select>
-              <svg class="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-              </svg>
+              <span class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">{% icon "chevron-down" size="sm" css_class="text-slate-400" %}</span>
             </div>
           </div>
           {% endif %}
@@ -254,18 +232,7 @@
               </div>
               <div class="text-xs text-slate-400 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mt-1">
                 <span class="whitespace-nowrap">{% trans 'Your role:' %}</span>
-                <span class="inline-flex px-2 py-1 rounded-full text-xs font-medium
-                  {% if selected_customer_role == 'owner' %}bg-green-600 text-white
-                  {% elif selected_customer_role == 'billing' %}bg-blue-600 text-white
-                  {% elif selected_customer_role == 'tech' %}bg-purple-600 text-white
-                  {% elif selected_customer_role == 'viewer' %}bg-gray-600 text-white
-                  {% else %}bg-slate-600 text-white{% endif %}">
-                  {% if selected_customer_role == "owner" %}{% icon "users" size="xs" css_class="text-white" %} {% trans "Owner" %}
-                  {% elif selected_customer_role == "billing" %}{% icon "credit-card" size="xs" css_class="text-white" %} {% trans "Billing" %}
-                  {% elif selected_customer_role == "tech" %}{% icon "settings" size="xs" css_class="text-white" %} {% trans "Technical" %}
-                  {% elif selected_customer_role == "viewer" %}{% icon "search" size="xs" css_class="text-white" %} {% trans "Viewer" %}
-                  {% else %}{{ selected_customer_role|title }}{% endif %}
-                </span>
+                {% badge selected_customer_role|status_label variant=selected_customer_role|status_variant %}
               </div>
             </div>
           </div>
@@ -303,15 +270,7 @@
             </div>
 
             <!-- Role Badge -->
-            <span class="px-2 py-1 rounded-full text-xs font-medium
-              {% if membership.role == 'owner' %}bg-green-600 text-white
-              {% elif membership.role == 'billing' %}bg-blue-600 text-white
-              {% elif membership.role == 'tech' %}bg-purple-600 text-white
-              {% elif membership.role == 'viewer' %}bg-gray-600 text-white
-              {% else %}bg-slate-600 text-white{% endif %}">
-              {% if membership.role == "owner" %}{% icon "users" size="xs" %}{% elif membership.role == "billing" %}{% icon "credit-card" size="xs" %}{% elif membership.role == "tech" %}{% icon "settings" size="xs" %}{% elif membership.role == "viewer" %}{% icon "search" size="xs" %}{% endif %}
-              {{ membership.role|title }}
-            </span>
+            {% badge membership.role|title variant=membership.role|status_variant %}
           </div>
 
           <!-- Company Info -->
@@ -383,15 +342,14 @@
       <!-- Romanian Compliance Notice - Mobile Friendly -->
       <div class="mt-6 p-4 bg-slate-900 border border-slate-600 rounded-lg">
         <div class="flex items-start space-x-3">
-          <span class="text-blue-400 mt-0.5 flex-shrink-0">🇷🇴</span>
+          <span class="text-blue-400 mt-0.5 flex-shrink-0">{% icon "flag" size="sm" css_class="text-blue-400" %}</span>
           <div class="text-xs sm:text-sm text-slate-400 min-w-0">
             <p class="font-medium text-slate-300 mb-2 text-sm">{% trans 'Romanian Business Compliance' %}</p>
             <p class="leading-relaxed">{% trans 'VAT number (CUI) and legal address required for invoicing. Company owners can invite team members with different access levels.' %}</p>
           </div>
         </div>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 
   <!-- JavaScript for Multi-Customer Management -->
   <script>
@@ -434,11 +392,8 @@
   </script>
 
   <!-- GDPR Privacy & Data Protection -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mt-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-6">
-        {% icon "lock" size="md" css_class="text-white" %} {% trans 'Privacy & Data Protection' %}
-      </h3>
+  {% trans 'Privacy & Data Protection' as sc4_title %}
+  {% section_card title=sc4_title icon="lock" css_class="mt-6" %}
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Current Consent Status -->
@@ -534,12 +489,11 @@
           <!-- Legal compliance note -->
           <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
             <p class="text-xs text-slate-400">
-              🇷🇴 {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
+              {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'GDPR compliant according to Romanian Law 190/2018 and EU Regulation 2016/679' %}
             </p>
           </div>
         </div>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 </div>
 {% endblock %}

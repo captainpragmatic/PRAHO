@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n ui_components %}
 
 {# Romanian hosting provider dropdown navigation component #}
 <div class="relative inline-block text-left" x-data="{ open: false }" @click.away="open = false">
@@ -12,10 +12,9 @@
         <span class="mr-2">{{ icon }}</span>
       {% endif %}
       {{ title }}
-      <svg class="ml-1 h-4 w-4 transition-transform duration-200" :class="{ 'rotate-180': open }"
-           fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-      </svg>
+      <span class="ml-1 transition-transform duration-200 inline-flex" :class="{ 'rotate-180': open }">
+        {% icon "chevron-down" size="sm" %}
+      </span>
     </button>
   </div>
 
@@ -44,23 +43,7 @@
             {{ item.text }}
             {% if item.badge %}
               <span class="ml-auto">
-                {% if item.badge.variant == 'success' %}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900 text-green-200">
-                    {{ item.badge.text }}
-                  </span>
-                {% elif item.badge.variant == 'warning' %}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-900 text-yellow-200">
-                    {{ item.badge.text }}
-                  </span>
-                {% elif item.badge.variant == 'danger' %}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-900 text-red-200">
-                    {{ item.badge.text }}
-                  </span>
-                {% else %}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">
-                    {{ item.badge.text }}
-                  </span>
-                {% endif %}
+                {% badge item.badge.text variant=item.badge.variant size="xs" %}
               </span>
             {% endif %}
           </a>

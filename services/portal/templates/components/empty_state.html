@@ -1,0 +1,23 @@
+{% load i18n %}
+{% load ui_components %}
+
+{# Empty state placeholder for lists and tables with no data. #}
+<div class="text-center py-12 {{ css_class }}">
+  {% if icon %}
+  <div class="mx-auto h-16 w-16 rounded-full bg-slate-700 flex items-center justify-center mb-4">
+    {% icon icon size="xl" css_class="text-slate-400" %}
+  </div>
+  {% endif %}
+
+  <h3 class="text-lg font-medium text-white mb-2">{{ title }}</h3>
+
+  {% if body %}
+  <p class="text-sm text-slate-400 max-w-sm mx-auto mb-6">{{ body }}</p>
+  {% endif %}
+
+  {% if action_url and action_text %}
+  <a href="{{ action_url }}" class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+    {{ action_text }}
+  </a>
+  {% endif %}
+</div>

@@ -1,0 +1,19 @@
+{# =============================================================================== #}
+{# PRAHO PLATFORM - FORM ERROR SUMMARY COMPONENT #}
+{# =============================================================================== #}
+{# Accessible top-of-form error block. Use: {% form_error_summary form %} #}
+
+{% load ui_components %}
+
+{% if has_errors %}
+<div role="alert" aria-live="assertive" class="bg-red-900/60 border border-red-700 rounded-lg p-4 mb-4">
+  <div class="flex items-start gap-3">
+    <span class="flex-shrink-0 mt-0.5">{% icon "x-circle" size="md" css_class="text-red-400" %}</span>
+    <div class="space-y-1">
+      {% for error in errors %}
+      <p class="text-sm text-red-100">{{ error }}</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}

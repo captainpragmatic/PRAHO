@@ -6,22 +6,11 @@
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
-  <!-- Header -->
-  <div class="mb-6">
-    <h1 class="text-2xl font-bold text-white romanian-flag">
-      {% icon "lock" size="lg" css_class="text-white" %} {% trans 'Two-Factor Authentication' %}
-    </h1>
-    <p class="mt-2 text-sm text-slate-400">
-      {% trans 'Manage your account security and two-factor authentication settings' %}
-    </p>
-  </div>
+  {% trans 'Two-Factor Authentication' as ph_title %}{% trans 'Manage your account security and two-factor authentication settings' as ph_sub %}
+  {% page_header title=ph_title subtitle=ph_sub icon="lock" %}{% end_page_header %}
 
-  <!-- Current MFA Status -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-6">
-        {% icon "lock" size="md" css_class="text-white" %} {% trans 'Current Security Status' %}
-      </h3>
+  {% trans 'Current Security Status' as sc_css_title %}
+  {% section_card title=sc_css_title icon="lock" css_class="mb-6" %}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- MFA Status -->
@@ -99,15 +88,10 @@
           {% endif %}
         </div>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 
-  <!-- MFA Management Actions -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-6">
-        {% icon "settings" size="md" css_class="text-white" %} {% trans 'Manage MFA Settings' %}
-      </h3>
+  {% trans 'Manage MFA Settings' as sc_mms_title %}
+  {% section_card title=sc_mms_title icon="settings" %}
 
       {% if not mfa_enabled %}
       <!-- Enable MFA Section -->
@@ -266,8 +250,7 @@
         </div>
       </div>
       {% endif %}
-    </div>
-  </div>
+  {% end_section_card %}
 
   <!-- Back Navigation -->
   <div class="mt-6 text-center">

@@ -6,22 +6,11 @@
 
 {% block content %}
 <div class="px-4 max-w-4xl mx-auto">
-  <!-- Header -->
-  <div class="mb-6">
-    <h1 class="text-2xl font-bold text-white romanian-flag">
-      {% icon "lock" size="lg" css_class="text-white" %} {% trans 'Backup Codes' %}
-    </h1>
-    <p class="mt-2 text-sm text-slate-400">
-      {% trans 'Use these codes to access your account if you lose your phone or authenticator app' %}
-    </p>
-  </div>
+  {% trans 'Backup Codes' as ph_title %}{% trans 'Use these codes to access your account if you lose your phone or authenticator app' as ph_sub %}
+  {% page_header title=ph_title subtitle=ph_sub icon="lock" %}{% end_page_header %}
 
-  <!-- Backup Codes Display -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-6">
-        {% icon "lock" size="md" css_class="text-white" %} {% trans 'Your Recovery Codes' %}
-      </h3>
+  {% trans 'Your Recovery Codes' as sc_rc_title %}
+  {% section_card title=sc_rc_title icon="lock" css_class="mb-6" %}
 
       {% if backup_codes %}
       <div class="space-y-4">
@@ -81,15 +70,10 @@
         </div>
       </div>
       {% endif %}
-    </div>
-  </div>
+  {% end_section_card %}
 
-  <!-- Regenerate Codes Section -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-4">
-        {% icon "refresh" size="md" css_class="text-white" %} {% trans 'Regenerate Codes' %}
-      </h3>
+  {% trans 'Regenerate Codes' as sc_regen_title %}
+  {% section_card title=sc_regen_title icon="refresh" css_class="mb-6" %}
 
       <div class="space-y-4">
         <p class="text-sm text-slate-300">
@@ -113,15 +97,10 @@
           {% icon "refresh" size="sm" css_class="text-white" %} {% trans 'Generate New Backup Codes' %}
         </button>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 
-  <!-- Usage Instructions -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-4">
-        {% icon "book" size="md" css_class="text-white" %} {% trans 'How to Use Backup Codes' %}
-      </h3>
+  {% trans 'How to Use Backup Codes' as sc_htubc_title %}
+  {% section_card title=sc_htubc_title icon="book" %}
 
       <div class="space-y-3 text-sm text-slate-300">
         <div class="flex items-start">
@@ -141,8 +120,7 @@
           {% trans 'When you have only a few codes left, generate new ones to ensure continued access.' %}
         </div>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 
   <!-- Back Navigation -->
   <div class="mt-6 text-center">

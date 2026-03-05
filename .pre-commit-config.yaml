@@ -196,6 +196,21 @@ repos:
         verbose: true
 
 # ===============================================================================
+# DESIGN SYSTEM TEMPLATE LINT 🎨
+# ===============================================================================
+
+  - repo: local
+    hooks:
+      - id: lint-template-components
+        name: "Design System: Template Lint (TMPL001-009)"
+        entry: uv run python
+        args: [scripts/lint_template_components.py, "--fail-on", ""]
+        language: system
+        files: \.html$
+        exclude: ^(services/platform/templates/|services/portal/static/)
+        pass_filenames: true
+
+# ===============================================================================
 # CONFIGURATION OPTIONS ⚙️
 # ===============================================================================
 

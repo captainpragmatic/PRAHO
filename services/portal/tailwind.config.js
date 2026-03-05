@@ -68,6 +68,18 @@ module.exports = {
         ],
       },
 
+      fontSize: {
+        'page-title': ['var(--font-size-page-title)', { lineHeight: 'var(--line-height-page-title)', fontWeight: 'var(--font-weight-page-title)' }],
+        'section-title': ['var(--font-size-section-title)', { lineHeight: 'var(--line-height-section-title)', fontWeight: 'var(--font-weight-section-title)' }],
+      },
+
+      spacing: {
+        'page-gutter': 'var(--space-page-gutter)',
+        'section-stack': 'var(--space-section-stack)',
+        'card-padding': 'var(--space-card-padding)',
+        'field-stack': 'var(--space-field-stack)',
+      },
+
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
         'slide-up': 'slide-up 0.3s ease-out',

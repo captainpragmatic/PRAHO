@@ -7,22 +7,15 @@
 {% block content %}
 <div class="px-4 max-w-3xl mx-auto">
   <!-- Header -->
-  <div class="mb-6">
-    <div class="flex items-center space-x-4">
-      {% url 'tickets:list' as tickets_url %}
-      {% trans "← Back to Tickets" as bt1 %}{% button bt1 variant="secondary" href=tickets_url size="sm" %}
-    </div>
-    <h1 class="text-2xl font-bold text-white mt-4 romanian-flag">
-      {% trans 'Create New Ticket' %}
-    </h1>
-    <p class="text-slate-400 mt-2">
-      {% trans 'Get help from our support team' %}
-    </p>
+  <div class="mb-2">
+    {% url 'tickets:list' as tickets_url %}
+    {% trans "← Back to Tickets" as bt1 %}{% button bt1 variant="secondary" href=tickets_url size="sm" %}
   </div>
+  {% trans 'Create New Ticket' as ph_title %}{% trans 'Get help from our support team' as ph_sub %}
+  {% page_header title=ph_title subtitle=ph_sub icon="ticket" %}{% end_page_header %}
 
   <!-- Ticket Form -->
-  <div class="bg-slate-800 rounded-lg border border-slate-700">
-    <div class="p-6">
+  {% section_card css_class="mb-6" %}
       <form method="post" class="space-y-6">
         {% csrf_token %}
 
@@ -40,11 +33,11 @@
             <select name="category" id="category"
               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
               <option value="" {% if not category %}selected{% endif %}>{% trans 'Select category (optional)' %}</option>
-              <option value="technical" {% if category == "technical" %}selected{% endif %}>🛠️ {% trans 'Technical Support' %}</option>
-              <option value="billing" {% if category == "billing" %}selected{% endif %}>💰 {% trans 'Billing & Account' %}</option>
-              <option value="hosting" {% if category == "hosting" %}selected{% endif %}>🏠 {% trans 'Hosting Services' %}</option>
-              <option value="domains" {% if category == "domains" %}selected{% endif %}>🌐 {% trans 'Domain Management' %}</option>
-              <option value="general" {% if category == "general" %}selected{% endif %}>💬 {% trans 'General Inquiry' %}</option>
+              <option value="technical" {% if category == "technical" %}selected{% endif %}>{% trans 'Technical Support' %}</option>
+              <option value="billing" {% if category == "billing" %}selected{% endif %}>{% trans 'Billing & Account' %}</option>
+              <option value="hosting" {% if category == "hosting" %}selected{% endif %}>{% trans 'Hosting Services' %}</option>
+              <option value="domains" {% if category == "domains" %}selected{% endif %}>{% trans 'Domain Management' %}</option>
+              <option value="general" {% if category == "general" %}selected{% endif %}>{% trans 'General Inquiry' %}</option>
             </select>
           </div>
 
@@ -54,10 +47,10 @@
             </label>
             <select name="priority" id="priority"
               class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-              <option value="low" {% if priority == "low" %}selected{% endif %}>🟢 {% trans 'Low' %}</option>
-              <option value="normal" {% if priority != "low" and priority != "high" and priority != "critical" %}selected{% endif %}>🟡 {% trans 'Normal' %}</option>
-              <option value="high" {% if priority == "high" %}selected{% endif %}>🟠 {% trans 'High' %}</option>
-              <option value="critical" {% if priority == "critical" %}selected{% endif %}>🔴 {% trans 'Critical' %}</option>
+              <option value="low" {% if priority == "low" %}selected{% endif %}>{% trans 'Low' %}</option>
+              <option value="normal" {% if priority != "low" and priority != "high" and priority != "critical" %}selected{% endif %}>{% trans 'Normal' %}</option>
+              <option value="high" {% if priority == "high" %}selected{% endif %}>{% trans 'High' %}</option>
+              <option value="critical" {% if priority == "critical" %}selected{% endif %}>{% trans 'Critical' %}</option>
             </select>
           </div>
         </div>
@@ -146,14 +139,10 @@
           </div>
         </div>
       </form>
-    </div>
-  </div>
+  {% end_section_card %}
 
-  <!-- Support Contact Info -->
-  <div class="mt-8 bg-slate-800 rounded-lg border border-slate-700 p-6">
-    <h3 class="text-lg font-medium text-white mb-3">
-      {% trans "Need Immediate Help?" %}
-    </h3>
+  {% trans 'Need Immediate Help?' as sc_imm_title %}
+  {% section_card title=sc_imm_title icon="phone" css_class="mt-8" %}
     <div class="space-y-2 text-sm text-slate-400">
       <p>
         {% trans "For critical issues affecting your service, you can also:" %}
@@ -164,7 +153,7 @@
         <li>{% trans "Browse our knowledge base for quick solutions" %}</li>
       </ul>
     </div>
-  </div>
+  {% end_section_card %}
 </div>
 
 <script>

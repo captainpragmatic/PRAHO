@@ -6,22 +6,11 @@
 
 {% block content %}
 <div class="px-4 max-w-3xl mx-auto">
-  <!-- Header -->
-  <div class="mb-6">
-    <h1 class="text-2xl font-bold text-white romanian-flag">
-      {% icon "document" size="lg" css_class="text-white" %} {% trans 'Export My Data' %}
-    </h1>
-    <p class="mt-2 text-sm text-slate-400">
-      {% trans 'Request a copy of your personal data in machine-readable format (GDPR Article 20)' %}
-    </p>
-  </div>
+  {% trans 'Export My Data' as ph_title %}{% trans 'Request a copy of your personal data in machine-readable format (GDPR Article 20)' as ph_sub %}
+  {% page_header title=ph_title subtitle=ph_sub icon="document" %}{% end_page_header %}
 
-  <!-- Data Export Information -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-4">
-        {% icon "info" size="md" css_class="text-white" %} {% trans 'What Data Will Be Included' %}
-      </h3>
+  {% trans 'What Data Will Be Included' as sc_wdbi_title %}
+  {% section_card title=sc_wdbi_title icon="info" css_class="mb-6" %}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="space-y-3">
@@ -76,15 +65,10 @@
           </div>
         </div>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 
-  <!-- Export Request Form -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-4">
-        {% icon "clipboard" size="md" css_class="text-white" %} {% trans 'Request Data Export' %}
-      </h3>
+  {% trans 'Request Data Export' as sc_rde_title %}
+  {% section_card title=sc_rde_title icon="clipboard" css_class="mb-6" %}
 
       <form method="post" class="space-y-4">
         {% csrf_token %}
@@ -124,16 +108,12 @@
           </button>
         </div>
       </form>
-    </div>
-  </div>
+  {% end_section_card %}
 
   <!-- Export History -->
   {% if exports %}
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-4">
-        {% icon "clipboard" size="md" css_class="text-white" %} {% trans 'Export History' %}
-      </h3>
+  {% trans 'Export History' as sc_eh_title %}
+  {% section_card title=sc_eh_title icon="clipboard" css_class="mb-6" %}
 
       <div class="space-y-3">
         {% for export in exports %}
@@ -165,26 +145,15 @@
               </div>
             </div>
           </div>
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-            {% if export.status == 'completed' %}bg-green-100 text-green-800
-            {% elif export.status == 'processing' %}bg-yellow-100 text-yellow-800
-            {% elif export.status == 'pending' %}bg-blue-100 text-blue-800
-            {% else %}bg-red-100 text-red-800{% endif %}">
-            {{ export.status|title }}
-          </span>
+          {% badge export.status|status_label variant=export.status|status_variant size="xs" rounded="full" %}
         </div>
         {% endfor %}
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
   {% endif %}
 
-  <!-- Legal Information -->
-  <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg">
-    <div class="p-6">
-      <h3 class="text-lg font-medium text-white mb-4">
-        {% icon "document" size="md" css_class="text-white" %} {% trans 'Legal Information' %}
-      </h3>
+  {% trans 'Legal Information' as sc_li_title %}
+  {% section_card title=sc_li_title icon="document" %}
 
       <div class="text-sm text-slate-300 space-y-2">
         <p>
@@ -194,10 +163,9 @@
           {% trans 'The export includes personal data you provided and data generated through your use of our services.' %}
         </p>
         <p class="text-xs text-slate-400">
-          🇷🇴 {% trans 'In compliance with Romanian Law 190/2018 and EU Regulation 2016/679' %}
+          {% icon "flag" size="sm" css_class="inline text-blue-400" %} {% trans 'In compliance with Romanian Law 190/2018 and EU Regulation 2016/679' %}
         </p>
       </div>
-    </div>
-  </div>
+  {% end_section_card %}
 </div>
 {% endblock %}

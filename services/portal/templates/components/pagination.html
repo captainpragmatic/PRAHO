@@ -31,7 +31,7 @@ Features:
 ===============================================================================
 {% endcomment %}
 
-{% load i18n %}
+{% load i18n ui_components %}
 
 {# Always show pagination for now #}
 
@@ -64,18 +64,14 @@ Features:
            aria-label="{% trans 'Go to previous page' %}"
            href="?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}"
            {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page={{ page_obj.previous_page_number }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left">
-            <path d="m15 18-6-6 6-6"></path>
-          </svg>
+          {% icon "chevron-left" %}
           <span class="hidden sm:block">{% trans 'Previous' %}</span>
         </a>
       {% else %}
         <span data-slot="pagination-link"
               class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-500 cursor-not-allowed border border-transparent"
               aria-label="{% trans 'Previous page (unavailable)' %}">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left">
-            <path d="m15 18-6-6 6-6"></path>
-          </svg>
+          {% icon "chevron-left" %}
           <span class="hidden sm:block">{% trans 'Previous' %}</span>
         </span>
       {% endif %}
@@ -98,11 +94,7 @@ Features:
         {% if current_page > 4 %}
           <li data-slot="pagination-item">
             <span aria-hidden="true" data-slot="pagination-ellipsis" class="flex size-8 sm:size-9 items-center justify-center text-slate-400">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis size-4">
-                <circle cx="12" cy="12" r="1"></circle>
-                <circle cx="19" cy="12" r="1"></circle>
-                <circle cx="5" cy="12" r="1"></circle>
-              </svg>
+              <span class="size-4 inline-flex items-center justify-center">...</span>
               <span class="sr-only">{% trans 'More pages' %}</span>
             </span>
           </li>
@@ -138,11 +130,7 @@ Features:
         {% if current_page < total_pages|add:"-3" %}
           <li data-slot="pagination-item">
             <span aria-hidden="true" data-slot="pagination-ellipsis" class="flex size-8 sm:size-9 items-center justify-center text-slate-400">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis size-4">
-                <circle cx="12" cy="12" r="1"></circle>
-                <circle cx="19" cy="12" r="1"></circle>
-                <circle cx="5" cy="12" r="1"></circle>
-              </svg>
+              <span class="size-4 inline-flex items-center justify-center">...</span>
               <span class="sr-only">{% trans 'More pages' %}</span>
             </span>
           </li>
@@ -169,18 +157,14 @@ Features:
            href="?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}"
            {% if htmx_target %}hx-get="{% if htmx_url %}{{ htmx_url }}{% endif %}?page={{ page_obj.next_page_number }}{{ extra_params|default:'' }}" hx-target="{{ htmx_target }}" hx-push-url="true"{% endif %}>
           <span class="hidden sm:block">{% trans 'Next' %}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right">
-            <path d="m9 18 6-6-6-6"></path>
-          </svg>
+          {% icon "chevron-right" %}
         </a>
       {% else %}
         <span data-slot="pagination-link"
               class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none h-8 sm:h-9 py-2 px-2 sm:px-3 gap-1 sm:gap-2 text-slate-500 cursor-not-allowed border border-transparent"
               aria-label="{% trans 'Next page (unavailable)' %}">
           <span class="hidden sm:block">{% trans 'Next' %}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right">
-            <path d="m9 18 6-6-6-6"></path>
-          </svg>
+          {% icon "chevron-right" %}
         </span>
       {% endif %}
     </li>

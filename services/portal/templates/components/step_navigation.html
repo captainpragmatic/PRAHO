@@ -26,7 +26,7 @@ Optional Context:
 - back_url: Custom back URL override
 {% endcomment %}
 
-{% load i18n %}
+{% load i18n ui_components %}
 
 <div class="{% if variant == 'compact' %}mb-4{% else %}mb-8{% endif %}">
 
@@ -42,7 +42,7 @@ Optional Context:
           {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-green-600{% endif %}
         {% else %}bg-slate-600{% endif %}
         rounded-full flex items-center justify-center text-white text-sm font-bold">
-        {% if forloop.counter < current_step %}✓{% else %}{{ forloop.counter }}{% endif %}
+        {% if forloop.counter < current_step %}{% icon "check" size="xs" css_class="text-white" %}{% else %}{{ forloop.counter }}{% endif %}
       </div>
       <div class="ml-3">
         <div class="text-sm font-medium">{{ step.label }}</div>
@@ -68,7 +68,7 @@ Optional Context:
           rounded-full flex items-center justify-center text-white font-bold
           {% if variant != 'compact' %}shadow-lg{% endif %}">
           {% if forloop.counter < current_step %}
-            ✓
+            {% icon "check" size="xs" css_class="text-white" %}
           {% else %}
             {{ forloop.counter }}
           {% endif %}
@@ -102,18 +102,14 @@ Optional Context:
     {% if back_url %}
       <a href="{{ back_url }}"
          class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-        <svg class="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-        </svg>
+        {% icon "chevron-left" size="sm" css_class="mr-2 -ml-1" %}
         {% trans 'Back' %}
       </a>
     {% else %}
       {# Simplified back navigation - let the view handle the URL logic #}
       <button onclick="history.back()"
               class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-        <svg class="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-        </svg>
+        {% icon "chevron-left" size="sm" css_class="mr-2 -ml-1" %}
         {% trans 'Back' %}
       </button>
     {% endif %}

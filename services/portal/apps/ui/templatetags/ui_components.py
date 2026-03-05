@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from django import template
+from django.forms import CheckboxInput, Select, Textarea
+from django.template.base import FilterExpression
+from django.template.base import token_kwargs as django_token_kwargs
 from django.utils.html import format_html, mark_safe  # For XSS prevention
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 
@@ -141,25 +145,7 @@ class DataTableConfig:
     pagination: bool = True
     actions: list[dict[str, Any]] | None = None
     css_class: str = ""
-    empty_message: str = "Nu există date disponibile."
-
-
-@dataclass
-class EnhancedTableConfig:
-    """Parameter object for enhanced table configuration"""
-
-    show_actions: bool = True
-    pagination_enabled: bool = True
-    include_js: bool = True
-    action_column_label: str = ""
-    empty_icon: str = "📋"
-    empty_title: str = ""
-    empty_message: str = ""
-    empty_action_url: str = ""
-    empty_action_text: str = ""
-    htmx_target: str = ""
-    htmx_url: str = ""
-    css_class: str = ""
+    empty_message: str = "No data available."
 
 
 @register.inclusion_tag("components/button.html")
@@ -430,6 +416,159 @@ def alert(message: str, *, config: AlertConfig | None = None, **kwargs: Any) -> 
     }
 
 
+# ===============================================================================
+# FORM-FIELD BRIDGE TAGS (A.1) — Accept Django BoundField objects
+# ===============================================================================
+
+
+@register.inclusion_tag("components/input.html")
+def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> dict[str, Any]:
+    """
+    Bridge tag: renders a Django BoundField via the {% input_field %} component.
+
+    Usage:
+        {% form_field form.email icon_left="mail" %}
+        {% form_field form.password icon_left="lock" placeholder="Enter password" %}
+        {% form_field form.customer_type %}   {# select widget auto-detected #}
+    """
+    widget = field.field.widget
+    name: str = field.html_name
+    html_id: str = field.id_for_label or f"id_{name}"
+
+    # ── Detect input_type from widget class ──
+    input_type = "text"
+    if isinstance(widget, Textarea):
+        input_type = "textarea"
+    elif isinstance(widget, Select):
+        input_type = "select"
+    elif isinstance(widget, CheckboxInput):
+        input_type = "checkbox"
+    else:
+        # Honour widget.input_type (email, password, number, etc.)
+        wt = getattr(widget, "input_type", "text")
+        if wt:
+            input_type = wt
+
+    # ── Build options list for <select> ──
+    options: list[dict[str, str]] | None = None
+    if input_type == "select":
+        # choices is list of (value, label) tuples
+        choices = getattr(field.field, "choices", [])
+        options = [{"value": str(v), "label": str(lbl)} for v, lbl in choices]
+
+    # ── Extract first error (if any) ──
+    first_error: str | None = None
+    if field.errors:
+        first_error = str(field.errors[0])
+
+    # ── Current value ──
+    value = field.value()
+    value_str: str = str(value) if value is not None else ""
+
+    # ── Label text ──
+    label = str(field.label) if field.label else None
+
+    # ── Help text ──
+    help_text = str(field.help_text) if field.help_text else None
+
+    return {
+        "name": name,
+        "input_type": input_type,
+        "value": value_str,
+        "label": label,
+        "placeholder": kwargs.get("placeholder", getattr(widget, "attrs", {}).get("placeholder", "")),
+        "required": field.field.required,
+        "disabled": kwargs.get("disabled", False),
+        "readonly": kwargs.get("readonly", False),
+        "error": first_error,
+        "help_text": help_text,
+        "icon_left": icon_left,
+        "icon_right": kwargs.get("icon_right"),
+        "css_class": kwargs.get("css_class", ""),
+        "html_id": html_id,
+        "autocomplete": kwargs.get("autocomplete", getattr(widget, "attrs", {}).get("autocomplete", "")),
+        "autofocus": kwargs.get("autofocus", getattr(widget, "attrs", {}).get("autofocus", False)),
+        "hx_get": "",
+        "hx_post": "",
+        "hx_trigger": "",
+        "hx_target": "",
+        "hx_swap": "",
+        "options": options,
+        "romanian_validation": False,
+        "has_error": bool(first_error),
+        "container_class": kwargs.get("container_class", ""),
+        "help_text_below": None,
+    }
+
+
+@register.inclusion_tag("components/checkbox.html")
+def form_checkbox(field: Any, **kwargs: Any) -> dict[str, Any]:
+    """
+    Bridge tag: renders a Django BoundField checkbox via {% checkbox_field %}.
+
+    Usage:
+        {% form_checkbox form.remember_me %}
+        {% form_checkbox form.data_processing_consent %}
+    """
+    name: str = field.html_name
+    html_id: str = field.id_for_label or f"id_{name}"
+
+    first_error: str | None = None
+    if field.errors:
+        first_error = str(field.errors[0])
+
+    label = str(field.label) if field.label else None
+    help_text = str(field.help_text) if field.help_text else None
+
+    # Determine checked state
+    value = field.value()
+    checked = bool(value) if value is not None else False
+
+    return {
+        "name": name,
+        "label": kwargs.get("label", label),
+        "value": "on",
+        "checked": checked,
+        "required": field.field.required,
+        "disabled": kwargs.get("disabled", False),
+        "error": first_error,
+        "help_text": help_text,
+        "variant": kwargs.get("variant", "primary"),
+        "css_class": kwargs.get("css_class", ""),
+        "container_class": kwargs.get("container_class", ""),
+        "html_id": html_id,
+        "hx_get": "",
+        "hx_post": "",
+        "hx_trigger": "",
+        "hx_target": "",
+        "hx_swap": "",
+        "data_attrs": kwargs.get("data_attrs", {}),
+    }
+
+
+@register.inclusion_tag("components/form_error_summary.html")
+def form_error_summary(form: Any) -> dict[str, Any]:
+    """
+    Render a top-of-form error summary (non-field errors + all field errors).
+
+    Usage:
+        {% form_error_summary form %}
+    """
+    errors: list[str] = []
+
+    # Non-field errors first
+    if hasattr(form, "non_field_errors"):
+        errors.extend(str(err) for err in form.non_field_errors())
+
+    # Then field-level errors
+    if hasattr(form, "errors"):
+        for field_name, field_errors in form.errors.items():
+            if field_name != "__all__":
+                errors.extend(str(err) for err in field_errors)
+
+    return {"errors": errors, "has_errors": bool(errors)}
+
+
 @register.inclusion_tag("components/modal.html")
 def modal(modal_id: str, title: str, *, config: ModalConfig | None = None, **kwargs: Any) -> dict[str, Any]:
     """
@@ -456,6 +595,9 @@ def modal(modal_id: str, title: str, *, config: ModalConfig | None = None, **kwa
         if hasattr(config, key) and value is not None:
             setattr(config, key, value)
 
+    # Always resolve a concrete DOM id so JS open/close hooks target the same element.
+    resolved_html_id = config.html_id or f"modal-{modal_id or 'default'}"
+
     return {
         "modal_id": modal_id,
         "title": title,
@@ -464,101 +606,332 @@ def modal(modal_id: str, title: str, *, config: ModalConfig | None = None, **kwa
         "show_footer": config.show_footer,
         "content": config.content,
         "css_class": config.css_class,
-        "html_id": config.html_id,
+        "html_id": resolved_html_id,
     }
 
 
-@register.inclusion_tag("components/table_enhanced.html")
-def table_enhanced(
-    columns: list[dict[str, Any]],
-    rows: list[dict[str, Any]],
-    *,
-    config: EnhancedTableConfig | None = None,
-    page_obj: Any = None,
-    extra_params: str = "",
-    **kwargs: Any,
-) -> dict[str, Any]:
+# ===============================================================================
+# PAGE-SHELL PRIMITIVES (B.1) — Reusable layout blocks
+# ===============================================================================
+
+
+@dataclass
+class PageHeaderConfig:
+    """Parameter object for page_header block tag."""
+
+    title: str = ""
+    subtitle: str = ""
+    icon: str = ""
+    css_class: str = ""
+
+
+class PageHeaderNode(template.Node):
+    """Renders a page header with an actions slot between the opening and closing tags."""
+
+    def __init__(
+        self,
+        kwargs: dict[str, FilterExpression],
+        nodelist_actions: template.NodeList,
+    ) -> None:
+        self.kwargs = kwargs
+        self.nodelist_actions = nodelist_actions
+
+    def render(self, context: template.Context) -> str:
+        resolved: dict[str, Any] = {k: v.resolve(context) for k, v in self.kwargs.items()}
+        actions_html = self.nodelist_actions.render(context)
+
+        t = context.template.engine.get_template("components/page_header.html")
+        with context.update(
+            {
+                "ph_title": resolved.get("title", ""),
+                "ph_subtitle": resolved.get("subtitle", ""),
+                "ph_icon": resolved.get("icon", ""),
+                "ph_css_class": resolved.get("css_class", ""),
+                "ph_actions": mark_safe(actions_html),  # noqa: S308  — rendered from Django templates, not user input
+            }
+        ):
+            return t.render(context)
+
+
+@register.tag("page_header")
+def do_page_header(parser: template.base.Parser, token: template.base.Token) -> PageHeaderNode:
     """
-    Modern enhanced table component for PRAHO Platform
+    Block tag for standardized page headers with actions slot.
 
     Usage:
-        {% table_enhanced columns=billing_columns rows=billing_rows page_obj=documents pagination_enabled=True %}
+        {% page_header title="Invoice #001" subtitle="Invoice details" icon="document" %}
+          <a href="/pdf/">Download PDF</a>
+          {% button "Edit" variant="primary" %}
+        {% end_page_header %}
 
-    Column Structure:
-        {
-            'label': 'Document Type',
-            'width': 'w-28',           # Tailwind width class
-            'align': 'center',         # left|center|right
-            'sortable': True           # Enable sorting
-        }
-
-    Row Structure:
-        {
-            'clickable': True,
-            'click_url': '/billing/invoice/123/',  # Direct URL
-            'click_js': 'navigateToDocument("invoice", "123")',  # Custom JS
-            'cells': [
-                {
-                    'component': 'badge',      # badge|button|text
-                    'text': 'Invoice',
-                    'variant': 'success',
-                    'align': 'center',
-                    'no_wrap': True,
-                    'truncate': False,
-                    'title': 'Tooltip text',
-                    'text_color': 'text-white',
-                    'font_class': 'font-mono'
-                }
-            ],
-            'actions': [
-                {
-                    'component': 'button',     # button|link
-                    'text': '👁️',
-                    'variant': 'secondary',
-                    'size': 'xs',
-                    'href': '/view/123/',
-                    'class': 'px-2'
-                }
-            ]
-        }
-
-    Args:
-        columns: List of column definitions
-        rows: List of row data
-        show_actions: Show actions column
-        pagination_enabled: Enable pagination
-        include_js: Include navigation JavaScript
-        page_obj: Django paginator page object
-        extra_params: URL parameters for pagination
-        htmx_target: HTMX target selector
-        htmx_url: HTMX endpoint URL
+        {# Minimal — no actions #}
+        {% page_header title="Dashboard" subtitle="Welcome back" %}{% end_page_header %}
     """
-    # Use default configuration if not provided
-    if config is None:
-        config = EnhancedTableConfig()
+    bits = token.split_contents()
+    remaining_bits = bits[1:]
+    kwargs = django_token_kwargs(remaining_bits, parser)
+    if remaining_bits:
+        raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
 
-    # Override with any direct kwargs for backward compatibility
-    for key, value in kwargs.items():
-        if hasattr(config, key) and value is not None:
-            setattr(config, key, value)
+    nodelist = parser.parse(("end_page_header",))
+    parser.delete_first_token()
+    return PageHeaderNode(kwargs, nodelist)
 
+
+class SectionCardNode(template.Node):
+    """Renders a section card with a content slot between opening and closing tags."""
+
+    def __init__(
+        self,
+        kwargs: dict[str, FilterExpression],
+        nodelist_content: template.NodeList,
+    ) -> None:
+        self.kwargs = kwargs
+        self.nodelist_content = nodelist_content
+
+    def render(self, context: template.Context) -> str:
+        resolved: dict[str, Any] = {k: v.resolve(context) for k, v in self.kwargs.items()}
+        content_html = self.nodelist_content.render(context)
+
+        t = context.template.engine.get_template("components/section_card.html")
+        with context.update(
+            {
+                "sc_title": resolved.get("title", ""),
+                "sc_icon": resolved.get("icon", ""),
+                "sc_collapsible": resolved.get("collapsible", False),
+                "sc_padding": resolved.get("padding", "p-6"),
+                "sc_css_class": resolved.get("css_class", ""),
+                "sc_html_id": resolved.get("html_id", ""),
+                "sc_content": mark_safe(content_html),  # noqa: S308
+            }
+        ):
+            return t.render(context)
+
+
+@register.tag("section_card")
+def do_section_card(parser: template.base.Parser, token: template.base.Token) -> SectionCardNode:
+    """
+    Block tag for standardized section cards with titled headers.
+
+    Usage:
+        {% section_card title="Customer Details" icon="user" %}
+          <p>Card content here...</p>
+        {% end_section_card %}
+
+        {% section_card title="Line Items" icon="clipboard" collapsible=True padding="p-4 sm:p-6" %}
+          <table>...</table>
+        {% end_section_card %}
+    """
+    bits = token.split_contents()
+    remaining_bits = bits[1:]
+    kwargs = django_token_kwargs(remaining_bits, parser)
+    if remaining_bits:
+        raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+
+    nodelist = parser.parse(("end_section_card",))
+    parser.delete_first_token()
+    return SectionCardNode(kwargs, nodelist)
+
+
+@register.inclusion_tag("components/stat_tile.html")
+def stat_tile(  # noqa: PLR0913
+    label: str,
+    value: str,
+    *,
+    icon: str = "",
+    meta: str = "",
+    trend: str = "",
+    variant: str = "default",
+    css_class: str = "",
+) -> dict[str, Any]:
+    """
+    Stat metric tile for dashboards and detail pages.
+
+    Usage:
+        {% stat_tile "Total Due" "1.234,56 RON" icon="currency" variant="warning" meta="Due: 15.03.2026" %}
+        {% stat_tile "Active Services" "12" icon="server" variant="success" %}
+        {% stat_tile "Open Tickets" "3" icon="chat" trend="+2" %}
+    """
     return {
-        "columns": columns,
-        "rows": rows,
-        "show_actions": config.show_actions,
-        "pagination_enabled": config.pagination_enabled,
-        "include_js": config.include_js,
-        "action_column_label": config.action_column_label,
-        "empty_icon": config.empty_icon,
-        "empty_title": config.empty_title,
-        "empty_message": config.empty_message,
-        "empty_action_url": config.empty_action_url,
-        "empty_action_text": config.empty_action_text,
-        "htmx_target": config.htmx_target,
-        "htmx_url": config.htmx_url,
-        "page_obj": page_obj,
-        "extra_params": extra_params,
+        "label": label,
+        "value": value,
+        "icon": icon,
+        "meta": meta,
+        "trend": trend,
+        "variant": variant,
+        "css_class": css_class,
     }
+
+
+@register.inclusion_tag("components/empty_state.html")
+def empty_state(  # noqa: PLR0913
+    title: str,
+    *,
+    icon: str = "inbox",
+    body: str = "",
+    action_url: str = "",
+    action_text: str = "",
+    css_class: str = "",
+) -> dict[str, Any]:
+    """
+    Empty state placeholder for lists and tables with no data.
+
+    Usage:
+        {% empty_state "No invoices" icon="document" body="No invoices issued yet." action_url="/orders/" action_text="Browse products" %}
+        {% empty_state "No tickets" icon="chat" body="You haven't opened any support tickets." %}
+    """
+    return {
+        "title": title,
+        "icon": icon,
+        "body": body,
+        "action_url": action_url,
+        "action_text": action_text,
+        "css_class": css_class,
+    }
+
+
+# ===============================================================================
+# STATUS LABEL / VARIANT / ICON MAPPING (B.3)
+# ===============================================================================
+
+# ⚡ O(1) lookup — human-readable labels for statuses that don't title-case well
+_STATUS_LABEL_MAP: dict[str, str] = {
+    "waiting_on_customer": _("Waiting on You"),
+    "in_progress": _("In Progress"),
+    "not_consented": _("Not Consented"),
+    "not consented": _("Not Consented"),
+}
+
+# ⚡ O(1) lookup — all known statuses across billing, services, orders, tickets
+_STATUS_VARIANT_MAP: dict[str, str] = {
+    # Positive / completed
+    "active": "success",
+    "paid": "success",
+    "healthy": "success",
+    "accepted": "success",
+    "completed": "success",
+    "resolved": "success",
+    "granted": "success",
+    "converted": "success",
+    "enabled": "success",
+    "consented": "success",
+    # Warning / pending
+    "pending": "warning",
+    "overdue": "danger",
+    "warning": "warning",
+    "waiting": "warning",
+    "waiting_on_customer": "warning",
+    "processing": "info",
+    "not consented": "danger",
+    # Informational / in-progress
+    "draft": "info",
+    "issued": "primary",
+    "sent": "primary",
+    "open": "primary",
+    "in_progress": "primary",
+    "in progress": "primary",
+    "provisioning": "primary",
+    # Negative / cancelled
+    "cancelled": "danger",
+    "suspended": "danger",
+    "terminated": "secondary",
+    "expired": "danger",
+    "void": "secondary",
+    "refunded": "warning",
+    "error": "danger",
+    "revoked": "danger",
+    # Neutral / unknown
+    "closed": "secondary",
+    "inactive": "secondary",
+    "unknown": "secondary",
+    # Customer membership roles
+    "owner": "success",
+    "billing": "primary",
+    "tech": "info",
+    "viewer": "secondary",
+}
+
+# ⚡ O(1) lookup — status → icon name (subset with meaningful icons)
+_STATUS_ICON_MAP: dict[str, str] = {
+    "active": "check",
+    "paid": "check",
+    "completed": "check",
+    "resolved": "check",
+    "granted": "check",
+    "enabled": "check",
+    "healthy": "check",
+    "consented": "check",
+    "pending": "clock",
+    "waiting": "clock",
+    "waiting_on_customer": "clock",
+    "processing": "clock",
+    "expired": "clock",
+    "overdue": "alert",
+    "warning": "alert",
+    "suspended": "ban",
+    "cancelled": "x",
+    "terminated": "x",
+    "error": "alert",
+    "revoked": "x",
+    "provisioning": "lightning",
+    "open": "mail",
+    "in_progress": "lightning",
+    "in progress": "lightning",
+    "draft": "edit",
+    "sent": "mail",
+    "closed": "x",
+}
+
+
+@register.filter
+def status_variant(status: str) -> str:
+    """
+    Map any status string to a badge variant name.
+
+    Usage:
+        {% badge service.status_display variant=service.status|status_variant %}
+        {% badge ticket.status_display variant=ticket.status|status_variant rounded="full" %}
+
+    Returns: primary|secondary|success|warning|danger|info|default
+    """
+    if not status:
+        return "secondary"
+    return _STATUS_VARIANT_MAP.get(status.lower().strip(), "secondary")
+
+
+@register.filter
+def status_icon(status: str) -> str:
+    """
+    Map a status string to an icon name for use with {% badge %}.
+
+    Usage:
+        {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon %}
+
+    Returns: icon name string or "" if no icon mapped
+    """
+    if not status:
+        return ""
+    return _STATUS_ICON_MAP.get(status.lower().strip(), "")
+
+
+@register.filter
+def status_label(status: str) -> str:
+    """
+    Return a human-readable display label for a raw status code.
+
+    Handles underscore-separated codes (e.g. "waiting_on_customer" → "Waiting on You")
+    and falls back to title-cased output for unmapped statuses.
+
+    Usage:
+        {% badge ticket.status|status_label variant=ticket.status|status_variant %}
+    """
+    if not status:
+        return ""
+    key = status.lower().strip()
+    mapped = _STATUS_LABEL_MAP.get(key)
+    if mapped:
+        return str(mapped)
+    return status.replace("_", " ").title()
 
 
 @register.inclusion_tag("components/table.html")
@@ -590,12 +963,21 @@ def data_table(
         if hasattr(config, key) and value is not None:
             setattr(config, key, value)
 
+    pagination_obj = kwargs.get("pagination_obj")
+    if pagination_obj is None and not isinstance(config.pagination, bool):
+        pagination_obj = config.pagination
+
+    show_actions = bool(config.actions)
+    if "show_actions" in kwargs:
+        show_actions = bool(kwargs["show_actions"])
+
     return {
         "headers": headers,
         "rows": rows,
         "sortable": config.sortable,
         "searchable": config.searchable,
-        "pagination": config.pagination,
+        "pagination": pagination_obj,
+        "show_actions": show_actions,
         "actions": config.actions or [],
         "css_class": config.css_class,
         "empty_message": config.empty_message,
@@ -704,10 +1086,14 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     ),
     "logout": "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
     "check": "M5 13l4 4L19 7",
+    "success": "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
     "x": "M6 18L18 6M6 6l12 12",
+    "close": "M6 18L18 6M6 6l12 12",
     "warning": "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+    "alert-triangle": "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
     "clock": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
     "lightning": "M13 10V3L4 14h7v7l9-11h-7z",
+    "bell": "M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6.002 6.002 0 0 0-4-5.659V4a2 2 0 1 0-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 1 1-6 0m6 0H9",
     "users": "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z",
     "user": "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
     "building": "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 00-1-1h-2a1 1 0 00-1 1v5m4 0H9",
@@ -718,18 +1104,34 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     "chat": "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
     "receipt": "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z",
     "plus": "M12 4v16m8-8H4",
+    "minus": "M20 12H4",
+    "trash": "M6 7h12m-9 0V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0l1 12a2 2 0 002 2h2a2 2 0 002-2l1-12",
     "orders": "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z",
+    "shopping-cart": "M3 3h2l.4 2m0 0h13.2l-1.6 8H6.4M5.4 5L6.4 13m0 0l-1 5h11.6M6.4 13h10.6M9 21a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z",
     "lock": "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
     "refresh": "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+    "loading": "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
     "search": "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    "filter": "M3 4a1 1 0 011-1h16a1 1 0 01.8 1.6L14 13.5V19a1 1 0 01-1.447.894l-3-1.5A1 1 0 019 17.5v-4L3.2 4.6A1 1 0 013 4z",
+    "sort": "M7 4h10M7 10h7M7 16h4m6 0V6m0 10l-3-3m3 3l3-3",
     "external": "M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14",
+    "external-link": "M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14",
     "download": "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
+    "upload": "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-6l-4-4m0 0L8 10m4-4v12",
     "globe": "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "domain": "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
     "server": "M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01",
     "mail": "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
+    "email": "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
     "arrow-left": "M10 19l-7-7m0 0l7-7m-7 7h18",
     "phone": "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z",
     "info": "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "calendar": "M8 7V3m8 4V3m-9 8h10m-12 9h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v11a2 2 0 002 2z",
+    "copy": "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2M10 8h8a2 2 0 012 2v8a2 2 0 01-2 2h-8a2 2 0 01-2-2v-8a2 2 0 012-2z",
+    "grid": "M4 6h5v5H4V6zm0 7h5v5H4v-5zm7-7h5v5h-5V6zm0 7h5v5h-5v-5",
+    "file-text": "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    "ticket": "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+    "list": "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
     "ban": "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636",
     "credit-card": "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
     "question": "M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
@@ -737,6 +1139,39 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     "book": "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
     "chart": "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
     "currency": "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    # ── A.5 additions: migrated from raw <svg> in feature templates ──
+    "chevron-left": "M15 19l-7-7 7-7",
+    "chevron-down": "M19 9l-7 7-7-7",
+    "chevron-up": "M5 15l7-7 7 7",
+    "chevron-right": "M9 5l7 7-7 7",
+    "menu": "M4 6h16M4 12h16M4 18h16",
+    "arrow-up": "M5 10l7-7m0 0l7 7m-7-7v18",
+    "arrow-down": "M19 14l-7 7m0 0l-7-7m7 7V3",
+    "arrow-right": "M14 5l7 7m0 0l-7 7m7-7H3",
+    "map-pin": (
+        "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z",
+        "M15 11a3 3 0 11-6 0 3 3 0 016 0z",
+    ),
+    "edit": "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+    "exclamation-circle": "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "paperclip": "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13",
+    "shield-check": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+    "shield": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+    "star": "M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.801 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.539 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.719c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.95-.69l1.07-3.292z",
+    "key": "M15 7a5 5 0 10-9.95 1H3v2h2v2h2v2h2.05A5.002 5.002 0 0015 7z",
+    "swap": "M8 9l4-4 4 4m0 6l-4 4-4-4",
+    "pause": "M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z",
+    "x-circle": "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z",
+    "danger": "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z",
+    "send": "M12 19l9 2-9-18-9 18 9-2zm0 0v-8",
+    "adjustments": (
+        "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4",
+    ),
+    "flag": "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9",
+    "eye": (
+        "M15 12a3 3 0 11-6 0 3 3 0 016 0z",
+        "M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
+    ),
 }
 
 _ICON_SIZES: dict[str, str] = {
@@ -896,14 +1331,14 @@ def dropdown(title: str, items: list[dict[str, Any]], *, icon: str | None = None
     Romanian hosting provider dropdown navigation component
 
     Usage:
-        {% dropdown "Business" business_items icon="🏢" %}
-        {% dropdown "Support" support_items icon="🎫" %}
+        {% dropdown "Business" business_items icon="building" %}
+        {% dropdown "Support" support_items icon="tickets" %}
 
     Items format:
         [
-            {"text": "Customers", "url": "/customers/", "icon": "👥"},
+            {"text": "Customers", "url": "/customers/", "icon": "users"},
             {"divider": True},
-            {"text": "Invoices", "url": "/invoices/", "icon": "🧾", "badge": {"text": "3", "variant": "warning"}},
+            {"text": "Invoices", "url": "/invoices/", "icon": "invoices", "badge": {"text": "3", "variant": "warning"}},
         ]
 
     Args:
@@ -934,3 +1369,42 @@ def romanian_percentage(value: float, decimals: int = 1) -> str:
     percentage = value * 100
     formatted = f"{percentage:.{decimals}f}".replace(".", ",")
     return f"{formatted}%"
+
+
+# ===============================================================================
+# FORM ACTIONS COMPONENT (A.1)
+# ===============================================================================
+
+
+@register.inclusion_tag("components/form_actions.html")
+def form_actions(  # noqa: PLR0913
+    submit_label: str = "",
+    cancel_url: str = "",
+    cancel_label: str = "",
+    submit_variant: str = "primary",
+    align: str = "right",
+    css_class: str = "",
+) -> dict[str, Any]:
+    """
+    Render a standardised form submit/cancel row.
+
+    Usage:
+        {% form_actions submit_label="Save Changes" cancel_url=back_url %}
+        {% form_actions submit_label="Delete" submit_variant="danger" cancel_url=back_url %}
+
+    Args:
+        submit_label:   Text for the submit button (default: "Save").
+        cancel_url:     URL for the cancel link; omits cancel when empty.
+        cancel_label:   Text for cancel link (default: "Cancel").
+        submit_variant: Button colour variant — primary|danger|warning.
+        align:          Container alignment — right|left|between.
+        css_class:      Extra CSS classes on the container div.
+    """
+    return {
+        "submit_label": submit_label,
+        "cancel_url": cancel_url,
+        "cancel_label": cancel_label,
+        "submit_variant": submit_variant,
+        "align": align,
+        "css_class": css_class,
+    }

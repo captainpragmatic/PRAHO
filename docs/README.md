@@ -9,6 +9,11 @@
 - [Dependency Analysis Report](architecture/DEPENDENCY_ANALYSIS.md) -- App coupling metrics and circular dependency analysis
 - [Codebase Archaeology Report](architecture/CODEBASE_ARCHAEOLOGY.md) -- Evolution across 3 architectural eras (through v0.19.1)
 
+## UI/UX Design System
+
+- [Portal Design System Specification](architecture/ui-ux/portal-design-system.md) -- Tokens, components, API rules, UX standards, governance
+- [Portal UI/UX Implementation Backlog](architecture/ui-ux/portal-ui-ux-backlog.md) -- Phased roadmap (A-D), task breakdown, success metrics
+
 ## Architecture Decision Records
 
 - [ADR Index](ADRs/README.md) -- 24 decisions (ADR-0001 through ADR-0025, with ADR-0008 superseded)

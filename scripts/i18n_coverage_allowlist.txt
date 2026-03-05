@@ -60,3 +60,7 @@ services/portal/templates/users/mfa_backup_codes.html:I18N009
 
 # I18N010: Company proper nouns in data processors page — should not be translated
 services/platform/templates/legal/data_processors.html:I18N010
+
+# Living styleguide: developer-only tool (DEBUG=True), not user-facing
+services/portal/apps/ui/views.py:I18N005
+services/portal/templates/styleguide/index.html:I18N010

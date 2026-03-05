@@ -212,6 +212,13 @@ class Proforma:
 
     @property
     def status_display(self) -> str:
-        """Get status display with emoji"""
-        status_map = {"draft": "📝 Draft", "sent": "📧 Sent", "accepted": "✅ Accepted", "expired": "❌ Expired"}
-        return status_map.get(self.status, f"❓ {self.status.title()}")
+        """Human-readable status label with i18n support."""
+        labels = {
+            "draft": str(_("Draft")),
+            "sent": str(_("Sent")),
+            "accepted": str(_("Accepted")),
+            "expired": str(_("Expired")),
+            "converted": str(_("Converted")),
+            "cancelled": str(_("Cancelled")),
+        }
+        return labels.get(self.status, self.status.replace("_", " ").title())

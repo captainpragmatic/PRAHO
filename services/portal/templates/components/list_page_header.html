@@ -8,7 +8,7 @@ Provides: icon, title, subtitle, stats grid, optional action button.
 Usage:
 {% include "components/list_page_header.html" with
     list_icon_bg="bg-blue-600"
-    list_icon_svg_path="M8 12h.01M12 12h.01..."
+    list_icon_name="tickets"
     list_title="My Support Tickets"
     list_title_mobile="Support Tickets"
     list_subtitle="Get help with your hosting services"
@@ -18,7 +18,7 @@ Usage:
 
 Required:
 - list_icon_bg: Tailwind bg class for icon container
-- list_icon_svg_path: SVG <path> d attribute
+- list_icon_name: icon name from {% icon %} tag
 - list_title: Page title (desktop)
 - list_subtitle: Subtitle text
 
@@ -41,9 +41,7 @@ Optional:
           {% if list_icon_name %}
             {% icon list_icon_name size="lg" css_class="text-white" %}
           {% else %}
-            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
-            </svg>
+            {% icon "document" size="lg" css_class="text-white" %}
           {% endif %}
         </div>
         <div>
@@ -79,9 +77,7 @@ Optional:
           {% if list_icon_name %}
             {% icon list_icon_name size="md" css_class="text-white" %}
           {% else %}
-            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ list_icon_svg_path }}" />
-            </svg>
+            {% icon "document" size="md" css_class="text-white" %}
           {% endif %}
         </div>
         <div>

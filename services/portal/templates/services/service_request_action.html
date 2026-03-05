@@ -9,9 +9,7 @@
   <div class="mb-6">
     <a href="{% url 'services:detail' service_id=service_id %}"
        class="inline-flex items-center text-slate-400 hover:text-white transition-colors">
-      <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-      </svg>
+      {% icon "chevron-left" size="sm" css_class="mr-2" %}
       {% trans "Back to Service Details" %}
     </a>
   </div>
@@ -21,9 +19,7 @@
     <div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center space-x-4">
         <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center">
-          <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
-          </svg>
+          {% icon "swap" size="lg" css_class="text-blue-400" %}
         </div>
         <div>
           <h1 class="text-2xl font-bold text-white">{% trans "Request Service Action" %}</h1>
@@ -36,8 +32,8 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
     <!-- Main Form -->
     <div class="lg:col-span-2">
-      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h2 class="text-xl font-semibold text-white mb-6">{% trans "Select Action Type" %}</h2>
+      {% trans 'Select Action Type' as sc_sat_title %}
+      {% section_card title=sc_sat_title icon="swap" %}
 
         <form method="post" action="{% url 'services:request_action' service_id=service_id %}">
           {% csrf_token %}
@@ -62,25 +58,15 @@
                     <!-- Action Icon -->
                     <div class="action-icon w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center transition-all">
                       {% if action_value == 'upgrade_request' %}
-                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path>
-                        </svg>
+                        {% icon "arrow-up" size="sm" css_class="text-slate-300 transition-colors" %}
                       {% elif action_value == 'downgrade_request' %}
-                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6"></path>
-                        </svg>
+                        {% icon "arrow-down" size="sm" css_class="text-slate-300 transition-colors" %}
                       {% elif action_value == 'suspend_request' %}
-                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
+                        {% icon "pause" size="sm" css_class="text-slate-300 transition-colors" %}
                       {% elif action_value == 'cancel_request' %}
-                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
+                        {% icon "x-circle" size="sm" css_class="text-slate-300 transition-colors" %}
                       {% else %}
-                        <svg class="w-4 h-4 text-slate-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
-                        </svg>
+                        {% icon "swap" size="sm" css_class="text-slate-300 transition-colors" %}
                       {% endif %}
                     </div>
 
@@ -191,9 +177,7 @@
             <button type="submit"
                     class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg
                            transition-colors flex items-center justify-center">
-              <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
-              </svg>
+              {% icon "send" size="sm" css_class="mr-2" %}
               {% trans "Submit Request" %}
             </button>
 
@@ -204,14 +188,14 @@
             </a>
           </div>
         </form>
-      </div>
+      {% end_section_card %}
     </div>
 
     <!-- Sidebar -->
     <div class="lg:col-span-1 space-y-6">
       <!-- Current Service Info -->
-      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Current Service" %}</h3>
+      {% trans 'Current Service' as sc_cs_title %}
+      {% section_card title=sc_cs_title icon="server" %}
 
         <div class="space-y-3">
           <div>
@@ -244,11 +228,11 @@
             </dd>
           </div>
         </div>
-      </div>
+      {% end_section_card %}
 
       <!-- Request Process -->
-      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Request Process" %}</h3>
+      {% trans 'Request Process' as sc_rp_title %}
+      {% section_card title=sc_rp_title icon="list" %}
 
         <div class="space-y-4">
           <div class="flex items-center space-x-3">
@@ -291,28 +275,24 @@
             </div>
           </div>
         </div>
-      </div>
+      {% end_section_card %}
 
       <!-- Contact Support -->
-      <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
-        <h3 class="text-lg font-semibold text-white mb-4">{% trans "Need Help?" %}</h3>
+      {% trans 'Need Help?' as sc_nh_title %}
+      {% section_card title=sc_nh_title icon="chat" %}
 
         <div class="space-y-3">
           <a href="#" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
-            </svg>
+            {% icon "chat" size="sm" %}
             <span>{% trans "Chat with Support" %}</span>
           </a>
 
           <a href="mailto:support@pragmatichost.com" class="flex items-center space-x-3 text-slate-300 hover:text-white transition-colors">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-            </svg>
+            {% icon "mail" size="sm" %}
             <span>{% trans "Email Support" %}</span>
           </a>
         </div>
-      </div>
+      {% end_section_card %}
     </div>
   </div>
 </div>

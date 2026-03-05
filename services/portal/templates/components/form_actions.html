@@ -1,0 +1,44 @@
+{# =============================================================================== #}
+{# PRAHO PORTAL - FORM ACTIONS COMPONENT #}
+{# =============================================================================== #}
+{# Standardised submit/cancel row for all portal forms. #}
+{# #}
+{# Parameters: #}
+{#   submit_label  — button label (default: "Save")                               #}
+{#   cancel_url    — URL for cancel link (optional, omits cancel if absent)       #}
+{#   cancel_label  — cancel link text (default: "Cancel")                         #}
+{#   submit_variant — button variant: primary|danger|warning (default: primary)   #}
+{#   align         — right|left|between (default: right)                          #}
+{#   css_class     — additional CSS classes on the container                      #}
+{# =============================================================================== #}
+
+{% load i18n %}
+{% load ui_components %}
+
+<div class="flex items-center {% if align == 'left' %}justify-start{% elif align == 'between' %}justify-between{% else %}justify-end{% endif %} gap-3 pt-4 border-t border-slate-700{% if css_class %} {{ css_class }}{% endif %}">
+
+  {# Cancel link — left side when align=between, otherwise in natural order #}
+  {% if cancel_url %}
+  <a href="{{ cancel_url }}"
+     class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+     aria-label="{{ cancel_label|default:_('Cancel') }}">
+    {{ cancel_label|default:_("Cancel") }}
+  </a>
+  {% endif %}
+
+  {# Submit button — uses {% button %} tag so variant/disabled/htmx attrs work #}
+  <button type="submit"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800
+                 {% if submit_variant == 'danger' %}bg-red-600 hover:bg-red-700 text-white focus:ring-red-500
+                 {% elif submit_variant == 'warning' %}bg-yellow-600 hover:bg-yellow-700 text-white focus:ring-yellow-500
+                 {% else %}bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500{% endif %}">
+    <span class="htmx-indicator hidden">
+      {# Inline spinner — no icon equivalent for animated spin #}
+      <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+    </span>
+    {{ submit_label|default:_("Save") }}
+  </button>
+</div>

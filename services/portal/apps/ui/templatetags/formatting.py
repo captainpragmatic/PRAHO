@@ -550,6 +550,46 @@ def cents_to_currency(value: int | float | Decimal) -> Decimal:
 
 
 @register.filter
+def format_currency(value: int | float | Decimal, currency: str = "RON") -> str:
+    """
+    Convenience filter: cents → formatted Romanian currency in one step.
+
+    Combines cents_to_currency + romanian_currency into a single call.
+
+    Usage:
+        {{ invoice.total_cents|format_currency:invoice.currency.code }}
+        {{ 11900|format_currency:"RON" }}  -> "119,00 RON"
+        {{ 5000|format_currency:"EUR" }}   -> "50,00 EUR"
+
+    Args:
+        value: Amount in cents (integer)
+        currency: Currency code (RON, EUR, USD)
+    """
+    converted = cents_to_currency(value)
+    return romanian_currency(converted, currency)
+
+
+@register.filter
+def format_date(value: Any, format_type: str = "short") -> str:
+    """
+    Locale-aware date filter — design-system alias for romanian_date.
+
+    Preferred name for new templates; delegates to romanian_date internally
+    so both filters stay in sync.
+
+    Usage:
+        {{ invoice.issued_at|format_date }}           -> "15 ian. 2024"
+        {{ invoice.due_at|format_date:"long" }}       -> "15 ianuarie 2024"
+        {{ timestamp|format_date:"datetime" }}        -> "15 ian. 2024, 14:30"
+
+    Args:
+        value: Date/datetime object
+        format_type: short|long|datetime|time (same as romanian_date)
+    """
+    return romanian_date(value, format_type)
+
+
+@register.filter
 def as_percentage(value: TemplateNumeric) -> Decimal:
     """
     Convert a proportion (0.21) to a percentage (21).

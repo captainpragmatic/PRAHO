@@ -64,8 +64,14 @@ urlpatterns = [
 ]
 
 # ===============================================================================
-# DEVELOPMENT URLS (Debug toolbar)
+# DEVELOPMENT URLS (Debug toolbar + Living Styleguide)
 # ===============================================================================
+
+if settings.DEBUG:
+    # Living design-system styleguide — DEBUG only
+    urlpatterns += [
+        path("styleguide/", include("apps.ui.urls")),
+    ]
 
 if settings.DEBUG and "debug_toolbar" in settings.INSTALLED_APPS:
     import debug_toolbar  # type: ignore[import-untyped]

@@ -11,9 +11,7 @@
     <div class="mb-4">
       <a href="{% url 'services:list' %}"
          class="inline-flex items-center text-slate-400 hover:text-white transition-colors">
-        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-        </svg>
+        {% icon "chevron-left" size="md" css_class="mr-2" %}
         {% trans "Back to Services" %}
       </a>
     </div>
@@ -64,27 +62,7 @@
                 {% endif %}
 
                 <!-- Status Badge -->
-                {% if service.status == 'active' %}
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-500/20 text-green-300 border border-green-500/30">
-                    <span class="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
-                    {% trans 'Active' %}
-                  </span>
-                {% elif service.status == 'suspended' %}
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-500/20 text-red-300 border border-red-500/30">
-                    <span class="w-2 h-2 bg-red-400 rounded-full mr-2"></span>
-                    {% trans 'Suspended' %}
-                  </span>
-                {% elif service.status == 'pending' %}
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
-                    <span class="w-2 h-2 bg-yellow-400 rounded-full mr-2"></span>
-                    {% trans 'Pending' %}
-                  </span>
-                {% else %}
-                  <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-slate-500/20 text-slate-300 border border-slate-500/30">
-                    <span class="w-2 h-2 bg-slate-400 rounded-full mr-2"></span>
-                    {{ service.status_display|default:"Unknown" }}
-                  </span>
-                {% endif %}
+                {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon %}
 
                 <!-- Service Type Badge -->
                 {% if service.service_plan.plan_type_display %}
@@ -97,9 +75,7 @@
               <!-- Domain Info -->
               {% if service.domain %}
                 <div class="flex items-center mt-2 text-slate-400">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9v-9m0 0V3"></path>
-                  </svg>
+                  {% icon "globe" size="sm" css_class="mr-2" %}
                   <span class="text-sm">{{ service.domain }}</span>
                 </div>
               {% endif %}
@@ -112,10 +88,7 @@
               <!-- Control Panel Access -->
               <a href="#"
                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-colors">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                </svg>
+                {% icon "settings" size="sm" css_class="mr-2" %}
                 {% trans "Control Panel" %}
               </a>
             {% endif %}
@@ -123,18 +96,14 @@
             <!-- Service Actions -->
             <a href="{% url 'services:request_action' service_id=service_id %}"
                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-slate-300 bg-slate-700 hover:bg-slate-600 hover:text-white transition-colors">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
-              </svg>
+              {% icon "adjustments" size="sm" css_class="mr-2" %}
               {% trans "Actions" %}
             </a>
 
             <!-- Contact Support — opens ticket form with service pre-linked -->
             <a href="{% url 'tickets:create' %}?service_id={{ service_id }}"
                class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-slate-300 border border-slate-600 hover:text-white hover:border-slate-500 transition-colors">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
-              </svg>
+              {% icon "chat" size="sm" css_class="mr-2" %}
               {% trans "Support" %}
             </a>
           </div>
@@ -144,92 +113,41 @@
       <!-- Key Service Information - Enhanced Stats -->
       <div class="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <!-- Monthly Cost -->
-        <div class="bg-slate-700/50 rounded-lg p-4 border border-slate-600/50">
-          <div class="flex items-center space-x-2 mb-2">
-            {% icon "currency" size="sm" css_class="text-green-400" %}
-            <div class="text-xs text-slate-400 uppercase tracking-wide font-medium">{% trans "Monthly" %}</div>
-          </div>
-          <div class="text-xl font-bold text-white">
-            {% if service.monthly_price %}
-              {{ service.monthly_price|floatformat:2 }} <span class="text-sm font-normal text-slate-400">{{ service.currency_code|default:"RON" }}</span>
-            {% else %}
-              <span class="text-slate-500">{% trans "N/A" %}</span>
-            {% endif %}
-          </div>
-          {% if service.total_monthly_cost %}
-          <div class="text-xs text-slate-400 mt-1">
-            {{ service.total_monthly_cost|floatformat:2 }} {{ service.currency_code|default:"RON" }} {% trans "with VAT" %}
-          </div>
-          {% endif %}
-        </div>
+        {% if service.monthly_price %}
+          {% trans 'Monthly' as st1_label %}
+          {% with val=service.monthly_price|floatformat:2 %}{% stat_tile st1_label val icon="currency" variant="success" %}{% endwith %}
+        {% else %}
+          {% trans 'Monthly' as st1_label %}{% trans 'N/A' as st1_val %}
+          {% stat_tile st1_label st1_val icon="currency" variant="default" %}
+        {% endif %}
 
         <!-- Next Billing -->
-        <div class="bg-slate-700/50 rounded-lg p-4 border border-slate-600/50">
-          <div class="flex items-center space-x-2 mb-2">
-            {% icon "clock" size="sm" css_class="text-blue-400" %}
-            <div class="text-xs text-slate-400 uppercase tracking-wide font-medium">{% trans "Next Bill" %}</div>
-          </div>
-          <div class="text-xl font-bold text-white">
-            {% if service.next_billing_date %}
-              {{ service.next_billing_date|date:"M d" }}
-            {% elif service.expires_at %}
-              {{ service.expires_at|date:"M d" }}
-            {% else %}
-              <span class="text-slate-500">{% trans "Calculating..." %}</span>
-            {% endif %}
-          </div>
-          {% if service.billing_cycle_display %}
-          <div class="text-xs text-slate-400 mt-1">
-            {{ service.billing_cycle_display }} {% trans "cycle" %}
-          </div>
-          {% endif %}
-        </div>
+        {% trans 'Next Bill' as st2_label %}
+        {% if service.next_billing_date %}
+          {% stat_tile st2_label service.next_billing_date|date:"M d" icon="clock" variant="primary" meta=service.billing_cycle_display %}
+        {% elif service.expires_at %}
+          {% stat_tile st2_label service.expires_at|date:"M d" icon="clock" variant="warning" meta=service.billing_cycle_display %}
+        {% else %}
+          {% trans 'Calculating...' as st2_val %}{% stat_tile st2_label st2_val icon="clock" variant="default" %}
+        {% endif %}
 
         <!-- Service Age -->
-        <div class="bg-slate-700/50 rounded-lg p-4 border border-slate-600/50">
-          <div class="flex items-center space-x-2 mb-2">
-            {% icon "clock" size="sm" css_class="text-purple-400" %}
-            <div class="text-xs text-slate-400 uppercase tracking-wide font-medium">{% trans "Age" %}</div>
-          </div>
-          <div class="text-xl font-bold text-white">
-            {% if service.service_age_days != None %}
-              {{ service.service_age_days }} <span class="text-sm font-normal text-slate-400">{% trans "days" %}</span>
-            {% elif service.created_at %}
-              <span class="text-slate-500">{% trans "Active" %}</span>
-            {% else %}
-              <span class="text-slate-500">{% trans "New" %}</span>
-            {% endif %}
-          </div>
-          {% if service.created_at %}
-          <div class="text-xs text-slate-400 mt-1">
-            {% trans "Since" %} {{ service.created_at|date:"M d, Y" }}
-          </div>
-          {% endif %}
-        </div>
+        {% trans 'Age' as st3_label %}
+        {% if service.service_age_days != None %}
+          {% with val=service.service_age_days|stringformat:"s" %}{% stat_tile st3_label val icon="clock" variant="info" %}{% endwith %}
+        {% else %}
+          {% trans 'New' as st3_val %}{% stat_tile st3_label st3_val icon="clock" variant="default" %}
+        {% endif %}
 
         <!-- Auto Renew -->
-        <div class="bg-slate-700/50 rounded-lg p-4 border border-slate-600/50">
-          <div class="flex items-center space-x-2 mb-2">
-            {% icon "refresh" size="sm" css_class="text-orange-400" %}
-            <div class="text-xs text-slate-400 uppercase tracking-wide font-medium">{% trans "Auto Renew" %}</div>
-          </div>
-          <div class="text-xl font-bold">
-            {% if service.auto_renew %}
-              <span class="text-green-400">{% trans "Enabled" %}</span>
-            {% elif service.auto_renew == False %}
-              <span class="text-red-400">{% trans "Disabled" %}</span>
-            {% else %}
-              <span class="text-slate-500">{% trans "N/A" %}</span>
-            {% endif %}
-          </div>
-          <div class="text-xs text-slate-400 mt-1">
-            {% if service.auto_renew %}
-              {% trans "Automatic renewal active" %}
-            {% else %}
-              {% trans "Manual renewal required" %}
-            {% endif %}
-          </div>
-        </div>
+        {% trans 'Auto Renew' as st4_label %}
+        {% if service.auto_renew %}
+          {% trans 'Enabled' as st4_val %}{% stat_tile st4_label st4_val icon="refresh" variant="success" %}
+        {% elif service.auto_renew == False %}
+          {% trans 'Disabled' as st4_val %}{% stat_tile st4_label st4_val icon="refresh" variant="danger" %}
+        {% else %}
+          {% trans 'N/A' as st4_val %}{% stat_tile st4_label st4_val icon="refresh" variant="default" %}
+        {% endif %}
       </div>
     </div>
   </div>
@@ -550,21 +468,7 @@
                   <div class="bg-slate-600/30 rounded-lg p-4">
                     <div class="flex items-center justify-between mb-2">
                       <div class="text-sm font-medium text-slate-300">{% trans "Current Status" %}</div>
-                      {% if service.status == 'active' %}
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          <span class="w-2 h-2 bg-green-400 rounded-full mr-1"></span>
-                          {% trans 'Active' %}
-                        </span>
-                      {% elif service.status == 'pending' %}
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          <span class="w-2 h-2 bg-yellow-400 rounded-full mr-1"></span>
-                          {% trans 'Pending' %}
-                        </span>
-                      {% else %}
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                          {{ service.status_display }}
-                        </span>
-                      {% endif %}
+                      {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" %}
                     </div>
                     <div class="text-xs text-slate-400">
                       {% trans "Last updated" %} {{ service.updated_at|date:"M d, Y H:i" }}
@@ -674,9 +578,7 @@
                 </div>
                 <div class="h-64 flex items-center justify-center text-slate-400">
                   <div class="text-center">
-                    <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                    </svg>
+                    {% icon "chart" size="2xl" css_class="mx-auto mb-2 opacity-50" %}
                     <p>{% trans "Usage charts will be available soon" %}</p>
                   </div>
                 </div>
@@ -892,7 +794,7 @@
                       </div>
                       <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "VAT Registration" %}</span>
-                        <span class="text-white">🇷🇴 Romania</span>
+                        <span class="text-white">{% icon "flag" size="xs" css_class="inline" %} Romania</span>
                       </div>
                       <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "Invoice Currency" %}</span>
@@ -945,15 +847,7 @@
                     </div>
                   </div>
                   <div class="flex space-x-2">
-                    {% if domain.status == 'active' %}
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        {% trans "Active" %}
-                      </span>
-                    {% else %}
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        {{ domain.status|title }}
-                      </span>
-                    {% endif %}
+                    {% badge domain.status|status_label variant=domain.status|status_variant size="xs" rounded="full" %}
                   </div>
                 </div>
                 {% endfor %}

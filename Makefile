@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -520,8 +520,80 @@ lint-credentials:
 	@echo "✅ Credentials check complete!"
 
 # ===============================================================================
+# DESIGN SYSTEM CHECKS 🎨  (Phase C.3, C.4, D.1)
+# ===============================================================================
+
+check-parity:
+	@echo "🔍 [Parity] Checking component parity: portal ↔ platform..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/check_component_parity.py
+	@echo "✅ Component parity check complete!"
+
+check-parity-fix:
+	@echo "🔧 [Parity] Syncing divergent components (portal → platform)..."
+	@$(VENV_DIR)/bin/python scripts/check_component_parity.py --fix
+	@echo "✅ Parity fix complete — verify diffs before committing."
+
+css-audit:
+	@echo "📦 [CSS Audit] Measuring portal CSS bundle size..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@CSS_FILE="services/portal/static/css/tailwind.min.css"; \
+	if [ ! -f "$$CSS_FILE" ]; then \
+		echo "⚠️  $$CSS_FILE not found — run 'make build-css' first."; \
+		exit 0; \
+	fi; \
+	SIZE_RAW=$$(wc -c < "$$CSS_FILE"); \
+	SIZE_GZIP=$$(gzip -c "$$CSS_FILE" | wc -c); \
+	SIZE_GZIP_KB=$$((SIZE_GZIP / 1024)); \
+	echo "📄 Raw size:    $$(echo "scale=1; $$SIZE_RAW / 1024" | bc) KB"; \
+	echo "🗜️  Gzipped:     $$SIZE_GZIP_KB KB"; \
+	if [ $$SIZE_GZIP_KB -le 50 ]; then \
+		echo "✅ Gzipped size $$SIZE_GZIP_KB KB is within target (≤ 50 KB)"; \
+	else \
+		echo "⚠️  Gzipped size $$SIZE_GZIP_KB KB exceeds target (50 KB) — consider PurgeCSS"; \
+	fi
+	@echo ""
+	@echo "📜 Top 10 largest Tailwind utility classes by selector count:"
+	@if command -v grep >/dev/null 2>&1; then \
+		grep -oP '\.([\w-]+)' "services/portal/static/css/tailwind.min.css" 2>/dev/null \
+		| sort | uniq -c | sort -rn | head -10 || echo "  (selector analysis unavailable)"; \
+	fi
+
+lint-templates:
+	@echo "🎨 [Templates] Scanning for design-system violations..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/lint_template_components.py || true
+	@echo "⚠️  (run 'make lint-templates-strict' to fail on blockers)"
+
+lint-templates-strict:
+	@echo "🎨 [Templates] Strict scan (all codes block)..."
+	@$(VENV_DIR)/bin/python scripts/lint_template_components.py \
+		--fail-on TMPL001,TMPL002,TMPL003,TMPL004,TMPL005,TMPL006,TMPL007,TMPL008,TMPL009
+
+audit-a11y:
+	@echo "♿ [A11Y] Accessibility audit (WCAG AA)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/audit_accessibility.py --verbose || true
+	@echo "⚠️  (run 'make audit-a11y-strict' to fail on critical+serious)"
+
+audit-a11y-strict:
+	@echo "♿ [A11Y] Strict accessibility audit..."
+	@$(VENV_DIR)/bin/python scripts/audit_accessibility.py --verbose --fail-on critical,serious
+
+audit-dark-mode:
+	@echo "🌙 [DarkMode] Dark mode completeness audit..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/audit_dark_mode.py --verbose || true
+	@echo "⚠️  (run 'make audit-dark-mode-strict' to fail on blockers)"
+
+audit-dark-mode-strict:
+	@echo "🌙 [DarkMode] Strict dark mode audit..."
+	@$(VENV_DIR)/bin/python scripts/audit_dark_mode.py --verbose --fail-on blocker
+
+# ===============================================================================
 # TYPE CHECKING 🏷️
 # ===============================================================================
+
 
 type-check:
 	@echo "🏷️ [All Services] Comprehensive type checking..."

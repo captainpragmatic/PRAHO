@@ -1,0 +1,72 @@
+# .component-parity-ignore
+#
+# Components listed here exist in both portal and platform but are INTENTIONALLY
+# different. Each entry must have a justification comment below it.
+#
+# Syntax: one component filename per line (e.g., modal.html)
+# Lines starting with # are comments.
+#
+# Maintained by: PRAHO Platform Team
+# Last reviewed: 2026-03-05
+# Review trigger: After Phase B completes, sync portal → platform for all entries
+#
+# ===============================================================================
+
+# ── Navigation ──────────────────────────────────────────────────────────────────
+
+# mobile_header.html — portal has customer-facing nav links (billing, services,
+# tickets); platform has staff admin links. Same structure, different content.
+mobile_header.html
+
+# mobile_nav_item.html — portal and platform have different URL namespaces.
+mobile_nav_item.html
+
+# nav_dropdown.html — portal uses customer role checks; platform uses staff roles.
+nav_dropdown.html
+
+# ── Form components ─────────────────────────────────────────────────────────────
+
+# input.html — portal has Finding 1 a11y fixes (aria-describedby combined,
+# help_text id). Platform migration pending Phase B sync.
+input.html
+
+# checkbox.html — portal has updated error styling from epic. Platform pending.
+checkbox.html
+
+# ── Feedback ────────────────────────────────────────────────────────────────────
+
+# alert.html — portal has additional variant support from epic. Platform pending.
+alert.html
+
+# toast.html — portal integrated with C.1 static JS modules. Platform uses inline JS.
+toast.html
+
+# modal.html — portal has HTMX multiline bug fix and C.1 JS modules. Platform pending.
+modal.html
+
+# ── Layout / Data ───────────────────────────────────────────────────────────────
+
+# breadcrumb.html — portal has updated aria-label and current-page detection.
+breadcrumb.html
+
+# button.html — portal has HTMX loading states from epic. Platform pending.
+button.html
+
+# dangerous_action_modal.html — portal uses openModal() JS API from C.1 static
+# modules. Platform still uses deprecated inline handlers.
+dangerous_action_modal.html
+
+# pagination.html — portal has HTMX hx-boost attributes. Platform pending.
+pagination.html
+
+# progress_indicator.html — portal uses updated color tokens from epic.
+progress_indicator.html
+
+# step_navigation.html — portal has additional compact variant. Platform pending.
+step_navigation.html
+
+# table_enhanced.html — portal has updated empty state from B.1 primitives.
+table_enhanced.html
+
+# table.html — portal has updated row hover states. Platform pending sync.
+table.html
