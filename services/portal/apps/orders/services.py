@@ -472,7 +472,7 @@ class GDPRCompliantCartSession:
             self._save_cart()
             logger.info(f"🔄 [Cart] Updated quantity for {product_slug}: {quantity}")
         else:
-            raise ValidationError(_("Produsul nu a fost găsit în coș"))
+            raise ValidationError(_("Product not found in cart"))
 
     def remove_item(self, product_slug: str, billing_period: str) -> None:
         """Remove item from cart"""
@@ -482,7 +482,7 @@ class GDPRCompliantCartSession:
             self._save_cart()
             logger.info(f"🗑️ [Cart] Removed item: {removed_item['product_name']}")
         else:
-            raise ValidationError(_("Produsul nu a fost găsit în coș"))
+            raise ValidationError(_("Product not found in cart"))
 
     def clear(self) -> None:
         """Clear entire cart"""

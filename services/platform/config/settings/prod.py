@@ -280,19 +280,11 @@ RATELIMIT_USE_CACHE = "ratelimit" if REDIS_URL else "default"
 
 
 # ===============================================================================
-# STATIC FILES (Production with CDN)
+# STATIC FILES (Production)
 # ===============================================================================
 
-# AWS S3 settings (if using S3 for static files)
-AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
-AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME")
-AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "eu-central-1")
-
-if AWS_STORAGE_BUCKET_NAME:
-    AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-    STATICFILES_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
+# Static files — env-driven for deployment flexibility (native, Docker)
+STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 
 # ===============================================================================
 # CUSTOM STAFF INTERFACE (Admin Removed)

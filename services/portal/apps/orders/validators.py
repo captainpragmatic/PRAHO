@@ -61,18 +61,18 @@ class OrderInputValidator:
         try:
             qty = int(quantity)
             if qty < 1:
-                raise ValidationError(_("Cantitatea trebuie să fie cel puțin 1"))
+                raise ValidationError(_("Quantity must be at least 1"))
             if qty > MAX_CONFIG_KEYS:
-                raise ValidationError(_("Cantitatea nu poate depăși 50"))
+                raise ValidationError(_("Quantity cannot exceed 50"))
             return qty
         except (ValueError, TypeError):
-            raise ValidationError(_("Cantitate nevalidă")) from None
+            raise ValidationError(_("Invalid quantity")) from None
 
     @staticmethod
     def validate_billing_period(period: str) -> str:
         """Validate billing period against allowed values"""
         if not period or period not in OrderInputValidator.ALLOWED_BILLING_PERIODS:
-            raise ValidationError(_("Perioada de facturare nevalidă"))
+            raise ValidationError(_("Invalid billing period"))
         return period
 
     @staticmethod
@@ -86,15 +86,15 @@ class OrderInputValidator:
 
         # Security check: prevent injection attempts
         if any(char in domain for char in ["<", ">", '"', "'", "&", ";"]):
-            raise ValidationError(_("Nume de domeniu conține caractere nevalide"))
+            raise ValidationError(_("Domain name contains invalid characters"))
 
         # Length validation
         if len(domain) > MAX_DOMAIN_LENGTH:
-            raise ValidationError(_("Nume de domeniu prea lung"))
+            raise ValidationError(_("Domain name too long"))
 
         # Format validation
         if not OrderInputValidator.DOMAIN_PATTERN.match(domain):
-            raise ValidationError(_("Format nume de domeniu nevalid"))
+            raise ValidationError(_("Invalid domain name format"))
 
         return domain
 
@@ -102,14 +102,14 @@ class OrderInputValidator:
     def validate_product_slug(slug: str) -> str:
         """Validate product slug format for URL safety"""
         if not slug:
-            raise ValidationError(_("Identificator produs lipsă"))
+            raise ValidationError(_("Product identifier missing"))
 
         # Allow only alphanumeric, hyphens, and underscores
         if not re.match(r"^[a-zA-Z0-9\-_]+$", slug):
-            raise ValidationError(_("Identificator produs nevalid"))
+            raise ValidationError(_("Invalid product identifier"))
 
         if len(slug) > MAX_CONFIG_VALUE_LENGTH:
-            raise ValidationError(_("Identificator produs prea lung"))
+            raise ValidationError(_("Product identifier too long"))
 
         return slug.lower()
 
@@ -162,10 +162,10 @@ class OrderInputValidator:
         # Trim whitespace and limit length
         notes = notes.strip()
         if len(notes) > MAX_PROMO_CODE_LENGTH:
-            raise ValidationError(_("Notele nu pot depăși 500 de caractere"))
+            raise ValidationError(_("Notes cannot exceed 500 characters"))
 
         # Basic security check - prevent script injection
         if any(pattern in notes.lower() for pattern in ["<script", "javascript:", "alert(", "eval("]):
-            raise ValidationError(_("Notele conțin conținut nevalid"))
+            raise ValidationError(_("Notes contain invalid content"))
 
         return notes

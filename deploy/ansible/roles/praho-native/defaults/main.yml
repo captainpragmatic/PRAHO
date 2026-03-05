@@ -7,8 +7,7 @@
 deploy_method: rsync
 
 # Git settings (used when deploy_method: git)
-praho_git_repo: "https://github.com/your-org/praho.git"
-praho_git_branch: master
+praho_git_repo: "https://github.com/captainpragmatic/PRAHO.git"
 
 # Python
 python_version: "3.13"
@@ -27,8 +26,7 @@ platform_memory_max: 1G
 portal_memory_max: 512M
 qcluster_memory_max: 512M
 
-# Django
-django_settings_module: config.settings.prod
+# Django — django_settings_module is derived from `praho_env` in group_vars/all.yml
 
 # PostgreSQL
 db_port: 5432

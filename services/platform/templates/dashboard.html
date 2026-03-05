@@ -362,42 +362,8 @@
         </h3>
 
         {% if user.is_staff %}
-        <!-- Staff: System Status -->
-        <div class="space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-slate-300">{% trans 'Server Status' %}</span>
-            <span class="inline-flex items-center text-green-400">
-              {% icon "check" size="sm" css_class="mr-1" %} {% trans 'Online' %}
-            </span>
-          </div>
-
-          <div class="flex items-center justify-between">
-            <span class="text-slate-300">{% trans 'Backup Status' %}</span>
-            <span class="inline-flex items-center text-green-400">
-              {% icon "check" size="sm" css_class="mr-1" %} {% trans 'Up-to-date' %}
-            </span>
-          </div>
-
-          <div class="flex items-center justify-between">
-            <span class="text-slate-300">e-Factura API</span>
-            <span class="inline-flex items-center text-green-400">
-              {% icon "check" size="sm" css_class="mr-1" %} {% trans 'Connected' %}
-            </span>
-          </div>
-
-          <div class="flex items-center justify-between">
-            <span class="text-slate-300">{% trans 'Payment Gateway' %}</span>
-            <span class="inline-flex items-center text-green-400">
-              {% icon "check" size="sm" css_class="mr-1" %} {% trans 'Functional' %}
-            </span>
-          </div>
-        </div>
-
-        <div class="mt-4 pt-4 border-t border-slate-700">
-          <p class="text-slate-400 text-xs">
-            {% trans 'Last update' %}: {{ current_time|date:"d.m.Y H:i" }}
-          </p>
-        </div>
+        <!-- Staff: System Status (dynamic, cached, refreshable via HTMX) -->
+        {% include "dashboard_partials/system_status.html" %}
         {% else %}
         <!-- Customer: Account Information -->
         <div class="space-y-3">

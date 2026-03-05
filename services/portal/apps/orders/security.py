@@ -65,7 +65,7 @@ class OrderSecurityHardening:
 
             return JsonResponse(
                 {
-                    "error": _("Serviciul este temporar indisponibil. Vă rugăm încercați din nou."),
+                    "error": _("Service temporarily unavailable. Please try again later."),
                     "retry_after": OrderSecurityHardening.CACHE_FAILURE_BLOCK_TIME,
                 },
                 status=503,
@@ -95,7 +95,7 @@ class OrderSecurityHardening:
 
                     return JsonResponse(
                         {
-                            "error": _("Cererea este prea mare."),
+                            "error": _("Request is too large."),
                         },
                         status=413,
                     )
@@ -105,7 +105,7 @@ class OrderSecurityHardening:
                 logger.warning(f"🚨 [Security] Invalid Content-Length header: {content_length}")
                 return JsonResponse(
                     {
-                        "error": _("Cererea este invalidă."),
+                        "error": _("Request is invalid."),
                     },
                     status=400,
                 )
@@ -131,7 +131,7 @@ class OrderSecurityHardening:
 
             return JsonResponse(
                 {
-                    "error": _("Cererea conține prea multe câmpuri."),
+                    "error": _("Request contains too many fields."),
                 },
                 status=400,
             )
@@ -151,7 +151,7 @@ class OrderSecurityHardening:
 
                     return JsonResponse(
                         {
-                            "error": _("Un câmp din cerere este prea lung."),
+                            "error": _("A field in the request is too long."),
                         },
                         status=400,
                     )

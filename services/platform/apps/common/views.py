@@ -4,12 +4,14 @@
 
 from datetime import timedelta
 
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum
 from django.db.models.query import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from apps.billing.models import Invoice
 from apps.billing.proforma_models import ProformaInvoice
@@ -94,10 +96,16 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")[:4]
     )
 
+    # System status (cached from daily Django-Q2 task, or empty on first boot)
+    from apps.common.system_status import get_cached_status  # noqa: PLC0415
+
+    system_status = get_cached_status() if user.is_staff else []
+
     context = {
         "stats": stats,
         "recent_documents": recent_documents,
         "recent_tickets": recent_tickets,
+        "system_status": system_status,
         "current_time": timezone.now(),
         "app_version": "1.0.0",
         "current_year": timezone.now().year,
@@ -133,3 +141,20 @@ def _count_open_tickets(customers: QuerySet[Customer]) -> int:
 def _count_active_services(customers: QuerySet[Customer]) -> int:
     """Count active hosting services"""
     return Service.objects.filter(customer__in=customers, status="active").count()
+
+
+@require_POST
+@staff_member_required
+def system_status_refresh(request: HttpRequest) -> HttpResponse:
+    """
+    HTMX endpoint: run system status checks on demand and return partial HTML.
+    Staff-only. POST to prevent accidental crawling.
+    """
+    from apps.common.system_status import refresh_and_cache_status  # noqa: PLC0415
+
+    system_status = refresh_and_cache_status()
+    return render(
+        request,
+        "dashboard_partials/system_status.html",
+        {"system_status": system_status, "current_time": timezone.now()},
+    )

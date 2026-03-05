@@ -11,8 +11,10 @@ from collections.abc import Callable
 from typing import ClassVar, cast
 
 from django.conf import settings
+from django.contrib import messages
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import redirect
 from django.utils.translation import gettext as _
 
 logger = logging.getLogger(__name__)
@@ -93,10 +95,11 @@ class AuthenticationRateLimitMiddleware:
         """Check if request is for an authentication endpoint"""
         return any(request.path.startswith(path) for path in self.AUTH_PATHS)
 
-    def _check_rate_limits(self, request: HttpRequest) -> JsonResponse | None:
+    def _check_rate_limits(self, request: HttpRequest) -> HttpResponse | None:
         """
         🔒 Check both IP and account rate limits.
-        Returns JsonResponse with 429 status if rate limited, None if allowed.
+        Returns error response if rate limited, None if allowed.
+        Browser requests get a redirect with message; API/HTMX requests get JSON.
         """
         try:
             client_ip = self._get_client_ip(request)
@@ -107,14 +110,8 @@ class AuthenticationRateLimitMiddleware:
 
             if ip_attempts >= self.IP_RATE_LIMIT:
                 logger.warning(f"🚨 [RateLimit] IP rate limit exceeded: {client_ip} ({ip_attempts} attempts)")
-                return JsonResponse(
-                    {
-                        "error": _("Prea multe încercări de autentificare. Încercați din nou în 15 minute."),
-                        "retry_after": self.IP_WINDOW_SECONDS,
-                        "attempts_remaining": 0,
-                    },
-                    status=429,
-                )
+                error_msg = _("Too many authentication attempts. Please try again in 15 minutes.")
+                return self._rate_limit_response(request, error_msg, self.IP_WINDOW_SECONDS, 429)
 
             # Check account-based rate limiting (if email provided)
             email = self._extract_email_from_request(request)
@@ -124,27 +121,38 @@ class AuthenticationRateLimitMiddleware:
 
                 if account_attempts >= self.ACCOUNT_RATE_LIMIT:
                     logger.warning(f"🚨 [RateLimit] Account rate limit exceeded: {email} ({account_attempts} attempts)")
-                    return JsonResponse(
-                        {
-                            "error": _("Contul este temporar blocat din cauza prea multor încercări eșuate."),
-                            "retry_after": self.ACCOUNT_WINDOW_SECONDS,
-                            "attempts_remaining": 0,
-                        },
-                        status=423,
-                    )  # 423 Locked
+                    error_msg = _("Account temporarily locked due to too many failed attempts.")
+                    return self._rate_limit_response(request, error_msg, self.ACCOUNT_WINDOW_SECONDS, 429)
 
             return None  # Rate limits not exceeded
 
         except Exception as e:
             # Fail closed - block request if cache/rate limiting fails
             logger.error(f"🔥 [RateLimit] Rate limiting check failed: {e}")
+            error_msg = _("Service temporarily unavailable. Please try again later.")
+            return self._rate_limit_response(request, error_msg, 300, 503)
+
+    def _is_api_or_htmx_request(self, request: HttpRequest) -> bool:
+        """Check if this is an API/HTMX request (expects JSON) vs browser form submission."""
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return True
+        if request.headers.get("HX-Request") == "true":
+            return True
+        accept = request.headers.get("Accept", "")
+        return "application/json" in accept and "text/html" not in accept
+
+    def _rate_limit_response(
+        self, request: HttpRequest, error_msg: str, retry_after: int, status_code: int
+    ) -> HttpResponse:
+        """Return appropriate rate limit response based on request type."""
+        if self._is_api_or_htmx_request(request):
             return JsonResponse(
-                {
-                    "error": _("Serviciul este temporar indisponibil. Vă rugăm încercați din nou."),
-                    "retry_after": 300,  # 5 minutes
-                },
-                status=503,
+                {"error": error_msg, "retry_after": retry_after, "attempts_remaining": 0},
+                status=status_code,
             )
+        # Browser form submission — redirect back to login with error message
+        messages.error(request, error_msg)
+        return redirect(request.path)
 
     def _record_failed_attempt(self, request: HttpRequest) -> None:
         """🔒 Record failed authentication attempt for both IP and account"""
@@ -322,7 +330,7 @@ class APIRateLimitMiddleware:
                 logger.warning(f"🚨 [APIRateLimit] Burst limit exceeded: {client_ip}")
                 return JsonResponse(
                     {
-                        "error": _("Prea multe cereri într-un interval scurt. Vă rugăm să încetiniți."),
+                        "error": _("Too many requests in a short period. Please slow down."),
                         "retry_after": self.BURST_WINDOW_SECONDS,
                     },
                     status=429,
@@ -336,7 +344,7 @@ class APIRateLimitMiddleware:
                 logger.warning(f"🚨 [APIRateLimit] General limit exceeded: {client_ip}")
                 return JsonResponse(
                     {
-                        "error": _("Limită de cereri depășită. Vă rugăm să încercați din nou în 1 minut."),
+                        "error": _("Rate limit exceeded. Please try again in 1 minute."),
                         "retry_after": self.GENERAL_WINDOW_SECONDS,
                     },
                     status=429,

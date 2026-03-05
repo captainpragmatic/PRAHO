@@ -92,7 +92,7 @@ def require_customer_authentication(view_func: Callable[..., Any]) -> Any:
             )
 
         if not customer_id or not user_id:
-            messages.error(request, _("Pentru a plasa o comandă, trebuie să fiți autentificat."))
+            messages.error(request, _("To place an order, you must be authenticated."))
             return redirect("/login/?next=" + request.get_full_path())
 
         return view_func(request, *args, **kwargs)
@@ -157,7 +157,7 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
 
     except PlatformAPIError as e:
         logger.error(f"🔥 [Catalog] Failed to load products: {e}")
-        messages.error(request, _("Eroare la încărcarea produselor. Vă rugăm încercați din nou."))
+        messages.error(request, _("Error loading products. Please try again."))
 
         context = {
             "products": [],
@@ -182,7 +182,7 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
         product = platform_api.get(f"/api/orders/products/{product_slug}/")
 
         if not product:
-            messages.error(request, _("Produsul nu a fost găsit."))
+            messages.error(request, _("Product not found."))
             return redirect("orders:catalog")
 
         # Get cart for context
@@ -206,7 +206,7 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
 
     except PlatformAPIError as e:
         logger.error(f"🔥 [Product] Failed to load product {product_slug}: {e}")
-        messages.error(request, _("Produsul nu a fost găsit."))
+        messages.error(request, _("Product not found."))
         return redirect("orders:catalog")
 
     return render(request, "orders/product_detail.html", context)
@@ -262,7 +262,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
 
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
         OrderSecurityHardening.uniform_response_delay()  # Apply delay even on rate limit
-        return JsonResponse({"error": _("Prea multe operații. Vă rugăm încetiniți.")}, status=429)
+        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
 
     try:
         # Get form data
@@ -340,7 +340,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
             request,
             "orders/partials/cart_error_notification.html",
             {
-                "error": _("Eroare la adăugarea în coș. Vă rugăm încercați din nou."),
+                "error": _("Error adding to cart. Please try again."),
                 "cart_count": 0,
                 "cart_total_quantity": 0,
             },
@@ -377,7 +377,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     client_ip = CartRateLimiter.get_client_ip(request)
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
         OrderSecurityHardening.uniform_response_delay()
-        return JsonResponse({"error": _("Prea multe operații. Vă rugăm încetiniți.")}, status=429)
+        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
 
     try:
         product_slug = request.POST.get("product_slug", "").strip()
@@ -399,7 +399,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
             {
                 "cart_count": cart.get_item_count(),
                 "cart_total_quantity": cart.get_total_quantity(),
-                "success_message": _("Cantitate actualizată cu succes!"),
+                "success_message": _("Quantity updated successfully!"),
             },
         )
 
@@ -407,9 +407,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": str(e)})
     except Exception as e:
         logger.error(f"🔥 [Cart] Error updating cart item: {e}")
-        return _cart_error_response(
-            request, "orders/partials/cart_empty.html", {"error": _("Eroare la actualizarea coșului.")}
-        )
+        return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": _("Error updating cart.")})
 
 
 @require_customer_authentication
@@ -442,7 +440,7 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     client_ip = CartRateLimiter.get_client_ip(request)
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
         OrderSecurityHardening.uniform_response_delay()
-        return JsonResponse({"error": _("Prea multe operații. Vă rugăm încetiniți.")}, status=429)
+        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
 
     try:
         product_slug = request.POST.get("product_slug", "").strip()
@@ -463,7 +461,7 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
             {
                 "cart_count": cart.get_item_count(),
                 "cart_total_quantity": cart.get_total_quantity(),
-                "success_message": _("Produs eliminat din coș!"),
+                "success_message": _("Product removed from cart!"),
             },
         )
 
@@ -472,7 +470,7 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     except Exception as e:
         logger.error(f"🔥 [Cart] Error removing from cart: {e}")
         return _cart_error_response(
-            request, "orders/partials/cart_empty.html", {"error": _("Eroare la eliminarea din coș.")}
+            request, "orders/partials/cart_empty.html", {"error": _("Error removing from cart.")}
         )
 
 
@@ -485,7 +483,7 @@ def cart_review(request: HttpRequest) -> HttpResponse:
     cart = GDPRCompliantCartSession(request.session)
 
     if not cart.has_items():
-        messages.info(request, _("Coșul dumneavoastră este gol."))
+        messages.info(request, _("Your cart is empty."))
         return redirect("orders:catalog")
 
     # Calculate totals
@@ -556,7 +554,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
     client_ip = CartRateLimiter.get_client_ip(request)
     if not CartRateLimiter.check_rate_limit(session_key, client_ip):
         OrderSecurityHardening.uniform_response_delay()
-        return JsonResponse({"error": _("Prea multe operații. Vă rugăm încetiniți.")}, status=429)
+        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
 
     try:
         cart = GDPRCompliantCartSession(request.session)
@@ -882,7 +880,7 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
         return redirect("orders:checkout")
     except Exception as e:
         logger.error(f"🔥 [Orders] Unexpected error creating order: {e}")
-        messages.error(request, _("Eroare la crearea comenzii. Vă rugăm încercați din nou."))
+        messages.error(request, _("Error creating order. Please try again."))
         return redirect("orders:checkout")
 
 
@@ -1064,7 +1062,7 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
         )
 
         if not order_data or order_data.get("error"):
-            messages.error(request, _("Comanda nu a fost găsită."))
+            messages.error(request, _("Order not found."))
             return redirect("orders:catalog")
 
         # 💳 NEW: Get payment intent for pending orders
@@ -1099,7 +1097,7 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
 
     except PlatformAPIError as e:
         logger.error(f"🔥 [Orders] Failed to load order {order_id}: {e}")
-        messages.error(request, _("Eroare la încărcarea detaliilor comenzii."))
+        messages.error(request, _("Error loading order details."))
         return redirect("orders:catalog")
 
 

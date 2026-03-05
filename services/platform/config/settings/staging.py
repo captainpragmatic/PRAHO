@@ -1,6 +1,22 @@
 """
-Staging settings for PRAHO Platform
-Staging environment configuration for pre-production testing.
+Staging settings for PRAHO Platform.
+
+Why this exists separately from prod.py:
+─────────────────────────────────────────
+Staging and production share the same Ansible playbook and inventory
+(-e praho_env=staging|prod). The Django settings file is the ONLY thing
+that differs. These differences prevent real-world side effects during testing:
+
+  1. Email backend: console (prints to log) — prevents sending real emails
+  2. e-Factura: test mode — prevents submitting invoices to ANAF
+  3. HSTS: 1 hour (not 1 year) — allows rolling back to HTTP if needed
+  4. Session: 2 hours, no browser-close — more lenient for testing
+  5. DB sslmode: "prefer" (not "require") — staging DB may lack SSL certs
+  6. Data retention: 30 days (not 7 years) — don't keep years of test data
+  7. App log level: DEBUG (not INFO) — more verbose for debugging
+  8. STAGING_FEATURES dict — toggles test-only features
+
+If none of these matter for your use case, use prod.py for everything.
 """
 
 import os as _os
@@ -180,7 +196,7 @@ LOGGING = {
         # Main application log file (smaller retention than prod)
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/app.log",
+            "filename": "/var/log/praho/app.log",
             "maxBytes": 10485760,  # 10MB (prod: 50MB)
             "backupCount": 5,  # prod: 10
             "formatter": "json",
@@ -189,7 +205,7 @@ LOGGING = {
         # Security-specific log file
         "security_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/security.log",
+            "filename": "/var/log/praho/security.log",
             "maxBytes": 10485760,  # 10MB (prod: 50MB)
             "backupCount": 10,  # prod: 30
             "formatter": "json",
@@ -198,7 +214,7 @@ LOGGING = {
         # Audit log file (immutable audit trail)
         "audit_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/audit.log",
+            "filename": "/var/log/praho/audit.log",
             "maxBytes": 20971520,  # 20MB (prod: 100MB)
             "backupCount": 30,  # prod: 90
             "formatter": "audit",
@@ -207,7 +223,7 @@ LOGGING = {
         # Error log for critical issues
         "error_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/error.log",
+            "filename": "/var/log/praho/error.log",
             "maxBytes": 10485760,  # 10MB (prod: 50MB)
             "backupCount": 10,  # prod: 30
             "formatter": "json",

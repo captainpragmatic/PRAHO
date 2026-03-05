@@ -23,4 +23,4 @@ all:
         deploy_portal: true
         deploy_database: true
         deploy_caddy: true
-        environment: dev
+        praho_env: dev

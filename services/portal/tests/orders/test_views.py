@@ -130,7 +130,7 @@ class TestOrderViews(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
 
         # Should show error message and empty product list
-        self.assertContains(response, 'Eroare la încărcarea produselor')
+        self.assertContains(response, 'Error loading products')
         context = response.context
         self.assertEqual(len(context['products']), 0)
         self.assertTrue(context.get('error'))
@@ -205,7 +205,7 @@ class TestOrderViews(SimpleTestCase):
 
         self.assertEqual(response.status_code, 429)
         response_data = json.loads(response.content)
-        self.assertIn('Prea multe operații', response_data['error'])
+        self.assertIn('Too many operations', response_data['error'])
 
     @patch('apps.orders.views.GDPRCompliantCartSession')
     def test_cart_review_empty(self, mock_cart_class):

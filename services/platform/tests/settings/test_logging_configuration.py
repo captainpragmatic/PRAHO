@@ -19,6 +19,11 @@ from django.test import SimpleTestCase
 # We provide dummy env vars so the import succeeds.
 _PROD_ENV = {
     "SECRET_KEY": "test-only-secret-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "DB_PASSWORD": "test-only-db-password-for-logging-tests",
+    "HMAC_SECRET": "test-only-hmac-secret-for-logging-tests",
+    "ALLOWED_HOSTS": "localhost,127.0.0.1",
+    "PORTAL_DOMAIN": "portal.test.local",
+    "PLATFORM_DOMAIN": "platform.test.local",
     "PLATFORM_API_SECRET": "dGVzdC1vbmx5LXNlY3JldC1rZXktZm9yLWxvZ2dpbmctdGVzdHM=",
     "SENTRY_DSN": "",  # Disable Sentry during test imports (placeholder in .env triggers BadDsn)
 }

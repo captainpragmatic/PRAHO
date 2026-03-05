@@ -4,8 +4,8 @@
 # Rolls back to a specific version or restores from backup
 #
 # Usage:
-#   ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e version=v1.2.3
-#   ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e restore_backup=true
+#   ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e version=v1.2.3
+#   ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e restore_backup=true
 
 ---
 - name: Rollback PRAHO

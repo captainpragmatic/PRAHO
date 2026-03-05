@@ -1,5 +1,17 @@
 """
-Staging settings for PRAHO Portal Service
+Staging settings for PRAHO Portal Service.
+
+Why this exists separately from prod.py:
+─────────────────────────────────────────
+Same Ansible playbook for staging and prod (-e praho_env=staging|prod).
+The Django settings file is the only difference. Key staging overrides:
+
+  1. HSTS: 1 hour (not 1 year) — allows rolling back to HTTP if needed
+  2. App log level: DEBUG (not INFO) — more verbose for debugging
+  3. Log file retention: smaller sizes — staging doesn't need prod-scale logs
+  4. Cache location: "portal-staging-cache" — prevents collision if dev is testing locally
+
+If none of these matter, use prod.py for everything.
 """
 
 import os
@@ -52,6 +64,7 @@ PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_H
 }
 
 # Security settings (less strict than production for testing)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # Caddy terminates TLS
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
@@ -108,7 +121,7 @@ LOGGING = {
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/portal-staging/app.log",
+            "filename": "/var/log/praho/portal/app.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
             "formatter": "json",
@@ -116,7 +129,7 @@ LOGGING = {
         },
         "error_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/portal-staging/error.log",
+            "filename": "/var/log/praho/portal/error.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 10,
             "formatter": "json",

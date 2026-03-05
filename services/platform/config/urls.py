@@ -24,7 +24,7 @@ from apps.common.legal_views import (
 )
 
 # Import dashboard view
-from apps.common.views import dashboard_view
+from apps.common.views import dashboard_view, system_status_refresh
 
 
 def root_redirect(request: HttpRequest) -> HttpResponseBase:
@@ -42,6 +42,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # Dashboard - main app after login
     path("dashboard/", dashboard_view, name="dashboard"),
+    path("dashboard/system-status/refresh/", system_status_refresh, name="system_status_refresh"),
     path("app/", dashboard_view, name="dashboard_alias"),
     # ===============================================================================
     # LEGAL & GDPR COMPLIANCE PAGES (Public access)
