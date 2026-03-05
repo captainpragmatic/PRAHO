@@ -180,7 +180,7 @@ LOGGING = {
         # Main application log file (smaller retention than prod)
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/app.log",
+            "filename": "/var/log/praho/app.log",
             "maxBytes": 10485760,  # 10MB (prod: 50MB)
             "backupCount": 5,  # prod: 10
             "formatter": "json",
@@ -189,7 +189,7 @@ LOGGING = {
         # Security-specific log file
         "security_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/security.log",
+            "filename": "/var/log/praho/security.log",
             "maxBytes": 10485760,  # 10MB (prod: 50MB)
             "backupCount": 10,  # prod: 30
             "formatter": "json",
@@ -198,7 +198,7 @@ LOGGING = {
         # Audit log file (immutable audit trail)
         "audit_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/audit.log",
+            "filename": "/var/log/praho/audit.log",
             "maxBytes": 20971520,  # 20MB (prod: 100MB)
             "backupCount": 30,  # prod: 90
             "formatter": "audit",
@@ -207,7 +207,7 @@ LOGGING = {
         # Error log for critical issues
         "error_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/staging/error.log",
+            "filename": "/var/log/praho/error.log",
             "maxBytes": 10485760,  # 10MB (prod: 50MB)
             "backupCount": 10,  # prod: 30
             "formatter": "json",

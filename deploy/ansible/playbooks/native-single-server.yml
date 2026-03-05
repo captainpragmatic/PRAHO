@@ -2,24 +2,34 @@
 # PRAHO - Native Single Server Deployment Playbook
 # =============================================================================
 # Deploys PRAHO natively (PostgreSQL + uv + systemd + Caddy) - no Docker.
-# Intended for dev/staging on resource-constrained servers (4 GB RAM).
+# Works for any environment — pass -e environment=staging|prod.
 #
 # Usage:
-#   ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
-#
-# Required environment variables:
-#   PRAHO_PORTAL_DOMAIN (customer-facing domain)
-#   PRAHO_PLATFORM_DOMAIN (staff/admin domain)
-#   PRAHO_DB_PASSWORD
-#   PRAHO_SECRET_KEY
+#   cd deploy/ansible
+#   PRAHO_SERVER_IP=1.2.3.4 \
+#   PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com \
+#   PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com \
+#   PRAHO_DB_PASSWORD=$(openssl rand -base64 32) \
+#   PRAHO_SECRET_KEY=$(openssl rand -base64 50) \
+#   PRAHO_HMAC_SECRET=$(openssl rand -base64 32) \
+#   PRAHO_ACME_EMAIL=admin@example.com \
+#   ansible-playbook -i inventory/native-single-server.yml \
+#     playbooks/native-single-server.yml -e environment=staging
 
 ---
-- name: Deploy PRAHO - Native Single Server
+- name: Deploy PRAHO - Native Single Server ({{ environment | default('prod') }})
   hosts: praho
   become: yes
   gather_facts: yes
 
   pre_tasks:
+    - name: Validate environment
+      assert:
+        that:
+          - environment is defined
+          - environment in ['dev', 'staging', 'prod']
+        fail_msg: "Set environment with: -e environment=staging|prod"
+
     - name: Validate Ubuntu version
       assert:
         that:
@@ -35,6 +45,12 @@
           - db_password is defined and db_password != 'changeme'
           - secret_key is defined and secret_key != 'generate-a-strong-key'
         fail_msg: "Required variables not set. Export PRAHO_PORTAL_DOMAIN, PRAHO_PLATFORM_DOMAIN, PRAHO_DB_PASSWORD, and PRAHO_SECRET_KEY."
+
+    - name: Validate HMAC secret
+      assert:
+        that:
+          - hmac_secret is defined and hmac_secret | length > 0
+        fail_msg: "PRAHO_HMAC_SECRET is required — Portal cannot authenticate to Platform without it."
 
     # -------------------------------------------------------------------
     # DNS pre-flight: verify both FQDNs resolve to this server's IP
@@ -134,9 +150,11 @@
       debug:
         msg: |
           ================================================
-          PRAHO Deployment Verified!
+          PRAHO Deployment Verified! ({{ environment }})
           ================================================
-          Portal:   https://{{ portal_domain }}
-          Platform: https://{{ platform_domain }}
+          Environment: {{ environment }}
+          Settings:    {{ django_settings_module }}
+          Portal:      https://{{ portal_domain }}
+          Platform:    https://{{ platform_domain }}
           ================================================
       tags: [post-verify]

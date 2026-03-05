@@ -1,36 +1,36 @@
 # =============================================================================
-# PRAHO - Staging Environment Inventory (Single Server)
+# PRAHO - Native Single Server Inventory (Unified)
 # =============================================================================
 # All-in-one server: Platform + Portal + DB + Caddy
+# Works for ALL environments — pass -e environment=staging|prod
 #
 # Required env vars:
-#   export PRAHO_STAGING_IP=87.99.129.167
+#   export PRAHO_SERVER_IP=<server-ip>
 #   export PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com
 #   export PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com
 #   export PRAHO_DB_PASSWORD=<strong-password>
 #   export PRAHO_SECRET_KEY=<strong-key>
 #   export PRAHO_HMAC_SECRET=<strong-secret>
-#   export PRAHO_ACME_EMAIL=claudiu@pragmatichost.com
+#   export PRAHO_ACME_EMAIL=admin@example.com
 #
-# Quick deploy:
+# Deploy:
 #   cd deploy/ansible
-#   ansible-playbook -i inventory/staging-single-server.yml playbooks/native-single-server.yml -v
+#   ansible-playbook -i inventory/native-single-server.yml \
+#     playbooks/native-single-server.yml -e environment=staging -v
 
 all:
   hosts:
-    praho-staging:
-      ansible_host: "{{ lookup('env', 'PRAHO_STAGING_IP') }}"
+    praho-server:
+      ansible_host: "{{ lookup('env', 'PRAHO_SERVER_IP') }}"
       ansible_user: "{{ lookup('env', 'PRAHO_SSH_USER') | default('root', true) }}"
       ansible_ssh_private_key_file: "{{ lookup('env', 'PRAHO_SSH_KEY') | default('~/.ssh/id_ed25519', true) }}"
 
   children:
     praho:
       hosts:
-        praho-staging:
+        praho-server:
       vars:
         deploy_platform: true
         deploy_portal: true
         deploy_database: true
         deploy_caddy: true
-        environment: staging
-        django_settings_module: config.settings.staging

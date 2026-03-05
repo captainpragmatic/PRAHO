@@ -27,8 +27,7 @@ platform_memory_max: 1G
 portal_memory_max: 512M
 qcluster_memory_max: 512M
 
-# Django
-django_settings_module: config.settings.prod
+# Django — django_settings_module is derived from `environment` in group_vars/all.yml
 
 # PostgreSQL
 db_port: 5432

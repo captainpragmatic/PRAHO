@@ -4,7 +4,7 @@
 # Creates database backup on the server
 #
 # Usage:
-#   ansible-playbook -i inventory/single-server.yml playbooks/backup.yml
+#   ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml
 
 ---
 - name: Backup PRAHO Database

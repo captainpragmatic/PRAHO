@@ -112,8 +112,8 @@ help:
 	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
 	@echo "  make deploy-dev            - Deploy PRAHO to dev (Docker)"
 	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
-	@echo "  make deploy-staging        - Deploy PRAHO to staging"
-	@echo "  make deploy-prod           - Deploy PRAHO to production"
+	@echo "  make deploy-staging        - Deploy PRAHO to staging (native)"
+	@echo "  make deploy-prod           - Deploy PRAHO to production (native)"
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
@@ -878,7 +878,7 @@ infra-destroy-dev:
 # ENVIRONMENT DEPLOYMENT (Ansible) 🚀
 # ===============================================================================
 
-.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-staging-native deploy-prod
+.PHONY: deploy-dev deploy-dev-native deploy-staging deploy-prod
 
 deploy-dev:
 	@echo "🚀 [Deploy] Deploying PRAHO to dev (Docker)..."
@@ -891,32 +891,31 @@ deploy-dev-native:
 	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
 
 deploy-staging:
-	@echo "🚀 [Deploy] Deploying PRAHO to staging (two-server)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/staging.yml playbooks/two-servers.yml
-
-deploy-staging-native:
-	@for var in PRAHO_STAGING_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
+	@for var in PRAHO_SERVER_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
 		eval val=\$$$$var; \
-		if [ -z "$$val" ]; then echo "❌ Missing env var: $$var"; echo "  source deploy/.env.staging && make deploy-staging-native"; exit 1; fi; \
+		if [ -z "$$val" ]; then echo "❌ Missing env var: $$var"; exit 1; fi; \
 	done
-	@echo "🚀 [Deploy] Deploying PRAHO to staging (native single server)..."
+	@echo "🚀 [Deploy] Deploying PRAHO to staging (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/staging-single-server.yml playbooks/native-single-server.yml -v
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e environment=staging -v
 
 deploy-prod:
-	@echo "🚀 [Deploy] Deploying PRAHO to production..."
+	@for var in PRAHO_SERVER_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
+		eval val=\$$$$var; \
+		if [ -z "$$val" ]; then echo "❌ Missing env var: $$var"; exit 1; fi; \
+	done
+	@echo "🚀 [Deploy] Deploying PRAHO to production (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/prod.yml playbooks/two-servers.yml
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e environment=prod -v
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜
 # ===============================================================================
 
 ansible-single-server:
-	@echo "📜 [Ansible] Single server deployment..."
+	@echo "📜 [Ansible] Native single server deployment..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e environment=$(ENV)
 
 ansible-two-servers:
 	@echo "📜 [Ansible] Two server deployment..."
@@ -925,4 +924,4 @@ ansible-two-servers:
 
 ansible-backup:
 	@echo "📜 [Ansible] Remote backup..."
-	@cd deploy/ansible && ansible-playbook -i inventory/single-server.yml playbooks/backup.yml
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml

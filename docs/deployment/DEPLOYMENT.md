@@ -12,7 +12,6 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
   - [Option 4: Docker Platform Only](#option-4-docker-platform-only)
   - [Option 5: Docker Portal Only](#option-5-docker-portal-only)
   - [Option 6: Two Servers (Distributed)](#option-6-two-servers-distributed)
-- [Using Ansible](#ansible-deployments)
 - [Database Operations](#database-operations)
 - [Rollback Procedures](#rollback-procedures)
 - [Makefile Commands](#makefile-commands)
@@ -39,13 +38,19 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 
 ## Two-Domain Security Architecture
 
-All deployment modes use a **two-domain architecture** where Portal and Platform are isolated on separate FQDNs:
+PRAHO requires **two separate FQDNs** — one for Portal (customer-facing) and one for Platform (staff/admin). This is a security requirement, not optional.
+
+**Why two domains?** Portal and Platform have completely different threat models. Portal is public-facing and stateless; Platform has full database access and admin capabilities. Separating them by domain means:
+- Caddy routes traffic by hostname — no URL-path-based routing mistakes can leak admin endpoints
+- Platform can be IP-whitelisted at the reverse proxy level
+- Cookie scoping is isolated (no cross-service cookie leakage)
+- Each service has its own TLS certificate
 
 | Component | Domain | Access |
 |-----------|--------|--------|
 | **Portal** (customer-facing) | `portal.pragmatichost.com` | Public |
 | **Platform** (staff/admin) | `platform.pragmatichost.com` | IP-restricted (optional) |
-| **Bare IP** | Server's public IP | 301 redirect → portal domain |
+| **Bare IP** | Server's public IP | 301 redirect to portal domain |
 
 **Security layers (all deployment modes):**
 
@@ -53,16 +58,9 @@ All deployment modes use a **two-domain architecture** where Portal and Platform
 2. **Caddy reverse proxy** — routes by domain name (not URL path). Platform domain can be IP-whitelisted via `platform_allowed_ips`. Non-whitelisted IPs get HTTP 403.
 3. **Django `ALLOWED_HOSTS`** — fails hard at startup if not set or contains wildcards. No fallback defaults in production.
 
-**Required environment variables (all modes):**
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `PRAHO_PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
-| `PRAHO_PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
-
 **IP whitelisting (optional, all modes):**
 ```yaml
-# In inventory or group_vars
+# Pass as extra-var or add to inventory vars
 platform_allowed_ips:
   - 203.0.113.10        # Office IP
   - 198.51.100.0/24     # VPN range
@@ -75,7 +73,7 @@ When `platform_allowed_ips` is empty (default), Platform is accessible from any 
 
 ### Option 1: Native Single Server
 
-Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. No Docker required. Automated via Ansible.
+Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. No Docker required. Fully automated via Ansible. One inventory, one playbook — works for staging and production.
 
 **Architecture:**
 ```
@@ -107,46 +105,103 @@ Deploy PRAHO directly on the host with PostgreSQL + Gunicorn + systemd + Caddy. 
 - 3 systemd services: `praho-platform`, `praho-portal`, `praho-qcluster`
 - Backup cron job (daily at 2:00 AM)
 
-**Prerequisites:**
-- Ubuntu 22.04+ (required for deadsnakes PPA)
-- Ansible installed on your local machine
-- A domain with DNS pointing to your server
+#### Prerequisites
 
-**Deploy:**
+1. **Ubuntu 22.04+** server (required for deadsnakes PPA)
+2. **Ansible** installed on your local machine
+3. **Two DNS A records** pointing to the server IP — both must resolve before deploying (Caddy ACME will fail without them)
+4. **SSH access** to the server as root (or a user with passwordless sudo)
+
 ```bash
 # Install Ansible and required collections
 pip install ansible
 ansible-galaxy collection install community.postgresql community.general ansible.posix
-
-# Configure your inventory
-cd deploy/ansible
-# Edit inventory/single-server.yml with your server IP
-# (or use inventory/dev.yml for dev/staging)
-
-# Set required variables
-export PRAHO_SERVER_IP=your-server-ip
-export PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com      # Customer-facing domain
-export PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com   # Staff/admin domain (separate FQDN)
-export PRAHO_DB_PASSWORD=secure-password
-export PRAHO_SECRET_KEY=your-secret-key
-export PRAHO_ACME_EMAIL=admin@example.com
-
-# Run the native playbook (note: native-single-server.yml, not single-server.yml)
-ansible-playbook -i inventory/single-server.yml playbooks/native-single-server.yml
 ```
 
-> **Architecture note:** Platform is never exposed publicly on the portal domain. Each service gets its own FQDN. Caddy routes traffic by domain, not by URL path. Bare IP requests are permanently redirected to the portal domain.
->
-> **IP whitelisting (optional):** Set `platform_allowed_ips` in your inventory to restrict Platform access to specific IPs:
-> ```yaml
-> platform_allowed_ips:
->   - 203.0.113.10
->   - 198.51.100.0/24
-> ```
+#### Deploy
 
-> **Important:** `single-server.yml` deploys with Docker. `native-single-server.yml` deploys without Docker (systemd + Gunicorn).
+The same inventory and playbook serve both staging and production. Pass `-e environment=staging` or `-e environment=prod` to select the Django settings module.
 
-**Management commands:**
+```bash
+cd deploy/ansible
+
+PRAHO_SERVER_IP=203.0.113.10 \
+PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com \
+PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com \
+PRAHO_DB_PASSWORD=$(openssl rand -base64 32) \
+PRAHO_SECRET_KEY=$(openssl rand -base64 50) \
+PRAHO_HMAC_SECRET=$(openssl rand -base64 32) \
+PRAHO_ACME_EMAIL=admin@pragmatichost.com \
+ansible-playbook -i inventory/native-single-server.yml \
+  playbooks/native-single-server.yml \
+  -e environment=staging -v
+```
+
+For production, change the domains and environment:
+```bash
+PRAHO_SERVER_IP=203.0.113.20 \
+PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com \
+PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com \
+PRAHO_DB_PASSWORD=$(openssl rand -base64 32) \
+PRAHO_SECRET_KEY=$(openssl rand -base64 50) \
+PRAHO_HMAC_SECRET=$(openssl rand -base64 32) \
+PRAHO_ACME_EMAIL=admin@pragmatichost.com \
+ansible-playbook -i inventory/native-single-server.yml \
+  playbooks/native-single-server.yml \
+  -e environment=prod -v
+```
+
+Or use Make shortcuts:
+```bash
+# Staging
+export PRAHO_SERVER_IP=203.0.113.10
+export PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com
+export PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com
+export PRAHO_DB_PASSWORD=$(openssl rand -base64 32)
+export PRAHO_SECRET_KEY=$(openssl rand -base64 50)
+export PRAHO_HMAC_SECRET=$(openssl rand -base64 32)
+export PRAHO_ACME_EMAIL=admin@pragmatichost.com
+make deploy-staging
+
+# Production
+make deploy-prod
+```
+
+#### Required Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `PRAHO_SERVER_IP` | Server public IP address | `203.0.113.10` |
+| `PRAHO_PORTAL_DOMAIN` | Customer-facing FQDN | `portal.pragmatichost.com` |
+| `PRAHO_PLATFORM_DOMAIN` | Staff/admin FQDN | `platform.pragmatichost.com` |
+| `PRAHO_DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
+| `PRAHO_SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
+| `PRAHO_HMAC_SECRET` | Portal-to-Platform auth secret | `openssl rand -base64 32` |
+| `PRAHO_ACME_EMAIL` | Let's Encrypt notification email | `admin@pragmatichost.com` |
+
+`PRAHO_HMAC_SECRET` is **critical** — Portal authenticates every API request to Platform using HMAC-SHA256 signatures. Without it, Portal cannot communicate with Platform.
+
+#### What the Playbook Validates
+
+Before deploying, the playbook checks:
+1. `environment` is defined and one of `dev`, `staging`, `prod`
+2. Ubuntu >= 22.04
+3. All required variables are set (not defaults)
+4. `PRAHO_HMAC_SECRET` is non-empty
+5. Both FQDNs resolve to the server IP (DNS pre-flight)
+
+#### Post-Deploy
+
+After deployment completes, the playbook verifies all services over HTTP and HTTPS.
+
+**First login:** The `setup_initial_data` management command creates a superuser if none exists:
+- Email: `admin@pragmatichost.com`
+- Password: from `DJANGO_SUPERUSER_PASSWORD` env var, or a random password printed to the Ansible log
+
+Access the Platform admin at `https://<platform-domain>/admin/`.
+
+#### Management Commands
+
 ```bash
 # Service status
 systemctl status praho-platform praho-portal praho-qcluster
@@ -169,12 +224,24 @@ sudo systemctl restart praho-platform
 /opt/praho/scripts/restore.sh --latest
 ```
 
-**Caveats:**
-- Ubuntu-only (relies on deadsnakes PPA for Python 3.13)
-- Single-server only — no built-in horizontal scaling
-- Manual scaling requires adjusting Gunicorn workers in Ansible vars
+#### Redeployment
 
-**Tuning (Ansible variables):**
+To redeploy (e.g., after code changes), run the same `ansible-playbook` command again. The playbook is idempotent — it will rsync code, run migrations, collect static files, and restart services.
+
+To rebuild a server from scratch (e.g., after an OS upgrade):
+```bash
+# Hetzner example: rebuild the server image
+hcloud server rebuild praho-staging --image ubuntu-24.04
+
+# Wait for server to come up, then deploy
+ansible-playbook -i inventory/native-single-server.yml \
+  playbooks/native-single-server.yml \
+  -e environment=staging -v
+```
+
+#### Tuning (Ansible Extra Variables)
+
+Override defaults with `-e` flags:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -183,7 +250,21 @@ sudo systemctl restart praho-platform
 | `qcluster_workers` | 2 | Django-Q2 background workers |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
-| `deploy_method` | rsync | `rsync` (dev) or `git` (prod) |
+| `deploy_method` | rsync | `rsync` (dev/staging) or `git` (prod) |
+| `platform_allowed_ips` | `[]` | IP whitelist for Platform access |
+
+Example: deploy production with 4 Gunicorn workers:
+```bash
+ansible-playbook -i inventory/native-single-server.yml \
+  playbooks/native-single-server.yml \
+  -e environment=prod \
+  -e gunicorn_workers_platform=4 \
+  -e gunicorn_workers_portal=2
+```
+
+**Caveats:**
+- Ubuntu-only (relies on deadsnakes PPA for Python 3.13)
+- Single-server only — no built-in horizontal scaling
 
 ---
 
@@ -223,11 +304,6 @@ docker compose -f deploy/docker-compose.single-server.yml up -d
 ```
 
 > **Note:** Both native and Docker deployments use a two-domain architecture. Platform is never exposed on the portal domain.
-
-**Using Make:**
-```bash
-make deploy-single-server
-```
 
 ---
 
@@ -352,66 +428,6 @@ ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
 
 ---
 
-## Ansible Deployments
-
-### Prerequisites
-
-```bash
-# Install Ansible
-pip install ansible
-
-# Install required collections
-ansible-galaxy collection install community.docker community.postgresql community.general ansible.posix
-```
-
-### Single Server Deployment
-
-```bash
-cd deploy/ansible
-
-# Set environment variables
-export PRAHO_SERVER_IP=your-server-ip
-export PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com
-export PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com
-export PRAHO_DB_PASSWORD=secure-password
-export PRAHO_SECRET_KEY=your-secret-key
-export PRAHO_ACME_EMAIL=admin@example.com
-
-# Native (no Docker — systemd + Gunicorn)
-ansible-playbook -i inventory/single-server.yml playbooks/native-single-server.yml
-
-# Docker-based
-ansible-playbook -i inventory/single-server.yml playbooks/single-server.yml
-```
-
-### Two Server Deployment
-
-```bash
-cd deploy/ansible
-
-# Set environment variables
-export PRAHO_PLATFORM_IP=10.0.0.1
-export PRAHO_PORTAL_IP=10.0.0.2
-export PRAHO_DOMAIN=praho.example.com
-export PRAHO_DB_PASSWORD=secure-password
-export PRAHO_SECRET_KEY=your-secret-key
-
-# Run playbook
-ansible-playbook -i inventory/two-servers.yml playbooks/two-servers.yml
-```
-
-### Ansible Backup Playbook
-
-```bash
-# Create backup
-ansible-playbook -i inventory/single-server.yml playbooks/backup.yml
-
-# Create backup and fetch to local machine
-ansible-playbook -i inventory/single-server.yml playbooks/backup.yml -e fetch_backup=true
-```
-
----
-
 ## Database Operations
 
 ### Creating Backups
@@ -505,14 +521,14 @@ Roll back both version and database:
 ./deploy/scripts/rollback.sh full v1.2.3
 ```
 
-### Rollback Ansible Playbook
+### Rollback via Ansible
 
 ```bash
 # Rollback to version
-ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e version=v1.2.3
+ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e version=v1.2.3
 
 # Restore database
-ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e restore_backup=true
+ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e restore_backup=true
 ```
 
 ---
@@ -521,9 +537,9 @@ ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e restor
 
 | Command | Description |
 |---------|-------------|
-| `make deploy-single-server` | Deploy all services on single server |
-| `make deploy-platform` | Deploy platform only |
-| `make deploy-portal` | Deploy portal only |
+| `make deploy-staging` | Deploy to staging (native, `-e environment=staging`) |
+| `make deploy-prod` | Deploy to production (native, `-e environment=prod`) |
+| `make deploy-dev-native` | Deploy to dev (native) |
 | `make deploy-stop` | Stop all deployment services |
 | `make deploy-status` | Show deployment status |
 | `make deploy-logs` | Show service logs |
@@ -537,33 +553,36 @@ ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e restor
 
 ## Environment Variables
 
-### Required Variables
+### Native Deployment (Ansible)
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `PRAHO_PORTAL_DOMAIN` | Customer-facing domain | `portal.pragmatichost.com` |
-| `PRAHO_PLATFORM_DOMAIN` | Staff/admin domain | `platform.pragmatichost.com` |
-| `DB_PASSWORD` | PostgreSQL password | `secure-password` |
-| `SECRET_KEY` | Django secret key | `django-insecure-...` |
-| `ACME_EMAIL` | Let's Encrypt email | `admin@example.com` |
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `PRAHO_SERVER_IP` | Yes | Server public IP | `203.0.113.10` |
+| `PRAHO_PORTAL_DOMAIN` | Yes | Customer-facing FQDN | `portal.pragmatichost.com` |
+| `PRAHO_PLATFORM_DOMAIN` | Yes | Staff/admin FQDN | `platform.pragmatichost.com` |
+| `PRAHO_DB_PASSWORD` | Yes | PostgreSQL password | `openssl rand -base64 32` |
+| `PRAHO_SECRET_KEY` | Yes | Django secret key | `openssl rand -base64 50` |
+| `PRAHO_HMAC_SECRET` | Yes | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
+| `PRAHO_ACME_EMAIL` | Yes | Let's Encrypt email | `admin@pragmatichost.com` |
+| `PRAHO_SSH_USER` | No | SSH user (default: `root`) | `root` |
+| `PRAHO_SSH_KEY` | No | SSH key path | `~/.ssh/id_ed25519` |
 
-### Optional Variables
+### Docker Deployment
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `VERSION` | Image version tag | `latest` |
-| `REGISTRY` | Docker registry | (empty) |
-| `PLATFORM_PORT` | Platform service port | `8700` |
-| `PORTAL_PORT` | Portal service port | `8701` |
-| `BACKUP_DIR` | Backup directory | `./backups` |
-| `RETENTION_DAYS` | Backup retention | `30` |
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `PRAHO_PORTAL_DOMAIN` | Yes | Customer-facing domain | `portal.pragmatichost.com` |
+| `PRAHO_PLATFORM_DOMAIN` | Yes | Staff/admin domain | `platform.pragmatichost.com` |
+| `DB_PASSWORD` | Yes | PostgreSQL password | `secure-password` |
+| `SECRET_KEY` | Yes | Django secret key | `django-insecure-...` |
+| `ACME_EMAIL` | Yes | Let's Encrypt email | `admin@example.com` |
 
 ### Security Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `platform_allowed_ips` | IP whitelist for Platform access | `[]` (unrestricted) |
-| `hmac_secret` | HMAC shared secret (portal↔platform) | (required for portal) |
+| `platform_allowed_ips` | IP whitelist for Platform access (Ansible) | `[]` (unrestricted) |
+| `PRAHO_HMAC_SECRET` | HMAC shared secret for Portal ↔ Platform auth | (required) |
 
 ### Portal-Specific Variables
 
@@ -587,8 +606,8 @@ ansible-playbook -i inventory/single-server.yml playbooks/rollback.yml -e restor
 make health-check
 
 # Manual checks
-curl http://localhost:8700/health/
-curl http://localhost:8701/health/
+curl http://localhost:8700/api/users/health/
+curl http://localhost:8701/
 
 # Native deployment
 /opt/praho/scripts/health-check.sh
@@ -639,21 +658,26 @@ docker logs praho_caddy
 journalctl -u caddy -f
 
 # Verify domain DNS is correct
-dig your-domain.com
+dig portal.pragmatichost.com
+dig platform.pragmatichost.com
 
 # Check if ports 80/443 are open
+sudo ufw status
 ```
 
 **3. Portal can't connect to Platform**
+
+This usually means `PRAHO_HMAC_SECRET` is missing or mismatched between services.
+
 ```bash
-# Verify PLATFORM_API_BASE_URL
-echo $PLATFORM_API_BASE_URL
+# Check HMAC secret is set in the .env
+grep HMAC_SECRET /opt/praho/.env
 
-# Docker
-docker exec praho_portal curl http://platform:8700/health/
+# Verify Platform is responding
+curl http://localhost:8700/api/users/health/
 
-# Native
-curl http://localhost:8700/health/
+# Check Portal logs for auth errors
+journalctl -u praho-portal --since "5 minutes ago" | grep -i hmac
 ```
 
 **4. Health checks failing**
@@ -698,7 +722,7 @@ make deploy-single-server
 
 ```
 deploy/
-├── docker-compose.single-server.yml   # All services on one server
+├── docker-compose.single-server.yml   # Docker: all services on one server
 ├── docker-compose.container-service.yml # For managed platforms
 ├── docker-compose.platform-only.yml   # Platform service only
 ├── docker-compose.portal-only.yml     # Portal service only
@@ -720,23 +744,24 @@ deploy/
 │   └── health-check.sh               # Health check script
 └── ansible/
     ├── inventory/
-    │   ├── single-server.yml          # Single server hosts
-    │   └── two-servers.yml            # Multi-server hosts
+    │   ├── native-single-server.yml   # Unified native inventory (staging + prod)
+    │   ├── dev.yml                    # Dev environment inventory
+    │   └── two-servers.yml            # Multi-server hosts (Docker)
     ├── group_vars/
-    │   └── all.yml                    # Global variables
+    │   └── all.yml                    # Global variables (auto-derives settings from environment)
     ├── playbooks/
+    │   ├── native-single-server.yml   # Native deploy (no Docker) — the main playbook
     │   ├── single-server.yml          # Docker single server deploy
-    │   ├── native-single-server.yml   # Native deploy (no Docker)
-    │   ├── two-servers.yml            # Multi-server deploy
+    │   ├── two-servers.yml            # Multi-server deploy (Docker)
     │   ├── backup.yml                 # Backup playbook
     │   └── rollback.yml               # Rollback playbook
     └── roles/
-        ├── common/                    # Base server setup
+        ├── common/                    # Base server setup (UFW, swap, users)
         ├── docker/                    # Docker installation
         ├── praho/                     # Docker-based deployment
         └── praho-native/              # Native deployment (systemd + Gunicorn)
             ├── defaults/main.yml      # Tunable variables
             ├── handlers/main.yml      # Service restart handlers
             ├── tasks/main.yml         # 11-step deployment
-            └── templates/             # systemd units, Caddyfile, scripts
+            └── templates/             # systemd units, Caddyfile, env, scripts
 ```

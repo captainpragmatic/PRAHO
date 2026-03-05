@@ -121,8 +121,6 @@
     - "{{ project_root }}/media"
     - /var/log/praho
     - /var/log/praho/portal
-    - /var/log/praho/staging
-    - /var/log/praho/portal-staging
 
 - name: Deploy code via rsync
   synchronize:
@@ -269,7 +267,7 @@
   become_user: "{{ project_user }}"
   environment:
     PYTHONPATH: "{{ project_root }}/src/services/portal"
-    DJANGO_SETTINGS_MODULE: "config.settings.staging"
+    DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
     SECRET_KEY: "{{ secret_key }}"
     ALLOWED_HOSTS: "{{ portal_domain }},localhost,127.0.0.1"
     PORTAL_DOMAIN: "{{ portal_domain }}"

@@ -109,7 +109,7 @@ LOGGING = {
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/portal-staging/app.log",
+            "filename": "/var/log/praho/portal/app.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
             "formatter": "json",
@@ -117,7 +117,7 @@ LOGGING = {
         },
         "error_file": {
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "/var/log/praho/portal-staging/error.log",
+            "filename": "/var/log/praho/portal/error.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 10,
             "formatter": "json",
