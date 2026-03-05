@@ -183,7 +183,7 @@ See the docstrings in `services/platform/config/settings/staging.py` and `servic
 #### What the Playbook Validates
 
 Before deploying, the playbook checks:
-1. `environment` is defined and one of `dev`, `staging`, `prod`
+1. `praho_env` is defined and one of `dev`, `staging`, `prod`
 2. Ubuntu >= 22.04
 3. All required variables are set (not defaults)
 4. `PRAHO_HMAC_SECRET` is non-empty
@@ -198,6 +198,30 @@ After deployment completes, the playbook verifies all services over HTTP and HTT
 - Password: from `DJANGO_SUPERUSER_PASSWORD` env var, or a random password printed to the Ansible log
 
 Access the Platform admin at `https://<platform-domain>/admin/`.
+
+#### Post-Deploy Configuration (Optional Integrations)
+
+A fresh deployment works with **only the 7 required env vars** from `.env.deploy.example`. However, several business features require additional configuration through the Platform admin UI or by adding env vars to the server's `/opt/praho/env` file (then restarting services).
+
+| Feature | Env Vars Needed | Impact if Missing | Configure Via |
+|---------|----------------|-------------------|---------------|
+| **Email sending** | `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` (or SES/SendGrid keys) | Emails silently fail — users don't receive notifications, password resets, invoices | `/opt/praho/env` |
+| **Stripe payments** | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Payment processing disabled — orders can't be paid online | Platform Settings UI |
+| **e-Factura (ANAF)** | `EFACTURA_API_URL`, `EFACTURA_API_KEY` | Romanian e-invoicing disabled — manual invoice submission required | `/opt/praho/env` |
+| **2FA / TOTP encryption** | `DJANGO_ENCRYPTION_KEY` | TOTP secrets stored unencrypted — 2FA still works but less secure | `/opt/praho/env` |
+| **Credential vault** | `CREDENTIAL_VAULT_MASTER_KEY` | Provider credentials stored without encryption | `/opt/praho/env` |
+| **Sentry error tracking** | `SENTRY_DSN` | No error tracking — errors only in log files | `/opt/praho/env` or Ansible `-e sentry_dsn=...` |
+| **Company info on invoices** | `COMPANY_NAME`, `COMPANY_CUI`, etc. | Placeholder data appears on invoices | Platform Settings UI |
+| **Virtualmin hosting** | Credentials via web UI | Hosting provisioning disabled | Platform admin → Infrastructure |
+
+**Where to add env vars on the server:**
+```bash
+# SSH to the server, edit the env file, restart services
+sudo nano /opt/praho/env
+sudo systemctl restart praho-platform praho-portal
+```
+
+> **Note about `.env.example` in the project root:** That file (338 lines) is a **developer reference** for local `make dev` usage. It lists every possible setting with defaults. It is NOT used in production. Deployed servers use `/opt/praho/env` which Ansible generates from the 7 deploy secrets. Add optional integrations post-deploy as needed.
 
 #### Management Commands
 
@@ -235,7 +259,7 @@ hcloud server rebuild praho-staging --image ubuntu-24.04
 # Wait for server to come up, then deploy
 ansible-playbook -i inventory/native-single-server.yml \
   playbooks/native-single-server.yml \
-  -e environment=staging -v
+  -e praho_env=staging -v
 ```
 
 #### Tuning (Ansible Extra Variables)
@@ -256,7 +280,7 @@ Example: deploy production with 4 Gunicorn workers:
 ```bash
 ansible-playbook -i inventory/native-single-server.yml \
   playbooks/native-single-server.yml \
-  -e environment=prod \
+  -e praho_env=prod \
   -e gunicorn_workers_platform=4 \
   -e gunicorn_workers_portal=2
 ```
@@ -536,8 +560,8 @@ ansible-playbook -i inventory/native-single-server.yml playbooks/rollback.yml -e
 
 | Command | Description |
 |---------|-------------|
-| `make deploy-staging` | Deploy to staging (native, `-e environment=staging`) |
-| `make deploy-prod` | Deploy to production (native, `-e environment=prod`) |
+| `make deploy-staging` | Deploy to staging (native, `-e praho_env=staging`) |
+| `make deploy-prod` | Deploy to production (native, `-e praho_env=prod`) |
 | `make deploy-dev-native` | Deploy to dev (native) |
 | `make deploy-stop` | Stop all deployment services |
 | `make deploy-status` | Show deployment status |
