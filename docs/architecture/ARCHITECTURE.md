@@ -313,7 +313,26 @@ make fixtures         # Load sample data via platform
 - **Authentication**: Two independent HMAC-SHA256 systems:
   - **System 1** (Portal→Platform): Canonical string signing with nonce dedup (`HMAC_SECRET`)
   - **System 2** (Platform→Portal webhooks): `ts.body` signing with replay dedup (`PLATFORM_TO_PORTAL_WEBHOOK_SECRET`)
-- **Rate Limiting**: Per-service and per-customer limits
+
+### Rate Limiting Architecture
+
+Rate limiting runs in three layers and is intentionally cumulative:
+
+1. **Portal middleware (pre-DRF)**: protects Portal auth and API routes before outbound calls are made.
+2. **Platform global DRF throttles**: routes traffic by source:
+   - HMAC service traffic: `PortalHMACRateThrottle` + `PortalHMACBurstThrottle`
+   - Direct/customer traffic: `CustomerRateThrottle` + `BurstRateThrottle`
+3. **Platform per-view DRF throttles**: operation-level controls:
+   - `StandardAPIThrottle` (`sustained`)
+   - `BurstAPIThrottle` (`api_burst`)
+   - `AuthThrottle` (`auth`)
+
+For internal HMAC traffic, `request._portal_authenticated` drives mutual exclusion:
+- portal HMAC throttles apply
+- customer/burst fallback classes skip processing for the same request
+
+Throttle scope rates are centrally configured via `THROTTLE_RATES` and validated at startup
+to fail fast on invalid rate strings or missing scopes.
 
 ### Health Monitoring
 ```python

@@ -1,0 +1,28 @@
+flowchart TD
+    A["Portal User Request"] --> B["Portal Middleware Layer"]
+    B --> B1["AuthenticationRateLimitMiddleware"]
+    B --> B2["APIRateLimitMiddleware"]
+
+    B --> C["Portal API Client (HMAC Signed Request)"]
+    C --> D["Platform Request Pipeline"]
+
+    D --> E{"_portal_authenticated?"}
+    E -->|"Yes"| F["Layer 1 Global DRF: PortalHMACRateThrottle + PortalHMACBurstThrottle"]
+    E -->|"No"| G["Layer 1 Global DRF: CustomerRateThrottle + BurstRateThrottle"]
+
+    F --> H["Layer 2 Per-View DRF Throttles"]
+    G --> H
+
+    H --> H1["StandardAPIThrottle (sustained)"]
+    H --> H2["BurstAPIThrottle (api_burst)"]
+    H --> H3["AuthThrottle (auth endpoints)"]
+    H --> H4["Order Scoped Throttles (order_create/order_calculate/order_list/product_catalog)"]
+
+    H --> I["View Logic + Response"]
+    I --> J["429 Normalized Payload + Retry-After"]
+
+    K["THROTTLE_RATES (settings)"] -.-> F
+    K -.-> G
+    K -.-> H
+    L["Startup Validation"] -.-> K
+    L -.-> M["Class path + scope checks"]

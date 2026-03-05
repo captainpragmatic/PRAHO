@@ -194,9 +194,12 @@ The platform automatically applies these security headers:
 - ✅ **Secure Password Hashing**: Argon2 (industry standard)
 - ✅ **Two-Factor Authentication**: TOTP with encrypted secrets
 - ✅ **Account Lockout**: Progressive delays (5min → 4hr)
-- ✅ **Rate Limiting**: Applied to login and API endpoints
+- ✅ **Rate Limiting**: Three-layer protection (portal middleware + platform global DRF + platform per-view DRF)
 - ✅ **Session Security**: Secure, HttpOnly cookies
 - ✅ **CSRF Protection**: Enabled for all user endpoints
+
+Rate-limit scopes are centrally configured via `THROTTLE_RATES` and validated at startup.
+Platform responses standardize `429` handling with parseable error payloads and `Retry-After`.
 
 ### 📊 OWASP Top 10 Compliance
 

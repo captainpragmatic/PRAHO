@@ -9,11 +9,15 @@ from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from apps.api.exception_handlers import platform_exception_handler
+from apps.api.users import views as api_users_views
 from apps.common.performance.rate_limiting import (
+    AuthThrottle,
+    BurstAPIThrottle,
     BurstRateThrottle,
     CustomerRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
+    StandardAPIThrottle,
 )
 
 
@@ -40,17 +44,25 @@ class PlatformExceptionHandlerTests(SimpleTestCase):
 
 
 class ThrottleConfigurationTests(SimpleTestCase):
-    def test_default_throttle_rates_use_5x_for_authenticated_and_hmac(self) -> None:
+    def test_default_throttle_rates_have_single_source_scopes(self) -> None:
         rates = settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
 
+        self.assertEqual(rates["auth"], "5/minute")
+        self.assertEqual(rates["sustained"], "1000/hour")
+        self.assertEqual(rates["api_burst"], "60/min")
         self.assertEqual(rates["anon"], "20/minute")
-        self.assertEqual(rates["anon_burst"], "10/10s")
-        self.assertEqual(rates["user"], "100/minute")
-        self.assertEqual(rates["user_burst"], "50/10s")
+        self.assertEqual(rates["burst"], "30/10s")
         self.assertEqual(rates["customer"], "100/minute")
-        self.assertEqual(rates["customer_burst"], "50/10s")
         self.assertEqual(rates["portal_hmac"], "100/minute")
         self.assertEqual(rates["portal_hmac_burst"], "50/10s")
+
+    def test_api_core_throttles_use_scopes_from_throttle_rates(self) -> None:
+        self.assertEqual(StandardAPIThrottle.scope, "sustained")
+        self.assertEqual(BurstAPIThrottle.scope, "api_burst")
+        self.assertEqual(AuthThrottle.scope, "auth")
+
+    def test_users_module_uses_canonical_auth_throttle(self) -> None:
+        self.assertIs(api_users_views.AuthThrottle, AuthThrottle)
 
 
 class PortalHMACThrottleTests(SimpleTestCase):

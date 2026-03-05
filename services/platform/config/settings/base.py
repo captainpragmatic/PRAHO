@@ -344,21 +344,9 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
     "EXCEPTION_HANDLER": "apps.api.exception_handlers.platform_exception_handler",
-    "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
-    ],
-    "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",  # Anonymous users (very limited)
-        "user": "1000/hour",  # Authenticated users (generous for portal)
-        "burst": "60/min",  # Search/autocomplete endpoints
-        # 🔒 SECURITY: Order-specific throttling to prevent abuse
-        "order_create": "10/min",  # Order creation (expensive operations)
-        "order_calculate": "30/min",  # Cart calculations (less expensive)
-        "order_list": "100/min",  # Order listing (read operations)
-        "product_catalog": "200/min",  # Product browsing (public-ish)
-        "session_validation": "60/min",  # Portal→platform session checks (per portal)
-    },
+    # Set explicitly later from THROTTLE_RATES + canonical throttle classes.
+    "DEFAULT_THROTTLE_CLASSES": [],
+    "DEFAULT_THROTTLE_RATES": {},
 }
 
 # ===============================================================================
@@ -599,33 +587,22 @@ REDIS_CACHE_CONFIG = {
 
 # Rate limiting rates for different scopes
 THROTTLE_RATES = {
-    # Authentication endpoints - very restrictive
-    "login": "5/minute",
-    "password_reset": "3/minute",
-    "2fa_verify": "10/minute",
-    # Customer-based rates (per customer account)
-    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "100/minute"),
-    "customer_burst": "50/10s",
-    # Internal portal HMAC traffic (service-to-service)
+    # Global DRF defaults (apps.common.performance.rate_limiting)
     "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", "100/minute"),
     "portal_hmac_burst": "50/10s",
-    # Anonymous rates
-    "anon": "20/minute",
-    "anon_burst": "10/10s",
-    # Standard authenticated rates
-    "user": "100/minute",
-    "user_burst": "50/10s",
-    # Service operations
-    "provision": "10/minute",
-    "backup": "5/minute",
-    "sync": "30/minute",
-    # Financial operations
-    "payment": "30/minute",
-    "invoice": "60/minute",
-    "refund": "10/minute",
-    # Sustained rates (hourly limits)
+    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "100/minute"),
+    "burst": "30/10s",
+    # Per-view API throttles (apps.api.core.throttling)
+    "auth": "5/minute",
     "sustained": "1000/hour",
-    "sustained_premium": "5000/hour",
+    "api_burst": "60/min",
+    # Built-in DRF classes used directly by decorators
+    "anon": "20/minute",
+    # Order API scoped throttles (apps.api.orders.views)
+    "order_create": "10/min",
+    "order_calculate": "30/min",
+    "order_list": "100/min",
+    "product_catalog": "200/min",
 }
 
 # Add throttling classes to REST_FRAMEWORK

@@ -10,7 +10,7 @@ from django.apps import AppConfig
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from apps.common.performance.rate_limiting import validate_throttle_rate_map
+from apps.common.performance.rate_limiting import validate_throttle_class_scopes, validate_throttle_rate_map
 
 logger = logging.getLogger(__name__)
 
@@ -49,3 +49,21 @@ def _validate_throttle_rates_at_startup() -> None:
     if not isinstance(throttle_rates, dict):
         raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_RATES must be a dict")
     validate_throttle_rate_map(throttle_rates)
+
+    default_classes = rest_framework.get("DEFAULT_THROTTLE_CLASSES", [])
+    if not isinstance(default_classes, list):
+        raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_CLASSES must be a list")
+
+    # Global defaults + known per-view throttle classes must all have valid scopes.
+    scoped_class_paths = [
+        *default_classes,
+        "apps.api.core.throttling.StandardAPIThrottle",
+        "apps.api.core.throttling.BurstAPIThrottle",
+        "apps.api.core.throttling.AuthThrottle",
+        "apps.api.orders.views.OrderCreateThrottle",
+        "apps.api.orders.views.OrderCalculateThrottle",
+        "apps.api.orders.views.OrderListThrottle",
+        "apps.api.orders.views.ProductCatalogThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ]
+    validate_throttle_class_scopes(scoped_class_paths, throttle_rates)

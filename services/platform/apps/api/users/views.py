@@ -22,6 +22,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 
+from apps.api.core.throttling import AuthThrottle
 from apps.api.secure_auth import require_customer_authentication, require_user_authentication
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.performance.rate_limiting import PortalHMACBurstThrottle, PortalHMACRateThrottle
@@ -164,17 +165,6 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     }
 
     return Response({"success": True, "user": user_data})
-
-
-# ===============================================================================
-# TOKEN AUTHENTICATION ENDPOINTS 🎫
-# ===============================================================================
-
-
-class AuthThrottle(AnonRateThrottle):
-    """Custom throttle for auth endpoints - more restrictive"""
-
-    rate = "5/min"
 
 
 @api_view(["POST"])

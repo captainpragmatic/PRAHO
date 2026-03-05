@@ -7,7 +7,11 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
 from apps.common.apps import _validate_throttle_rates_at_startup
-from apps.common.performance.rate_limiting import parse_rate_string, validate_throttle_rate_map
+from apps.common.performance.rate_limiting import (
+    parse_rate_string,
+    validate_throttle_class_scopes,
+    validate_throttle_rate_map,
+)
 from apps.common.retry_after import coerce_retry_after_seconds
 
 
@@ -26,14 +30,49 @@ class ThrottleRateParsingTests(SimpleTestCase):
 
 
 class StartupThrottleValidationTests(SimpleTestCase):
-    @override_settings(REST_FRAMEWORK={"DEFAULT_THROTTLE_RATES": {"anon": "20/minute", "portal_hmac": "100/minute"}})
+    @override_settings(
+        REST_FRAMEWORK={
+            "DEFAULT_THROTTLE_CLASSES": [
+                "apps.common.performance.rate_limiting.PortalHMACRateThrottle",
+                "apps.common.performance.rate_limiting.PortalHMACBurstThrottle",
+                "apps.common.performance.rate_limiting.CustomerRateThrottle",
+                "apps.common.performance.rate_limiting.BurstRateThrottle",
+            ],
+            "DEFAULT_THROTTLE_RATES": {
+                "portal_hmac": "100/minute",
+                "portal_hmac_burst": "50/10s",
+                "customer": "100/minute",
+                "burst": "30/10s",
+                "auth": "5/minute",
+                "sustained": "1000/hour",
+                "api_burst": "60/min",
+                "anon": "20/minute",
+                "order_create": "10/min",
+                "order_calculate": "30/min",
+                "order_list": "100/min",
+                "product_catalog": "200/min",
+            },
+        }
+    )
     def test_startup_validation_allows_valid_rates(self) -> None:
         _validate_throttle_rates_at_startup()
 
-    @override_settings(REST_FRAMEWORK={"DEFAULT_THROTTLE_RATES": {"portal_hmac": "100/week"}})
+    @override_settings(
+        REST_FRAMEWORK={
+            "DEFAULT_THROTTLE_CLASSES": ["apps.common.performance.rate_limiting.PortalHMACRateThrottle"],
+            "DEFAULT_THROTTLE_RATES": {"portal_hmac": "100/week"},
+        }
+    )
     def test_startup_validation_rejects_invalid_rates(self) -> None:
         with self.assertRaises(ImproperlyConfigured):
             _validate_throttle_rates_at_startup()
+
+    def test_validate_throttle_class_scopes_rejects_unknown_scope(self) -> None:
+        with self.assertRaises(ImproperlyConfigured):
+            validate_throttle_class_scopes(
+                ["apps.common.performance.rate_limiting.StandardAPIThrottle"],
+                {"auth": "5/minute"},
+            )
 
 
 class RetryAfterParsingTests(SimpleTestCase):
