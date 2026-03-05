@@ -11,6 +11,74 @@ _No unreleased changes._
 
 ---
 
+## [0.23.0] - 2026-03-05
+
+### Added
+
+- **Deployment**: Production-grade git-tag deploy pipeline — production always deploys
+  from an immutable git tag (`PRAHO_VERSION` in `.env.prod`), with pre-flight validation
+  that the tag exists in the remote repository via `git ls-remote`
+- **Deployment**: CLI version override for production deploys (`make deploy-prod VERSION=v0.14.0`)
+- **Deployment**: Configurable staging deploy method — defaults to git HEAD of `DEPLOY_BRANCH`,
+  with `DEPLOY_METHOD=rsync` as fallback for rapid iteration
+- **Deployment**: Deploy summary now shows version + commit SHA for audit trail
+- **Deployment**: DNS pre-flight check verifies FQDNs resolve to target server IP (using `@8.8.8.8`)
+- **Deployment**: `.env` file as single source of truth — Ansible validates locally, copies to
+  server, and reads values from it (replaces Jinja2 `env.native.j2` template)
+- **Deployment**: New `.env.example.prod` and `.env.example.staging` at project root with
+  documented `[REQUIRED]`/`[OPTIONAL]` annotations
+- **Deployment**: `setup_initial_data` management command for first-deploy bootstrap
+  (categories, settings, scheduled tasks, templates, superuser)
+- **Platform**: System status dashboard with integration health checks (database, cache,
+  email, Stripe, e-Factura, scheduled tasks) — HTMX-refreshable partial with staff-only
+  on-demand refresh
+- **Platform**: Django-Q2 scheduled task for daily system status check
+
+### Changed
+
+- **Deployment**: Consolidated per-environment Ansible inventory and group_vars into single
+  `native-single-server.yml` layout — environment driven by `-e praho_env=staging|prod`
+- **Deployment**: Renamed Ansible variable `environment` → `praho_env` to avoid reserved
+  keyword collision
+- **Deployment**: Merged old `.env.example` into `.env.example.dev` (comprehensive dev reference)
+- **Deployment**: Updated `praho_git_repo` from placeholder to `captainpragmatic/PRAHO.git`
+- **Deployment**: Rewritten `DEPLOYMENT.md` for `.env`-driven workflow with post-deploy
+  integration guide (email, Stripe, e-Factura, 2FA, Sentry)
+- **Portal**: Normalized i18n source strings from Romanian to English — translations remain
+  in `.po/.mo` files; rate limiting now returns redirect + flash message instead of raw JSON
+  for browser form submissions
+- **Platform**: SIEM logger derives environment from `DJANGO_SETTINGS_MODULE` instead of
+  hardcoding "production"
+- **Platform**: Removed unused `django-storages` dependency and AWS S3 static files config
+
+### Fixed
+
+- **Deployment**: Production deploys enforce git-only method — rsync blocked for prod
+- **Deployment**: Quoted `.env` values with spaces for shell sourcing compatibility
+- **Deployment**: Tightened `.gitignore` — `.env.*` excludes secrets, `!.env.example.*`
+  keeps templates tracked; rsync excludes `.env.*` and `.envrc` to prevent secret leakage
+- **Deployment**: Fixed Caddy log ownership and portal systemd `ReadWritePaths`
+- **Deployment**: Fixed portal `collectstatic` missing `PLATFORM_API_ALLOW_INSECURE_HTTP` env var
+- **Portal**: Added `SECURE_PROXY_SSL_HEADER` for TLS-terminated reverse proxy (Caddy/nginx)
+- **Portal**: Exempted `/api/` from `SECURE_SSL_REDIRECT` (localhost inter-service communication)
+- **Portal**: Added `/robots.txt` to public path exemptions in portal middleware
+- **Platform**: Exempted `/api/` from `SECURE_SSL_REDIRECT` in prod settings
+- **Platform**: Fixed missing required env vars in logging configuration test
+- **Orders**: Fixed fail-closed validation and consistent product filtering; accept
+  `product_slug` as fallback identifier in cart and order API
+- **Security**: Env-driven host config with split domains, native deployment hardening
+
+### Removed
+
+- Deleted per-environment Ansible files: `group_vars/{dev,prod,staging}.yml`,
+  `inventory/{prod,staging,single-server,staging-single-server}.yml`
+- Deleted `deploy/ansible/roles/praho-native/templates/env.native.j2` (replaced by `.env` copy)
+- Deleted `deploy/.env.staging.example` (replaced by `.env.example.staging` at project root)
+- Deleted `.env.example` (replaced by `.env.example.dev`)
+- Removed `django-storages` from dependencies
+
+---
+
 ## [0.22.0] - 2026-03-04
 
 ### Fixed — Platform Ruff Auto-Fixes & Type Safety (196 files)
