@@ -4,19 +4,12 @@
 # All-in-one server: Platform + Portal + DB + Caddy
 # Works for ALL environments — pass -e praho_env=staging|prod
 #
-# Required env vars:
-#   export PRAHO_SERVER_IP=<server-ip>
-#   export PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com
-#   export PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com
-#   export PRAHO_DB_PASSWORD=<strong-password>
-#   export PRAHO_SECRET_KEY=<strong-key>
-#   export PRAHO_HMAC_SECRET=<strong-secret>
-#   export PRAHO_ACME_EMAIL=admin@example.com
+# Connection vars (PRAHO_SERVER_IP, PRAHO_SSH_USER, PRAHO_SSH_KEY) are read
+# from the .env.{env} file. The Makefile sources the file before calling Ansible.
 #
 # Deploy:
-#   cd deploy/ansible
-#   ansible-playbook -i inventory/native-single-server.yml \
-#     playbooks/native-single-server.yml -e praho_env=staging -v
+#   make deploy-staging   # reads .env.staging
+#   make deploy-prod      # reads .env.prod
 
 all:
   hosts:

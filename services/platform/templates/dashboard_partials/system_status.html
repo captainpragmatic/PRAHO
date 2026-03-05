@@ -1,0 +1,54 @@
+{% load ui_components %}
+{% load i18n %}
+
+<div id="system-status-widget">
+  {% if system_status %}
+  <div class="space-y-3">
+    {% for status in system_status %}
+    <div class="flex items-center justify-between">
+      <span class="text-slate-300">{{ status.name }}</span>
+      {% if status.level == "green" %}
+      <span class="inline-flex items-center text-green-400" title="{{ status.detail }}">
+        {% icon "check" size="sm" css_class="mr-1" %} {{ status.message }}
+      </span>
+      {% elif status.level == "amber" %}
+      <span class="inline-flex items-center text-amber-400" title="{{ status.detail }}">
+        {% icon "alert" size="sm" css_class="mr-1" %} {{ status.message }}
+      </span>
+      {% elif status.level == "red" %}
+      <span class="inline-flex items-center text-red-400" title="{{ status.detail }}">
+        {% icon "x" size="sm" css_class="mr-1" %} {{ status.message }}
+      </span>
+      {% elif status.level == "grey" %}
+      <span class="inline-flex items-center text-slate-500" title="{{ status.detail }}">
+        {% icon "minus" size="sm" css_class="mr-1" %} {{ status.message }}
+      </span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between">
+    <p class="text-slate-400 text-xs">
+      {% trans 'Last update' %}: {{ current_time|date:"d.m.Y H:i" }}
+    </p>
+    <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="innerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner" class="text-xs text-slate-500 hover:text-blue-400 transition-colors">
+      <span id="status-spinner" class="htmx-indicator">
+        {% icon "loading" size="sm" css_class="animate-spin mr-1" %}
+      </span>
+      {% trans 'Refresh' %}
+    </button>
+  </div>
+
+  {% else %}
+  <div class="text-center py-4">
+    <p class="text-slate-400 text-sm mb-2">{% trans 'Checking system status...' %}</p>
+    <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="innerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner-init" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+      <span id="status-spinner-init" class="htmx-indicator">
+        {% icon "loading" size="sm" css_class="animate-spin mr-1" %}
+      </span>
+      {% trans 'Check now' %}
+    </button>
+  </div>
+  {% endif %}
+</div>

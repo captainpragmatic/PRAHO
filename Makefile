@@ -112,8 +112,8 @@ help:
 	@echo "🚀 ENVIRONMENT DEPLOYMENT (Ansible):"
 	@echo "  make deploy-dev            - Deploy PRAHO to dev (Docker)"
 	@echo "  make deploy-dev-native     - Deploy PRAHO to dev (native, no Docker)"
-	@echo "  make deploy-staging        - Deploy PRAHO to staging (native)"
-	@echo "  make deploy-prod           - Deploy PRAHO to production (native)"
+	@echo "  make deploy-staging        - Deploy PRAHO to staging (reads .env.staging)"
+	@echo "  make deploy-prod           - Deploy PRAHO to production (reads .env.prod)"
 	@echo ""
 	@echo "📜 ANSIBLE (generic):"
 	@echo "  make ansible-single-server - Deploy via Ansible (single server)"
@@ -149,7 +149,7 @@ install:
 	@if [ ! -f .env ]; then \
 		echo ""; \
 		echo "⚠️  No .env file found. Before running services:"; \
-		echo "   cp .env.example .env"; \
+		echo "   cp .env.example.dev .env"; \
 		echo "   Then edit .env with your credentials."; \
 	fi
 	@echo "✅ Environment ready! 🐍 $(VENV_DIR)/ | 🔒 Portal cannot import platform code"
@@ -158,7 +158,7 @@ check-env:
 	@if [ ! -f .env ]; then \
 		echo ""; \
 		echo "🚨 Missing .env file!"; \
-		echo "   cp .env.example .env"; \
+		echo "   cp .env.example.dev .env"; \
 		echo "   Then edit .env with your values."; \
 		echo ""; \
 		exit 1; \
@@ -891,22 +891,22 @@ deploy-dev-native:
 	@cd deploy/ansible && ansible-playbook -i inventory/dev.yml playbooks/native-single-server.yml
 
 deploy-staging:
-	@for var in PRAHO_SERVER_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
-		eval val=\$$$$var; \
-		if [ -z "$$val" ]; then echo "❌ Missing env var: $$var"; exit 1; fi; \
-	done
+	@test -f .env.staging || (echo "❌ Missing .env.staging — run: cp .env.example.staging .env.staging"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to staging (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=staging -v
+	@set -a && . $(PWD)/.env.staging && set +a && \
+		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
+		playbooks/native-single-server.yml -e praho_env=staging \
+		-e env_file_path=$(PWD)/.env.staging -v
 
 deploy-prod:
-	@for var in PRAHO_SERVER_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
-		eval val=\$$$$var; \
-		if [ -z "$$val" ]; then echo "❌ Missing env var: $$var"; exit 1; fi; \
-	done
+	@test -f .env.prod || (echo "❌ Missing .env.prod — run: cp .env.example.prod .env.prod"; exit 1)
 	@echo "🚀 [Deploy] Deploying PRAHO to production (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=prod -v
+	@set -a && . $(PWD)/.env.prod && set +a && \
+		cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
+		playbooks/native-single-server.yml -e praho_env=prod \
+		-e env_file_path=$(PWD)/.env.prod -v
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜

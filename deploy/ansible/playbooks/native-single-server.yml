@@ -5,10 +5,8 @@
 # Works for any environment — pass -e praho_env=staging|prod.
 #
 # Usage:
-#   cd deploy/ansible
-#   source .env.staging   # loads PRAHO_SERVER_IP, secrets, etc.
-#   ansible-playbook -i inventory/native-single-server.yml \
-#     playbooks/native-single-server.yml -e praho_env=staging
+#   cp .env.example.prod .env.prod   # fill in values
+#   make deploy-prod                  # or: make deploy-staging
 
 ---
 - name: Deploy PRAHO - Native Single Server ({{ praho_env | default('prod') }})
@@ -28,29 +26,54 @@
       assert:
         that:
           - ansible_distribution == 'Ubuntu'
-          - ansible_distribution_version is version('22.04', '>=')
-        fail_msg: "Requires Ubuntu >= 22.04 (found {{ ansible_distribution }} {{ ansible_distribution_version }})"
+          - ansible_distribution_version is version('24.04', '>=')
+        fail_msg: "Requires Ubuntu >= 24.04 LTS (found {{ ansible_distribution }} {{ ansible_distribution_version }})"
 
-    - name: Validate required variables
+    - name: Validate .env file exists
+      stat:
+        path: "{{ env_file_path }}"
+      delegate_to: localhost
+      become: false
+      register: preflight_env_check
+
+    - name: Fail if .env file not found
+      fail:
+        msg: >
+          Missing .env file at {{ env_file_path }}.
+          Run: cp .env.example.{{ praho_env }} .env.{{ praho_env }}
+          Then fill in the [REQUIRED] values and re-run.
+      when: not preflight_env_check.stat.exists
+
+    - name: Read env vars for pre-flight validation
+      shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
+      delegate_to: localhost
+      become: false
+      register: preflight_env_contents
+      changed_when: false
+
+    - name: Parse pre-flight env vars
+      set_fact:
+        preflight_env: "{{ dict(preflight_env_contents.stdout_lines | map('split', '=', 1)) }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Validate required env vars
       assert:
         that:
-          - portal_domain is defined and portal_domain != 'portal.pragmatichost.com'
-          - platform_domain is defined and platform_domain != 'platform.pragmatichost.com'
-          - db_password is defined and db_password != 'changeme'
-          - secret_key is defined and secret_key != 'generate-a-strong-key'
-        fail_msg: "Required variables not set. Export PRAHO_PORTAL_DOMAIN, PRAHO_PLATFORM_DOMAIN, PRAHO_DB_PASSWORD, and PRAHO_SECRET_KEY."
-
-    - name: Validate HMAC secret
-      assert:
-        that:
-          - hmac_secret is defined and hmac_secret | length > 0
-        fail_msg: "PRAHO_HMAC_SECRET is required — Portal cannot authenticate to Platform without it."
+          - preflight_env.PORTAL_DOMAIN is defined and preflight_env.PORTAL_DOMAIN | length > 0
+          - preflight_env.PLATFORM_DOMAIN is defined and preflight_env.PLATFORM_DOMAIN | length > 0
+          - preflight_env.SECRET_KEY is defined and preflight_env.SECRET_KEY | length > 0
+          - preflight_env.DB_PASSWORD is defined and preflight_env.DB_PASSWORD | length > 0
+          - preflight_env.HMAC_SECRET is defined and preflight_env.HMAC_SECRET | length > 0
+        fail_msg: >
+          Missing required variables in {{ env_file_path }}.
+          Ensure PORTAL_DOMAIN, PLATFORM_DOMAIN, SECRET_KEY, DB_PASSWORD, and HMAC_SECRET are set.
 
     # -------------------------------------------------------------------
     # DNS pre-flight: verify both FQDNs resolve to this server's IP
     # -------------------------------------------------------------------
     - name: Resolve portal_domain DNS
-      command: "dig +short {{ portal_domain }} A"
+      command: "dig +short {{ preflight_env.PORTAL_DOMAIN }} A"
       register: portal_dns
       changed_when: false
       delegate_to: localhost
@@ -58,7 +81,7 @@
       tags: [preflight, dns]
 
     - name: Resolve platform_domain DNS
-      command: "dig +short {{ platform_domain }} A"
+      command: "dig +short {{ preflight_env.PLATFORM_DOMAIN }} A"
       register: platform_dns
       changed_when: false
       delegate_to: localhost
@@ -70,7 +93,7 @@
         that:
           - portal_dns.stdout | trim == ansible_host
         fail_msg: >
-          DNS MISMATCH: {{ portal_domain }} resolves to '{{ portal_dns.stdout | trim }}'
+          DNS MISMATCH: {{ preflight_env.PORTAL_DOMAIN }} resolves to '{{ portal_dns.stdout | trim }}'
           but this server is '{{ ansible_host }}'.
           Update your DNS A record before deploying — Caddy ACME will fail without it.
       tags: [preflight, dns]
@@ -80,7 +103,7 @@
         that:
           - platform_dns.stdout | trim == ansible_host
         fail_msg: >
-          DNS MISMATCH: {{ platform_domain }} resolves to '{{ platform_dns.stdout | trim }}'
+          DNS MISMATCH: {{ preflight_env.PLATFORM_DOMAIN }} resolves to '{{ platform_dns.stdout | trim }}'
           but this server is '{{ ansible_host }}'.
           Update your DNS A record before deploying — Caddy ACME will fail without it.
       tags: [preflight, dns]
@@ -115,7 +138,7 @@
 
     - name: Verify Portal HTTPS endpoint
       uri:
-        url: "https://{{ portal_domain }}/"
+        url: "https://{{ deployed_env.PORTAL_DOMAIN }}/"
         status_code:
           - 200
           - 301
@@ -130,7 +153,7 @@
 
     - name: Verify Platform HTTPS endpoint
       uri:
-        url: "https://{{ platform_domain }}/api/users/health/"
+        url: "https://{{ deployed_env.PLATFORM_DOMAIN }}/api/users/health/"
         status_code: 200
         validate_certs: yes
         follow_redirects: none
@@ -148,7 +171,8 @@
           ================================================
           Environment: {{ praho_env }}
           Settings:    {{ django_settings_module }}
-          Portal:      https://{{ portal_domain }}
-          Platform:    https://{{ platform_domain }}
+          Portal:      https://{{ deployed_env.PORTAL_DOMAIN }}
+          Platform:    https://{{ deployed_env.PLATFORM_DOMAIN }}
+          Env file:    {{ env_file_path }}
           ================================================
       tags: [post-verify]

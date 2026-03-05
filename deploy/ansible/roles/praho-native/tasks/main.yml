@@ -3,6 +3,24 @@
 # =============================================================================
 # Deploys PRAHO directly on the host with PostgreSQL + uv + systemd + Caddy.
 # No Docker required.
+#
+# The .env file is the single source of truth for all configuration.
+# Ansible reads it locally, copies it to the server, then uses its values.
+
+# ---------------------------------------------------------------------------
+# 0. Parse .env file for use throughout this role
+# ---------------------------------------------------------------------------
+
+- name: Read .env file locally for role variables
+  shell: "grep -E '^[A-Z_]+=' {{ env_file_path }} | grep -v '^#'"
+  delegate_to: localhost
+  become: false
+  register: role_env_contents
+  changed_when: false
+
+- name: Parse .env vars for role use
+  set_fact:
+    deployed_env: "{{ dict(role_env_contents.stdout_lines | map('split', '=', 1)) }}"
 
 # ---------------------------------------------------------------------------
 # 1. PostgreSQL 15
@@ -41,16 +59,16 @@
 - name: Create PostgreSQL user
   become_user: postgres
   community.postgresql.postgresql_user:
-    name: "{{ db_user }}"
-    password: "{{ db_password }}"
+    name: "{{ deployed_env.DB_USER | default('praho') }}"
+    password: "{{ deployed_env.DB_PASSWORD }}"
     role_attr_flags: CREATEDB
     state: present
 
 - name: Create PostgreSQL database
   become_user: postgres
   community.postgresql.postgresql_db:
-    name: "{{ db_name }}"
-    owner: "{{ db_user }}"
+    name: "{{ deployed_env.DB_NAME | default('praho') }}"
+    owner: "{{ deployed_env.DB_USER | default('praho') }}"
     encoding: UTF-8
     lc_collate: en_US.UTF-8
     lc_ctype: en_US.UTF-8
@@ -193,12 +211,51 @@
     UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv"
 
 # ---------------------------------------------------------------------------
-# 6. Environment file
+# 6. Environment file (.env as single source of truth)
 # ---------------------------------------------------------------------------
 
-- name: Template environment file
-  template:
-    src: env.native.j2
+- name: Validate .env file exists locally
+  stat:
+    path: "{{ env_file_path }}"
+  delegate_to: localhost
+  become: false
+  register: env_file_check
+
+- name: Fail if .env file not found
+  fail:
+    msg: >
+      Environment file not found at {{ env_file_path }}.
+      Copy .env.example.{{ praho_env }} to .env.{{ praho_env }} and fill in values.
+      See docs/deployment/DEPLOYMENT.md for details.
+  when: not env_file_check.stat.exists
+
+- name: Validate required variables in .env file
+  shell: |
+    missing=""
+    while IFS='=' read -r key value; do
+      # Skip comments and empty lines
+      case "$key" in \#*|"") continue ;; esac
+      # Trim whitespace
+      key=$(echo "$key" | xargs)
+      value=$(echo "$value" | xargs)
+    done < "{{ env_file_path }}"
+    # Check critical vars
+    for var in SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
+      val=$(grep "^${var}=" "{{ env_file_path }}" | head -1 | cut -d'=' -f2-)
+      if [ -z "$val" ]; then missing="$missing $var"; fi
+    done
+    if [ -n "$missing" ]; then
+      echo "MISSING:$missing"
+      exit 1
+    fi
+  delegate_to: localhost
+  become: false
+  register: env_validation
+  changed_when: false
+
+- name: Copy environment file to server
+  copy:
+    src: "{{ env_file_path }}"
     dest: "{{ project_root }}/.env"
     owner: "{{ project_user }}"
     group: "{{ project_group }}"
@@ -208,31 +265,33 @@
     - restart praho-portal
     - restart praho-qcluster
 
+# deployed_env is already set from step 0 (parsed from local .env file)
+
 # ---------------------------------------------------------------------------
 # 7. Django setup
 # ---------------------------------------------------------------------------
 
-- name: Set Django environment variables
+- name: Set Django environment variables from .env file
   set_fact:
     django_env:
       PYTHONPATH: "{{ project_root }}/src/services/platform"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-      DATABASE_URL: "postgresql://{{ db_user }}:{{ db_password }}@localhost:{{ db_port }}/{{ db_name }}"
-      DB_NAME: "{{ db_name }}"
-      DB_USER: "{{ db_user }}"
-      DB_PASSWORD: "{{ db_password }}"
-      DB_HOST: "localhost"
-      DB_PORT: "{{ db_port }}"
-      DB_SSLMODE: "disable"
-      DJANGO_SECRET_KEY: "{{ secret_key }}"
-      SECRET_KEY: "{{ secret_key }}"
-      HMAC_SECRET: "{{ hmac_secret | default('') }}"
-      PLATFORM_API_SECRET: "{{ hmac_secret | default('') }}"
+      # Read all vars from the deployed .env file
+      DB_NAME: "{{ deployed_env.DB_NAME | default('praho') }}"
+      DB_USER: "{{ deployed_env.DB_USER | default('praho') }}"
+      DB_PASSWORD: "{{ deployed_env.DB_PASSWORD }}"
+      DB_HOST: "{{ deployed_env.DB_HOST | default('localhost') }}"
+      DB_PORT: "{{ deployed_env.DB_PORT | default('5432') }}"
+      DB_SSLMODE: "{{ deployed_env.DB_SSLMODE | default('disable') }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+      SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+      HMAC_SECRET: "{{ deployed_env.HMAC_SECRET | default('') }}"
+      PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/static"
       MEDIA_ROOT: "{{ project_root }}/media"
-      ALLOWED_HOSTS: "{{ portal_domain }},{{ platform_domain }},localhost,127.0.0.1"
-      PORTAL_DOMAIN: "{{ portal_domain }}"
-      PLATFORM_DOMAIN: "{{ platform_domain }}"
+      ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},{{ deployed_env.PLATFORM_DOMAIN }},localhost,127.0.0.1"
+      PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
+      PLATFORM_DOMAIN: "{{ deployed_env.PLATFORM_DOMAIN }}"
 
 - name: Run database migrations
   command: >
@@ -268,11 +327,11 @@
   environment:
     PYTHONPATH: "{{ project_root }}/src/services/portal"
     DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-    SECRET_KEY: "{{ secret_key }}"
-    ALLOWED_HOSTS: "{{ portal_domain }},localhost,127.0.0.1"
-    PORTAL_DOMAIN: "{{ portal_domain }}"
+    SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+    ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
+    PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
     PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
-    PLATFORM_API_SECRET: "{{ hmac_secret | default('') }}"
+    PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
     STATIC_ROOT: "{{ project_root }}/portal-static"
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
@@ -464,12 +523,13 @@
       ================================================
       PRAHO Native Deployment Complete!
       ================================================
-      Portal:    https://{{ portal_domain }}
-      Platform:  https://{{ platform_domain }}
+      Portal:    https://{{ deployed_env.PORTAL_DOMAIN }}
+      Platform:  https://{{ deployed_env.PLATFORM_DOMAIN }}
       Local:     http://localhost:{{ platform_port }} / http://localhost:{{ portal_port }}
       Q-Cluster: running ({{ qcluster_workers }} workers)
-      Database:  PostgreSQL 15 (localhost:{{ db_port }})
+      Database:  PostgreSQL 15 (localhost:{{ deployed_env.DB_PORT | default('5432') }})
       Method:    {{ deploy_method }}
+      Env file:  {{ env_file_path }}
       ================================================
       Useful commands:
         systemctl status praho-platform praho-portal praho-qcluster
