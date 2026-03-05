@@ -11,15 +11,88 @@ Provides DRF-compatible throttling classes with:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ImproperlyConfigured
 from rest_framework.request import Request
 from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
 
 logger = logging.getLogger(__name__)
+
+_RATE_PATTERN = re.compile(r"^\s*(?P<num>\d+)\s*/\s*(?P<period>[A-Za-z0-9]+)\s*$")
+_RATE_WORD_SECONDS: dict[str, int] = {
+    "sec": 1,
+    "second": 1,
+    "seconds": 1,
+    "min": 60,
+    "minute": 60,
+    "minutes": 60,
+    "hour": 3600,
+    "hours": 3600,
+    "day": 86400,
+    "days": 86400,
+}
+_RATE_UNIT_SECONDS: dict[str, int] = {
+    "s": 1,
+    "m": 60,
+    "h": 3600,
+    "d": 86400,
+}
+
+
+def parse_rate_string(rate: str) -> tuple[int, int]:
+    """
+    Parse DRF-like throttle rates with support for custom shorthand windows.
+
+    Supported examples:
+    - ``100/minute``
+    - ``50/10s``
+    - ``100/hour``
+    """
+    text_rate = str(rate).strip()
+    match = _RATE_PATTERN.fullmatch(text_rate)
+    if not match:
+        raise ValueError(f"Invalid rate format: {rate!r}")
+
+    num_requests = int(match.group("num"))
+    if num_requests <= 0:
+        raise ValueError(f"Rate request count must be > 0: {rate!r}")
+
+    period = match.group("period").lower()
+    if period in _RATE_WORD_SECONDS:
+        return num_requests, _RATE_WORD_SECONDS[period]
+
+    if period[-1] in _RATE_UNIT_SECONDS:
+        unit_seconds = _RATE_UNIT_SECONDS[period[-1]]
+        if len(period) == 1:
+            multiplier = 1
+        else:
+            if not period[:-1].isdigit():
+                raise ValueError(f"Invalid rate period: {rate!r}")
+            multiplier = int(period[:-1])
+            if multiplier <= 0:
+                raise ValueError(f"Rate period multiplier must be > 0: {rate!r}")
+        return num_requests, multiplier * unit_seconds
+
+    raise ValueError(f"Unsupported rate period: {rate!r}")
+
+
+def validate_throttle_rate_map(rates: dict[str, str]) -> None:
+    """Validate throttle rates and raise clear startup errors for invalid values."""
+    invalid_entries: list[str] = []
+    for scope, rate in rates.items():
+        try:
+            parse_rate_string(rate)
+        except (TypeError, ValueError) as exc:
+            invalid_entries.append(f"{scope}={rate!r} ({exc})")
+
+    if invalid_entries:
+        joined = ", ".join(invalid_entries)
+        raise ImproperlyConfigured(f"Invalid throttle rate configuration: {joined}")
 
 
 def _is_portal_authenticated(request: Request) -> bool:
@@ -56,25 +129,7 @@ class _CustomTimeRateMixin:
     """Support custom shorthand rates such as `50/10s`."""
 
     def parse_rate(self, rate: str) -> tuple[int, int]:
-        num, period = rate.split("/")
-        num_requests = int(num)
-
-        if period.endswith("s"):
-            duration = int(period[:-1])
-        elif period == "sec":
-            duration = 1
-        elif period in {"min", "minute"}:
-            duration = 60
-        elif period == "hour":
-            duration = 3600
-        elif period == "day":
-            duration = 86400
-        else:
-            duration = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(period[-1], 1)
-            if period[:-1].isdigit():
-                duration *= int(period[:-1])
-
-        return (num_requests, duration)
+        return parse_rate_string(rate)
 
 
 class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs

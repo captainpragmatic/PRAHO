@@ -4,31 +4,19 @@ Helpers for user-facing rate-limit feedback in Portal views/templates.
 
 from __future__ import annotations
 
-import math
-import time
-from typing import Any
-
+from django.contrib import messages
 from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError
+from apps.common.retry_after import coerce_retry_after_seconds
 
-RATE_LIMIT_BANNER_UNTIL_KEY = "rate_limit_banner_until"
-
-
-def _coerce_retry_after(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        parsed = math.ceil(float(value))
-    except (TypeError, ValueError):
-        return None
-    return max(1, parsed)
+_RATE_LIMIT_MESSAGE_ADDED_ATTR = "_rate_limit_message_added"
 
 
 def get_retry_after_from_error(error: Exception) -> int | None:
     if isinstance(error, PlatformAPIError):
-        return _coerce_retry_after(error.retry_after)
+        return coerce_retry_after_seconds(error.retry_after)
     return None
 
 
@@ -46,27 +34,23 @@ def get_rate_limit_message(retry_after: int | None) -> str:
 
 def record_rate_limit_banner(request: HttpRequest, retry_after: int | None) -> None:
     """
-    Store a short-lived warning banner in session so subsequent pages show
-    explicit rate-limit feedback instead of silent degradation.
+    Queue a warning message for the next rendered response.
+
+    Uses Django's messages framework instead of session-managed banner state
+    to keep feedback behavior simple and avoid custom expiration bookkeeping.
     """
-    retry_seconds = min(max(_coerce_retry_after(retry_after) or 15, 5), 300)
-    request.session[RATE_LIMIT_BANNER_UNTIL_KEY] = int(time.time()) + retry_seconds
+    if getattr(request, _RATE_LIMIT_MESSAGE_ADDED_ATTR, False):
+        return
+    setattr(request, _RATE_LIMIT_MESSAGE_ADDED_ATTR, True)
+    messages.warning(request, get_rate_limit_message(coerce_retry_after_seconds(retry_after)), extra_tags="rate-limit")
 
 
-def consume_rate_limit_banner(request: HttpRequest) -> dict[str, str] | None:
-    until = request.session.get(RATE_LIMIT_BANNER_UNTIL_KEY)
-    if not until:
-        return None
-
-    now = int(time.time())
-    if now >= int(until):
-        request.session.pop(RATE_LIMIT_BANNER_UNTIL_KEY, None)
-        return None
-
-    remaining = max(1, int(until) - now)
+def build_rate_limited_context(request: HttpRequest, error: Exception) -> dict[str, str | bool | int | None]:
+    retry_after = get_retry_after_from_error(error)
+    record_rate_limit_banner(request, retry_after)
     return {
-        "severity": "warning",
-        "message": get_rate_limit_message(remaining),
-        "cta_url": request.get_full_path(),
-        "cta_text": _("Try again"),
+        "rate_limited": True,
+        "rate_limit_retry_after": retry_after,
+        "rate_limit_message": get_rate_limit_message(retry_after),
+        "rate_limit_retry_url": request.get_full_path(),
     }

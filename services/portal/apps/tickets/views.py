@@ -15,10 +15,8 @@ from django.views.decorators.http import require_http_methods
 from apps.common.api_utils import DictAsObj
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import (
-    get_rate_limit_message,
-    get_retry_after_from_error,
+    build_rate_limited_context,
     is_rate_limited_error,
-    record_rate_limit_banner,
 )
 from apps.services.services import services_api
 
@@ -44,17 +42,6 @@ TICKET_STATUS_TABS = [
 ]
 
 logger = logging.getLogger(__name__)
-
-
-def _rate_limited_context(request: HttpRequest, error: Exception) -> dict[str, str | bool | int | None]:
-    retry_after = get_retry_after_from_error(error)
-    record_rate_limit_banner(request, retry_after)
-    return {
-        "rate_limited": True,
-        "rate_limit_retry_after": retry_after,
-        "rate_limit_message": get_rate_limit_message(retry_after),
-        "rate_limit_retry_url": request.get_full_path(),
-    }
 
 
 def _handle_ticket_error_response(
@@ -169,7 +156,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
             "filter_tabs": TICKET_STATUS_TABS,
         }
         if rate_limited:
-            context.update(_rate_limited_context(request, e))
+            context.update(build_rate_limited_context(request, e))
 
     return render(request, "tickets/ticket_list.html", context)
 
@@ -477,7 +464,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
             "pagination_params": "",
         }
         if is_rate_limited_error(e):
-            context.update(_rate_limited_context(request, e))
+            context.update(build_rate_limited_context(request, e))
         return render(request, "tickets/partials/tickets_table.html", context)
 
 

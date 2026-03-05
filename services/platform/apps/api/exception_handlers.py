@@ -4,7 +4,6 @@ Centralized API exception handling for Platform service.
 
 from __future__ import annotations
 
-import math
 from http import HTTPStatus
 from typing import Any
 
@@ -12,14 +11,7 @@ from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
-
-def _coerce_retry_after(value: Any) -> int | None:
-    """Best-effort conversion to integer seconds."""
-    try:
-        retry_after = math.ceil(float(value))
-    except (TypeError, ValueError):
-        return None
-    return max(1, retry_after)
+from apps.common.retry_after import coerce_retry_after_seconds
 
 
 def platform_exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
@@ -47,11 +39,11 @@ def platform_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
 
     retry_after = None
     if isinstance(exc, Throttled):
-        retry_after = _coerce_retry_after(getattr(exc, "wait", None))
+        retry_after = coerce_retry_after_seconds(getattr(exc, "wait", None))
     if retry_after is None:
-        retry_after = _coerce_retry_after(existing_data.get("retry_after"))
+        retry_after = coerce_retry_after_seconds(existing_data.get("retry_after"))
     if retry_after is None:
-        retry_after = _coerce_retry_after(response.headers.get("Retry-After"))
+        retry_after = coerce_retry_after_seconds(response.headers.get("Retry-After"))
     if retry_after is None:
         retry_after = 60
 

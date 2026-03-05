@@ -40,6 +40,22 @@ class RateLimitTemplateTests(SimpleTestCase):
         self.assertIn("Try again", rendered)
         self.assertNotIn("No services found", rendered)
 
+    def test_list_partials_use_shared_rate_limit_include(self) -> None:
+        billing_content = (
+            REPO_ROOT / "services" / "portal" / "templates" / "billing" / "partials" / "invoices_table.html"
+        ).read_text(encoding="utf-8")
+        tickets_content = (
+            REPO_ROOT / "services" / "portal" / "templates" / "tickets" / "partials" / "tickets_table.html"
+        ).read_text(encoding="utf-8")
+        services_content = (
+            REPO_ROOT / "services" / "portal" / "templates" / "services" / "partials" / "services_table.html"
+        ).read_text(encoding="utf-8")
+
+        include_line = '{% include "components/rate_limit_inline_alert.html" %}'
+        self.assertIn(include_line, billing_content)
+        self.assertIn(include_line, tickets_content)
+        self.assertIn(include_line, services_content)
+
     def test_dashboard_template_contains_rate_limit_states(self) -> None:
         content = (REPO_ROOT / "services" / "portal" / "templates" / "dashboard" / "dashboard.html").read_text(
             encoding="utf-8"

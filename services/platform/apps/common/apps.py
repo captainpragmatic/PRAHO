@@ -8,6 +8,9 @@ import socket
 
 from django.apps import AppConfig
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+
+from apps.common.performance.rate_limiting import validate_throttle_rate_map
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,7 @@ class CommonConfig(AppConfig):
 
     def ready(self) -> None:
         _validate_internal_service_domains()
+        _validate_throttle_rates_at_startup()
 
 
 def _validate_internal_service_domains() -> None:
@@ -36,3 +40,12 @@ def _validate_internal_service_domains() -> None:
                 "unreachable host: %s — inter-service requests to this host will fail",
                 domain,
             )
+
+
+def _validate_throttle_rates_at_startup() -> None:
+    """Fail fast on invalid DRF throttle rates from env/config."""
+    rest_framework = getattr(settings, "REST_FRAMEWORK", {})
+    throttle_rates = rest_framework.get("DEFAULT_THROTTLE_RATES", {})
+    if not isinstance(throttle_rates, dict):
+        raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_RATES must be a dict")
+    validate_throttle_rate_map(throttle_rates)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, override_settings
 
-from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.api_client.services import _READ_ONLY_POST_RETRY_ENDPOINTS, PlatformAPIClient, PlatformAPIError
 
 
 def _response(status_code: int, payload: object, headers: dict[str, str] | None = None) -> MagicMock:
@@ -48,11 +50,20 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         self.assertNotIn("Unknown error", str(ctx.exception))
         self.assertIn("throttled", str(ctx.exception))
 
+    @patch("apps.api_client.services.portal_request")
+    def test_make_request_does_not_retry_allowlisted_read_post_on_429(self, mock_portal_request: MagicMock) -> None:
+        mock_portal_request.return_value = _response(429, {"detail": "Too many requests"}, headers={"Retry-After": "1"})
+
+        with self.assertRaises(PlatformAPIError):
+            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2})
+
+        self.assertEqual(mock_portal_request.call_count, 1)
+
     @patch("apps.api_client.services.time.sleep")
     @patch("apps.api_client.services.portal_request")
-    def test_make_request_retries_allowlisted_read_post_on_429(self, mock_portal_request: MagicMock, _mock_sleep: MagicMock) -> None:
+    def test_make_request_retries_allowlisted_read_post_on_503(self, mock_portal_request: MagicMock, _mock_sleep: MagicMock) -> None:
         mock_portal_request.side_effect = [
-            _response(429, {"detail": "Too many requests"}, headers={"Retry-After": "1"}),
+            _response(503, {"error": "Service unavailable"}),
             _response(200, {"success": True, "data": {"summary": {}}}),
         ]
 
@@ -67,7 +78,7 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         self, mock_portal_request: MagicMock, _mock_sleep: MagicMock
     ) -> None:
         mock_portal_request.side_effect = [
-            _response(429, {"detail": "Too many requests"}, headers={"Retry-After": "1"}),
+            _response(503, {"error": "Service unavailable"}),
             _response(200, {"success": True}),
         ]
 
@@ -109,12 +120,39 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         self.assertTrue(data["success"])
         self.assertEqual(mock_portal_request.call_count, 2)
 
+    @patch("apps.api_client.services.time.sleep")
+    @patch("apps.api_client.services.portal_request")
+    def test_make_request_raises_after_retry_exhaustion_on_503(
+        self, mock_portal_request: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        mock_portal_request.side_effect = [
+            _response(503, {"error": "Service unavailable"}),
+            _response(503, {"error": "Service unavailable"}),
+            _response(503, {"error": "Service unavailable"}),
+        ]
+
+        with self.assertRaises(PlatformAPIError) as ctx:
+            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2})
+
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertFalse(ctx.exception.is_rate_limited)
+        self.assertEqual(mock_portal_request.call_count, 3)
+
     def test_compute_retry_delay_honors_retry_after_with_cap(self) -> None:
         response = _response(429, {"detail": "Too many requests"}, headers={"Retry-After": "30"})
 
         delay = self.client._compute_retry_delay(response, attempt=0)
 
         self.assertEqual(delay, self.client.max_retry_wait_seconds)
+
+    def test_get_retry_after_seconds_supports_http_date_header(self) -> None:
+        retry_date = format_datetime(datetime.now(UTC) + timedelta(seconds=8), usegmt=True)
+        response = _response(429, {"detail": "Too many requests"}, headers={"Retry-After": retry_date})
+
+        retry_after = self.client._get_retry_after_seconds(response)
+
+        self.assertIsNotNone(retry_after)
+        self.assertGreaterEqual(retry_after or 0, 1)
 
     def test_binary_error_uses_detail_message_and_retry_metadata(self) -> None:
         response = _response(429, {"detail": "Wait please", "retry_after": 9})
@@ -125,3 +163,13 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         self.assertTrue(ctx.exception.is_rate_limited)
         self.assertEqual(ctx.exception.retry_after, 9)
         self.assertIn("Wait please", str(ctx.exception))
+
+    def test_normalize_endpoint_handles_api_prefix_and_slashes(self) -> None:
+        self.assertEqual(self.client._normalize_endpoint("/api/tickets/"), "/tickets/")
+        self.assertEqual(self.client._normalize_endpoint("tickets/summary"), "/tickets/summary/")
+        self.assertEqual(self.client._normalize_endpoint("///services/"), "/services/")
+
+    def test_read_retry_allowlist_excludes_known_write_endpoints(self) -> None:
+        self.assertNotIn("/tickets/create/", _READ_ONLY_POST_RETRY_ENDPOINTS)
+        self.assertNotIn("/orders/create/", _READ_ONLY_POST_RETRY_ENDPOINTS)
+        self.assertFalse(self.client._is_read_retry_candidate("POST", "/tickets/create/"))

@@ -8,7 +8,6 @@ from typing import Any
 from django.http import HttpRequest
 
 from apps.common.account_health import get_account_health
-from apps.common.rate_limit_feedback import consume_rate_limit_banner
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +40,6 @@ def portal_context(request: HttpRequest) -> dict[str, Any]:
 
     # Account health banner — only for authenticated users with a session
     if request.session.get("customer_id") and request.session.get("user_id"):
-        rate_limit_banner = consume_rate_limit_banner(request)
-        if rate_limit_banner:
-            context["rate_limit_banner"] = rate_limit_banner
-
         try:
             context["account_banner"] = get_account_health(request)
         except Exception as e:

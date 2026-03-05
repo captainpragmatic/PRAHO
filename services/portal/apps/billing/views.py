@@ -16,10 +16,8 @@ from apps.api_client.services import PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import (
-    get_rate_limit_message,
-    get_retry_after_from_error,
+    build_rate_limited_context,
     is_rate_limited_error,
-    record_rate_limit_banner,
 )
 
 from .services import BillingDataSyncService, InvoiceViewService
@@ -171,17 +169,6 @@ def _invoices_base_context(  # noqa: PLR0913
     }
 
 
-def _rate_limited_context(request: HttpRequest, error: Exception) -> dict[str, Any]:
-    retry_after = get_retry_after_from_error(error)
-    record_rate_limit_banner(request, retry_after)
-    return {
-        "rate_limited": True,
-        "rate_limit_retry_after": retry_after,
-        "rate_limit_message": get_rate_limit_message(retry_after),
-        "rate_limit_retry_url": request.get_full_path(),
-    }
-
-
 # ===============================================================================
 # INVOICE LIST VIEW 📋
 # ===============================================================================
@@ -277,7 +264,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
                 "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
                 "pagination_params": "",
                 **_invoices_base_context(doc_type, status_filter, search_query),
-                **_rate_limited_context(request, e),
+                **build_rate_limited_context(request, e),
             }
             return render(request, "billing/invoices_list.html", context)
 
@@ -364,7 +351,7 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
             "pagination_params": "",
         }
         if is_rate_limited_error(e):
-            context.update(_rate_limited_context(request, e))
+            context.update(build_rate_limited_context(request, e))
         return render(request, "billing/partials/invoices_table.html", context)
     except Exception as e:
         logger.error(f"🔥 [Portal Billing] Invoice search error for customer {customer_id}: {e}")

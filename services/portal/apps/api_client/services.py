@@ -27,7 +27,6 @@ import re
 import secrets
 import time
 import urllib.parse
-from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -36,6 +35,7 @@ from django.conf import settings
 from django.core.cache import cache
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
+from apps.common.retry_after import coerce_retry_after_seconds
 
 # HTTP status code constants
 HTTP_OK = 200
@@ -281,9 +281,7 @@ class PlatformAPIClient:
         return math.isfinite(timestamp_value) and timestamp_value > 0
 
     def _normalize_endpoint(self, endpoint: str) -> str:
-        normalized = "/" + endpoint.strip()
-        if normalized.startswith("//"):
-            normalized = normalized[1:]
+        normalized = "/" + endpoint.strip().lstrip("/")
         if not normalized.endswith("/"):
             normalized = f"{normalized}/"
         if normalized.startswith("/api/"):
@@ -298,32 +296,8 @@ class PlatformAPIClient:
             return False
         return self._normalize_endpoint(endpoint) in _READ_ONLY_POST_RETRY_ENDPOINTS
 
-    def _coerce_retry_after(self, value: Any) -> int | None:
-        if value is None:
-            return None
-
-        parsed: int | None = None
-        if isinstance(value, (int, float)):
-            if not math.isfinite(float(value)):
-                return None
-            parsed = max(1, math.ceil(float(value)))
-            return parsed
-
-        text = str(value).strip()
-        if not text:
-            return None
-        if text.isdigit():
-            parsed = int(text)
-        else:
-            try:
-                target_dt = parsedate_to_datetime(text)
-            except (TypeError, ValueError, IndexError):
-                return None
-            parsed = math.ceil(target_dt.timestamp() - time.time())
-        return max(1, parsed)
-
     def _get_retry_after_seconds(self, response: requests.Response) -> int | None:
-        header_retry_after = self._coerce_retry_after(response.headers.get("Retry-After"))
+        header_retry_after = coerce_retry_after_seconds(response.headers.get("Retry-After"))
         if header_retry_after is not None:
             return header_retry_after
 
@@ -332,7 +306,7 @@ class PlatformAPIClient:
         except ValueError:
             return None
         if isinstance(payload, dict):
-            return self._coerce_retry_after(payload.get("retry_after"))
+            return coerce_retry_after_seconds(payload.get("retry_after"))
         return None
 
     def _extract_error_message(self, error_data: dict[str, Any]) -> str:
@@ -396,7 +370,7 @@ class PlatformAPIClient:
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
 
         auto_retry = self._is_read_retry_candidate(method, endpoint)
-        retry_statuses = retry_on_status or ({429, 503} if auto_retry else set())
+        retry_statuses = retry_on_status or ({503} if auto_retry else set())
         if auto_retry and max_retries == 0:
             max_retries = self.max_read_retry_attempts
         use_legacy_canonical = False

@@ -4,6 +4,8 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.contrib.messages import get_messages
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, SimpleTestCase, override_settings
@@ -39,7 +41,8 @@ class ListViewsRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Temporarily rate limited")
         self.assertTrue(response.context["rate_limited"])
-        self.assertIn("rate_limit_banner_until", self.client.session)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
 
     @patch("apps.tickets.views.tickets_api.get_customer_tickets")
     def test_tickets_list_shows_rate_limited_state(self, mock_get_tickets) -> None:
@@ -53,7 +56,8 @@ class ListViewsRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Temporarily rate limited")
         self.assertTrue(response.context["rate_limited"])
-        self.assertIn("rate_limit_banner_until", self.client.session)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
 
     @patch("apps.billing.views._fetch_filtered_documents")
     def test_billing_list_shows_rate_limited_state(self, mock_fetch_documents) -> None:
@@ -67,7 +71,8 @@ class ListViewsRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Temporarily rate limited")
         self.assertTrue(response.context["rate_limited"])
-        self.assertIn("rate_limit_banner_until", self.client.session)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
 
 
 class DashboardRateLimitTests(SimpleTestCase):
@@ -75,6 +80,7 @@ class DashboardRateLimitTests(SimpleTestCase):
         request = RequestFactory().get("/dashboard/")
         middleware = SessionMiddleware(lambda r: None)
         middleware.process_request(request)
+        request._messages = FallbackStorage(request)
         request.session["customer_id"] = "1"
         request.session["email"] = "customer@example.com"
         request.user = SimpleNamespace(id=15)
@@ -101,4 +107,5 @@ class DashboardRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured_context["rate_limited"])
         self.assertIn("Please try again in", captured_context["rate_limit_message"])
-        self.assertIn("rate_limit_banner_until", request.session)
+        messages = [str(message) for message in get_messages(request)]
+        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
