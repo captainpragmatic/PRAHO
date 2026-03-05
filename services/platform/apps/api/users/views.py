@@ -2,6 +2,7 @@
 # AUTHENTICATION API VIEWS - PORTAL SERVICE INTEGRATION 🔐
 # ===============================================================================
 
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -15,6 +16,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework import status
+from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -51,6 +53,22 @@ def get_session_validation_rate_limit() -> int:
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)
+
+
+_EMAIL_MASK_LOCAL_VISIBLE_CHARS: int = 2
+
+
+def _mask_email(email: str) -> str:
+    """Return a privacy-safe email string for logging. Sanitizes log injection chars."""
+    email = email.replace("\n", "").replace("\r", "").replace("\t", "")[:254]
+    if "@" not in email:
+        return "[invalid-email]"
+    local, domain = email.split("@", 1)
+    domain = domain.replace("\n", "").replace("\r", "")
+    masked_local = (
+        local[:_EMAIL_MASK_LOCAL_VISIBLE_CHARS] + "***" if len(local) > _EMAIL_MASK_LOCAL_VISIBLE_CHARS else "***"
+    )
+    return f"{masked_local}@{domain}"
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -179,62 +197,60 @@ def obtain_token(request: HttpRequest) -> Response:
         logger.warning("🚨 [Auth] Token request missing email or password")
         return Response({"error": "Email and password are required"}, status=status.HTTP_400_BAD_REQUEST)
 
+    client_ip = request.META.get("REMOTE_ADDR", "unknown")
+
     # Authenticate user
     user = authenticate(request, username=email, password=password)
 
     if user is None:
-        logger.warning(f"🚨 [Auth] Failed token request for email: {email}")
+        # Increment counter silently (no-op if email doesn't exist)
+        with contextlib.suppress(User.DoesNotExist):
+            failed_user = User.objects.get(email=email)
+            failed_user.increment_failed_login_attempts()
+        logger.warning("[Auth] Failed token request — ip=%s", client_ip)
+        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Same generic error for locked/inactive — attacker cannot distinguish
+    if user.is_account_locked():
+        logger.warning("[Auth] Token request for locked account — ip=%s", client_ip)
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     if not user.is_active:
-        logger.warning(f"🚨 [Auth] Token request for inactive user: {email}")
-        return Response({"error": "User account is disabled"}, status=status.HTTP_401_UNAUTHORIZED)
+        logger.warning("[Auth] Token request for inactive account — ip=%s", client_ip)
+        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Success: reset lockout counter
+    user.failed_login_attempts = 0
+    user.account_locked_until = None
+    user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
     # Get or create token
     token, created = Token.objects.get_or_create(user=user)
 
     if created:
-        logger.info(f"✅ [Auth] New token created for user: {user.email}")
+        logger.info("[Auth] New token created for user: %s", _mask_email(user.email))
     else:
-        logger.info(f"🔄 [Auth] Existing token returned for user: {user.email}")
+        logger.info("[Auth] Existing token returned for user: %s", _mask_email(user.email))
 
     return Response(
         {
             "token": token.key,
             "user_id": user.id,
             "email": user.email,
-            "is_staff": user.is_staff,
         }
     )
 
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
+@api_view(["DELETE"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
 def revoke_token(request: HttpRequest) -> Response:
-    """
-    🗑️ Revoke authentication token
-
-    POST /api/users/token/revoke/
-    {
-        "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
-    }
-    """
-    token_key = request.data.get("token")
-
-    if not token_key:
-        return Response({"error": "Token is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        token = Token.objects.get(key=token_key)
-        user_email = token.user.email
-        token.delete()
-
-        logger.info(f"🗑️ [Auth] Token revoked for user: {user_email}")
-        return Response({"message": "Token revoked successfully"})
-
-    except Token.DoesNotExist:
-        return Response({"error": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST)
+    """🗑️ Revoke the caller's own authentication token."""
+    token = request.auth  # Set by TokenAuthentication — no extra DB query needed
+    user_email = _mask_email(token.user.email)
+    token.delete()
+    logger.info("[Auth] Token revoked for: %s", user_email)
+    return Response({"message": "Token revoked successfully"})
 
 
 @api_view(["GET"])

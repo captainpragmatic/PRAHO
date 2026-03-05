@@ -67,7 +67,7 @@ class Payment(models.Model):
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
 
     # Gateway/external tracking
-    gateway_txn_id = models.CharField(max_length=255, blank=True)
+    gateway_txn_id = models.CharField(max_length=255, blank=True, null=True, unique=True, default=None)
     reference_number = models.CharField(max_length=100, blank=True)
 
     # Idempotency for safe retries and deduplication

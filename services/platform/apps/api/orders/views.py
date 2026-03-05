@@ -819,21 +819,23 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
     Confirm order after successful payment and trigger service provisioning.
     """
     try:
-        # Get order and verify ownership
-        order = Order.objects.prefetch_related("items").get(id=order_id, customer_id=customer.id)
-
-        # Check if order can be confirmed
-        if order.status not in ["pending", "payment_processing"]:
-            return Response(
-                {"success": False, "error": f"Order cannot be confirmed from status: {order.status}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         payment_intent_id = request.data.get("payment_intent_id")
         payment_status = request.data.get("payment_status")
 
         # Use atomic transaction for order confirmation and service creation
         with transaction.atomic():
+            # Get order with row-level lock to prevent double-confirmation
+            order = (
+                Order.objects.select_for_update().prefetch_related("items").get(id=order_id, customer_id=customer.id)
+            )
+
+            # Idempotency guard — prevent double-processing
+            if order.status not in ["pending", "payment_processing"]:
+                return Response(
+                    {"success": False, "error": "Order already processed"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
             # Update order status to confirmed
             old_status = order.status
             order.status = "confirmed"

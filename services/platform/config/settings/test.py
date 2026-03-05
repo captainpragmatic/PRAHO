@@ -171,6 +171,7 @@ TESTING = True
 
 # Ensure rate limiting is disabled in test environment to prevent race conditions
 RATELIMIT_ENABLE = False
+RATELIMIT_ENABLED = False
 
 # Disable DRF throttling in tests to prevent 429s from rapid API calls
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []

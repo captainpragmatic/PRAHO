@@ -4,11 +4,10 @@ DoS protection and brute force prevention for authentication endpoints.
 """
 
 import logging
-import os
 import random
 import time
 from collections.abc import Callable
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from django.conf import settings
 from django.contrib import messages
@@ -16,6 +15,8 @@ from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.utils.translation import gettext as _
+
+from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +58,9 @@ class AuthenticationRateLimitMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with rate limiting for authentication endpoints"""
 
-        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
-        # Check Django settings first, fall back to env var for runtime override
-        ratelimit_setting = getattr(settings, "RATELIMIT_ENABLE", None)
-        if ratelimit_setting is not None:
-            if not ratelimit_setting:
-                return self.get_response(request)
-        elif os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+        # Respect RATELIMIT_ENABLED setting (disabled during E2E testing)
+        rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+        if not rate_limit_enabled:
             return self.get_response(request)
 
         # Check if this is an authentication endpoint
@@ -232,23 +229,7 @@ class AuthenticationRateLimitMiddleware:
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""
-        # Check for forwarded IP headers (reverse proxy/CDN)
-        forwarded_headers = [
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_REAL_IP",
-            "HTTP_CF_CONNECTING_IP",  # Cloudflare
-            "HTTP_X_CLUSTER_CLIENT_IP",
-        ]
-
-        for header in forwarded_headers:
-            forwarded_ip = request.META.get(header)
-            if forwarded_ip:
-                # Take first IP if comma-separated
-                ip = forwarded_ip.split(",")[0].strip()
-                if ip and ip != "unknown":
-                    return cast(str, ip)
-
-        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
+        return get_safe_client_ip(request)
 
     def _uniform_response_delay(self, start_time: float) -> None:
         """
@@ -293,13 +274,9 @@ class APIRateLimitMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with general API rate limiting"""
 
-        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
-        # Check Django settings first, fall back to env var for runtime override
-        ratelimit_setting = getattr(settings, "RATELIMIT_ENABLE", None)
-        if ratelimit_setting is not None:
-            if not ratelimit_setting:
-                return self.get_response(request)
-        elif os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+        # Respect RATELIMIT_ENABLED setting (disabled during E2E testing)
+        rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+        if not rate_limit_enabled:
             return self.get_response(request)
 
         # Check if this is an API endpoint
@@ -362,19 +339,5 @@ class APIRateLimitMiddleware:
             return None
 
     def _get_client_ip(self, request: HttpRequest) -> str:
-        """Safely extract client IP address (same as auth middleware)"""
-        forwarded_headers = [
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_REAL_IP",
-            "HTTP_CF_CONNECTING_IP",
-            "HTTP_X_CLUSTER_CLIENT_IP",
-        ]
-
-        for header in forwarded_headers:
-            forwarded_ip = request.META.get(header)
-            if forwarded_ip:
-                ip = forwarded_ip.split(",")[0].strip()
-                if ip and ip != "unknown":
-                    return cast(str, ip)
-
-        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
+        """Safely extract client IP address"""
+        return get_safe_client_ip(request)

@@ -280,38 +280,49 @@ class PaymentService:
             if result.get("success", False):
                 # Update payment record status
                 try:
-                    payment = Payment.objects.get(gateway_txn_id=payment_intent_id)
+                    with transaction.atomic():
+                        payment = Payment.objects.select_for_update().get(gateway_txn_id=payment_intent_id)
 
-                    # Map gateway status to our status
-                    status_mapping = {
-                        "succeeded": "succeeded",
-                        "requires_payment_method": "pending",
-                        "requires_confirmation": "pending",
-                        "requires_action": "pending",
-                        "processing": "pending",
-                        "canceled": "failed",
-                    }
+                        # Idempotency guard — skip if already in terminal state
+                        _terminal_statuses = {"succeeded", "refunded", "failed"}
+                        if payment.status in _terminal_statuses:
+                            logger.info(
+                                "💰 [PaymentService] confirm_payment: payment %s already in terminal state %s — skipping",
+                                payment.id,
+                                payment.status,
+                            )
+                            return result
 
-                    result_status = result.get("status", "unknown")
-                    new_status = status_mapping.get(result_status, "pending")
+                        # Map gateway status to our status
+                        status_mapping = {
+                            "succeeded": "succeeded",
+                            "requires_payment_method": "pending",
+                            "requires_confirmation": "pending",
+                            "requires_action": "pending",
+                            "processing": "pending",
+                            "canceled": "failed",
+                        }
 
-                    if payment.status != new_status:
-                        old_status = payment.status
-                        payment.status = new_status
-                        payment.save(update_fields=["status"])
+                        result_status = result.get("status", "unknown")
+                        new_status = status_mapping.get(result_status, "pending")
 
-                        logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
+                        if payment.status != new_status:
+                            old_status = payment.status
+                            payment.status = new_status
+                            payment.save(update_fields=["status"])
 
-                        log_security_event(
-                            "payment_status_changed",
-                            {
-                                "payment_id": str(payment.id),
-                                "old_status": old_status,
-                                "new_status": new_status,
-                                "gateway_intent_id": payment_intent_id,
-                                "critical_financial_operation": True,
-                            },
-                        )
+                            logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
+
+                            log_security_event(
+                                "payment_status_changed",
+                                {
+                                    "payment_id": str(payment.id),
+                                    "old_status": old_status,
+                                    "new_status": new_status,
+                                    "gateway_intent_id": payment_intent_id,
+                                    "critical_financial_operation": True,
+                                },
+                            )
 
                 except Payment.DoesNotExist:
                     logger.warning(f"⚠️ Payment not found for intent {payment_intent_id}")

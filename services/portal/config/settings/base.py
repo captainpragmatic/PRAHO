@@ -306,3 +306,12 @@ LOGGING = {
 # ===============================================================================
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ===============================================================================
+# TRUSTED PROXY CONFIGURATION
+# ===============================================================================
+
+# Trusted proxy CIDR list for get_safe_client_ip().
+# Set to your load balancer / CDN CIDR(s) in production.
+# Leave empty to use REMOTE_ADDR only (safe default for direct connections).
+TRUSTED_PROXY_LIST: list[str] = []

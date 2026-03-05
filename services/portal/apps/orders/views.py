@@ -3,12 +3,16 @@ Order Views for PRAHO Portal
 Product catalog, cart management, and order creation with Romanian compliance.
 """
 
+import hashlib
+import hmac as _hmac_module
 import json
 import logging
+import time as _time_module
 import uuid
 from collections.abc import Callable
 from typing import Any
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -1125,6 +1129,28 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 
 from django.views.decorators.csrf import csrf_exempt  # noqa: E402
 
+_WEBHOOK_REPLAY_WINDOW_SECONDS: int = 300  # 5 minutes
+
+
+def _verify_platform_webhook(request: HttpRequest) -> bool:
+    """Verify HMAC-SHA256 signature from Platform on webhook calls."""
+    secret: str = getattr(settings, "PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+    if not secret:
+        logger.error("[Webhook] PLATFORM_TO_PORTAL_WEBHOOK_SECRET not configured — rejecting all webhooks")
+        return False
+    sig: str = request.headers.get("X-Platform-Signature", "")
+    ts: str = request.headers.get("X-Platform-Timestamp", "")
+    try:
+        if abs(_time_module.time() - float(ts)) > _WEBHOOK_REPLAY_WINDOW_SECONDS:
+            logger.warning("[Webhook] Replay attack detected — timestamp too old")
+            return False
+    except (ValueError, TypeError):
+        logger.warning("[Webhook] Invalid or missing X-Platform-Timestamp")
+        return False
+    payload: bytes = ts.encode() + b"." + request.body
+    expected: str = _hmac_module.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+    return _hmac_module.compare_digest(sig, expected)
+
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
@@ -1135,13 +1161,12 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     This endpoint is called by the Platform service when a payment succeeds
     to clean up Portal session data and update UI state.
     """
+    if not _verify_platform_webhook(request):
+        logger.warning("[Webhook] Invalid platform signature — request rejected")
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+
     try:
-        import json  # noqa: PLC0415
-
-        from django.http import JsonResponse  # noqa: PLC0415
-
         data = json.loads(request.body)
-
         order_id = data.get("order_id")
         payment_status = data.get("status")
 

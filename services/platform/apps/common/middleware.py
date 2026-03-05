@@ -8,7 +8,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import time
 import traceback
 import urllib.parse
@@ -362,6 +361,16 @@ class PortalServiceAuthMiddleware:
 # ===============================================================================
 
 
+AUTH_EXEMPT_EXACT_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/users/register/",
+        "/api/users/password/reset/",
+        "/api/users/health/",
+        "/api/orders/products/",
+    }
+)
+
+
 class PortalServiceHMACMiddleware:
     """
     🔐 HMAC authentication middleware for portal service API requests.
@@ -512,27 +521,19 @@ class PortalServiceHMACMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # Only process API requests
         if request.path.startswith("/api/"):
-            # Skip HMAC validation for public endpoints only.
+            # Skip HMAC validation for public endpoints only (exact match to prevent bypass).
             # NOTE: /api/users/login/ is NOT exempt - the portal service signs
             # login requests with HMAC, so we validate portal origin to prevent
             # direct credential brute-force from external attackers.
-            auth_exempt_paths = [
-                "/api/users/register/",
-                "/api/users/password/reset/",
-                "/api/users/health/",
-                "/api/orders/products/",  # Public product catalog access
-            ]
-
-            if any(request.path.startswith(path) for path in auth_exempt_paths):
-                logger.debug(f"🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: {request.path}")
+            if request.path in AUTH_EXEMPT_EXACT_PATHS:
+                logger.debug("🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: %s", request.path)
                 return self.get_response(request)
 
-            # Global rate limiting keyed by portal and IP (respects RATELIMIT_ENABLE env var)
+            # Global rate limiting keyed by portal and IP
             portal_id_for_rl = request.META.get("HTTP_X_PORTAL_ID", "unknown")
             client_ip = get_safe_client_ip(request)
-            if os.environ.get("RATELIMIT_ENABLE", "true").lower() != "false" and self._rate_limited(
-                portal_id_for_rl, client_ip
-            ):
+            rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+            if rate_limit_enabled and self._rate_limited(portal_id_for_rl, client_ip):
                 logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}")
                 return HttpResponse(
                     json.dumps({"error": "Too Many Requests"}), status=429, content_type="application/json"

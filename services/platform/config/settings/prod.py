@@ -98,6 +98,7 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",  # MUST be first
     "apps.common.middleware.RequestIDMiddleware",
+    "apps.common.middleware.PortalServiceHMACMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

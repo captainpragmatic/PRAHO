@@ -61,9 +61,19 @@ variable "portal_server_type" {
 
 # Firewall source restrictions
 variable "firewall_ssh_sources" {
-  description = "Source IPs allowed for SSH access (empty = all)"
-  type        = list(string)
-  default     = ["0.0.0.0/0", "::/0"]
+  description = <<-EOT
+    Source IP CIDRs allowed for SSH access.
+    WARNING: No permissive default — must be set explicitly in staging/prod tfvars.
+    Example: ["203.0.113.0/24"]  # office/VPN CIDR
+    Never use ["0.0.0.0/0", "::/0"] in production.
+  EOT
+  type    = list(string)
+  default = []
+
+  validation {
+    condition     = length(var.firewall_ssh_sources) > 0
+    error_message = "firewall_ssh_sources must contain at least one CIDR. Set your office/VPN IP range."
+  }
 }
 
 # =============================================================================
