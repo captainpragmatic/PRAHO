@@ -120,52 +120,51 @@ ansible-galaxy collection install community.postgresql community.general ansible
 
 #### Deploy
 
-The same inventory and playbook serve both staging and production. Pass `-e environment=staging` or `-e environment=prod` to select the Django settings module.
+The same inventory and playbook serve both staging and production. Pass `-e praho_env=staging` or `-e praho_env=prod` to select the Django settings module (`config.settings.staging` vs `config.settings.prod`).
 
+> **Why `praho_env` and not `environment`?** Ansible reserves the keyword `environment` for setting task-level environment variables. Using it as a custom variable causes silent failures.
+
+**Step 1: Create your secrets file** (once per deployment target):
 ```bash
 cd deploy/ansible
+cp .env.deploy.example .env.staging   # fill in values
+# or: cp .env.deploy.example .env.prod
+```
 
-PRAHO_SERVER_IP=203.0.113.10 \
-PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com \
-PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com \
-PRAHO_DB_PASSWORD=$(openssl rand -base64 32) \
-PRAHO_SECRET_KEY=$(openssl rand -base64 50) \
-PRAHO_HMAC_SECRET=$(openssl rand -base64 32) \
-PRAHO_ACME_EMAIL=admin@pragmatichost.com \
+**Step 2: Deploy:**
+```bash
+source .env.staging
 ansible-playbook -i inventory/native-single-server.yml \
   playbooks/native-single-server.yml \
-  -e environment=staging -v
+  -e praho_env=staging -v
 ```
 
-For production, change the domains and environment:
+For production:
 ```bash
-PRAHO_SERVER_IP=203.0.113.20 \
-PRAHO_PORTAL_DOMAIN=portal.pragmatichost.com \
-PRAHO_PLATFORM_DOMAIN=platform.pragmatichost.com \
-PRAHO_DB_PASSWORD=$(openssl rand -base64 32) \
-PRAHO_SECRET_KEY=$(openssl rand -base64 50) \
-PRAHO_HMAC_SECRET=$(openssl rand -base64 32) \
-PRAHO_ACME_EMAIL=admin@pragmatichost.com \
+source .env.prod
 ansible-playbook -i inventory/native-single-server.yml \
   playbooks/native-single-server.yml \
-  -e environment=prod -v
+  -e praho_env=prod -v
 ```
 
-Or use Make shortcuts:
+Or use Make shortcuts (after sourcing the right `.env.*`):
 ```bash
-# Staging
-export PRAHO_SERVER_IP=203.0.113.10
-export PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com
-export PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com
-export PRAHO_DB_PASSWORD=$(openssl rand -base64 32)
-export PRAHO_SECRET_KEY=$(openssl rand -base64 50)
-export PRAHO_HMAC_SECRET=$(openssl rand -base64 32)
-export PRAHO_ACME_EMAIL=admin@pragmatichost.com
-make deploy-staging
-
-# Production
-make deploy-prod
+source deploy/ansible/.env.staging && make deploy-staging
+source deploy/ansible/.env.prod && make deploy-prod
 ```
+
+#### Staging vs Production Django Settings
+
+The Ansible infrastructure is fully unified — one inventory, one playbook, one set of variables. The **only** thing that differs is the Django settings module (`-e praho_env=staging` selects `config.settings.staging`).
+
+Staging settings exist to prevent real-world side effects during testing:
+- **Email**: console backend (prevents sending real emails)
+- **e-Factura**: test mode (prevents submitting invoices to Romanian ANAF)
+- **HSTS**: 1 hour instead of 1 year (allows rolling back to HTTP)
+- **Sessions**: longer lifetime, no browser-close expiry (more lenient for testing)
+- **Logging**: DEBUG level with smaller log files
+
+See the docstrings in `services/platform/config/settings/staging.py` and `services/portal/config/settings/staging.py` for the full list.
 
 #### Required Environment Variables
 

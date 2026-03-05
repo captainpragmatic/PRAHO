@@ -2,7 +2,7 @@
 # PRAHO - Native Single Server Inventory (Unified)
 # =============================================================================
 # All-in-one server: Platform + Portal + DB + Caddy
-# Works for ALL environments — pass -e environment=staging|prod
+# Works for ALL environments — pass -e praho_env=staging|prod
 #
 # Required env vars:
 #   export PRAHO_SERVER_IP=<server-ip>
@@ -16,7 +16,7 @@
 # Deploy:
 #   cd deploy/ansible
 #   ansible-playbook -i inventory/native-single-server.yml \
-#     playbooks/native-single-server.yml -e environment=staging -v
+#     playbooks/native-single-server.yml -e praho_env=staging -v
 
 all:
   hosts:

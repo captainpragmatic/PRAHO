@@ -1,5 +1,17 @@
 """
-Staging settings for PRAHO Portal Service
+Staging settings for PRAHO Portal Service.
+
+Why this exists separately from prod.py:
+─────────────────────────────────────────
+Same Ansible playbook for staging and prod (-e praho_env=staging|prod).
+The Django settings file is the only difference. Key staging overrides:
+
+  1. HSTS: 1 hour (not 1 year) — allows rolling back to HTTP if needed
+  2. App log level: DEBUG (not INFO) — more verbose for debugging
+  3. Log file retention: smaller sizes — staging doesn't need prod-scale logs
+  4. Cache location: "portal-staging-cache" — prevents collision if dev is testing locally
+
+If none of these matter, use prod.py for everything.
 """
 
 import os

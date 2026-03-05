@@ -28,9 +28,10 @@ secret_key: "{{ lookup('env', 'PRAHO_SECRET_KEY') | default('generate-a-strong-k
 hmac_secret: "{{ lookup('env', 'PRAHO_HMAC_SECRET') | default('', true) }}"
 debug: false
 
-# Auto-derive Django settings from environment name
-# Pass -e environment=staging|prod on the command line
-django_settings_module: "config.settings.{{ environment | default('prod') }}"
+# Auto-derive Django settings from praho_env
+# Pass -e praho_env=staging|prod on the command line
+# Note: "environment" is an Ansible reserved keyword — we use "praho_env" instead
+django_settings_module: "config.settings.{{ praho_env | default('prod') }}"
 
 # Docker
 docker_compose_version: "2.24.0"

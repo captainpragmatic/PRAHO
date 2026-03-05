@@ -897,7 +897,7 @@ deploy-staging:
 	done
 	@echo "🚀 [Deploy] Deploying PRAHO to staging (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e environment=staging -v
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=staging -v
 
 deploy-prod:
 	@for var in PRAHO_SERVER_IP PRAHO_PORTAL_DOMAIN PRAHO_PLATFORM_DOMAIN PRAHO_DB_PASSWORD PRAHO_SECRET_KEY PRAHO_HMAC_SECRET PRAHO_ACME_EMAIL; do \
@@ -906,7 +906,7 @@ deploy-prod:
 	done
 	@echo "🚀 [Deploy] Deploying PRAHO to production (native)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e environment=prod -v
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=prod -v
 
 # ===============================================================================
 # ANSIBLE DEPLOYMENT 📜
@@ -915,7 +915,7 @@ deploy-prod:
 ansible-single-server:
 	@echo "📜 [Ansible] Native single server deployment..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e environment=$(ENV)
+	@cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/native-single-server.yml -e praho_env=$(ENV)
 
 ansible-two-servers:
 	@echo "📜 [Ansible] Two server deployment..."

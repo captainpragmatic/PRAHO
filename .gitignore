@@ -170,4 +170,6 @@ i18n-review-*.yaml
 
 # Deployment secrets
 deploy/.env.*
+deploy/ansible/.env.*
 !deploy/.env.*.example
+!deploy/ansible/.env.deploy.example

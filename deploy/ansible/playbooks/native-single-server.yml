@@ -2,33 +2,27 @@
 # PRAHO - Native Single Server Deployment Playbook
 # =============================================================================
 # Deploys PRAHO natively (PostgreSQL + uv + systemd + Caddy) - no Docker.
-# Works for any environment — pass -e environment=staging|prod.
+# Works for any environment — pass -e praho_env=staging|prod.
 #
 # Usage:
 #   cd deploy/ansible
-#   PRAHO_SERVER_IP=1.2.3.4 \
-#   PRAHO_PORTAL_DOMAIN=staging.portal.pragmatichost.com \
-#   PRAHO_PLATFORM_DOMAIN=staging.platform.pragmatichost.com \
-#   PRAHO_DB_PASSWORD=$(openssl rand -base64 32) \
-#   PRAHO_SECRET_KEY=$(openssl rand -base64 50) \
-#   PRAHO_HMAC_SECRET=$(openssl rand -base64 32) \
-#   PRAHO_ACME_EMAIL=admin@example.com \
+#   source .env.staging   # loads PRAHO_SERVER_IP, secrets, etc.
 #   ansible-playbook -i inventory/native-single-server.yml \
-#     playbooks/native-single-server.yml -e environment=staging
+#     playbooks/native-single-server.yml -e praho_env=staging
 
 ---
-- name: Deploy PRAHO - Native Single Server ({{ environment | default('prod') }})
+- name: Deploy PRAHO - Native Single Server ({{ praho_env | default('prod') }})
   hosts: praho
   become: yes
   gather_facts: yes
 
   pre_tasks:
-    - name: Validate environment
+    - name: Validate praho_env
       assert:
         that:
-          - environment is defined
-          - environment in ['dev', 'staging', 'prod']
-        fail_msg: "Set environment with: -e environment=staging|prod"
+          - praho_env is defined
+          - praho_env in ['dev', 'staging', 'prod']
+        fail_msg: "Set environment with: -e praho_env=staging|prod"
 
     - name: Validate Ubuntu version
       assert:
@@ -150,9 +144,9 @@
       debug:
         msg: |
           ================================================
-          PRAHO Deployment Verified! ({{ environment }})
+          PRAHO Deployment Verified! ({{ praho_env }})
           ================================================
-          Environment: {{ environment }}
+          Environment: {{ praho_env }}
           Settings:    {{ django_settings_module }}
           Portal:      https://{{ portal_domain }}
           Platform:    https://{{ platform_domain }}
