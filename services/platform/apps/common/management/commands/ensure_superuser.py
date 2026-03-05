@@ -14,6 +14,7 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.db import IntegrityError
 
 User = get_user_model()
 
@@ -83,7 +84,12 @@ class Command(BaseCommand):
                     "Superuser password is in the deny list of common passwords. Choose a stronger password."
                 )
 
-        User.objects.create_superuser(email=email, password=password)
+        try:
+            User.objects.create_superuser(email=email, password=password)
+        except IntegrityError:
+            # Race condition: another process created the user between our check and create
+            self.stdout.write(f"⏭️  User {email} was created concurrently, skipping")
+            return
         self.stdout.write(self.style.SUCCESS(f"✅ Superuser created: {email}"))
 
         if is_debug:

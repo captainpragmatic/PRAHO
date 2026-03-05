@@ -95,20 +95,27 @@ class CreateOrderSlugFallbackTestCase(TestCase):
         self.product = _make_product("create-slug-product")
         self.price = _make_price(self.product, self.currency, monthly_price_cents=5000)
 
-    def test_create_order_slug_only_creates_order(self) -> None:
-        """POST with product_slug only → order created (201) or validation error (not 500)."""
+    def test_create_order_slug_only_resolves_product(self) -> None:
+        """POST with product_slug only → product resolved (no 404/500), validation may reject for billing profile."""
         items = [{"product_slug": self.product.slug, "quantity": 1, "billing_period": BILLING_PERIOD}]
         status_code, data = _call_create_order(self.customer, items)
 
-        # Order creation may fail due to incomplete billing profile, but must NOT be a 500
+        # Product slug resolved successfully — 400 is expected (missing billing profile),
+        # but the error must NOT be about product not found (that would mean slug lookup failed)
         self.assertIn(status_code, (201, 400), f"Expected 201 or 400, got {status_code}: {data}")
+        if status_code == 400:
+            error_msg = data.get("error", "").lower()
+            self.assertNotIn("product not found", error_msg, "Slug lookup should resolve the product")
 
     def test_create_order_uuid_still_works(self) -> None:
-        """POST with product_id (UUID) → order created or validation error."""
+        """POST with product_id (UUID) → product resolved, not a product-not-found error."""
         items = [{"product_id": str(self.product.id), "quantity": 1, "billing_period": BILLING_PERIOD}]
         status_code, data = _call_create_order(self.customer, items)
 
         self.assertIn(status_code, (201, 400), f"Expected 201 or 400, got {status_code}: {data}")
+        if status_code == 400:
+            error_msg = data.get("error", "").lower()
+            self.assertNotIn("product not found", error_msg, "UUID lookup should resolve the product")
 
     def test_create_order_uuid_inactive_product_returns_400(self) -> None:
         """UUID lookup of inactive product returns 400."""
@@ -176,8 +183,9 @@ class CreateOrderSealedPriceTokenTestCase(TestCase):
         ]
         status_code, data = _call_create_order(self.customer, items)
 
-        # Should succeed (201) or fail for non-token reasons (400 from billing profile etc.)
+        # Must not be a 500 or token-related error
         self.assertIn(status_code, (201, 400), f"Unexpected status {status_code}: {data}")
-        # Must NOT be a token-related error
         if status_code == 400:
-            self.assertNotIn("sealed price token", data.get("error", "").lower())
+            error_msg = data.get("error", "").lower()
+            self.assertNotIn("sealed price token", error_msg, "No token was sent — error should not be token-related")
+            self.assertNotIn("product not found", error_msg, "Product exists and is active")

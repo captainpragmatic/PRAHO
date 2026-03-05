@@ -19,7 +19,7 @@ import time
 from typing import Any
 
 from django.core.management import call_command
-from django.core.management.base import BaseCommand, CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 CORE_COMMANDS: list[tuple[str, str]] = [
     ("setup_settings_categories", "Setting categories"),
@@ -95,6 +95,10 @@ class Command(BaseCommand):
 
         results = self._execute_commands(commands)
         self._print_summary(results)
+
+        fail_count = sum(1 for *_, status, _ in results if status != "ok")
+        if fail_count > 0:
+            raise CommandError(f"{fail_count} setup command(s) failed — check output above")
 
     def _resolve_tiers(self, options: dict[str, Any]) -> list[str]:
         """Resolve which tiers to run from CLI flags and auto-detection."""

@@ -6,6 +6,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 
 
@@ -80,8 +81,8 @@ class SetupInitialDataTestCase(TestCase):
         self.assertNotIn("setup_tax_rules", called_commands)
 
     @patch("apps.common.management.commands.setup_initial_data.call_command")
-    def test_sub_command_failure_continues(self, mock_call: object) -> None:
-        """If one sub-command raises, the rest still run."""
+    def test_sub_command_failure_continues_then_raises(self, mock_call: object) -> None:
+        """If one sub-command raises, the rest still run, then CommandError is raised."""
 
         def side_effect(cmd_name: str, **kwargs: object) -> None:
             if cmd_name == "setup_default_settings":
@@ -89,12 +90,15 @@ class SetupInitialDataTestCase(TestCase):
 
         mock_call.side_effect = side_effect
         out = StringIO()
-        call_command("setup_initial_data", stdout=out)
 
+        with self.assertRaises(CommandError) as ctx:
+            call_command("setup_initial_data", stdout=out)
+
+        # Commands after the failure should still have been called
         called_commands = [c[0][0] for c in mock_call.call_args_list]
-        # Commands after the failure should still be called
         self.assertIn("setup_scheduled_tasks", called_commands)
         self.assertIn("ensure_superuser", called_commands)
+        self.assertIn("1 setup command(s) failed", str(ctx.exception))
 
     @patch("apps.common.management.commands.setup_initial_data.call_command")
     def test_all_flag_runs_both_tiers(self, mock_call: object) -> None:
