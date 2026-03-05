@@ -69,7 +69,6 @@ MIDDLEWARE = [
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",
     "apps.common.middleware.GDPRComplianceMiddleware",
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
 ]
 
 # ===============================================================================
@@ -334,7 +333,7 @@ MONITORING = {
 
 # Use local static file serving for staging
 STATIC_URL = "/static/"
-STATIC_ROOT = Path("/var/www/staging-static/")
+STATIC_ROOT = Path(_os.environ.get("STATIC_ROOT", "/opt/praho/static"))
 
 # ===============================================================================
 # DEVELOPMENT HELPERS (Staging specific)

@@ -59,8 +59,8 @@ SECURE_HSTS_SECONDS = 3600  # 1 hour for staging
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 SECURE_HSTS_PRELOAD = False
 
-# Static files
-STATIC_ROOT = BASE_DIR / "staticfiles"
+# Static files — env-driven for deployment flexibility
+STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
 
 # Cache configuration for staging

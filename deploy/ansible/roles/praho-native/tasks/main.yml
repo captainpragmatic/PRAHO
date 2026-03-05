@@ -117,9 +117,12 @@
     mode: "0755"
   loop:
     - "{{ project_root }}/static"
+    - "{{ project_root }}/portal-static"
     - "{{ project_root }}/media"
     - /var/log/praho
     - /var/log/praho/portal
+    - /var/log/praho/staging
+    - /var/log/praho/portal-staging
 
 - name: Deploy code via rsync
   synchronize:
@@ -224,9 +227,14 @@
       DB_PORT: "{{ db_port }}"
       DB_SSLMODE: "disable"
       DJANGO_SECRET_KEY: "{{ secret_key }}"
+      SECRET_KEY: "{{ secret_key }}"
+      HMAC_SECRET: "{{ hmac_secret | default('') }}"
+      PLATFORM_API_SECRET: "{{ hmac_secret | default('') }}"
       STATIC_ROOT: "{{ project_root }}/static"
       MEDIA_ROOT: "{{ project_root }}/media"
       ALLOWED_HOSTS: "{{ portal_domain }},{{ platform_domain }},localhost,127.0.0.1"
+      PORTAL_DOMAIN: "{{ portal_domain }}"
+      PLATFORM_DOMAIN: "{{ platform_domain }}"
 
 - name: Run database migrations
   command: >
@@ -245,13 +253,29 @@
   environment: "{{ django_env }}"
   failed_when: false
 
-- name: Collect static files
+- name: Collect Platform static files
   command: >
     {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
   environment: "{{ django_env }}"
+
+- name: Collect Portal static files
+  command: >
+    {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
+  args:
+    chdir: "{{ project_root }}/src/services/portal"
+  become_user: "{{ project_user }}"
+  environment:
+    PYTHONPATH: "{{ project_root }}/src/services/portal"
+    DJANGO_SETTINGS_MODULE: "config.settings.staging"
+    SECRET_KEY: "{{ secret_key }}"
+    ALLOWED_HOSTS: "{{ portal_domain }},localhost,127.0.0.1"
+    PORTAL_DOMAIN: "{{ portal_domain }}"
+    PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
+    PLATFORM_API_SECRET: "{{ hmac_secret | default('') }}"
+    STATIC_ROOT: "{{ project_root }}/portal-static"
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
   command: >
@@ -296,6 +320,7 @@
     owner: caddy
     group: caddy
     mode: "0755"
+    recurse: yes
 
 - name: Template Caddyfile
   template:

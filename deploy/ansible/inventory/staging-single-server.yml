@@ -33,3 +33,4 @@ all:
         deploy_database: true
         deploy_caddy: true
         environment: staging
+        django_settings_module: config.settings.staging
