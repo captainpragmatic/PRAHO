@@ -3,6 +3,18 @@
 from django.db import migrations, models
 
 
+def convert_empty_txn_id_to_null(apps, schema_editor):
+    """Convert gateway_txn_id="" to NULL before applying unique constraint.
+
+    The field was previously CharField(blank=True) without null=True, so rows
+    without a transaction ID were stored as "". Adding unique=True would fail
+    if more than one such row exists. NULL is excluded from unique checks in
+    PostgreSQL, so converting empty strings to NULL is the correct fix.
+    """
+    Payment = apps.get_model("billing", "Payment")
+    Payment.objects.filter(gateway_txn_id="").update(gateway_txn_id=None)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,6 +22,13 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Step 1: convert existing "" values to NULL so unique constraint can apply.
+        # (PostgreSQL treats each NULL as distinct, so NULLs never violate UNIQUE.)
+        migrations.RunPython(
+            convert_empty_txn_id_to_null,
+            reverse_code=migrations.RunPython.noop,
+        ),
+        # Step 2: now safe to add unique=True, null=True, default=None.
         migrations.AlterField(
             model_name="payment",
             name="gateway_txn_id",

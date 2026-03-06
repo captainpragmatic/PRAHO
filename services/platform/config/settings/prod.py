@@ -298,7 +298,7 @@ STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 # RATE LIMITING (Production)
 # ===============================================================================
 
-RATELIMIT_ENABLE = True
+RATELIMIT_ENABLED = True
 RATELIMIT_USE_CACHE = "default"
 
 # ===============================================================================

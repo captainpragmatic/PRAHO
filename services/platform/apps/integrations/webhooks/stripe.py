@@ -1,5 +1,8 @@
+import hashlib
+import hmac
 import json
 import logging
+import time
 from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
@@ -386,13 +389,24 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Don't fail the webhook processing if Portal notification fails
 
     def _send_portal_webhook(self, data: dict[str, Any]) -> None:
-        """Send webhook notification to Portal service"""
+        """Send HMAC-signed webhook notification to Portal service."""
         try:
             # Get Portal webhook URL from settings
             portal_webhook_url = getattr(settings, "PORTAL_PAYMENT_WEBHOOK_URL", None)
             if not portal_webhook_url:
                 logger.warning("⚠️ PORTAL_PAYMENT_WEBHOOK_URL not configured - skipping notification")
                 return
+
+            webhook_secret = getattr(settings, "PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+            if not webhook_secret:
+                logger.error("🔥 PLATFORM_TO_PORTAL_WEBHOOK_SECRET not configured — cannot sign portal webhook")
+                return
+
+            # Compute HMAC-SHA256 signature: ts + "." + body (matches portal _verify_platform_webhook)
+            body = json.dumps(data, separators=(",", ":")).encode()
+            ts = str(time.time())
+            payload = ts.encode() + b"." + body
+            signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
 
             # Send POST request to Portal via safe_request (internal service)
             from apps.common.outbound_http import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -404,8 +418,12 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 "POST",
                 portal_webhook_url,
                 policy=INTERNAL_SERVICE,
-                json=data,
-                headers={"Content-Type": "application/json"},
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Platform-Signature": signature,
+                    "X-Platform-Timestamp": ts,
+                },
             )
 
             if response.status_code == HTTPStatus.OK:

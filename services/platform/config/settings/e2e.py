@@ -17,5 +17,5 @@ from .dev import *  # noqa: F403  # Django settings pattern
 
 # Explicit E2E defaults
 SECRET_KEY = os.environ.get("E2E_DJANGO_SECRET_KEY", "django-insecure-e2e-key-change-for-production")
-RATELIMIT_ENABLE = False
+RATELIMIT_ENABLED = False
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []

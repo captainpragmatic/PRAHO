@@ -315,7 +315,7 @@ CACHES["default"].update(
 # RATE LIMITING (Staging - Relaxed)
 # ===============================================================================
 
-RATELIMIT_ENABLE = True
+RATELIMIT_ENABLED = True
 RATELIMIT_USE_CACHE = "default"
 
 # ===============================================================================

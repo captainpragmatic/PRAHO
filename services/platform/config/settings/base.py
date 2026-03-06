@@ -754,5 +754,12 @@ API_TIMEOUTS = {
 # Portal service specific timeout (can be overridden)
 PORTAL_API_TIMEOUT = int(os.environ.get("PORTAL_API_TIMEOUT", "30"))
 
+# Portal payment webhook URL (platform → portal notification after Stripe payment)
+PORTAL_PAYMENT_WEBHOOK_URL: str = os.environ.get("PORTAL_PAYMENT_WEBHOOK_URL", "")
+
+# Dedicated HMAC secret for platform→portal webhook signing (separate from HMAC_SECRET)
+# Must match PLATFORM_TO_PORTAL_WEBHOOK_SECRET on the portal side.
+PLATFORM_TO_PORTAL_WEBHOOK_SECRET: str = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+
 # Outbound HTTP: allowed domains for INTERNAL_SERVICE policy (empty = unrestricted)
 INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
