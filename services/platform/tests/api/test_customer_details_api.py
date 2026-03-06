@@ -86,12 +86,12 @@ class CustomerDetailsAPITests(TestCase):
     )
     def test_customer_details_success_hmac_and_membership(self):
         path = '/api/customers/details/'
-        ts = str(time.time())
+        ts = str(int(time.time()))
         body_dict = {
             'customer_id': self.customer.id,
             'user_id': self.user.id,
             'action': 'get_customer_details',
-            'timestamp': float(ts),
+            'timestamp': int(ts),
         }
         body = json.dumps(body_dict).encode()
         headers = self._headers('POST', path, body, nonce='nonce-success-1', timestamp=ts)
@@ -125,12 +125,12 @@ class CustomerDetailsAPITests(TestCase):
     )
     def test_customer_details_denied_without_membership(self):
         path = '/api/customers/details/'
-        ts = str(time.time())
+        ts = str(int(time.time()))
         body_dict = {
             'customer_id': self.customer.id,
             'user_id': self.other_user.id,  # No membership for this user
             'action': 'get_customer_details',
-            'timestamp': float(ts),
+            'timestamp': int(ts),
         }
         body = json.dumps(body_dict).encode()
         headers = self._headers('POST', path, body, nonce='nonce-nomember-1', timestamp=ts)
@@ -159,12 +159,12 @@ class CustomerDetailsAPITests(TestCase):
     )
     def test_customer_details_invalid_signature_rejected(self):
         path = '/api/customers/details/'
-        ts = str(time.time())
+        ts = str(int(time.time()))
         body_dict = {
             'customer_id': self.customer.id,
             'user_id': self.user.id,
             'action': 'get_customer_details',
-            'timestamp': float(ts),
+            'timestamp': int(ts),
         }
         body = json.dumps(body_dict).encode()
 

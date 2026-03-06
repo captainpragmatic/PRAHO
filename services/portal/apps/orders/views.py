@@ -3,12 +3,16 @@ Order Views for PRAHO Portal
 Product catalog, cart management, and order creation with Romanian compliance.
 """
 
+import hashlib
+import hmac as _hmac_module
 import json
 import logging
+import time as _time_module
 import uuid
 from collections.abc import Callable
 from typing import Any
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -1125,6 +1129,72 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 
 from django.views.decorators.csrf import csrf_exempt  # noqa: E402
 
+_WEBHOOK_REPLAY_WINDOW_SECONDS: int = 300  # 5 minutes
+_WEBHOOK_NTP_SKEW_SECONDS: int = 2  # Forward clock skew tolerance for NTP jitter
+_HMAC_SHA256_HEX_LENGTH: int = 64  # HMAC-SHA256 produces 64 lowercase hex chars
+
+
+def _verify_platform_webhook(request: HttpRequest) -> bool:
+    """Verify HMAC-SHA256 signature from Platform on webhook calls.
+
+    Protocol
+    --------
+    * The Platform signs each webhook with HMAC-SHA256 using the shared
+      ``PLATFORM_TO_PORTAL_WEBHOOK_SECRET``.
+    * The signed payload is ``ts.body`` — the ASCII timestamp concatenated
+      with a literal dot and the raw request body bytes.
+    * The hex digest is sent in the ``X-Platform-Signature`` header; the
+      timestamp string is sent in ``X-Platform-Timestamp``.
+
+    Replay prevention
+    -----------------
+    After verifying the signature, the full 64-char hex signature is stored
+    via ``cache.add()`` with a TTL equal to the replay-window (5 minutes).
+    ``cache.add()`` is atomic and returns ``False`` when the key already
+    exists, which rejects duplicate deliveries.
+
+    **Limitation:** replay markers live only in the Django cache backend.
+    If the cache is restarted (or the Portal pod is recycled with a
+    non-persistent cache), previously-seen signatures will be accepted
+    again.  This is an accepted risk for a stateless portal service;
+    idempotency on the Platform side is the primary defense.
+
+    Body serialization contract
+    ---------------------------
+    The Platform serializes the JSON body with compact separators
+    (``separators=(",", ":")``) before signing, so the raw ``request.body``
+    received here must match that encoding byte-for-byte.
+    """
+    secret: str = getattr(settings, "PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+    if not secret:
+        logger.error("[Webhook] PLATFORM_TO_PORTAL_WEBHOOK_SECRET not configured — rejecting all webhooks")
+        return False
+    sig: str = request.headers.get("X-Platform-Signature", "")
+    if len(sig) != _HMAC_SHA256_HEX_LENGTH or not all(c in "0123456789abcdef" for c in sig):
+        logger.warning("[Webhook] Invalid signature format")
+        return False
+    ts: str = request.headers.get("X-Platform-Timestamp", "")
+    try:
+        request_time = int(ts)
+        current_time = int(_time_module.time())
+        # Allow small forward skew for minor NTP jitter between platform and portal.
+        timestamp_valid = -_WEBHOOK_NTP_SKEW_SECONDS <= (current_time - request_time) <= _WEBHOOK_REPLAY_WINDOW_SECONDS
+    except (ValueError, TypeError):
+        timestamp_valid = False
+    if not timestamp_valid:
+        logger.warning("[Webhook] Invalid or stale X-Platform-Timestamp")
+        return False
+    payload: bytes = ts.encode() + b"." + request.body
+    expected: str = _hmac_module.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+    if not _hmac_module.compare_digest(sig, expected):
+        return False
+    # Full 64-char hex signature — no truncation needed, cache key length is not a constraint
+    cache_key = f"webhook:sig:{sig}"
+    if not cache.add(cache_key, 1, timeout=_WEBHOOK_REPLAY_WINDOW_SECONDS):
+        logger.warning("[Webhook] Replay detected — signature already seen")
+        return False
+    return True
+
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
@@ -1135,13 +1205,12 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
     This endpoint is called by the Platform service when a payment succeeds
     to clean up Portal session data and update UI state.
     """
+    if not _verify_platform_webhook(request):
+        logger.warning("[Webhook] Invalid platform signature — request rejected")
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+
     try:
-        import json  # noqa: PLC0415
-
-        from django.http import JsonResponse  # noqa: PLC0415
-
         data = json.loads(request.body)
-
         order_id = data.get("order_id")
         payment_status = data.get("status")
 
@@ -1160,8 +1229,8 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
         return JsonResponse({"success": True})
 
-    except Exception as e:
-        logger.error(f"🔥 Error processing payment webhook: {e}")
+    except Exception:
+        logger.exception("🔥 [Webhook] Error processing payment webhook")
         return JsonResponse({"error": "Webhook processing failed"}, status=500)
 
 

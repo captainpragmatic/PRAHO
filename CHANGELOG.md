@@ -7,7 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **Token identity endpoint** (`GET /api/users/token/me/`) — correct token-auth introspection endpoint; the existing `verify_token` at `/api/users/token/verify/` requires HMAC customer context (portal-only) and returns 401 for CLI/API consumers; the new endpoint uses `TokenAuthentication` only, returns `email`, `staff_role`, and `token_created`; 3 tests added
+- **ADR-0030**: documents full state of API token authentication, 8 explicit gaps (no expiry, plaintext storage, one-token-per-user, broken verify endpoint), and rationale for `token_info` gap-1 fix
+- **Payment model**: `updated_at = DateTimeField(auto_now=True)` on `Payment` (migration 0018); aligns with Invoice, Customer, PaymentRetryPolicy
+- **`TERMINAL_PAYMENT_STATUSES`** frozenset constant in `payment_models.py` — canonical set of statuses from which payments must not transition; includes both `cancelled`/`canceled` spellings
+- **`Payment.apply_gateway_event()`** method — idempotent gateway status transition with `select_for_update()` contract; replaces 3 separate inline implementations
+- **Django system check `portal.W001`** — deploy-time warning when `IPWARE_TRUSTED_PROXY_LIST` is empty in non-debug mode
+- **`ACCOUNT_LOCKOUT_THRESHOLD`** setting (default=1) — makes lockout threshold configurable without code changes
+
+### Changed
+
+- **Middleware ordering** (prod.py, staging.py) — `PortalServiceHMACMiddleware` and `StaffOnlyPlatformMiddleware` moved after `AuthenticationMiddleware`; staff bypass now has access to `request.user`
+- **HMAC timestamp validation** — allow 2s forward clock skew (`-2 <= delta`) for NTP jitter between portal and platform; shared `HMAC_TIMESTAMP_WINDOW_SECONDS` constant extracted to `apps.common.constants`
+- **HMAC timestamp parsing** — `int(float(timestamp))` for rolling-deploy backward compatibility
+- **Nonce cache TTL** — increased by 30s buffer (`HMAC_TIMESTAMP_WINDOW_SECONDS + 30`) to ensure nonces outlive their timestamp validity window
+- **Webhook replay cache key** — use full 64-char hex signature instead of truncated `sig[:32]`
+- **Portal `_HMAC_TIMESTAMP_RE`** — tightened from `^[0-9]+(?:\.[0-9]+)?$` to `^[0-9]+$` (int-only; platform validates with `int()`)
+- **Portal rate limiting** — atomic `cache.add()`/`cache.incr()` counters replace non-atomic `cache.get()+1`/`cache.set()` in both `AuthenticationRateLimitMiddleware` and `APIRateLimitMiddleware`
+- **API rate limiter** — fail-closed (503) instead of fail-open on cache errors; matches `AuthenticationRateLimitMiddleware` behavior
+- **`IPWARE_TRUSTED_PROXY_LIST`** — renamed from `TRUSTED_PROXY_LIST` in portal (request_ip.py, settings, tests) to align with platform setting name
+- **Security scanner `_matches_path_glob()`** — rewritten using `PurePosixPath.full_match()` (Python 3.13); fixes `**` recursive wildcard matching that `fnmatch` didn't support
+- **Security scanner scoped patterns** — all glob patterns now use explicit `**/` prefixes for reliable matching
+- **Security scanner XFF regex** — fixed extra `"` in character class
+- **Security scanner email-in-logs pattern** — negative lookahead excludes `_mask_email()` and similar safe wrappers
+- **Security scanner ORM `.get()` severity** — raised from LOW to MEDIUM with concurrent-safety guidance
+- **Stripe webhook processor** — refactored to use `Payment.apply_gateway_event()` instead of inline status mutation
+- **`PaymentService.confirm_payment()`** — uses shared `TERMINAL_PAYMENT_STATUSES` constant instead of inline set
+- **`obtain_token`** — uses `get_safe_client_ip()` instead of raw `REMOTE_ADDR`
+- **`_mask_email()`** — adds null byte (`\0`) stripping; removes redundant domain-level `\n`/`\r` sanitization
+
+### Removed
+
+- **`PaymentService.handle_webhook_payment()`** and **`_handle_stripe_payment_intent()`** — legacy duplicate handlers; Stripe webhook handling consolidated in `StripeWebhookProcessor`
+- Associated test classes removed from `test_payment_service.py` and `test_billing_27_todos.py`
+
+### Fixed
+
+- fix(settings): remove duplicate `RATELIMIT_USE_CACHE = "default"` in prod.py that overrode the correct conditional assignment
+- fix(settings): add `RATELIMIT_ENABLE = True/False` alongside `RATELIMIT_ENABLED` in prod/staging/e2e (both needed: library vs custom middleware)
+- fix(settings): add `HMAC_SECRET` startup validation to staging.py (was only in prod.py)
+- fix(settings): align webhook secret default in platform dev.py (`"test-webhook-secret-do-not-use-in-prod"`) to match portal dev.py
+- fix(settings): add LocMemCache per-worker limitation docstring in portal base.py
+- fix(docs): expand `_is_auth_exempt` docstring explaining exempt path semantics and startswith-to-exact-match rationale
+- fix(docs): expand `increment_failed_login_attempts` docstring explaining progressive lockout design
+- fix(docs): add deprecation comments to `MAX_LOGIN_ATTEMPTS` / `ACCOUNT_LOCKOUT_DURATION_MINUTES` constants
+- fix(docs): expand `_verify_platform_webhook` docstring (HMAC-SHA256, replay prevention, cache limitation, serialization contract)
+- fix(security): wire account lockout into `portal_login_api` (#53) — closes the same brute-force gap found in `obtain_token`; checks `is_account_locked()`, increments `failed_login_attempts` on failure, resets on success, uses PII-safe structured logging
+  - 7 regression tests added in `PortalLoginAPILockoutTests` (including inactive account and byte-identical response verification across all 4 failure modes)
+  - `AUTHENTICATION.md` and `SECURITY_COMPLIANCE_ASSESSMENT.md` updated to document lockout enforcement across all 3 credential endpoints
+- fix(security): atomic lockout counter — `increment_failed_login_attempts()` now uses `F()` expression to prevent lost increments under concurrent requests
+- docs(security): timing side-channel and HMAC rate limiting documented as accepted risks with rationale in `portal_login_api` and `obtain_token`
+- fix(security): harden 9 real vulnerabilities from security audit (confirmed by dual Claude+Codex adversarial review; 33 regression tests + 8 new security linter patterns)
+  - **Critical** — token revocation self-revocation pattern: `DELETE /api/users/token/revoke/` now uses `TokenAuthentication` + `request.auth`; no ownership check needed (#60)
+  - **Critical** — payment success webhook: HMAC-SHA256 + timestamp + 5-minute replay window using dedicated `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` (#49)
+  - **High** — `obtain_token` account lockout: wire `is_account_locked()` and `increment_failed_login_attempts()`; uniform 401 prevents user enumeration (#53)
+  - **High** — auth failure log masking: `_mask_email()` for PII and control-character sanitization to prevent log injection (#54)
+  - **High** — IP extraction: `request_ip.py` rewritten using `django-ipware` with `TRUSTED_PROXY_LIST`; Cloudflare-aware CF-Ray guard; all 4 extraction locations fixed in both platform and portal (#51, #69)
+  - **High** — rate limiting bypass: replace `os.environ RATELIMIT_ENABLE` with `settings.RATELIMIT_ENABLED` in both platform and portal middleware (#68)
+  - **High** — Terraform firewall: `firewall_ssh_sources` and `firewall_webmin_sources` default `[]` with validation block across all 5 provider modules (#41)
+  - **Medium** — insecure HTTP startup warning: loud `WARNING` when `PLATFORM_API_ALLOW_INSECURE_HTTP` is active in production settings (#52)
+  - **Nuanced** — HMAC exempt path check: uses `frozenset` exact match instead of `startswith` to eliminate future footgun (#61)
+  - **Nuanced** — `Payment.confirm_payment()`: adds `select_for_update`, unique constraint on `gateway_txn_id`, and row lock in `confirm_order` to prevent double-charge race (#50)
+  - **Bonus** — `PortalServiceHMACMiddleware` added to prod and staging middleware stacks (was missing entirely)
+- fix(security): harden HMAC webhook authentication — int timestamps replace floats; future timestamps rejected via `0 <= (now - ts) <= window` (prevents preplay); 64-char hex signature format pre-filter; per-process replay deduplication via `cache.add()`; startup validation for `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` in both platform and portal prod settings; 8 new webhook tests + 12 structural integration tests
+- fix(billing): migration 0017 — add `RunPython` step to convert `gateway_txn_id=""` → `NULL` before applying the unique constraint; PostgreSQL treats each NULL as distinct so multiple empty strings would fail the migration on production
+- fix(settings): rename `RATELIMIT_ENABLE` → `RATELIMIT_ENABLED` in `e2e.py`, `prod.py`, and `staging.py` to match the key read by middleware; E2E tests were silently not disabling rate limiting due to this mismatch
+- fix(billing): portal webhook signing in `_send_portal_webhook` — compute HMAC-SHA256 of `(ts + "." + body)` and send `X-Platform-Signature` + `X-Platform-Timestamp` headers; without these, every payment success notification was rejected with 401
+
+- fix(security): `PortalServiceHMACMiddleware` — batch hardening (no new dependencies)
+  - **Removed `PortalServiceAuthMiddleware`** dead code — weak shared-secret auth with no replay protection; regression test `test_legacy_auth_middleware_removed` added to prevent re-introduction
+  - **Removed body timestamp cross-check** — redundant JSON parse that blocked non-JSON bodies; `body_hash` in the canonical string already cryptographically covers any payload timestamp; comment documents this invariant
+  - **Rate limiting moved after HMAC validation** — previously keyed on the unverified `HTTP_X_PORTAL_ID` header (attacker-controlled); now post-validation, keyed on `request._portal_id` (verified); prevents DoS quota exhaustion via forged portal IDs
+- fix(security): replace `SessionValidationThrottle(BaseThrottle)` with DRF's `ScopedRateThrottle` — custom implementation used non-atomic `cache.get()` + `cache.set()` TOCTOU pattern; replaced with `ScopedRateThrottle(scope="session_validation")` using `DEFAULT_THROTTLE_RATES`; zero custom cache logic; rate configurable in settings
+- fix(security): replace direct `REMOTE_ADDR` with `get_safe_client_ip()` at all remaining callsites — `REMOTE_ADDR` is always the immediate TCP peer (the proxy in production); audit logs, rate-limit keys, and security logs recorded the proxy IP instead of the real client; fixed in `audit/signals.py`, `api/customers/views.py`, `api/customers/serializers.py`, `api/users/views.py` (×2), `common/decorators.py` (platform + portal)
+- fix(security): add scanner pattern for direct `REMOTE_ADDR` access in `security_scanner.py` — pattern #9 flags `request.META.get("REMOTE_ADDR")` / `request.META["REMOTE_ADDR"]` outside `request_ip.py`; severity MEDIUM; OWASP A09:2021
+- fix(settings): `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` in `portal/config/settings/staging.py` — changed from hard fail (`ValueError`) to optional (`WARNING` log); staging rarely tests the end-to-end payment confirmation flow; comment clarifies this is NOT the Stripe webhook secret — it signs Platform→Portal internal calls only
+
+### Tests
+
+- 2 regression tests for token revocation: `test_revoke_token_post_rejected_with_405` (guards against silent reintroduction of POST pattern) and `test_revoke_token_uses_header_token_not_body` (proves body payload is ignored; revokes only the authenticated user's token)
+- 11 new platform unit tests (`test_api_users_security.py`), 8 new portal unit tests (`test_portal_security.py`), 14 new structural integration tests (`test_security_hardening.py`)
+- 8 new security scanner patterns in `security_scanner.py`
+- 7 HMAC middleware tests (`test_hmac_middleware.py`) — added `test_legacy_auth_middleware_removed` (regression guard against `PortalServiceAuthMiddleware` re-introduction), `test_non_json_body_passes_hmac_validation` (proves non-JSON passes after removing cross-check), `test_stale_timestamp_rejected`; fixed all test nonces to meet `HMAC_NONCE_MIN_LENGTH = 32`; fixed float timestamps → int; added `LOCMEM_TEST_CACHE` override to nonce-replay and rate-limit tests (default `DummyCache` silently no-ops `cache.add`/`cache.incr`)
+
+### Docs
+
+- `AUTHENTICATION.md` updated: correct `obtain_token` response (removed stale `is_staff` field), fix revoke verb `POST → DELETE`, replace fictional portal JS token-auth code with accurate description of HMAC-signed `api_client` flow; consumer→method table covering all 4 auth paths
+- `AUTHENTICATION.md` dual HMAC architecture section added, `DEPLOYMENT.md` env var tables updated, `SECURITY_CONFIGURATION.md` and `ARCHITECTURE.md` updated with data-flow diagram
 
 ---
 

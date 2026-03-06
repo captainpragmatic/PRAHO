@@ -154,6 +154,11 @@ LOGOUT_REDIRECT_URL = "/"
 # Password reset settings
 PASSWORD_RESET_TIMEOUT = 7200  # 2 hours in seconds
 
+# Account lockout threshold: number of failed attempts before progressive lockout kicks in.
+# Default 1 means lockout starts on the first failed attempt (most secure).
+# Increase to allow N free attempts before lockout delays apply.
+ACCOUNT_LOCKOUT_THRESHOLD = 1
+
 # ===============================================================================
 # INTERNATIONALIZATION & LOCALIZATION
 # ===============================================================================
@@ -351,6 +356,7 @@ REST_FRAMEWORK = {
         "order_calculate": "30/min",  # Cart calculations (less expensive)
         "order_list": "100/min",  # Order listing (read operations)
         "product_catalog": "200/min",  # Product browsing (public-ish)
+        "session_validation": "60/min",  # Portal→platform session checks (per portal)
     },
 }
 
@@ -524,7 +530,11 @@ RATELIMIT_KEY = "apps.users.ratelimit_keys.user_or_ip"
 RATELIMIT_USE_CACHE = "default"
 
 # Enable rate limiting (can be disabled in development)
+# RATELIMIT_ENABLE: used by django-ratelimit library decorators
+# RATELIMIT_ENABLED: used by our custom middleware (PortalServiceHMACMiddleware, etc.)
+# Both must stay in sync — custom code should read RATELIMIT_ENABLED.
 RATELIMIT_ENABLE = True
+RATELIMIT_ENABLED = True
 
 # ===============================================================================
 # DJANGO-Q2 ASYNC TASK PROCESSING 🚀
@@ -753,6 +763,13 @@ API_TIMEOUTS = {
 
 # Portal service specific timeout (can be overridden)
 PORTAL_API_TIMEOUT = int(os.environ.get("PORTAL_API_TIMEOUT", "30"))
+
+# Portal payment webhook URL (platform → portal notification after Stripe payment)
+PORTAL_PAYMENT_WEBHOOK_URL: str = os.environ.get("PORTAL_PAYMENT_WEBHOOK_URL", "")
+
+# Dedicated HMAC secret for platform→portal webhook signing (separate from HMAC_SECRET)
+# Must match PLATFORM_TO_PORTAL_WEBHOOK_SECRET on the portal side.
+PLATFORM_TO_PORTAL_WEBHOOK_SECRET: str = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
 
 # Outbound HTTP: allowed domains for INTERNAL_SERVICE policy (empty = unrestricted)
 INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]

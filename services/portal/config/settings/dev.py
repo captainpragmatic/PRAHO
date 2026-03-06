@@ -87,7 +87,7 @@ if is_testing:
     SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
     # Disable rate limiting during tests
-    RATELIMIT_ENABLE = False
+    RATELIMIT_ENABLED = False
 
     # Reduce log noise and timing jitter in security/performance tests.
     LOGGING["root"]["level"] = "ERROR"
@@ -98,12 +98,13 @@ if is_testing:
         LOGGING["loggers"]["urllib3"]["level"] = "WARNING"
 else:
     # Allow E2E tests to disable rate limiting via environment variable
-    RATELIMIT_ENABLE = os.environ.get("RATELIMIT_ENABLE", "true").lower() == "true"
+    RATELIMIT_ENABLED = os.environ.get("RATELIMIT_ENABLE", "true").lower() == "true"
 
 # Development platform API URL
 PLATFORM_API_BASE_URL = "http://localhost:8700/api"
 PLATFORM_API_SECRET = "dev-shared-secret-change-in-production"
 PLATFORM_API_TIMEOUT = 10  # seconds
+PLATFORM_TO_PORTAL_WEBHOOK_SECRET = "test-webhook-secret-do-not-use-in-prod"
 
 # 🔒 SECURITY: Development warnings for weak secrets (non-blocking)
 try:

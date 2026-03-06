@@ -16,6 +16,8 @@ urlpatterns = [
     # Token authentication endpoints for API access
     path("token/", views.obtain_token, name="obtain_token"),
     path("token/revoke/", views.revoke_token, name="revoke_token"),
+    path("token/me/", views.token_info, name="token_info"),
+    # Legacy: verify_token requires HMAC customer context — kept for portal use only
     path("token/verify/", views.verify_token, name="verify_token"),
     # Multi-Factor Authentication endpoints
     path("mfa/setup/", views.mfa_setup_api, name="mfa_setup"),

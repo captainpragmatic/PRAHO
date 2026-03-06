@@ -56,8 +56,7 @@ Content-Type: application/json
 {
     "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
     "user_id": 123,
-    "email": "user@example.com",
-    "is_staff": false
+    "email": "user@example.com"
 }
 ```
 
@@ -87,14 +86,25 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 ```
 
 ### **Revoke Token**
-```bash
-POST /api/users/token/revoke/
-Content-Type: application/json
 
+Self-revocation only — revokes the token used to authenticate this request.
+No body needed; the token in the `Authorization` header is the one deleted.
+
+```bash
+DELETE /api/users/token/revoke/
+Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
+```
+
+**Response:**
+```json
 {
-    "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
+    "message": "Token revoked successfully"
 }
 ```
+
+> **Security note:** The endpoint accepts `DELETE` only. `POST` returns 405.
+> Passing another user's token key in a request body has no effect — only
+> the token in the `Authorization` header is ever revoked.
 
 ## Rate Limiting 🚦
 
@@ -106,6 +116,7 @@ Content-Type: application/json
 | **Authenticated** | 1000/hour | General API usage |
 | **Burst** | 60/min | Search/autocomplete |
 | **Auth endpoints** | 5/min | Login/token requests |
+| **All credential endpoints** | Account lockout | `/users/login/`, `/api/users/token/`, `/api/users/login/` |
 
 ### **Rate Limit Headers**
 API responses include rate limit information:
@@ -125,50 +136,26 @@ X-RateLimit-Reset: 1625097600
 
 ## Portal Service Integration
 
-For the **portal service** to call the platform API:
+The **portal service does not use DRF token authentication**. Portal→Platform
+communication uses **HMAC-SHA256 signed requests** instead. Every call from
+the portal carries a signed `X-User-Context` header and a canonical signature
+computed over method, path, content-type, body hash, portal ID, nonce, and
+timestamp (see section 0 above).
 
-### **1. Initial Setup**
-```javascript
-// Portal service authentication
-const response = await fetch('https://platform.praho.com/api/users/token/', {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-        email: 'service-account@praho.com',
-        password: 'secure-service-password'
-    })
-});
+The Python client is at `services/portal/apps/api_client/services.py`. It
+handles signing transparently — portal views call methods like
+`api_client.authenticate_customer()` without managing tokens or headers
+directly.
 
-const { token } = await response.json();
-```
+**DRF tokens (`Authorization: Token ...`) are for:**
+- Direct API consumers such as CLI tools or future mobile clients
+- Platform staff automation scripts
+- Any external system granted direct platform access
 
-### **2. API Calls**
-```javascript
-// Use token for all API calls
-const customerData = await fetch('https://platform.praho.com/api/customers/search/?q=test', {
-    headers: {
-        'Authorization': `Token ${token}`,
-        'Content-Type': 'application/json',
-    }
-});
-```
-
-### **3. Token Management**
-```javascript
-// Verify token is still valid
-const verifyResponse = await fetch('https://platform.praho.com/api/users/token/verify/', {
-    headers: {
-        'Authorization': `Token ${token}`
-    }
-});
-
-if (verifyResponse.status === 401) {
-    // Token expired, get new one
-    token = await getNewToken();
-}
-```
+**The portal is not and should not be any of those.** Portal↔Platform trust
+is established by the shared `HMAC_SECRET` and the
+`PortalServiceHMACMiddleware` that validates every inbound request from the
+portal.
 
 ## Security Best Practices
 
@@ -222,14 +209,56 @@ print(f"Token: {token.key}")
 Token.objects.filter(user=user).delete()
 ```
 
-## Migration from Legacy Auth
+## Authentication by Consumer
 
-If you have existing authentication, migrate gradually:
+| Consumer | Method | Where configured |
+|----------|--------|-----------------|
+| Portal service | HMAC-signed requests | `HMAC_SECRET` env var, `PortalServiceHMACMiddleware` |
+| Platform web UI (staff) | Django session cookies | Automatic for logged-in staff |
+| CLI tools / external API clients | DRF token (`Authorization: Token ...`) | `POST /api/users/token/` to obtain |
+| Platform→Portal webhooks | Dedicated HMAC (`PLATFORM_TO_PORTAL_WEBHOOK_SECRET`) | `X-Platform-Signature` + `X-Platform-Timestamp` headers |
 
-1. **Add Token Authentication** (✅ Done)
-2. **Update Portal Service** to use tokens
-3. **Keep Session Auth** for web UI
-4. **Monitor Usage** and fix any issues
-5. **Deprecate Legacy** endpoints when ready
+## Platform→Portal Webhook Authentication (System 2)
 
-The API now supports both session and token authentication for maximum flexibility! 🚀
+PRAHO uses **two independent HMAC systems** with separate secrets for different trust boundaries:
+
+| | System 1: Portal → Platform | System 2: Platform → Portal Webhook |
+|---|---|---|
+| **Secret** | `PLATFORM_API_SECRET` / `HMAC_SECRET` | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` |
+| **Direction** | Portal calls Platform API | Platform pushes payment notifications |
+| **Maturity** | Battle-tested (nonce dedup, canonical signing, rate limiting) | Signature-based dedup, format validation |
+| **Why separate** | Multi-endpoint API, untrusted client | Single endpoint, trusted internal service |
+
+**Why not unify:** Portal is stateless (LocMemCache per-process, no DB). Can't do reliable cross-worker nonce dedup. Different threat models. Different trust boundaries. Secret isolation is a feature.
+
+### Signature Scheme
+
+```
+signature = HMAC-SHA256(secret, str(int(ts)) + "." + body)
+```
+
+- **Payload**: integer Unix timestamp concatenated with `"."` and the raw JSON body bytes
+- **Algorithm**: HMAC-SHA256 (timing-safe comparison via `hmac.compare_digest`)
+- **Headers**: `X-Platform-Signature` (64-char lowercase hex), `X-Platform-Timestamp` (integer Unix)
+
+### Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| **Replay window** | 5 minutes (`_WEBHOOK_REPLAY_WINDOW_SECONDS = 300`) |
+| **Future timestamps** | Rejected — only `0 <= (now - ts) <= window` accepted |
+| **Signature format** | Pre-validated: exactly 64 lowercase hex characters |
+| **Per-process replay dedup** | `cache.add()` with signature prefix as key (LocMemCache) |
+| **Fail-secure** | Empty/missing secret → all webhooks rejected |
+| **Startup validation** | Both `prod.py` settings raise on missing secret |
+
+### Endpoint
+
+```
+POST /orders/payment/webhook/
+```
+
+- CSRF-exempt (HMAC-authenticated inter-service endpoint)
+- Idempotent handler (logs + session hint — safe for per-process dedup)
+- Sender: `apps.integrations.webhooks.stripe._notify_portal_payment_success()`
+- Receiver: `apps.orders.views.payment_success_webhook()`

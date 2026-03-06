@@ -71,13 +71,38 @@ variable "ssh_public_key" {
 
 # Firewall configuration
 variable "firewall_ssh_sources" {
-  description = "Source IPs/CIDRs for SSH access"
-  type        = list(string)
-  default     = ["0.0.0.0/0", "::/0"]
+  description = <<-EOT
+    Source IP CIDRs allowed for SSH access.
+    WARNING: No permissive default — must be set explicitly in staging/prod tfvars.
+    Example: ["203.0.113.0/24"]  # office/VPN CIDR
+    Never use ["0.0.0.0/0", "::/0"] in production.
+  EOT
+  type    = list(string)
+  default = []
+
+  validation {
+    condition     = length(var.firewall_ssh_sources) > 0
+    error_message = "firewall_ssh_sources must contain at least one CIDR. Set your office/VPN IP range."
+  }
+
+  validation {
+    condition     = !contains(var.firewall_ssh_sources, "0.0.0.0/0") && !contains(var.firewall_ssh_sources, "::/0")
+    error_message = "firewall_ssh_sources must not contain 0.0.0.0/0 or ::/0 (world-open). Use specific CIDRs for your office/VPN."
+  }
 }
 
 variable "firewall_webmin_sources" {
-  description = "Source IPs/CIDRs for Webmin/Virtualmin access"
-  type        = list(string)
-  default     = ["0.0.0.0/0", "::/0"]
+  description = <<-EOT
+    Source IP CIDRs allowed for Webmin/Virtualmin access.
+    WARNING: No permissive default — must be set explicitly in staging/prod tfvars.
+    Example: ["203.0.113.0/24"]  # office/VPN CIDR
+    Never use ["0.0.0.0/0", "::/0"] in production.
+  EOT
+  type    = list(string)
+  default = []
+
+  validation {
+    condition     = length(var.firewall_webmin_sources) > 0
+    error_message = "firewall_webmin_sources must contain at least one CIDR. Set your office/VPN IP range."
+  }
 }

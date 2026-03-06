@@ -44,6 +44,15 @@ if not _hmac_secret:
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 
+_webhook_secret = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+if not _webhook_secret:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "PLATFORM_TO_PORTAL_WEBHOOK_SECRET must be set in production for platform→portal webhooks. "
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
 # ===============================================================================
 # PRODUCTION FLAGS
 # ===============================================================================
@@ -103,6 +112,8 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
+    "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.common.middleware.AuditMiddleware",
@@ -297,8 +308,8 @@ STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 # RATE LIMITING (Production)
 # ===============================================================================
 
-RATELIMIT_ENABLE = True
-RATELIMIT_USE_CACHE = "default"
+RATELIMIT_ENABLE = True  # django-ratelimit library decorators (@ratelimit)
+RATELIMIT_ENABLED = True  # Custom middleware (PortalServiceHMACMiddleware, etc.)
 
 # ===============================================================================
 # OUTBOUND HTTP — INTERNAL SERVICE DOMAINS (Production)

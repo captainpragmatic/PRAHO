@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +271,7 @@ def log_access_attempt(view_func: Callable[..., Any]) -> Callable[..., Any]:
         logger.info(
             f"🔍 [Access] {request.method} {request.path} - "
             f"user: {user_id}, customer: {customer_id}, "
-            f"IP: {request.META.get('REMOTE_ADDR', 'unknown')}"
+            f"IP: {get_safe_client_ip(request)}"
         )
 
         response = cast(HttpResponse, view_func(request, *args, **kwargs))

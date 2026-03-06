@@ -34,6 +34,11 @@ sequenceDiagram
     Platform-->>Portal: {customer_data}
     Portal-->>Customer: JSON response
 
+    Note over Customer,Cache: Platform→Portal Webhook (System 2)
+    Platform->>Portal: POST /orders/payment/webhook/<br/>X-Platform-Signature: hmac-sha256<br/>X-Platform-Timestamp: int(unix)
+    Portal->>Portal: Verify HMAC signature<br/>+ replay dedup (LocMemCache)
+    Portal-->>Platform: {success: true}
+
     Note over Customer,Cache: Security Isolation
     rect rgb(255, 200, 200)
         Portal-XDB: ❌ Direct access blocked<br/>No psycopg2 driver

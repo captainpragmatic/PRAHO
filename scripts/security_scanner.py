@@ -24,7 +24,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 # Configure logging
@@ -429,6 +429,129 @@ class SecurityScanner:
             ),
         ]
 
+        # Scoped patterns: (regex, description, severity, owasp_cat, path_glob, warn_level)
+        # path_glob=None means match all files; otherwise only files matching the glob suffix
+        self.scoped_patterns: list[tuple[str, str, Severity, str | None, str | None]] = [
+            # 1. Raw email in log f-strings — privacy violation
+            # Excludes _mask_email() and similar safe wrappers
+            (
+                r'logger\.\w+\(f["\'].*\{(?!.*(_mask|masked|hashed|redact)).*\.email.*\}',
+                "Raw email in log message — use _mask_email() for privacy",
+                Severity.HIGH,
+                "A09:2021-Security Logging and Monitoring Failures",
+                "**/*.py",
+            ),
+            # 2. AllowAny on API views — access control risk
+            (
+                r"@permission_classes\(\[AllowAny\]\)",
+                "AllowAny on API view — verify this endpoint is intentionally public",
+                Severity.MEDIUM,
+                "A01:2021-Broken Access Control",
+                "**/apps/api/**/*.py",
+            ),
+            # 3. Security feature flags via os.environ — use Django settings
+            (
+                r'os\.environ\.get\(["\'](RATELIMIT|SECURITY|ENABLE_|DISABLE_)',
+                "Security feature flag via os.environ — use Django settings instead",
+                Severity.HIGH,
+                "A05:2021-Security Misconfiguration",
+                "**/*.py",
+            ),
+            # 4. Direct HTTP_X_FORWARDED_FOR access — use safe helper
+            (
+                r'request\.META\.get\(["\']HTTP_X_FORWARDED_FOR',
+                "Direct HTTP_X_FORWARDED_FOR — use get_safe_client_ip() from apps.common.request_ip",
+                Severity.HIGH,
+                "A01:2021-Broken Access Control",
+                "**/*.py",
+            ),
+            # 5. Webhook views without auth annotation — verify HMAC
+            (
+                r"def \w*webhook\w*\(request",
+                "Webhook endpoint found — verify HMAC signature verification is present",
+                Severity.MEDIUM,
+                "A07:2021-Identification and Authentication Failures",
+                "**/apps/**/views.py",
+            ),
+            # 6. Unsecured ORM get on payment models — use select_for_update
+            (
+                r"(Order|Payment)\.objects\.get\(",
+                "Direct .get() on financial model — use select_for_update() inside transaction.atomic() for concurrent safety",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+                "**/apps/**/*.py",
+            ),
+            # 7. Path prefix auth exemptions — use frozenset membership
+            (
+                r"request\.path\.startswith\(",
+                "Path prefix match for auth exemption — prefer exact frozenset membership check",
+                Severity.MEDIUM,
+                "A01:2021-Broken Access Control",
+                "**/apps/**/middleware.py",
+            ),
+            # 8. Terraform 0.0.0.0/0 as default — must use default=[] with validation
+            (
+                r"default\s*=\s*\[.*0\.0\.0\.0/0",
+                "Terraform firewall variable defaults to 0.0.0.0/0 — use default=[] with validation block",
+                Severity.CRITICAL,
+                "A05:2021-Security Misconfiguration",
+                "**/*.tf",
+            ),
+            # 9. Direct REMOTE_ADDR access outside request_ip.py — use get_safe_client_ip()
+            # request_ip.py is the only legitimate consumer of REMOTE_ADDR; everywhere else
+            # should call get_safe_client_ip() to respect trusted proxy configuration.
+            (
+                r'META(?:\.get\(["\']|(?:\[["\']))REMOTE_ADDR',
+                "Direct REMOTE_ADDR access — use get_safe_client_ip() from apps.common.request_ip "
+                "to respect TRUSTED_PROXY_LIST / IPWARE_TRUSTED_PROXY_LIST configuration",
+                Severity.MEDIUM,
+                "A09:2021-Security Logging and Monitoring Failures",
+                "services/**/*.py",
+            ),
+            # 10. Leftmost XFF trust — split(",")[0] on forwarded headers returns attacker-controlled IP.
+            # Proxies append to XFF, so the leftmost entry is client-supplied.
+            # Correct approach: rightmost-trusted-hop (walk right-to-left, skip trusted proxies).
+            # Only flag in request_ip.py / middleware where IP extraction actually happens.
+            (
+                r'split\(\s*["\'],["\']\s*\)\s*\[\s*0\s*\]',
+                "Leftmost XFF trust — split(',')[0] returns attacker-controlled IP. "
+                "Use rightmost-trusted-hop: walk right-to-left, skip trusted proxy IPs",
+                Severity.HIGH,
+                "A01:2021-Broken Access Control",
+                "**/request_ip.py",
+            ),
+            # 11. Non-constant-time HMAC comparison — timing oracle for signature forgery.
+            # Must use hmac.compare_digest() instead of == for signature verification.
+            (
+                r"signature\s*(?:==|!=)\s*|(?:==|!=)\s*signature",
+                "Non-constant-time HMAC comparison — use hmac.compare_digest() to prevent timing attacks",
+                Severity.HIGH,
+                "A02:2021-Cryptographic Failures",
+                "**/middleware.py",
+            ),
+            # 12. ALLOW_INSECURE_HTTP without startup warning — silent security downgrade.
+            # When the HTTP escape hatch is active, a logger.warning() must be present
+            # so ops monitoring catches it. Only relevant in prod/staging settings.
+            (
+                r"ALLOW_INSECURE_HTTP.*=.*True",
+                "Insecure HTTP flag enabled — verify a logger.warning() exists nearby to surface this in monitoring",
+                Severity.MEDIUM,
+                "A05:2021-Security Misconfiguration",
+                "**/settings/prod.py",
+            ),
+            # 13. Unique constraint migration without preflight duplicate check.
+            # AlterField(unique=True) will fail if duplicate non-null values exist.
+            # A RunPython step should check for and report duplicates before the AlterField.
+            (
+                r"unique=True",
+                "Unique constraint in migration — verify a RunPython preflight checks for "
+                "duplicate values before this AlterField to prevent deployment failures",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+                "**/migrations/*.py",
+            ),
+        ]
+
     def generate_finding_id(self) -> str:
         """Generate unique finding ID"""
         self.finding_counter += 1
@@ -448,13 +571,32 @@ class SecurityScanner:
             # Pattern-based scanning
             findings.extend(self._scan_patterns(file_path, content, lines))
 
-            # AST-based scanning
-            findings.extend(self._scan_ast(file_path, content))
+            # AST-based scanning (Python only)
+            if file_path.suffix == ".py":
+                findings.extend(self._scan_ast(file_path, content))
 
         except Exception as e:
             logger.warning(f"Failed to scan {file_path}: {e}")
 
         return findings
+
+    def _matches_path_glob(self, file_path: Path, glob_pattern: str | None) -> bool:
+        """Check whether file_path matches a glob pattern relative to codebase root.
+
+        Uses Python 3.13's PurePath.full_match() which supports ** recursive wildcards.
+        Patterns without **/ prefix are auto-expanded to match anywhere in the path tree.
+        """
+        if glob_pattern is None:
+            return True
+        try:
+            rel = file_path.relative_to(self.codebase_path).as_posix()
+        except ValueError:
+            rel = file_path.as_posix()
+        rel_path = PurePosixPath(rel)
+        candidates = [glob_pattern]
+        if not glob_pattern.startswith("**/"):
+            candidates.append(f"**/{glob_pattern}")
+        return any(rel_path.full_match(pattern) for pattern in candidates)
 
     def _scan_patterns(self, file_path: Path, content: str, lines: list[str]) -> list[SecurityFinding]:
         """Scan file using regex patterns"""
@@ -485,6 +627,43 @@ class SecurityScanner:
                     finding = SecurityFinding(
                         finding_id=self.generate_finding_id(),
                         title=description.split(" - ")[0],
+                        description=description,
+                        file_path=str(file_path),
+                        line_number=i,
+                        severity=severity,
+                        owasp_category=OWASPCategory(owasp_cat)
+                        if owasp_cat and owasp_cat in [c.value for c in OWASPCategory]
+                        else None,
+                        cve_id=None,
+                        cwe_id=None,
+                        code_snippet=line.strip()[:200],
+                        recommendation=self._get_recommendation(pattern, description),
+                        exploit_patterns=[pattern],
+                    )
+                    findings.append(finding)
+
+        # Apply scoped patterns (path-filtered)
+        findings.extend(self._scan_scoped_patterns(file_path, lines))
+
+        return findings
+
+    def _scan_scoped_patterns(self, file_path: Path, lines: list[str]) -> list[SecurityFinding]:
+        """Scan file using path-scoped regex patterns."""
+        findings = []
+
+        for pattern, description, severity, owasp_cat, path_glob in self.scoped_patterns:
+            if not self._matches_path_glob(file_path, path_glob):
+                continue
+
+            for i, line in enumerate(lines, 1):
+                if re.search(pattern, line, re.IGNORECASE):
+                    # Skip test files for low/info severity
+                    if "test" in str(file_path).lower() and severity in [Severity.LOW, Severity.INFO]:
+                        continue
+
+                    finding = SecurityFinding(
+                        finding_id=self.generate_finding_id(),
+                        title=description.split(" — ")[0],
                         description=description,
                         file_path=str(file_path),
                         line_number=i,
@@ -547,8 +726,9 @@ class SecurityScanner:
             total_lines_scanned=0,
         )
 
-        # Find all Python files
+        # Find all scannable files (Python + Terraform)
         python_files = list(self.codebase_path.rglob("*.py"))
+        terraform_files = list(self.codebase_path.rglob("*.tf"))
 
         # Exclude common non-source directories
         exclude_dirs = {
@@ -564,9 +744,12 @@ class SecurityScanner:
             "*.egg-info",
         }
 
-        filtered_files = [f for f in python_files if not any(exclude in str(f) for exclude in exclude_dirs)]
+        all_source_files = python_files + terraform_files
+        filtered_files = [f for f in all_source_files if not any(exclude in str(f) for exclude in exclude_dirs)]
 
-        logger.info(f"Found {len(filtered_files)} Python files to scan")
+        logger.info(
+            f"Found {len(filtered_files)} files to scan ({len(python_files)} Python, {len(terraform_files)} Terraform)"
+        )
 
         # Scan each file
         for file_path in filtered_files:

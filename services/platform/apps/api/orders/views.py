@@ -819,21 +819,23 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
     Confirm order after successful payment and trigger service provisioning.
     """
     try:
-        # Get order and verify ownership
-        order = Order.objects.prefetch_related("items").get(id=order_id, customer_id=customer.id)
-
-        # Check if order can be confirmed
-        if order.status not in ["pending", "payment_processing"]:
-            return Response(
-                {"success": False, "error": f"Order cannot be confirmed from status: {order.status}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         payment_intent_id = request.data.get("payment_intent_id")
         payment_status = request.data.get("payment_status")
 
         # Use atomic transaction for order confirmation and service creation
         with transaction.atomic():
+            # Get order with row-level lock to prevent double-confirmation
+            order = (
+                Order.objects.select_for_update().prefetch_related("items").get(id=order_id, customer_id=customer.id)
+            )
+
+            # Idempotency guard — prevent double-processing
+            if order.status not in ["pending", "payment_processing"]:
+                return Response(
+                    {"success": False, "error": "Order already processed"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
             # Update order status to confirmed
             old_status = order.status
             order.status = "confirmed"
@@ -865,12 +867,16 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 },
             )
 
-            # Trigger service provisioning for each order item
-            provisioning_results = [
-                _provision_confirmed_order_item(item, customer, order)
+            # Collect provisionable items inside the atomic block, but dispatch outside
+            provisionable_items = [
+                item
                 for item in order.items.all()
                 if item.product.product_type in {"shared_hosting", "vps", "dedicated_server"}
             ]
+
+        # Trigger service provisioning AFTER the transaction commits
+        # to avoid dispatching work that references uncommitted data.
+        provisioning_results = [_provision_confirmed_order_item(item, customer, order) for item in provisionable_items]
 
         return Response(
             {

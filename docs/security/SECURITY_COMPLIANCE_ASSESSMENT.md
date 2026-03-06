@@ -61,7 +61,7 @@ This document provides a comprehensive assessment of PRAHO's security and compli
 |---------|--------|----------|
 | Password Hashing (Argon2) | ✅ Full | `config/settings/base.py:136-141` |
 | Failed Login Tracking | ✅ Full | `apps/users/models.py:110-111` |
-| Account Lockout | ✅ Full | `apps/users/views.py:92-111` |
+| Account Lockout | ✅ Full | `apps/users/views.py`, `apps/api/users/views.py` (all 3 credential endpoints) |
 | Session Security | ✅ Full | Middleware + SessionSecurityService |
 | Login Rate Limiting | ✅ Full | `apps/users/views.py:81` (10/m, 5/m per email) |
 

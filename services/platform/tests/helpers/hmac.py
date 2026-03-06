@@ -98,9 +98,9 @@ def hmac_headers(  # noqa: PLR0913
     Returns dict with HTTP_X_* keys ready for **kwargs to client.post().
     """
     if nonce is None:
-        nonce = f"test-nonce-{time.time()}"
+        nonce = f"test-nonce-{int(time.time())}"
     if timestamp is None:
-        timestamp = str(time.time())
+        timestamp = str(int(time.time()))
 
     sig = sign_request(method, path, body, portal_id, nonce, timestamp, secret)
     return {

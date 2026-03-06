@@ -61,12 +61,27 @@ if not PLATFORM_API_ALLOW_INSECURE_HTTP and urlsplit(PLATFORM_API_BASE_URL).sche
         "SECURITY ERROR: PLATFORM_API_BASE_URL must use HTTPS in production. "
         "Set PLATFORM_API_ALLOW_INSECURE_HTTP=true only for controlled internal environments."
     )
+if PLATFORM_API_ALLOW_INSECURE_HTTP:
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "SECURITY WARNING: PLATFORM_API_ALLOW_INSECURE_HTTP is ACTIVE. "
+        "Ensure PLATFORM_API_BASE_URL=%s is on an internal/private network only. "
+        "This MUST NOT be enabled for external-facing deployments.",
+        PLATFORM_API_BASE_URL,
+    )
 if not PLATFORM_API_SECRET:
     raise ValueError(
         "SECURITY ERROR: PLATFORM_API_SECRET must be set in production.\n"
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
+PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+if not PLATFORM_TO_PORTAL_WEBHOOK_SECRET:
+    raise ValueError(
+        "SECURITY ERROR: PLATFORM_TO_PORTAL_WEBHOOK_SECRET must be set in production.\n"
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
 
 # 🔒 SECURITY: Validate all secrets meet production security requirements
 # This will raise ValueError with detailed instructions if any secret is too weak

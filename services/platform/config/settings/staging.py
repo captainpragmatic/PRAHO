@@ -38,6 +38,10 @@ if not _db_password or _db_password in {"changeme", "development_password", "pas
         "DB_PASSWORD must be set to a strong value in staging. Current value is missing or a known default."
     )
 
+_hmac_secret = _os.environ.get("HMAC_SECRET", "")
+if not _hmac_secret:
+    raise _ImproperlyConfigured("HMAC_SECRET must be set in staging for portal-to-platform auth.")
+
 # ===============================================================================
 # STAGING ENVIRONMENT CONFIGURATION
 # ===============================================================================
@@ -80,6 +84,8 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
+    "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.common.middleware.AuditMiddleware",
@@ -314,7 +320,8 @@ CACHES["default"].update(
 # RATE LIMITING (Staging - Relaxed)
 # ===============================================================================
 
-RATELIMIT_ENABLE = True
+RATELIMIT_ENABLE = True  # django-ratelimit library decorators (@ratelimit)
+RATELIMIT_ENABLED = True  # Custom middleware (PortalServiceHMACMiddleware, etc.)
 RATELIMIT_USE_CACHE = "default"
 
 # ===============================================================================

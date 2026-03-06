@@ -105,7 +105,11 @@ DATABASES: dict[str, dict[str, Any]] = {
 # Use DB-backed sessions in both dev and prod (simple, persistent across reloads)
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
-# Keep a local cache for general portal caching (not sessions)
+# Portal uses LocMemCache (per-process, in-memory).
+# Limitation: rate limit counters are NOT shared across gunicorn workers.
+# In multi-worker deployments, effective rate limits are multiplied by worker count.
+# This is an accepted tradeoff for the portal's stateless architecture (no database).
+# cache.add()/cache.incr() are still atomic within each worker process.
 if os.environ.get("DEBUG", "True").lower() == "true":
     CACHES = {
         "default": {
@@ -306,3 +310,13 @@ LOGGING = {
 # ===============================================================================
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ===============================================================================
+# TRUSTED PROXY CONFIGURATION
+# ===============================================================================
+
+# Aligned with platform setting name — both services use IPWARE_TRUSTED_PROXY_LIST
+# Trusted proxy CIDR list for get_safe_client_ip().
+# Set to your load balancer / CDN CIDR(s) in production.
+# Leave empty to use REMOTE_ADDR only (safe default for direct connections).
+IPWARE_TRUSTED_PROXY_LIST: list[str] = []

@@ -180,6 +180,7 @@
       '</svg></button>'
       : '';
 
+    // nosemgrep: insecure-document-method — message is escaped via escapeHtml() above
     toast.innerHTML =
       '<div class="flex items-center justify-between">' +
       '<div class="flex items-center">' +

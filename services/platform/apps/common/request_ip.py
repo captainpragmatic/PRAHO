@@ -104,22 +104,17 @@ def get_safe_client_ip(request: HttpRequest) -> str:
         # Not from trusted proxy, use REMOTE_ADDR (prevents spoofing)
         return remote_addr
 
-    # Connection is from trusted proxy, extract client IP from headers
+    # Connection is from trusted proxy — extract client IP using rightmost-trusted-hop.
+    # Proxies *append* to XFF, so rightmost entries are most trustworthy.
+    # Walking right-to-left and skipping trusted proxy IPs gives us the real client.
     try:
-        # Check X-Forwarded-For header (most common)
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-        if x_forwarded_for:
-            # Get first IP in chain (original client)
-            client_ip = x_forwarded_for.split(",")[0].strip()
-            if client_ip and _is_valid_ip(client_ip):
-                return str(client_ip)
-
-        # Check X-Real-IP header (alternative)
-        x_real_ip = request.META.get("HTTP_X_REAL_IP")
-        if x_real_ip:
-            client_ip = x_real_ip.split(",")[0].strip()
-            if client_ip and _is_valid_ip(client_ip):
-                return str(client_ip)
+        for header_name in ("HTTP_X_FORWARDED_FOR", "HTTP_X_REAL_IP"):
+            header_val = request.META.get(header_name)
+            if header_val:
+                candidates = [ip.strip() for ip in header_val.split(",")]
+                for candidate in reversed(candidates):
+                    if candidate and _is_valid_ip(candidate) and not _is_trusted_proxy(candidate, trusted_proxies):
+                        return str(candidate)
 
         # No valid proxy headers found, fallback to REMOTE_ADDR
         return remote_addr

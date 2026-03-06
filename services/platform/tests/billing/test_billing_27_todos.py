@@ -330,45 +330,11 @@ class ProcessRecurringBillingTests(TestCase):
         self.assertEqual(result["succeeded"], 2)
 
 
-class TriggerDunningOnFailureTests(TestCase):
-    """C4: Trigger dunning on payment failure"""
-
-    @patch("apps.billing.tasks.start_dunning_process_async")
-    @patch("apps.billing.payment_service.log_security_event")
-    @patch("apps.billing.payment_service.Payment")
-    def test_triggers_dunning(self, mock_pay_cls, mock_log, mock_dunning):
-        mock_invoice = MagicMock(id="i1", number="INV-1")
-        mock_payment = MagicMock(id="p1", status="pending", meta={}, invoice=mock_invoice)
-        mock_pay_cls.objects.get.return_value = mock_payment
-
-        event_data = {"object": {"id": "pi_1", "last_payment_error": {"message": "Declined"}}}
-        success, _msg = PaymentService._handle_stripe_payment_intent("payment_intent.payment_failed", event_data)
-        self.assertTrue(success)
-        mock_dunning.assert_called_once_with(str(mock_invoice.id))
-
-
-class TriggerOrderCompletionTests(TestCase):
-    """C3: Trigger order completion"""
-
-    @patch("apps.notifications.services.EmailService")
-    @patch("apps.billing.payment_service.log_security_event")
-    @patch("apps.billing.payment_service.Order")
-    @patch("apps.billing.payment_service.Payment")
-    def test_order_completed(self, mock_pay_cls, mock_order_cls, mock_log, mock_email):
-        mock_order = MagicMock(status="pending", order_number="ORD-1")
-        mock_order_cls.objects.get.return_value = mock_order
-
-        mock_payment = MagicMock(
-            id="p1", status="pending",
-            meta={"order_id": "o1"},
-            invoice=MagicMock(id="i1"),
-        )
-        mock_pay_cls.objects.get.return_value = mock_payment
-
-        event_data = {"object": {"id": "pi_1", "payment_method": "pm_1", "amount_received": 10000}}
-        success, _msg = PaymentService._handle_stripe_payment_intent("payment_intent.succeeded", event_data)
-        self.assertTrue(success)
-        self.assertEqual(mock_order.status, "completed")
+# TriggerDunningOnFailureTests and TriggerOrderCompletionTests REMOVED:
+# These tested PaymentService._handle_stripe_payment_intent() which was deleted.
+# Stripe webhook handling (including dunning and order completion triggers) is now in
+# apps.integrations.webhooks.stripe.StripeWebhookProcessor.
+# Tests for the new handler live in tests/integrations/test_stripe_webhook.py.
 
 
 # ===============================================================================

@@ -18,6 +18,20 @@ from django.utils.translation import gettext_lazy as _
 
 from .currency_models import Currency
 
+# All statuses from which a payment MUST NOT transition.
+# Includes "cancelled"/"canceled" for safety (Stripe uses "canceled", some legacy code uses "cancelled").
+TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
+    {
+        "succeeded",
+        "failed",
+        "refunded",
+        "partially_refunded",
+        "disputed",
+        "cancelled",
+        "canceled",
+    }
+)
+
 
 # TypedDict definitions for private tracking attributes
 class _PaymentSnapshot(TypedDict, total=False):
@@ -67,7 +81,7 @@ class Payment(models.Model):
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
 
     # Gateway/external tracking
-    gateway_txn_id = models.CharField(max_length=255, blank=True)
+    gateway_txn_id = models.CharField(max_length=255, blank=True, null=True, unique=True, default=None)
     reference_number = models.CharField(max_length=100, blank=True)
 
     # Idempotency for safe retries and deduplication
@@ -83,6 +97,7 @@ class Payment(models.Model):
     # Dates
     received_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     # Metadata
     meta = models.JSONField(default=dict, blank=True)
@@ -158,6 +173,21 @@ class Payment(models.Model):
     def is_stripe_payment(self) -> bool:
         """Check if this is a Stripe payment"""
         return self.payment_method == "stripe"
+
+    def apply_gateway_event(self, new_status: str, meta_update: dict | None = None) -> bool:
+        """Apply a gateway status transition with idempotency guard.
+
+        Must be called on a row locked with select_for_update() inside
+        transaction.atomic(). Returns True if status changed, False if
+        already in terminal state (idempotent no-op).
+        """
+        if self.status in TERMINAL_PAYMENT_STATUSES:
+            return False
+        self.status = new_status
+        if meta_update:
+            self.meta = {**(self.meta or {}), **meta_update}
+        self.save(update_fields=["status", "meta", "updated_at"])
+        return True
 
     @classmethod
     def generate_idempotency_key(cls, prefix: str = "pay") -> str:

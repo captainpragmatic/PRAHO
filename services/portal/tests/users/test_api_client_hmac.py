@@ -245,7 +245,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
              patch('secrets.token_urlsafe', return_value='fixed-nonce'):
             headers = self.client._generate_hmac_headers(method, path_unsorted, body)
 
-        # Build expected canonical
+        # Build expected canonical (timestamp is now integer)
         body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode('ascii')
         expected_canonical = "\n".join([
             method,
@@ -254,7 +254,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
             body_hash,
             self.test_portal_id,
             'fixed-nonce',
-            '1111.0',
+            '1111',
         ])
         expected_signature = hmac.new(
             self.test_secret.encode(), expected_canonical.encode(), hashlib.sha256
@@ -269,8 +269,8 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         headers = self.client._generate_hmac_headers("GET", "/test/", b'')
         timestamp = headers['X-Timestamp']
 
-        # Should preserve microsecond precision
-        self.assertEqual(timestamp, "1234567890.123456")
+        # Should be integer (no sub-second precision)
+        self.assertEqual(timestamp, "1234567890")
 
     def test_nonce_uniqueness(self):
         """Test that nonces are unique across multiple requests"""

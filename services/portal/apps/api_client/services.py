@@ -47,7 +47,8 @@ HMAC_TIMING_THRESHOLD = 0.002
 _HMAC_SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
 _HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-_HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
+# Int-only — platform validates with int(), floats would fail
+_HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
 
 
 class PlatformAPIError(Exception):
@@ -89,7 +90,7 @@ class PlatformAPIClient:
         """
         # Generate unique nonce and timestamp
         nonce = secrets.token_urlsafe(32)
-        timestamp = fixed_timestamp or str(time.time())
+        timestamp = fixed_timestamp or str(int(time.time()))
 
         # Compute body hash
         body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
@@ -147,7 +148,7 @@ class PlatformAPIClient:
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
         if "timestamp" not in payload:
-            payload["timestamp"] = time.time()
+            payload["timestamp"] = int(time.time())
 
         # Serialize to JSON first to ensure we get the exact representation
         body_bytes = json.dumps(payload).encode("utf-8")
@@ -200,7 +201,7 @@ class PlatformAPIClient:
         the legacy canonical format with pipe separators.
         """
         nonce = secrets.token_urlsafe(32)
-        timestamp = body_ts or str(time.time())
+        timestamp = body_ts or str(int(time.time()))
         body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
         path_with_query = self._normalized_path_with_query(url, params)
         body_text = body.decode("utf-8")

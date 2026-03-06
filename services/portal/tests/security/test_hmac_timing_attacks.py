@@ -448,7 +448,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'normal_signature_64_chars_' + 'a' * 32,
                             'X-Nonce': 'normal_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'normal_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'

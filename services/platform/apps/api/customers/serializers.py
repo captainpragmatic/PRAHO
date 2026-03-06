@@ -13,6 +13,7 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.users.models import CustomerMembership
@@ -153,7 +154,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
         user_agent = None
 
         if request:
-            request_ip = request.META.get("REMOTE_ADDR")
+            request_ip = get_safe_client_ip(request)
             user_agent = request.META.get("HTTP_USER_AGENT", "")
 
         try:

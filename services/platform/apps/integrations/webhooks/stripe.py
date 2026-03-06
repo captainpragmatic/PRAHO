@@ -1,5 +1,8 @@
+import hashlib
+import hmac
 import json
 import logging
+import time
 from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
@@ -160,22 +163,17 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {stripe_payment_id}")
                 return True, f"Payment not found (external): {stripe_payment_id}"
 
-            # IDEMPOTENCY CHECK: Skip if already in terminal state
-            if payment.status in ("succeeded", "refunded") and event_type == "payment_intent.succeeded":
-                logger.info(f"⏭️ Payment {payment.id} already succeeded, skipping duplicate webhook")
-                return True, f"Payment {payment.id} already processed (idempotent)"
-
             if event_type == "payment_intent.succeeded":
-                # Payment succeeded
-                payment.status = "succeeded"
-                payment.meta.update(
-                    {
-                        "stripe_payment_intent": stripe_payment_id,
-                        "stripe_payment_method": payment_intent.get("payment_method"),
-                        "stripe_amount_received": payment_intent.get("amount_received"),
-                    }
-                )
-                payment.save(update_fields=["status", "meta", "updated_at"])
+                meta_update = {
+                    "stripe_payment_intent": stripe_payment_id,
+                    "stripe_payment_method": payment_intent.get("payment_method"),
+                    "stripe_amount_received": payment_intent.get("amount_received"),
+                }
+                changed = payment.apply_gateway_event("succeeded", meta_update)
+
+                if not changed:
+                    logger.info(f"⏭️ Payment {payment.id} already in terminal state, skipping duplicate webhook")
+                    return True, f"Payment {payment.id} already processed (idempotent)"
 
                 # Update associated invoice if exists
                 if payment.invoice:
@@ -188,22 +186,17 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return True, f"Payment {payment.id} succeeded"
 
             elif event_type == "payment_intent.payment_failed":
-                # IDEMPOTENCY: Don't overwrite succeeded status with failed
-                if payment.status == "succeeded":
-                    logger.warning(f"⚠️ Ignoring failed event for already-succeeded payment {payment.id}")
-                    return True, f"Payment {payment.id} already succeeded, ignoring failure"
-
-                # Payment failed
                 failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
 
-                payment.status = "failed"
-                payment.meta.update(
-                    {
-                        "stripe_payment_intent": stripe_payment_id,
-                        "stripe_failure_reason": failure_reason,
-                    }
-                )
-                payment.save(update_fields=["status", "meta", "updated_at"])
+                meta_update = {
+                    "stripe_payment_intent": stripe_payment_id,
+                    "stripe_failure_reason": failure_reason,
+                }
+                changed = payment.apply_gateway_event("failed", meta_update)
+
+                if not changed:
+                    logger.warning(f"⚠️ Payment {payment.id} already in terminal state, ignoring failure event")
+                    return True, f"Payment {payment.id} already in terminal state, ignoring failure"
 
                 # Trigger dunning process if this was an invoice payment
                 if payment.invoice:
@@ -299,18 +292,16 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             # Update payment record with dispute flag
             try:
-                payment = Payment.objects.filter(gateway_txn_id=charge_id).first()
-                if payment:
-                    payment.status = "disputed"
-                    payment.meta.update(
-                        {
+                with transaction.atomic():
+                    payment = Payment.objects.select_for_update().filter(gateway_txn_id=charge_id).first()
+                    if payment:
+                        meta_update = {
                             "dispute_id": charge.get("dispute", {}).get("id"),
                             "dispute_reason": charge.get("dispute", {}).get("reason"),
                             "dispute_created_at": timezone.now().isoformat(),
                         }
-                    )
-                    payment.save(update_fields=["status", "meta"])
-                    logger.info(f"📝 Updated payment {payment.id} with dispute flag")
+                        payment.apply_gateway_event("disputed", meta_update)
+                        logger.info(f"📝 Updated payment {payment.id} with dispute flag")
             except Exception as update_error:
                 logger.error(f"⚠️ Failed to update payment with dispute: {update_error}")
 
@@ -386,13 +377,24 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Don't fail the webhook processing if Portal notification fails
 
     def _send_portal_webhook(self, data: dict[str, Any]) -> None:
-        """Send webhook notification to Portal service"""
+        """Send HMAC-signed webhook notification to Portal service."""
         try:
             # Get Portal webhook URL from settings
             portal_webhook_url = getattr(settings, "PORTAL_PAYMENT_WEBHOOK_URL", None)
             if not portal_webhook_url:
                 logger.warning("⚠️ PORTAL_PAYMENT_WEBHOOK_URL not configured - skipping notification")
                 return
+
+            webhook_secret = getattr(settings, "PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+            if not webhook_secret:
+                logger.error("🔥 PLATFORM_TO_PORTAL_WEBHOOK_SECRET not configured — cannot sign portal webhook")
+                return
+
+            # Compute HMAC-SHA256 signature: ts + "." + body (matches portal _verify_platform_webhook)
+            body = json.dumps(data, separators=(",", ":")).encode()
+            ts = str(int(time.time()))
+            payload = ts.encode() + b"." + body
+            signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
 
             # Send POST request to Portal via safe_request (internal service)
             from apps.common.outbound_http import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -404,8 +406,12 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 "POST",
                 portal_webhook_url,
                 policy=INTERNAL_SERVICE,
-                json=data,
-                headers={"Content-Type": "application/json"},
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Platform-Signature": signature,
+                    "X-Platform-Timestamp": ts,
+                },
             )
 
             if response.status_code == HTTPStatus.OK:

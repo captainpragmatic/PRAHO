@@ -110,7 +110,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'a' * 64,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -159,7 +159,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': malformed_sig,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -259,7 +259,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'a' * 64,
                             'X-Nonce': malformed_nonce,
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -315,7 +315,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': malformed_portal_id,  # Override with malformed ID
                             'X-Signature': 'a' * 64,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -369,7 +369,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'a' * 64,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -428,7 +428,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'a' * 64,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -482,7 +482,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'a' * 64,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'
@@ -532,7 +532,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                     'X-Portal-Id': self.portal_id,
                     'X-Signature': 'a' * 64,
                     'X-Nonce': 'test_nonce',
-                    'X-Timestamp': str(time.time()),
+                    'X-Timestamp': str(int(time.time())),
                     'X-Body-Hash': 'test_body_hash',
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
@@ -581,7 +581,7 @@ class HMACMalformedHeaderTestCase(SimpleTestCase):
                             'X-Portal-Id': self.portal_id,
                             'X-Signature': 'a' * 64,
                             'X-Nonce': 'test_nonce',
-                            'X-Timestamp': str(time.time()),
+                            'X-Timestamp': str(int(time.time())),
                             'X-Body-Hash': 'test_body_hash',
                             'Content-Type': 'application/json',
                             'Accept': 'application/json'

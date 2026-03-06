@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common.request_ip import get_safe_client_ip
 
 from .validators import OrderInputValidator
 
@@ -289,24 +290,8 @@ class CartRateLimiter:
 
     @staticmethod
     def get_client_ip(request: HttpRequest) -> str:
-        """Extract client IP address safely"""
-        # Check forwarded headers
-        forwarded_headers = [
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_REAL_IP",
-            "HTTP_CF_CONNECTING_IP",  # Cloudflare
-        ]
-
-        for header in forwarded_headers:
-            forwarded_ip = request.META.get(header)
-            if forwarded_ip:
-                # Take first IP if comma-separated
-                ip = forwarded_ip.split(",")[0].strip()
-                if ip and ip != "unknown":
-                    return cast(str, ip)
-
-        # Fall back to direct connection
-        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
+        """Extract client IP address safely using validated proxy trust list."""
+        return get_safe_client_ip(request)
 
 
 class GDPRCompliantCartSession:

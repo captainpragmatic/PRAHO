@@ -9,12 +9,13 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from typing import cast
 
 from django.contrib.auth import logout
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
+
+from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -245,22 +246,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""
-        # Check for forwarded IP headers
-        forwarded_headers = [
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_REAL_IP",
-            "HTTP_CF_CONNECTING_IP",
-        ]
-
-        for header in forwarded_headers:
-            forwarded_ip = request.META.get(header)
-            if forwarded_ip:
-                # Take first IP if comma-separated
-                ip = forwarded_ip.split(",")[0].strip()
-                if ip and ip != "unknown":
-                    return cast(str, ip)
-
-        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
+        return get_safe_client_ip(request)
 
 
 class SecurityHeadersMiddleware:

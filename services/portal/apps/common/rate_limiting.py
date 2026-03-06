@@ -4,11 +4,10 @@ DoS protection and brute force prevention for authentication endpoints.
 """
 
 import logging
-import os
 import random
 import time
 from collections.abc import Callable
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from django.conf import settings
 from django.contrib import messages
@@ -16,6 +15,8 @@ from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.utils.translation import gettext as _
+
+from apps.common.request_ip import get_safe_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +58,9 @@ class AuthenticationRateLimitMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with rate limiting for authentication endpoints"""
 
-        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
-        # Check Django settings first, fall back to env var for runtime override
-        ratelimit_setting = getattr(settings, "RATELIMIT_ENABLE", None)
-        if ratelimit_setting is not None:
-            if not ratelimit_setting:
-                return self.get_response(request)
-        elif os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+        # Respect RATELIMIT_ENABLED setting (disabled during E2E testing)
+        rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+        if not rate_limit_enabled:
             return self.get_response(request)
 
         # Check if this is an authentication endpoint
@@ -150,26 +147,38 @@ class AuthenticationRateLimitMiddleware:
                 {"error": error_msg, "retry_after": retry_after, "attempts_remaining": 0},
                 status=status_code,
             )
-        # Browser form submission — redirect back to login with error message
+        # Browser form submission — redirect to login page with error message.
+        # nosemgrep: open-redirect — LOGIN_URL is a server-side Django setting, not user input.
         messages.error(request, error_msg)
-        return redirect(request.path)
+        login_url = settings.LOGIN_URL if hasattr(settings, "LOGIN_URL") else "/login/"
+        return redirect(login_url)
 
     def _record_failed_attempt(self, request: HttpRequest) -> None:
         """🔒 Record failed authentication attempt for both IP and account"""
         try:
             client_ip = self._get_client_ip(request)
 
-            # Record IP-based attempt
+            # Atomic increment — prevents lost updates under concurrent requests.
+            # Pattern: cache.add() initializes if absent; cache.incr() atomically increments.
             ip_cache_key = f"auth_ip_attempts_{client_ip}"
-            ip_attempts = cache.get(ip_cache_key, 0) + 1
-            cache.set(ip_cache_key, ip_attempts, timeout=self.IP_WINDOW_SECONDS)
+            try:
+                cache.add(ip_cache_key, 0, timeout=self.IP_WINDOW_SECONDS)
+                ip_attempts = cache.incr(ip_cache_key)
+            except ValueError:
+                cache.set(ip_cache_key, 1, timeout=self.IP_WINDOW_SECONDS)
+                ip_attempts = 1
 
             # Record account-based attempt (if email provided)
             email = self._extract_email_from_request(request)
             if email:
                 account_cache_key = f"auth_account_attempts_{email}"
-                account_attempts = cache.get(account_cache_key, 0) + 1
-                cache.set(account_cache_key, account_attempts, timeout=self.ACCOUNT_WINDOW_SECONDS)
+                # Atomic increment — prevents lost updates under concurrent requests.
+                try:
+                    cache.add(account_cache_key, 0, timeout=self.ACCOUNT_WINDOW_SECONDS)
+                    account_attempts = cache.incr(account_cache_key)
+                except ValueError:
+                    cache.set(account_cache_key, 1, timeout=self.ACCOUNT_WINDOW_SECONDS)
+                    account_attempts = 1
 
                 logger.info(
                     f"🔒 [RateLimit] Failed auth recorded: IP {client_ip} ({ip_attempts}), "
@@ -232,23 +241,7 @@ class AuthenticationRateLimitMiddleware:
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""
-        # Check for forwarded IP headers (reverse proxy/CDN)
-        forwarded_headers = [
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_REAL_IP",
-            "HTTP_CF_CONNECTING_IP",  # Cloudflare
-            "HTTP_X_CLUSTER_CLIENT_IP",
-        ]
-
-        for header in forwarded_headers:
-            forwarded_ip = request.META.get(header)
-            if forwarded_ip:
-                # Take first IP if comma-separated
-                ip = forwarded_ip.split(",")[0].strip()
-                if ip and ip != "unknown":
-                    return cast(str, ip)
-
-        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
+        return get_safe_client_ip(request)
 
     def _uniform_response_delay(self, start_time: float) -> None:
         """
@@ -293,13 +286,9 @@ class APIRateLimitMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with general API rate limiting"""
 
-        # Respect RATELIMIT_ENABLE setting (disabled during E2E testing)
-        # Check Django settings first, fall back to env var for runtime override
-        ratelimit_setting = getattr(settings, "RATELIMIT_ENABLE", None)
-        if ratelimit_setting is not None:
-            if not ratelimit_setting:
-                return self.get_response(request)
-        elif os.environ.get("RATELIMIT_ENABLE", "true").lower() == "false":
+        # Respect RATELIMIT_ENABLED setting (disabled during E2E testing)
+        rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+        if not rate_limit_enabled:
             return self.get_response(request)
 
         # Check if this is an API endpoint
@@ -350,31 +339,27 @@ class APIRateLimitMiddleware:
                     status=429,
                 )
 
-            # Record the request
-            cache.set(burst_cache_key, burst_requests + 1, timeout=self.BURST_WINDOW_SECONDS)
-            cache.set(general_cache_key, general_requests + 1, timeout=self.GENERAL_WINDOW_SECONDS)
+            # Atomic increment — prevents lost updates under concurrent requests.
+            # Pattern: cache.add() initializes if absent; cache.incr() atomically increments.
+            try:
+                cache.add(burst_cache_key, 0, timeout=self.BURST_WINDOW_SECONDS)
+                cache.incr(burst_cache_key)
+            except ValueError:
+                cache.set(burst_cache_key, 1, timeout=self.BURST_WINDOW_SECONDS)
+
+            try:
+                cache.add(general_cache_key, 0, timeout=self.GENERAL_WINDOW_SECONDS)
+                cache.incr(general_cache_key)
+            except ValueError:
+                cache.set(general_cache_key, 1, timeout=self.GENERAL_WINDOW_SECONDS)
 
             return None  # Rate limits not exceeded
 
-        except Exception as e:
-            logger.error(f"🔥 [APIRateLimit] Rate limiting check failed: {e}")
-            # Don't block requests if rate limiting fails (fail open for API)
-            return None
+        except Exception:
+            # Fail-closed: matches AuthenticationRateLimitMiddleware behavior
+            logger.error("🔥 [API Rate Limit] Cache error — failing closed")
+            return JsonResponse({"error": "Service temporarily unavailable"}, status=503)
 
     def _get_client_ip(self, request: HttpRequest) -> str:
-        """Safely extract client IP address (same as auth middleware)"""
-        forwarded_headers = [
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_REAL_IP",
-            "HTTP_CF_CONNECTING_IP",
-            "HTTP_X_CLUSTER_CLIENT_IP",
-        ]
-
-        for header in forwarded_headers:
-            forwarded_ip = request.META.get(header)
-            if forwarded_ip:
-                ip = forwarded_ip.split(",")[0].strip()
-                if ip and ip != "unknown":
-                    return cast(str, ip)
-
-        return cast(str, request.META.get("REMOTE_ADDR", "0.0.0.0"))
+        """Safely extract client IP address"""
+        return get_safe_client_ip(request)

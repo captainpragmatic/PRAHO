@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import require_customer_authentication
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
@@ -224,7 +225,7 @@ def customer_create_api(request: HttpRequest) -> Response:
         # must not be able to act on arbitrary user_id from request body.
         if not getattr(request, "_portal_authenticated", False):
             logger.warning(
-                f"🔥 [API Security] customer_create_api called without HMAC auth from {request.META.get('REMOTE_ADDR')}"
+                f"🔥 [API Security] customer_create_api called without HMAC auth from {get_safe_client_ip(request)}"
             )
             return Response(
                 {"success": False, "error": "HMAC authentication required"}, status=status.HTTP_401_UNAUTHORIZED
