@@ -437,16 +437,17 @@ class UnsubscribeView(View):
     URL: /email/unsubscribe/
     """
 
-    def get(self, request: HttpRequest) -> HttpResponse:
-        """Handle unsubscribe link click."""
-        email = request.GET.get("email")
-        token = request.GET.get("token")
+    def get(self, request: HttpRequest, token_id: str = "") -> HttpResponse:
+        """Handle unsubscribe link click via opaque token in URL path."""
+        # Support both new path-based tokens and legacy query params
+        if not token_id:
+            token_id = request.GET.get("token", "")
         category = request.GET.get("category")
 
-        if not email or not token:
+        if not token_id:
             return HttpResponse("Missing parameters", status=400)
 
-        success = EmailPreferenceService.process_unsubscribe(email, token, category)
+        success = EmailPreferenceService.process_unsubscribe(token_id, category)
 
         if success:
             # Return a simple success page
@@ -481,21 +482,21 @@ class UnsubscribeView(View):
                 status=400,
             )
 
-    def post(self, request: HttpRequest) -> JsonResponse:
+    def post(self, request: HttpRequest, token_id: str = "") -> JsonResponse:
         """Handle unsubscribe API request."""
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-        email = data.get("email")
-        token = data.get("token")
+        if not token_id:
+            token_id = data.get("token", "")
         category = data.get("category")
 
-        if not email or not token:
+        if not token_id:
             return JsonResponse({"error": "Missing parameters"}, status=400)
 
-        success = EmailPreferenceService.process_unsubscribe(email, token, category)
+        success = EmailPreferenceService.process_unsubscribe(token_id, category)
 
         if success:
             return JsonResponse({"success": True, "message": "Successfully unsubscribed"})

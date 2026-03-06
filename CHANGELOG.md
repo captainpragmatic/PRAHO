@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **HKDF key derivation utility** (`apps/common/key_derivation.py`) — domain-separated cryptographic keys using HKDF-SHA256 (RFC 5869) for NIST SP 800-57 Section 5.2 key separation; 4 domains: `mfa-backup`, `unsubscribe`, `siem-hash-chain`, `sensitive-data-hash`; optional per-domain env var overrides; 8 unit tests
+- **`UnsubscribeToken` model** — opaque UUID-based unsubscribe tokens replacing hash-based tokens that contained email addresses (GDPR Art. 5(1)(c) data minimization); 30-day expiry with `consume()` and `is_expired()` methods; `cleanup_unsubscribe_tokens` management command; 18 unit tests
+- **Per-server Virtualmin credentials** — `api_username` and `_api_password_encrypted` fields on `Server` model with AES-256-GCM encryption; vault-first, server-model-second credential resolution
+- **`check_secret_key_usage.py` pre-commit hook** — blocks new direct `settings.SECRET_KEY` usage in application code; allows `config/settings/` and `# noqa: SECRET_KEY` annotation
+
+### Changed
+
+- **Unsubscribe URLs** no longer contain email addresses — opaque UUID tokens replace `sha256(email:template_key:SECRET_KEY)` pattern (GDPR Art. 5(1)(c) data minimization)
+- **`hash_sensitive_data()`** uses HKDF-derived key via HMAC-SHA256 instead of bare SHA-256 with `settings.SECRET_KEY` and `"default-salt"` fallback
+- **SIEM `HashChainManager`** uses domain-specific derived key (`siem-hash-chain`) instead of raw `settings.SECRET_KEY`
+- **Virtualmin credentials** vault-only resolution — env var fallback (`VIRTUALMIN_ADMIN_USER`/`VIRTUALMIN_ADMIN_PASSWORD`) removed in non-debug mode
+
+### Removed
+
+- **`BackupCodeService.hash_backup_code()`** — weak SHA-256 with SECRET_KEY pepper; production uses Argon2 via `apps.common.encryption.hash_backup_code`
+- **`BackupCodeService.verify_backup_code()`** — timing-unsafe `==` comparison (CWE-208); production uses Django's `check_password()` (constant-time)
+- **`BackupCodeService.generate_backup_codes()`** — unused XXXX-XXXX-XXXX format helper; production uses `generate_codes()` (8-digit + Argon2)
+- **`VIRTUALMIN_ADMIN_USER`/`VIRTUALMIN_ADMIN_PASSWORD`** env var support — credentials must come from vault or per-server encrypted fields
+
+### Security
+
+- **Fixed CWE-208** timing side-channel in backup code verification (removed bare `==` comparison)
+- **Fixed GDPR Art. 5(1)(c) violation** — unsubscribe URLs no longer contain PII (email addresses)
+- **NIST SP 800-57 Section 5.2** key separation compliance — all HMAC/hash operations use domain-specific HKDF-derived keys instead of raw SECRET_KEY
+- **NIST SP 800-108** KDF-derived keys — `hash_sensitive_data`, SIEM hash chain, and price sealing all use derived or dedicated keys
+
+### Added
+
 - **Token identity endpoint** (`GET /api/users/token/me/`) — correct token-auth introspection endpoint; the existing `verify_token` at `/api/users/token/verify/` requires HMAC customer context (portal-only) and returns 401 for CLI/API consumers; the new endpoint uses `TokenAuthentication` only, returns `email`, `staff_role`, and `token_created`; 3 tests added
 - **ADR-0031**: documents full state of API token authentication, 8 explicit gaps (no expiry, plaintext storage, one-token-per-user, broken verify endpoint), and rationale for `token_info` gap-1 fix
 - **Payment model**: `updated_at = DateTimeField(auto_now=True)` on `Payment` (migration 0018); aligns with Invoice, Customer, PaymentRetryPolicy
@@ -151,6 +179,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AUTHENTICATION.md` updated: correct `obtain_token` response (removed stale `is_staff` field), fix revoke verb `POST → DELETE`, replace fictional portal JS token-auth code with accurate description of HMAC-signed `api_client` flow; consumer→method table covering all 4 auth paths
 - `AUTHENTICATION.md` dual HMAC architecture section added, `DEPLOYMENT.md` env var tables updated, `SECURITY_CONFIGURATION.md` and `ARCHITECTURE.md` updated with data-flow diagram
+
+---
+
+## [0.25.0] - 2026-03-06
+
+### Changed
+
+- **BREAKING: Encryption Architecture Consolidation** — Consolidated 4 encryption systems into 2, both using AES-256-GCM (NIST SP 800-38D). See [ADR-0033](docs/ADRs/ADR-0033-encryption-architecture-consolidation.md).
+  - Replaced Fernet (AES-128-CBC) with AES-256-GCM for app-level encryption
+  - Replaced Django Signer (HMAC signing) with real AES-256-GCM encryption for settings, tokens, notifications
+  - Replaced Fernet with AES-256-GCM in CredentialVault
+  - Deleted dead `aes256_encryption.py` module (zero production imports)
+  - Deleted `settings/encryption.py` (was signing, not encryption)
+  - New key format: URL-safe base64-encoded 32 random bytes (replaces Fernet key format)
+
+### Fixed
+
+- **CredentialVault RBAC bypass** — Permission check was always returning `True`; now restricts to staff/superuser/system
+- **Plaintext fallback in e-Factura token storage** — Encryption failures now raise instead of silently storing plaintext
+- **Silent decrypt failure** — `decrypt_sensitive_data()` now raises `DecryptionError` instead of returning empty string
+- **Dict-vs-tuple bug in virtualmin_gateway.py** — `get_credential()` returns tuple, not dict
+- **Stale object bug in credential rotation** — `refresh_from_db()` after `store_credential()` prevents overwriting
+
+### Migration Notes
+
+All existing encrypted/signed data is invalidated. After deploying:
+1. Generate new AES-256 keys for `DJANGO_ENCRYPTION_KEY` and `CREDENTIAL_VAULT_MASTER_KEY`
+2. Run `python manage.py migrate` to clear old encrypted data
+3. Run `python manage.py post_encryption_upgrade` to see re-provisioning status
+4. Users must re-enroll in 2FA
+5. Re-enter server credentials, API keys, and re-authenticate OAuth integrations
 
 ---
 

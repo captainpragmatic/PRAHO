@@ -45,9 +45,10 @@ class SecureAPIClient:
     ) -> tuple[bool, dict[str, Any]]:
         """🔒 Make secure HTTP API call with timeout and retry logic"""
         full_url = f"{registrar.api_endpoint.rstrip('/')}{endpoint}"
-        api_key, api_secret = registrar.get_api_credentials()
+        api_key, _api_secret = registrar.get_api_credentials()
+        api_secret_decrypted = registrar.get_decrypted_api_secret()
 
-        headers = SecureAPIClient._build_headers(api_key, api_secret)
+        headers = SecureAPIClient._build_headers(api_key, api_secret_decrypted)
         timeouts = get_api_timeouts()
         max_retries = timeouts.get("MAX_RETRIES", 3)
 

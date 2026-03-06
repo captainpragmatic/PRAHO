@@ -171,7 +171,9 @@ class RegistrarWebhookView(View):
             # Update domain status and details from registrar
             domain.status = "active"
             domain.registrar_domain_id = webhook_data.get("registrar_domain_id", domain.registrar_domain_id)
-            domain.epp_code = webhook_data.get("epp_code", domain.epp_code)
+            raw_epp = webhook_data.get("epp_code")
+            if raw_epp:
+                domain.set_encrypted_epp_code(raw_epp)
 
             # Update expiration date if provided
             expires_at = webhook_data.get("expires_at")
@@ -249,7 +251,7 @@ class RegistrarWebhookView(View):
             if "registrar_domain_id" in webhook_data:
                 domain.registrar_domain_id = webhook_data["registrar_domain_id"]
             if "epp_code" in webhook_data:
-                domain.epp_code = webhook_data["epp_code"]
+                domain.set_encrypted_epp_code(webhook_data["epp_code"])
 
             domain.save()
 

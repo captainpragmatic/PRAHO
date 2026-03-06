@@ -54,6 +54,25 @@ if not _webhook_secret:
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 
+_encryption_key = os.environ.get("DJANGO_ENCRYPTION_KEY", "")
+if not _encryption_key:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "DJANGO_ENCRYPTION_KEY must be set in production for AES-256-GCM encryption (2FA, sensitive data). "
+        'Generate one with: python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
+    )
+
+_vault_key = os.environ.get("CREDENTIAL_VAULT_MASTER_KEY", "")
+if not _vault_key:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "CREDENTIAL_VAULT_MASTER_KEY must be set in production for credential vault encryption. "
+        'Generate one with: python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
+    )
+
+
 # ===============================================================================
 # PRODUCTION FLAGS
 # ===============================================================================
@@ -438,6 +457,15 @@ SIEM_CONFIG = {
 
 # Log directory for file-based SIEM integration
 SIEM_LOG_DIR = os.environ.get("SIEM_LOG_DIR", "/var/log/praho/siem")
+
+if SIEM_CONFIG.get("ENABLE_HASH_CHAIN") and not os.environ.get("SIEM_HASH_CHAIN_SECRET"):
+    import warnings
+
+    warnings.warn(
+        "SIEM_HASH_CHAIN_SECRET is not set. Hash chain will use HKDF-derived key from SECRET_KEY. "
+        "For production, set a dedicated SIEM_HASH_CHAIN_SECRET (>= 32 chars).",
+        stacklevel=1,
+    )
 
 # ===============================================================================
 # ENHANCED AUDIT LOGGING CONFIGURATION 📋

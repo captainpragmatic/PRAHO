@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from apps.common.encryption import decrypt_sensitive_data, is_encrypted
 from apps.domains.forms import RegistrarForm
 from apps.domains.models import Registrar, TLD, Domain
 from apps.domains.services import DomainLifecycleService
@@ -51,11 +52,22 @@ class RegistrarFormSecurityTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         instance = form.save()
 
-        # Secrets should be stored encrypted for api key/secret (not equal to plaintext)
-        self.assertNotEqual(instance.api_key, "PLAINTEXT_KEY")
-        self.assertNotEqual(instance.api_secret, "PLAINTEXT_SECRET")
-        # webhook_secret is write-only but currently not encrypted in model; value should be set
-        self.assertEqual(instance.webhook_secret, "whsec_123")
+        # All secrets should be stored encrypted (AES-256-GCM with "aes:" prefix)
+        self.assertTrue(is_encrypted(instance.api_key), "api_key should be AES-encrypted")
+        self.assertTrue(is_encrypted(instance.api_secret), "api_secret should be AES-encrypted")
+        self.assertTrue(is_encrypted(instance.webhook_secret), "webhook_secret should be AES-encrypted")
+
+        # Verify round-trip: decrypt should return original plaintext
+        self.assertEqual(decrypt_sensitive_data(instance.api_key), "PLAINTEXT_KEY")
+        self.assertEqual(decrypt_sensitive_data(instance.api_secret), "PLAINTEXT_SECRET")
+        self.assertEqual(decrypt_sensitive_data(instance.webhook_secret), "whsec_123")
+
+        # Verify model accessor methods also decrypt correctly
+        username, key = instance.get_api_credentials()
+        self.assertEqual(username, "apiuser")
+        self.assertEqual(key, "PLAINTEXT_KEY")
+        self.assertEqual(instance.get_decrypted_api_secret(), "PLAINTEXT_SECRET")
+        self.assertEqual(instance.get_decrypted_webhook_secret(), "whsec_123")
 
     def test_nameservers_validation(self) -> None:
         bad = RegistrarForm(

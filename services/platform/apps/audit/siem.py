@@ -639,7 +639,12 @@ class HashChainManager:
     LOCK_KEY = "siem_hash_chain_lock"
 
     def __init__(self, secret_key: str | None = None):
-        self.secret_key = secret_key or settings.SECRET_KEY
+        if secret_key:
+            self.secret_key = secret_key
+        else:
+            from apps.common.key_derivation import get_key_hex  # noqa: PLC0415
+
+            self.secret_key = get_key_hex("siem-hash-chain")
         self._local_sequence = 0
         self._local_hash = ""
 

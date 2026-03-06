@@ -86,7 +86,7 @@ apps/users/mfa.py
 ## Implementation Details
 
 ### Security Measures
-- **Encryption**: Fernet (AES-256) for TOTP secrets
+- **Encryption**: AES-256-GCM for TOTP secrets
 - **Hashing**: Argon2 for backup codes
 - **Rate Limiting**: Redis-based with configurable windows
 - **Time Windows**: ±30 seconds tolerance for clock drift
@@ -135,4 +135,4 @@ Reconsider this decision if:
 ## Related Documents
 - `apps/users/mfa.py` - Custom MFA implementation
 - `tests/integration-tests/test_mfa_security.py` - Security test suite
-- `docs/2FA-SETUP-AND-KEY-MANAGEMENT.md` - Setup documentation
+- `docs/security/MFA-SETUP-AND-KEY-MANAGEMENT.md` - Setup documentation

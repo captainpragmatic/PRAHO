@@ -204,7 +204,7 @@ def _check_efactura() -> SubsystemStatus:
 
 
 def _check_encryption() -> SubsystemStatus:
-    """Check encryption key configuration."""
+    """Check encryption key configuration (AES-256-GCM)."""
     encryption_key = os.environ.get("DJANGO_ENCRYPTION_KEY", "")
 
     if not encryption_key:
@@ -215,28 +215,34 @@ def _check_encryption() -> SubsystemStatus:
             detail="Set DJANGO_ENCRYPTION_KEY — TOTP secrets stored unencrypted",
         )
 
-    # Validate Fernet key format
+    # Validate AES-256 key format (32 bytes, URL-safe base64)
     try:
-        from cryptography.fernet import Fernet  # noqa: PLC0415
+        import base64  # noqa: PLC0415
 
-        Fernet(encryption_key.encode())
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: PLC0415
+
+        expected_key_length = 32
+        key_bytes = base64.urlsafe_b64decode(encryption_key.encode())
+        if len(key_bytes) != expected_key_length:
+            raise ValueError(f"Key must be 32 bytes, got {len(key_bytes)}")
+        AESGCM(key_bytes)
         return SubsystemStatus(
             name="Encryption",
             level=StatusLevel.GREEN,
             message="Active",
-            detail="Fernet key valid",
+            detail="AES-256-GCM key valid",
         )
     except Exception:
         return SubsystemStatus(
             name="Encryption",
             level=StatusLevel.RED,
             message="Invalid key",
-            detail="DJANGO_ENCRYPTION_KEY is not a valid Fernet key",
+            detail="DJANGO_ENCRYPTION_KEY is not a valid AES-256 key (32 bytes, URL-safe base64)",
         )
 
 
 def _check_credential_vault() -> SubsystemStatus:
-    """Check credential vault configuration."""
+    """Check credential vault configuration (AES-256-GCM)."""
     master_key = getattr(settings, "CREDENTIAL_VAULT_MASTER_KEY", None)
     enabled = getattr(settings, "CREDENTIAL_VAULT_ENABLED", False)
 
@@ -256,23 +262,29 @@ def _check_credential_vault() -> SubsystemStatus:
             detail="Set CREDENTIAL_VAULT_MASTER_KEY — credentials stored unencrypted",
         )
 
-    # Validate Fernet key format
+    # Validate AES-256 key format (32 bytes, URL-safe base64)
     try:
-        from cryptography.fernet import Fernet  # noqa: PLC0415
+        import base64  # noqa: PLC0415
 
-        Fernet(master_key.encode())
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: PLC0415
+
+        expected_key_length = 32
+        key_bytes = base64.urlsafe_b64decode(master_key.encode())
+        if len(key_bytes) != expected_key_length:
+            raise ValueError(f"Key must be 32 bytes, got {len(key_bytes)}")
+        AESGCM(key_bytes)
         return SubsystemStatus(
             name="Credential Vault",
             level=StatusLevel.GREEN,
             message="Active",
-            detail="Master key valid",
+            detail="AES-256-GCM master key valid",
         )
     except Exception:
         return SubsystemStatus(
             name="Credential Vault",
             level=StatusLevel.RED,
             message="Invalid master key",
-            detail="CREDENTIAL_VAULT_MASTER_KEY is not a valid Fernet key",
+            detail="CREDENTIAL_VAULT_MASTER_KEY is not a valid AES-256 key (32 bytes, URL-safe base64)",
         )
 
 

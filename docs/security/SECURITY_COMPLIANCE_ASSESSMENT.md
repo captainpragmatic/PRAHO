@@ -1,330 +1,487 @@
 # PRAHO Security & Compliance Assessment
 
-**Assessment Date:** 2025-12-27
-**Branch:** `claude/security-compliance-implementation-8WNIQ`
+**Assessment Date:** 2026-03-06
+**Platform Version:** 0.13.0 (alpha)
+**Branch:** `feat/encryption-consolidation-plan`
 
 ---
 
 ## Executive Summary
 
-This document provides a comprehensive assessment of PRAHO's security and compliance posture against industry-standard requirements. The platform demonstrates **strong security fundamentals** with room for enhancement in specific areas.
+Comprehensive assessment of PRAHO's security and compliance posture against industry standards. References use `class::method` or `ClassName` notation instead of line numbers to survive refactoring.
 
 | Category | Coverage | Status |
 |----------|----------|--------|
-| Access Control & Authentication | 85% | Strong |
+| Access Control & Authentication | 88% | Strong |
 | Input Validation & Protection | 80% | Strong |
-| Transaction Security | 75% | Good |
-| Monitoring & Logging | 90% | Excellent |
-| Configuration Management | 70% | Good |
-| Security Testing | 60% | Needs Improvement |
+| Transaction Security | 80% | Strong |
+| Monitoring & Logging | 85% | Strong |
+| Security Testing & SAST | 78% | Good |
+| Configuration & Infrastructure | 80% | Strong |
+| Encryption & Secrets | 95% | Excellent |
 
 ---
 
 ## 1. Access Control & Authentication
 
-### 1.1 Multi-Factor Authentication (MFA) ✅ IMPLEMENTED
+### 1.1 Multi-Factor Authentication (MFA)
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| TOTP (Authenticator Apps) | ✅ Full | `apps/users/mfa.py:177-298` |
-| Backup Codes | ✅ Full | `apps/users/mfa.py:305-392` |
-| WebAuthn/Passkeys | ⚠️ Framework | `apps/users/mfa.py:88-528` |
-| SMS 2FA | ❌ Planned | Referenced in `mfa.py:10` |
-| Rate Limiting (5 attempts/5min) | ✅ Full | `apps/users/mfa.py:947` |
-| Audit Logging for MFA | ✅ Full | Throughout mfa.py |
+| TOTP (Authenticator Apps) | Implemented | `apps/users/mfa.py` — `TOTPService` class |
+| Backup Codes | Implemented | `apps/users/mfa.py` — `BackupCodeService` class |
+| WebAuthn/Passkeys | Framework | `apps/users/mfa.py` — `WebAuthnService` class, `WebAuthnCredential` model |
+| SMS 2FA | Not implemented | Referenced in `mfa.py` imports |
+| Rate Limiting (MFA) | Implemented | `apps/users/mfa.py` — `_check_rate_limit()`, 5 attempts per 5 minutes via cache |
+| Audit Logging for MFA | Implemented | Throughout `mfa.py`, 180+ audit event types in `apps/audit/models.py` |
 
-**Implementation Details:**
+**Implementation details:**
 - TOTP with 30-second time windows and clock drift tolerance
-- HMAC-SHA256 hashed backup codes with one-time use enforcement
+- Argon2-hashed backup codes (8-digit, max 10 per user, via Django `make_password`) with one-time use enforcement
 - Replay attack protection for TOTP tokens
+- WebAuthn signature counter replay detection
 - QR code generation for authenticator app setup
 
-### 1.2 Role-Based Access Control (RBAC) ⚠️ PARTIAL
+### 1.2 Role-Based Access Control (RBAC)
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Staff Roles | ✅ Implemented | `apps/users/models.py:68-73` |
-| Role-based Decorators | ✅ Implemented | `apps/common/decorators.py` |
-| Customer Memberships | ✅ Implemented | `apps/users/models.py:95-101` |
-| Principle of Least Privilege | ⚠️ Manual | Ad-hoc implementation |
-| Permission Framework | ❌ Not formalized | Uses Django's basic perms |
+| Staff Roles | Implemented | `apps/users/models.py` — `STAFF_ROLE_CHOICES`: admin, support, billing, manager |
+| Role-based Decorators | Implemented | `apps/common/decorators.py` — 7 decorators (see below) |
+| Customer Memberships | Implemented | `apps/users/models.py` — `CustomerMembership` model with roles: owner, billing, tech, viewer |
+| Infrastructure RBAC | Implemented | `apps/infrastructure/permissions.py` |
+| Formal Permission Matrix | Partial | Uses Django's basic perms + custom decorators, no ABAC |
 
-**Current Roles:**
-- `admin`, `support`, `billing`, `manager` (staff)
-- Customer roles via `CustomerMembership` model
+**Security decorators** in `apps/common/decorators.py`:
 
-**Gap:** No formal permission matrix or attribute-based access control (ABAC).
+| Decorator | Access Rule |
+|-----------|------------|
+| `staff_required` | `is_staff=True` or `staff_role` set |
+| `admin_required` | `staff_role='admin'` or `is_superuser` |
+| `staff_required_strict` | Same as `staff_required` but returns 403 instead of redirect |
+| `billing_staff_required` | `staff_role` in `["admin", "billing", "manager"]` or `is_superuser` |
+| `support_staff_required` | `staff_role` in `["admin", "support", "manager"]` or `is_superuser` |
+| `customer_or_staff_required` | Staff or `is_customer_user=True` |
+| `rate_limit` | Configurable requests_per_minute with per-user and anonymous blocking |
 
-### 1.3 Account Security ✅ IMPLEMENTED
+### 1.3 Account Security
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Password Hashing (Argon2) | ✅ Full | `config/settings/base.py:136-141` |
-| Failed Login Tracking | ✅ Full | `apps/users/models.py:110-111` |
-| Account Lockout | ✅ Full | `apps/users/views.py`, `apps/api/users/views.py` (all 3 credential endpoints) |
-| Session Security | ✅ Full | Middleware + SessionSecurityService |
-| Login Rate Limiting | ✅ Full | `apps/users/views.py:81` (10/m, 5/m per email) |
+| Password Hashing (Argon2) | Implemented | `config/settings/base.py` — `PASSWORD_HASHERS` (Argon2 primary, PBKDF2/BCrypt fallbacks) |
+| Failed Login Tracking | Implemented | `apps/users/models.py` — `failed_login_attempts`, `account_locked_until` fields |
+| Progressive Account Lockout | Implemented | Lockout escalation: 5 → 15 → 30 → 60 → 120 → 240 minutes |
+| Session Security | Implemented | Middleware + `SessionSecurityService` |
+| Login Rate Limiting | Implemented | `apps/users/views.py` — 10/min global, 5/min per email |
+
+### 1.4 Rate Limiting
+
+**Location:** `apps/common/performance/rate_limiting.py`
+
+| Throttle Class | Scope | Rate |
+|---------------|-------|------|
+| `CustomerRateThrottle` | Per customer tier | Basic: 100/min, Professional: 500/min, Enterprise: 2000/min |
+| `BurstRateThrottle` | Global burst | 30 requests per 10 seconds |
+| `SustainedRateThrottle` | Global sustained | 1000 requests per hour |
+| `ServiceRateThrottle` | Token bucket | Capacity: 100, refill: 10 tokens/sec, weighted by operation cost |
+| `AnonymousRateThrottle` | Unauthenticated | 20 requests per minute |
+| `WriteOperationThrottle` | POST/PUT/PATCH/DELETE | 60 per minute |
+| `EndpointThrottle` | Per-endpoint | login: 5/min, 2fa_verify: 10/min, provision: 10/min |
+
+See also: [ADR-0030](../ADRs/ADR-0030-rate-limiting-architecture.md)
 
 ---
 
 ## 2. Input Validation & Protection
 
-### 2.1 Content Security Policy (CSP) ✅ IMPLEMENTED
+### 2.1 Content Security Policy (CSP)
 
-**Location:** `apps/common/middleware.py:59-93`
+**Location:** `apps/common/middleware.py` — `SecurityHeadersMiddleware` class
 
 ```
 default-src 'self'
 script-src 'self' 'unsafe-inline' 'unsafe-eval' unpkg.com cdn.tailwindcss.com
 style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com
+font-src 'self' fonts.gstatic.com
+img-src 'self' data:
 object-src 'none'
 form-action 'self'
 ```
 
 **Gap:** `'unsafe-inline'` and `'unsafe-eval'` should be replaced with nonces for production hardening.
 
-### 2.2 Subresource Integrity (SRI) ❌ NOT IMPLEMENTED
+### 2.2 Security Headers
 
-**Status:** No SRI hashes found for third-party CDN resources.
+**Location:** `apps/common/middleware.py` — `SecurityHeadersMiddleware`
+
+| Header | Value | Status |
+|--------|-------|--------|
+| `X-Content-Type-Options` | `nosniff` | Implemented |
+| `X-Frame-Options` | `DENY` | Implemented |
+| `X-XSS-Protection` | `1; mode=block` | Implemented |
+| `Referrer-Policy` | Set | Implemented |
+| `Cross-Origin-Opener-Policy` | Set | Implemented |
+| `X-Request-ID` | UUID per request | Implemented (`RequestIDMiddleware`) |
+
+**Production hardening** in `config/settings/prod.py`:
+
+| Setting | Value |
+|---------|-------|
+| `SECURE_SSL_REDIRECT` | `True` |
+| `SESSION_COOKIE_SECURE` | `True` |
+| `CSRF_COOKIE_SECURE` | `True` |
+| `CSRF_COOKIE_HTTPONLY` | `True` (in `base.py`) |
+| `SECURE_HSTS_SECONDS` | 31536000 (1 year) |
+| `SECURE_HSTS_INCLUDE_SUBDOMAINS` | `True` |
+
+### 2.3 Subresource Integrity (SRI)
+
+**Status:** Not implemented. No SRI hashes for third-party CDN resources.
 
 **Risk:** Third-party scripts could be modified if CDNs are compromised.
 
-### 2.3 SQL Injection Prevention ✅ IMPLEMENTED
+### 2.4 SQL Injection Prevention
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Django ORM | ✅ Full | All database access via ORM |
-| Raw SQL Queries | ✅ None found | No direct SQL detected |
-| Parameterized Queries | ✅ Automatic | Django ORM handles this |
+| Django ORM | Implemented | All database access via ORM |
+| Raw SQL Queries | None found | No direct SQL detected |
+| Parameterized Queries | Automatic | Django ORM handles this |
 
-### 2.4 XSS Protection ✅ IMPLEMENTED
+### 2.5 XSS Protection
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| `X-XSS-Protection` | ✅ Full | `config/settings/base.py:224` |
-| `X-Content-Type-Options: nosniff` | ✅ Full | `config/settings/base.py:225` |
-| `X-Frame-Options: DENY` | ✅ Full | `config/settings/base.py:226` |
-| Template Auto-escaping | ✅ Full | Django default |
-| Input Validation | ✅ Full | `apps/common/validators.py` |
+| Feature | Status |
+|---------|--------|
+| Security headers | Implemented (see 2.2) |
+| Template auto-escaping | Implemented (Django default) |
+| Suspicious pattern detection | Implemented — `apps/common/validators.py` — `SUSPICIOUS_PATTERNS` list |
 
-**Additional Protection:** Suspicious pattern detection for XSS payloads in `validators.py:44-74`.
+**Patterns checked:** XSS (script tags, `javascript:`, event handlers), SQL injection (union/select/insert/update/delete/drop, comments), code execution (`eval()`, `exec()`), control characters.
 
-### 2.5 CSRF Protection ✅ IMPLEMENTED
+### 2.6 CSRF Protection
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| CSRF Middleware | ✅ Full | Django default |
-| `CSRF_COOKIE_HTTPONLY` | ✅ Full | `config/settings/base.py:214` |
-| `CSRF_COOKIE_SECURE` | ✅ Prod | `config/settings/prod.py:72` |
-| `SameSite=Lax` | ✅ Full | `config/settings/prod.py:74` |
+| CSRF Middleware | Implemented | Django default |
+| `CSRF_COOKIE_HTTPONLY` | Implemented | `config/settings/base.py` |
+| `CSRF_COOKIE_SECURE` | Implemented | `config/settings/prod.py` |
+| `SameSite=Lax` | Implemented | `config/settings/prod.py` |
 
-### 2.6 Command Injection Prevention ✅ IMPLEMENTED
-
-**Location:** `apps/common/validators.py:44-74`
-
-- Suspicious pattern detection for command execution attempts
-- Input size limits enforced
-- Timing-safe validators to prevent timing attacks
-
-### 2.7 File Upload Validation ⚠️ PARTIAL
+### 2.7 File Upload Validation
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Max File Size | ✅ 10MB | `config/settings/base.py:228-231` |
-| File Permissions | ✅ 0o644 | `config/settings/base.py:231` |
-| MIME Type Validation | ❌ Missing | Not implemented |
-| Content Scanning | ❌ Missing | No malware scanning |
-| Extension Whitelist | ❌ Missing | Not formalized |
+| Max File Size | Implemented (10MB) | `config/settings/base.py` — `FILE_UPLOAD_MAX_MEMORY_SIZE` |
+| File Permissions | Implemented (0o644) | `config/settings/base.py` — `FILE_UPLOAD_PERMISSIONS` |
+| Max Data Upload | Implemented (10MB) | `config/settings/base.py` — `DATA_UPLOAD_MAX_MEMORY_SIZE` |
+| MIME Type Validation | Not implemented | |
+| Content Scanning | Not implemented | No malware scanning |
+| Extension Whitelist | Not implemented | Not formalized |
 
 ---
 
-## 3. Secure Development Practices
+## 3. Encryption & Secrets Management
 
-### 3.1 Security Testing in CI/CD ⚠️ PARTIAL
+### 3.1 Encryption at Rest
+
+Both systems use **AES-256-GCM** (NIST SP 800-38D). For full standards mapping, see [ADR-0033](../ADRs/ADR-0033-encryption-architecture-consolidation.md).
+
+| System | Key | Purpose |
+|--------|-----|---------|
+| App-level encryption | `DJANGO_ENCRYPTION_KEY` | Model field data: 2FA secrets, settings, registrar credentials, EPP codes, OAuth tokens, notifications, provisioning passwords, server management credentials |
+| Credential vault | `CREDENTIAL_VAULT_MASTER_KEY` | Infrastructure identity: VirtualMin root creds, cloud provider tokens (HCloud), SSH keys, provider registration tokens |
+
+**Wire format:** `"aes:" + base64url(NONCE[12B] + CIPHERTEXT + TAG[16B])`
+**Key format:** URL-safe base64-encoded 32 random bytes
+**Fail mode:** `ImproperlyConfigured` if keys missing (fail-closed)
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Unit Tests | ✅ Full | `.github/workflows/platform.yml` |
-| Security Test Suite | ✅ Full | `tests/security/*.py` (9 files) |
-| Type Checking (mypy) | ✅ Full | `.github/workflows/platform.yml:78-82` |
-| Pre-commit Hooks | ✅ Full | `.pre-commit-config.yaml` |
+| AES-256-GCM encryption | Implemented | `apps/common/encryption.py` |
+| Credential vault with audit | Implemented | `apps/common/credential_vault.py` |
+| Key separation (blast radius) | Implemented | Two independent keys |
+| Environment variable storage | Implemented | All secrets via env vars |
+| Secret key validation | Implemented | `config/settings/base.py` — `validate_production_secret_key()` |
+| Vault integrity self-test | Implemented | `CredentialVault._verify_vault_integrity()` on init |
+| Credential expiration | Implemented | Default 30 days, configurable |
+| Credential rotation | Implemented | `CredentialVault.rotate_credential()` with rollback |
+| Credential access audit log | Implemented | `CredentialAccessLog` model, 365-day retention |
+| HKDF domain key separation | Implemented | `apps/common/key_derivation.py` — RFC 5869 HKDF-SHA256 with NIST SP 800-57 §5.2 domain separation |
 
-### 3.2 Static Application Security Testing (SAST) ❌ NOT IMPLEMENTED
+### 3.2 Password & Backup Code Security
 
-| Tool | Status | Notes |
-|------|--------|-------|
-| Bandit | ❌ Missing | Python security linter |
-| Semgrep | ❌ Missing | Multi-language SAST |
-| Safety | ❌ Missing | Dependency vulnerability scanner |
-| Snyk | ❌ Missing | SCA and SAST |
-| Trivy | ❌ Missing | Container scanning |
-
-**Current:** Hardcoded credentials detection via Ruff (S105, S106, S107, S108) in pre-commit.
+| Feature | Status |
+|---------|--------|
+| Argon2id hashing (primary) | Implemented |
+| PBKDF2/BCrypt fallbacks | Implemented |
+| Backup codes: Django password hashing | Implemented |
+| No plaintext secret storage | Verified (audit complete) |
 
 ---
 
 ## 4. Transaction Security
 
-### 4.1 Database Transactions (ACID) ✅ IMPLEMENTED
+### 4.1 Database Transactions (ACID)
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Django Transactions | ✅ Full | Used throughout |
-| Atomic Operations | ✅ Full | `@transaction.atomic` decorators |
-| Refund Service | ✅ Full | `apps/billing/refund_service.py` |
+| Django Transactions | Implemented | Used throughout |
+| Atomic Operations | Implemented | `@transaction.atomic` decorators |
+| Refund Service | Implemented | `apps/billing/refund_service.py` |
 
-### 4.2 Idempotency Keys ✅ IMPLEMENTED
+### 4.2 Idempotency Keys
 
-**Location:** `apps/provisioning/security_utils.py:29`
+**Location:** `apps/provisioning/security_utils.py` — `IdempotencyManager` class
 
-- Idempotency TTL: 1 hour
+- Idempotency TTL: 1 hour (`IDEMPOTENCY_KEY_TTL = 3600`)
+- Methods: `generate_key()`, `check_and_set()`, `complete()`, `clear()`
 - Used in provisioning and payment operations
-- Prevents duplicate operations
 
-### 4.3 Webhook Verification ✅ IMPLEMENTED
+### 4.3 Webhook Verification
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| HMAC Signature Verification | ✅ Full | `apps/integrations/webhooks/base.py` |
-| Deduplication | ✅ Full | `WebhookEvent` model with unique constraint |
-| Retry Mechanism | ✅ Full | `apps/integrations/models.py:87-89` |
-| Status Tracking | ✅ Full | pending/processed/failed/skipped |
+**Location:** `apps/integrations/webhooks/base.py`
 
-### 4.4 Audit Trails for Financial Transactions ✅ IMPLEMENTED
+| Feature | Status | Method |
+|---------|--------|--------|
+| HMAC Signature Verification | Implemented | `verify_hmac_signature()` — SHA-256 with `hmac.compare_digest()` (timing-safe) |
+| Stripe Signature Verification | Implemented | `verify_stripe_signature()` — timestamp validation (300s tolerance) + HMAC-SHA256 |
+| Deduplication (in-memory) | Implemented | `_check_duplicates()` preliminary check |
+| Deduplication (DB-level) | Implemented | `unique_together = (("source", "event_id"))` on `WebhookEvent` model |
+| Race condition handling | Implemented | `IntegrityError` caught on concurrent inserts, treated as duplicate |
+| Status Tracking | Implemented | pending / processed / failed / skipped |
+| Retry Mechanism | Implemented | `next_retry_at` field with indexed retry queue |
 
-**Location:** `apps/audit/models.py` (200+ event types)
+**Webhook sources:** Stripe, PayPal, VirtualMin, cPanel, Namecheap, GoDaddy, BT Bank, BCR Bank, e-Factura, other.
 
+### 4.4 Audit Trails for Financial Transactions
+
+**Location:** `apps/audit/models.py` — `AuditEvent` model
+
+- **180+ event types** across 10 categories
 - Complete payment lifecycle tracking
 - Refund and chargeback logging
 - Invoice access and download tracking
 - Tax calculation auditing
 
-### 4.5 Fraud Detection ⚠️ BASIC
+**Categories:** Authentication, Authorization, Account Management, Data Protection, Security Events, Business Operations, Compliance, System Admin, Integration, Infrastructure.
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| Suspicious Activity Logging | ✅ Full | `apps/audit/models.py:208` |
-| Brute Force Detection | ✅ Full | `apps/audit/models.py:209` |
-| Payment Fraud Events | ✅ Full | `apps/audit/models.py:284` |
-| Anomaly Detection | ❌ Missing | No ML/heuristic detection |
-| Real-time Fraud Scoring | ❌ Missing | Not implemented |
+**Severity levels:** low, medium, high, critical.
+**Metadata:** IP address, user agent, request ID, session key, tags, sensitivity flags.
+
+### 4.5 Fraud Detection
+
+| Feature | Status |
+|---------|--------|
+| Suspicious Activity Logging | Implemented — `brute_force_attempt`, `malicious_request` events |
+| Payment Fraud Events | Implemented — `payment_fraud_detected` event type |
+| Rate Limit Exceeded Events | Implemented — `rate_limit_exceeded` event type |
+| IP Blocking Events | Implemented — `ip_blocked` event type |
+| Anomaly Detection (ML) | Not implemented |
+| Real-time Fraud Scoring | Not implemented |
 
 ---
 
 ## 5. Monitoring, Logging & Incident Response
 
-### 5.1 Centralized Logging ✅ IMPLEMENTED
+### 5.1 Centralized Logging
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Authentication Logging | ✅ Full | 15+ auth event types in `audit/models.py` |
-| Privileged Actions | ✅ Full | Staff role changes, impersonation |
-| Configuration Changes | ✅ Full | System admin event category |
-| JSON Format Logging | ✅ Full | `config/settings/prod.py:151-154` |
-| Request ID Tracking | ✅ Full | `config/settings/prod.py:157-159` |
-| Rotating File Handler | ✅ Full | 10MB max, 5 backups |
+| Authentication Logging | Implemented | 15+ auth event types in `audit/models.py` |
+| Privileged Actions | Implemented | Staff role changes, impersonation |
+| Configuration Changes | Implemented | System admin event category |
+| JSON Format Logging | Implemented | `config/settings/prod.py` — `SIEMJSONFormatter` |
+| Request ID Tracking | Implemented | `RequestIDMiddleware` + `RequestIDFilter` in prod logging |
+| Rotating File Handlers | Implemented | Prod: 50MB/10 backups (general), 100MB/90 backups (audit), 50MB/30 backups (security, error) |
 
-### 5.2 File Integrity Monitoring ✅ IMPLEMENTED
+### 5.2 File Integrity Monitoring (FIM)
 
-**Location:** `apps/audit/file_integrity_service.py`, `apps/audit/tasks.py`
+**Location:** `apps/audit/file_integrity_service.py`
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| Cryptographic Hash Tracking | ✅ Full | `file_integrity_service.py` |
-| Critical File Monitoring | ✅ Full | FIMConfig with critical_files |
-| Change Detection | ✅ Full | Content, permissions, ownership |
-| Baseline Establishment | ✅ Full | Cache-based with 30-day timeout |
-| Scheduled Monitoring | ✅ Full | Django-Q2 tasks (6h interval) |
-| Alert Generation | ✅ Full | AuditAlert integration |
-| Management Command | ✅ Full | `run_integrity_check` command |
+| Feature | Status |
+|---------|--------|
+| Cryptographic Hash Tracking | Implemented — SHA-256 |
+| Critical File Monitoring | Implemented — `config/settings/*.py`, `apps/common/encryption.py`, `apps/users/mfa.py`, `apps/common/middleware.py`, `apps/users/views.py`, `apps/common/security_decorators.py` |
+| Change Detection | Implemented — CREATED, MODIFIED, DELETED, PERMISSIONS_CHANGED, OWNER_CHANGED |
+| Baseline Establishment | Implemented — cache-based with 30-day timeout |
+| Scheduled Monitoring | Implemented — Django-Q2 tasks with 6h interval (`apps/audit/tasks.py`) |
+| Alert Generation | Implemented — `AuditAlert` integration |
+| Management Command | Implemented — `run_integrity_check` |
+| Data Retention | Implemented — 90-day cleanup for healthy checks, retain all warnings/compromised |
 
 **Run manually:**
 ```bash
 python manage.py run_integrity_check --type all --period 24h
 ```
 
-**Schedule automated checks:**
-```bash
-python manage.py run_integrity_check --schedule
-```
+### 5.3 SIEM Integration
 
-### 5.3 SIEM Integration ✅ IMPLEMENTED
+**Status: Framework ready, not operationally deployed.**
 
-**Location:** `apps/audit/siem_integration.py`
+Code exists (`apps/audit/siem.py` + `apps/audit/siem_integration.py`) with support for Splunk, Elasticsearch, Datadog, Sumo Logic, and Generic Webhook providers. Includes CEF, LEEF, JSON, SYSLOG, and OCSF format export, batch/real-time modes, and HMAC webhook signing. However, no external SIEM endpoint is currently configured or deployed in production.
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| Splunk Integration | ✅ Full | SIEMProvider.SPLUNK |
-| Elasticsearch Integration | ✅ Full | SIEMProvider.ELASTICSEARCH |
-| Datadog Integration | ✅ Full | SIEMProvider.DATADOG |
-| Sumo Logic Integration | ✅ Full | SIEMProvider.SUMO_LOGIC |
-| Generic Webhook | ✅ Full | SIEMProvider.GENERIC_WEBHOOK |
-| CEF Format Export | ✅ Full | SIEMEvent.to_cef() |
-| Syslog RFC 5424 | ✅ Full | SIEMEvent.to_syslog() |
-| Batch Export | ✅ Full | export_events() method |
-| Real-time Streaming | ✅ Full | send_event() method |
-| HMAC Webhook Signing | ✅ Full | _sign_payload() method |
+| Feature | Code Status | Deployed |
+|---------|-------------|----------|
+| Splunk provider | Ready | No |
+| Elasticsearch provider | Ready | No |
+| Datadog provider | Ready | No |
+| Sumo Logic provider | Ready | No |
+| Generic Webhook | Ready | No |
+| CEF/LEEF/OCSF format export | Ready | No |
+| Syslog RFC 5424 | Ready | No |
+| HMAC webhook signing | Ready | No |
 
-### 5.4 Log Retention ✅ IMPLEMENTED
+### 5.4 Log Retention
 
 | Policy | Duration | Location |
 |--------|----------|----------|
-| Audit Logs | 10 years | `apps/common/constants.py:141` |
-| GDPR Logs | 12 months | `apps/common/constants.py:137` |
-| Failed Login Logs | 6 months | `apps/common/constants.py:142` |
-| Credential Access Logs | 365 days | `apps/common/credential_vault.py:41` |
-| Virtualmin Logs | 30 days | Settings service |
+| Audit Logs | 10 years | `apps/common/constants.py` — `AUDIT_LOG_RETENTION_YEARS` |
+| GDPR Logs | 12 months | `apps/common/constants.py` — `GDPR_LOG_RETENTION_MONTHS` |
+| Failed Login Logs | 6 months | `apps/common/constants.py` — `FAILED_LOGIN_LOG_RETENTION_MONTHS` |
+| Credential Access Logs | 365 days | `apps/common/credential_vault.py` — `ACCESS_LOG_RETENTION_DAYS` |
+| FIM Healthy Checks | 90 days | `apps/audit/tasks.py` — `cleanup_old_integrity_checks()` |
 
-### 5.5 Tamper-Proof Logging ⚠️ PARTIAL
+### 5.5 Tamper-Proof Logging
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Immutable Records | ✅ Full | Events cannot be modified |
-| Hash Chain | ⚠️ Framework | Model exists, not implemented |
-| Write-Once Storage | ❌ Missing | No WORM storage |
-| External Replication | ❌ Missing | Not implemented |
+| Feature | Status |
+|---------|--------|
+| Immutable Records | Implemented — audit events cannot be modified |
+| Hash Chain | Framework exists in `siem_integration.py`, not deployed |
+| Write-Once Storage (WORM) | Not implemented |
+| External Replication | Not implemented |
 
 ---
 
-## 6. Configuration Management
+## 6. Security Testing
 
-### 6.1 Infrastructure as Code (IaC) ❌ NOT IMPLEMENTED
+### 6.1 Security Testing in CI/CD
 
-| Tool | Status |
-|------|--------|
-| Terraform | ❌ Not found |
-| Ansible | ❌ Not found |
-| Pulumi | ❌ Not found |
-| CloudFormation | ❌ Not found |
+**6 GitHub Actions workflows** in `.github/workflows/`:
 
-**Current:** Manual server configuration with Virtualmin.
+| Workflow | Purpose | Security Relevance |
+|----------|---------|-------------------|
+| `platform.yml` | Platform unit tests + coverage + Ruff | Tests run on every push/PR |
+| `portal.yml` | Portal tests + validates no DB drivers installed | Enforces stateless architecture |
+| `integration.yml` | Cross-service integration + security isolation tests | Service boundary enforcement |
+| `type-coverage.yml` | MyPy type coverage (1100 error threshold) | Type safety enforcement |
+| `dco-check.yml` | Developer Certificate of Origin | Commit provenance |
+| `release.yml` | Automated GitHub Releases from tags | Release automation |
 
-### 6.2 Configuration Drift Detection ❌ NOT IMPLEMENTED
+### 6.2 Pre-Commit Security Hooks
 
-No automated drift detection or remediation in place.
+**19 total hooks**, 5 security-focused. From `.pre-commit-config.yaml`:
 
-### 6.3 Immutable Infrastructure ❌ NOT IMPLEMENTED
+| Hook | Purpose | Security? |
+|------|---------|-----------|
+| `ruff-new-violations` | Block NEW Ruff violations (tolerates historical debt) | Yes |
+| `portal-isolation-check` | **CRITICAL**: validates portal cannot import platform code | Yes |
+| `audit-coverage-check` | Audit logging regression detection (min-severity=high) | Yes |
+| `security-credentials-check` | Ruff S105/S106/S107/S108 — hardcoded credentials | Yes |
+| `prevent-type-ignore` | Block new `# type: ignore` comments | Yes (type safety) |
 
-Traditional server management approach currently in use.
+### 6.3 Static Application Security Testing (SAST)
 
-### 6.4 Secrets Management ✅ IMPLEMENTED
+| Tool | Status | Integration |
+|------|--------|-------------|
+| **Semgrep** | Active | `make lint-security` — `semgrep scan --config=auto --error` |
+| **Custom PRAHO Scanner** | Active | `scripts/security_scanner.py` (1,052 lines) — OWASP Top 10, APT patterns, CVE checks |
+| **Ruff Security Rules** | Active | S105/S106/S107/S108 in pre-commit |
+| **Audit Coverage Scanner** | Active | `scripts/audit_coverage_scan.py` — validates audit decorator coverage |
+| Bandit | Config exists, dormant | `.bandit` file in `services/platform/` — not in CI/CD |
+| pip-audit / Safety | Framework exists | `scripts/security_scanner.py` `--include-dependencies` flag — not triggered by default |
+| Snyk | Not configured | |
+| Trivy | Not configured | Container scanning not integrated |
+
+**`make lint-security` runs:**
+1. Semgrep scan (auto config, excludes tests, fails on findings)
+2. Hardcoded credentials check (`make lint-credentials`)
+3. Custom security scanner (OWASP Top 10, APT patterns — informational, non-blocking)
+
+**`make test-security` validates:**
+1. Portal cannot import platform modules (3 explicit checks)
+2. Platform uses `DatabaseCache` (not dev settings)
+3. Portal has no database access
+4. Import isolation guard (pytest)
+
+### 6.4 Security Test Coverage
+
+**26 security-focused test files** across the codebase:
+
+| Location | Count | Examples |
+|----------|-------|---------|
+| `tests/security/` (root) | 2 | `test_security_comprehensive.py`, `run_security_scan.py` |
+| `tests/integration/` | 1 | `test_security_hardening.py` (23K) |
+| `services/platform/tests/security/` | 4 | `test_comprehensive_access_control.py`, `test_enhanced_validation.py`, `test_file_upload_security.py`, `test_simple_access_control.py` |
+| `services/platform/tests/*/test_*security*` | 14 | Per-app security tests (domains, billing, users, orders, etc.) |
+| `services/portal/tests/*security*` | 4 | HMAC production security, portal security, order security |
+| `tests/integration_tests/` | 1 | `test_mfa_security.py` |
+
+---
+
+## 7. Configuration & Infrastructure
+
+### 7.1 Infrastructure as Code (IaC)
+
+| Tool | Status | Location |
+|------|--------|----------|
+| **Ansible** | Implemented | `deploy/ansible/` — 5 playbooks, 4 roles |
+| **Docker** | Implemented | `deploy/platform/Dockerfile`, `deploy/portal/Dockerfile` |
+| **Docker Compose** | Implemented | 7 compose configs (dev, prod, single-server, split, SSL) |
+| **hcloud Python SDK** | Implemented | `apps/infrastructure/hcloud_service.py` — replaced Terraform ([ADR-0027](../ADRs/ADR-0027-hcloud-sdk-infrastructure-provisioning.md)) |
+| Terraform | Exists (legacy) | `services/platform/infrastructure/terraform/` — superseded by hcloud SDK |
+
+**Ansible playbooks** (`deploy/ansible/playbooks/`):
+- `single-server.yml` — single machine Docker deployment
+- `two-servers.yml` — platform + portal split deployment
+- `native-single-server.yml` — systemd-based deployment (no Docker)
+- `backup.yml` — database backup
+- `rollback.yml` — deployment rollback
+
+**Ansible roles:**
+- `common` — security hardening (Fail2Ban jail config)
+- `docker` — Docker installation and daemon config
+- `praho` — Docker-based service deployment
+- `praho-native` — systemd-based service deployment
+
+**Docker security:**
+- Non-root user (`django:django`) in both Dockerfiles
+- Portal Dockerfile has NO `postgresql-client`, NO `libpq-dev` (enforces statelessness)
+- Network isolation: portal-network separate from platform-network
+
+### 7.2 Configuration Drift Detection
+
+**Status: Implemented** — [ADR-0029](../ADRs/ADR-0029-config-drift-detection.md)
 
 | Feature | Status | Location |
 |---------|--------|----------|
-| Credential Vault | ✅ Full | `apps/common/credential_vault.py` |
-| Fernet Encryption | ✅ Full | `apps/common/encryption.py` |
-| Environment Variables | ✅ Full | All secrets via env vars |
-| Secret Key Validation | ✅ Full | `config/settings/base.py:305-325` |
-| Master Encryption Key | ✅ Full | `DJANGO_ENCRYPTION_KEY` |
+| Drift Scanner | Implemented | `apps/infrastructure/drift_scanner.py` — scans Cloud, Network, Application layers |
+| Drift Remediation | Implemented | `apps/infrastructure/drift_remediation.py` — approval workflow + rollback |
+| Drift Models | Implemented | `DriftCheck`, `DriftReport`, `DriftRemediationRequest`, `DriftSnapshot` |
+| Management Command | Implemented | `manage.py drift_scan` |
+| Severity Classification | Implemented | CRITICAL / HIGH / MODERATE / LOW / INFO |
+| Scheduled Scanning | Proposed | 15-minute polling via Django-Q2 (ADR-0029) |
 
-### 6.5 Environment Variable Security ✅ IMPLEMENTED
+### 7.3 Infrastructure Management
 
-| Feature | Status | Location |
-|---------|--------|----------|
-| SECRET_KEY from env | ✅ Full | `config/settings/base.py` |
-| DB credentials from env | ✅ Full | Database settings |
-| Stripe keys from env | ✅ Full | Billing settings |
-| Warning for dev fallbacks | ✅ Full | `config/settings/base.py:310-314` |
+**Location:** `apps/infrastructure/` — 21 service files
+
+Key services:
+- `deployment_service.py` — node deployment orchestration
+- `hcloud_service.py` — Hetzner Cloud management
+- `ansible_service.py` — Ansible playbook orchestration
+- `ssh_key_manager.py` — SSH key provisioning and rotation
+- `provider_config.py` — cloud provider credentials (via credential vault)
+- `validation_service.py` — node health checks
+- `cost_service.py` — cloud cost tracking
+- `permissions.py` — infrastructure RBAC
+
+**Management commands** (`apps/infrastructure/management/commands/`):
+- `deploy_node.py` — deploy infrastructure node
+- `manage_node.py` — node lifecycle management
+- `drift_scan.py` — configuration drift detection
+- `store_credentials.py` — credential vault storage
+- `sync_providers.py` — provider configuration sync
+- `cleanup_deployments.py` — old deployment cleanup
 
 ---
 
@@ -332,97 +489,31 @@ Traditional server management approach currently in use.
 
 ### Critical Gaps (Immediate Action Required)
 
-| Gap | Risk Level | Effort |
-|-----|------------|--------|
-| SAST Tools Not Integrated | High | Low |
-| SRI for CDN Resources | High | Low |
-| File Upload Content Validation | High | Medium |
+| Gap | Risk Level | Effort | Notes |
+|-----|------------|--------|-------|
+| SRI for CDN Resources | High | Low | No integrity hashes on third-party scripts |
+| File Upload Content Validation | High | Medium | No MIME type validation or content scanning |
+| CSP Nonce Implementation | High | Medium | `unsafe-inline` and `unsafe-eval` in CSP |
 
 ### Important Gaps (Should Address)
 
-| Gap | Risk Level | Effort |
-|-----|------------|--------|
-| SIEM Integration | Medium | Medium |
-| Real Fraud Detection | Medium | High |
-| CSP Nonce Implementation | Medium | Medium |
-| WebAuthn Full Implementation | Medium | Medium |
-| File Integrity Automation | Medium | Medium |
+| Gap | Risk Level | Effort | Notes |
+|-----|------------|--------|-------|
+| SIEM Operational Deployment | Medium | Medium | Framework ready, needs endpoint configuration |
+| Dependency Scanning in CI | Medium | Low | pip-audit/Safety code exists, not triggered automatically |
+| Container Scanning (Trivy) | Medium | Low | Docker images not scanned |
+| Fraud Detection Heuristics | Medium | High | No ML/velocity/geo anomaly detection |
+| WebAuthn Full Implementation | Medium | Medium | Framework exists, needs completion |
+| Tamper-Proof Log Storage | Medium | Medium | No WORM storage or external replication |
 
 ### Enhancement Opportunities
 
-| Gap | Risk Level | Effort |
-|-----|------------|--------|
-| IaC Implementation | Low | High |
-| Immutable Infrastructure | Low | High |
-| Formal RBAC Permission Matrix | Low | Medium |
-| SMS 2FA | Low | Medium |
-| Configuration Drift Detection | Low | High |
-| Tamper-Proof Log Storage | Low | Medium |
-
----
-
-## Implementation Plan
-
-### Phase 1: Quick Wins (1-2 days)
-
-1. **Add SAST to CI/CD**
-   - Install and configure Bandit
-   - Add Safety for dependency scanning
-   - Integrate into GitHub Actions
-
-2. **Implement SRI for CDN Resources**
-   - Add integrity hashes to all CDN script/link tags
-   - Create template helper for SRI generation
-
-3. **Enhance File Upload Validation**
-   - Add MIME type validation
-   - Implement file extension whitelist
-   - Add python-magic for content detection
-
-### Phase 2: Security Hardening (1-2 weeks)
-
-4. **CSP Nonce Implementation**
-   - Generate per-request nonces
-   - Replace `'unsafe-inline'` with nonce-based CSP
-
-5. **SIEM Integration**
-   - Create audit log exporter service
-   - Implement webhook-based log forwarding
-   - Add structured log format for SIEM ingestion
-
-6. **File Integrity Automation**
-   - Schedule periodic integrity checks
-   - Implement hash chain verification
-   - Add alerting for integrity failures
-
-### Phase 3: Advanced Features (1-2 months)
-
-7. **Complete WebAuthn Implementation**
-   - Finish passkey registration flow
-   - Add cross-device authentication
-   - Implement account recovery with passkeys
-
-8. **Fraud Detection Enhancement**
-   - Implement velocity checks
-   - Add geographic anomaly detection
-   - Create risk scoring system
-
-9. **Formal RBAC System**
-   - Define permission matrix
-   - Implement attribute-based access control
-   - Add role hierarchy
-
-### Phase 4: Infrastructure (2-3 months)
-
-10. **Infrastructure as Code**
-    - Define Terraform/Ansible configurations
-    - Automate server provisioning
-    - Implement configuration drift detection
-
-11. **Tamper-Proof Logging**
-    - Implement WORM storage for critical logs
-    - Add external log replication
-    - Enable cryptographic log signing
+| Gap | Risk Level | Effort | Notes |
+|-----|------------|--------|-------|
+| Formal RBAC Permission Matrix | Low | Medium | Currently ad-hoc decorators |
+| SMS 2FA | Low | Medium | |
+| Bandit Integration in CI | Low | Low | Config exists, just needs wiring |
+| Custom Scanner as CI Blocker | Low | Low | Currently `|| true` (non-blocking) |
 
 ---
 
@@ -430,37 +521,18 @@ Traditional server management approach currently in use.
 
 | Framework | Coverage | Notes |
 |-----------|----------|-------|
-| ISO 27001 | ~80% | Strong audit logging, needs SIEM |
-| NIST Cybersecurity | ~75% | Good identity management |
-| GDPR | ~90% | Comprehensive consent and data handling |
-| PCI DSS | ~70% | Good transaction logging, needs review |
+| ISO 27001 | ~85% | Strong audit logging + credential access audit trail ([ADR-0033](../ADRs/ADR-0033-encryption-architecture-consolidation.md)); needs operational SIEM |
+| NIST Cybersecurity | ~88% | AES-256-GCM (SP 800-38D), key management (SP 800-57), key separation (SP 800-57 §5.2 via HKDF), CSPRNG (SP 800-90A), RBAC (SP 800-162) — see [ADR-0033](../ADRs/ADR-0033-encryption-architecture-consolidation.md) |
+| GDPR | ~94% | Encryption at rest (Art. 32), access audit logs (Art. 30), data minimization (Art. 5(1)(c) — no PII in unsubscribe URLs), comprehensive consent and data handling |
+| PCI DSS | ~75% | Transaction logging, webhook verification, rate limiting; needs formal penetration testing |
 | SOX | ~75% | Financial audit trails complete |
-| Romanian Law 190/2018 | ~90% | Strong local compliance |
+| Romanian Law 190/2018 | ~92% | Strong local compliance, encryption satisfies data protection requirement |
 
 ---
 
-## Recommendations
+## Related Documents
 
-### Immediate (This Sprint)
-1. Add Bandit and Safety to CI/CD pipeline
-2. Implement SRI for all CDN resources
-3. Add MIME type validation for file uploads
-
-### Short-term (Next Sprint)
-4. Replace CSP `unsafe-inline` with nonces
-5. Implement SIEM log export webhook
-6. Schedule automated integrity checks
-
-### Medium-term (This Quarter)
-7. Complete WebAuthn implementation
-8. Build fraud detection heuristics
-9. Formalize RBAC permission matrix
-
-### Long-term (Next Quarter)
-10. Migrate to Infrastructure as Code
-11. Implement tamper-proof log storage
-12. Add configuration drift detection
-
----
-
-*Document generated as part of security compliance review.*
+- [ADR-0033: Encryption Architecture Consolidation](../ADRs/ADR-0033-encryption-architecture-consolidation.md) — standards compliance mapping
+- [Security Configuration Guide](SECURITY_CONFIGURATION.md) — operational key setup and deployment
+- [MFA Setup and Key Management](MFA-SETUP-AND-KEY-MANAGEMENT.md) — MFA setup and encryption key management
+- [Template and CSP Security](../development/TEMPLATE-AND-CSP-SECURITY.md) — Django template security and CSP patterns

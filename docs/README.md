@@ -16,7 +16,7 @@
 
 ## Architecture Decision Records
 
-- [ADR Index](ADRs/README.md) -- 24 decisions (ADR-0001 through ADR-0025, with ADR-0008 superseded)
+- [ADR Index](ADRs/README.md) -- 33 decisions (ADR-0001 through ADR-0033, with ADR-0008 superseded)
 
 ## Development Guides
 
@@ -30,6 +30,7 @@
 - [N+1 Query Optimization Summary](development/N1_QUERY_OPTIMIZATION_SUMMARY.md) -- select_related/prefetch_related patterns
 - [IDE Auto-Formatting Prevention](development/IDE_AUTO_FORMATTING_PREVENTION.md) -- Preventing IDE conflicts with Ruff
 - [Trace-Based Dynamic Analysis](development/TRACE_BASED_ANALYSIS.md) -- Runtime tracing for debugging
+- [Template and CSP Security](development/TEMPLATE-AND-CSP-SECURITY.md) -- XSS prevention, CSP compliance, HTMX security patterns
 
 ## Deployment and Operations
 
@@ -40,10 +41,9 @@
 
 ## Security
 
-- [2FA Setup and Key Management](security/2FA-SETUP-AND-KEY-MANAGEMENT.md) -- TOTP setup, encryption key management, backup codes
+- [MFA Setup and Key Management](security/MFA-SETUP-AND-KEY-MANAGEMENT.md) -- MFA setup, encryption key management, backup codes
 - [Security Compliance Assessment](security/SECURITY_COMPLIANCE_ASSESSMENT.md) -- GDPR, Romanian Law 190/2018 compliance
-- [Security Configuration](security/SECURITY_CONFIGURATION.md) -- Django security settings and hardening
-- [Template Security Guidelines](security/TEMPLATE_SECURITY.md) -- XSS prevention, safe template patterns
+- [Security Configuration](security/SECURITY_CONFIGURATION.md) -- Production security settings, headers, rate limiting, SSRF prevention
 
 ## Business Domain
 

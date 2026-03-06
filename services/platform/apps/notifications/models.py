@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
-from apps.settings.encryption import settings_encryption
+from apps.common.encryption import decrypt_if_needed, encrypt_value, is_encrypted
 
 # Module-level logger and encryption flag (patched in tests)
 logger = logging.getLogger(__name__)
@@ -149,11 +149,11 @@ def validate_email_subject(subject: str) -> None:
 
 
 def encrypt_sensitive_content(content: str, key: str | None = None) -> str:
-    """🔒 Encrypt sensitive content using settings_encryption module."""
+    """🔒 Encrypt sensitive content using AES-256-GCM encryption."""
     if not ENCRYPTION_AVAILABLE or not content:
         return content
     try:
-        encrypted = settings_encryption.encrypt_value(content)
+        encrypted = encrypt_value(content)
         return encrypted if encrypted else content
     except Exception as e:
         logger.debug(f"Encryption failed, returning original: {e}")
@@ -161,11 +161,11 @@ def encrypt_sensitive_content(content: str, key: str | None = None) -> str:
 
 
 def decrypt_sensitive_content(encrypted_content: str, key: str | None = None) -> str:
-    """🔒 Decrypt sensitive content using settings_encryption module."""
+    """🔒 Decrypt sensitive content using AES-256-GCM encryption."""
     if not ENCRYPTION_AVAILABLE or not encrypted_content:
         return encrypted_content
     try:
-        return str(settings_encryption.decrypt_if_needed(encrypted_content))
+        return str(decrypt_if_needed(encrypted_content))
     except Exception as e:
         logger.debug(f"Decryption failed, returning original: {e}")
         return encrypted_content
@@ -404,10 +404,10 @@ class EmailLog(models.Model):
         """Encrypt body fields at rest when available."""
         if ENCRYPTION_AVAILABLE:
             try:
-                if self.body_text and not settings_encryption.is_encrypted(self.body_text):
-                    self.body_text = settings_encryption.encrypt_value(self.body_text) or self.body_text
-                if self.body_html and not settings_encryption.is_encrypted(self.body_html):
-                    self.body_html = settings_encryption.encrypt_value(self.body_html) or self.body_html
+                if self.body_text and not is_encrypted(self.body_text):
+                    self.body_text = encrypt_value(self.body_text) or self.body_text
+                if self.body_html and not is_encrypted(self.body_html):
+                    self.body_html = encrypt_value(self.body_html) or self.body_html
             except Exception as e:  # pragma: no cover
                 # Fallback to storing as-is; upstream logging handles errors
                 logger.debug(f"Encryption failed, storing as-is: {e}")
@@ -458,7 +458,7 @@ class EmailLog(models.Model):
         """Return a short, decrypted preview suitable for logs/UI."""
         content = self.body_text or ""
         try:
-            content = settings_encryption.decrypt_if_needed(content)
+            content = decrypt_if_needed(content)
         except Exception as e:  # pragma: no cover
             logger.debug(f"Decryption failed, using original content: {e}")
         preview = content[:CONTENT_PREVIEW_LENGTH]
@@ -468,7 +468,7 @@ class EmailLog(models.Model):
         """Return decrypted HTML body, handling missing encryption gracefully."""
         content = self.body_html or ""
         try:
-            return str(settings_encryption.decrypt_if_needed(content))
+            return str(decrypt_if_needed(content))
         except Exception:  # pragma: no cover
             return content
 
@@ -476,7 +476,7 @@ class EmailLog(models.Model):
         """Return decrypted text body, handling missing encryption gracefully."""
         content = self.body_text or ""
         try:
-            return str(settings_encryption.decrypt_if_needed(content))
+            return str(decrypt_if_needed(content))
         except Exception:  # pragma: no cover
             return content
 
@@ -894,3 +894,52 @@ class EmailPreference(models.Model):
             # Don't clear the date - keep for audit trail
             pass
         self.save(update_fields=["marketing", "marketing_consent_date", "marketing_consent_source", "updated_at"])
+
+
+# ===============================================================================
+# UNSUBSCRIBE TOKEN (GDPR Art. 5 Data Minimization)
+# ===============================================================================
+
+TOKEN_EXPIRY_DAYS = 30
+
+
+class UnsubscribeToken(models.Model):
+    """
+    Opaque token for email unsubscribe URLs.
+
+    Replaces the previous pattern of embedding email addresses directly in
+    unsubscribe URLs, which violated GDPR Art. 5(1)(c) data minimization.
+    URLs now use only the UUID token: /email/unsubscribe/{uuid}/
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(help_text=_("Email address this token was generated for"))
+    template_key = models.CharField(max_length=100, help_text=_("Template key that triggered this email"))
+    created_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(null=True, blank=True, help_text=_("When this token was consumed"))
+
+    class Meta:
+        db_table = "unsubscribe_token"
+        verbose_name = _("Unsubscribe Token")
+        verbose_name_plural = _("Unsubscribe Tokens")
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["email", "-created_at"]),
+            models.Index(fields=["-created_at"]),
+        )
+
+    def __str__(self) -> str:
+        return f"Unsubscribe {self.id} ({self.email[:3]}***)"
+
+    def is_expired(self) -> bool:
+        """Check if this token has expired."""
+        return timezone.now() > self.created_at + timedelta(days=TOKEN_EXPIRY_DAYS)
+
+    def consume(self) -> bool:
+        """Mark token as consumed. Returns False if already used or expired."""
+        if self.used_at is not None:
+            return False
+        if self.is_expired():
+            return False
+        self.used_at = timezone.now()
+        self.save(update_fields=["used_at"])
+        return True

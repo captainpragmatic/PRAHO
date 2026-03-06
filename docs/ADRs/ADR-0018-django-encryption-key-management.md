@@ -1,7 +1,9 @@
+> **Status: Superseded by [ADR-0033](ADR-0033-encryption-architecture-consolidation.md)**
+
 # ADR-0018: DJANGO_ENCRYPTION_KEY Management for 2FA Security
 
 ## Status
-**Accepted** - December 2024
+**Superseded** - December 2024 (superseded March 2026 by ADR-0033)
 
 ## Context
 
