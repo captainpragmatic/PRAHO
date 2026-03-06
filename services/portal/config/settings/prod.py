@@ -49,7 +49,7 @@ if not PORTAL_DOMAIN:
 
 # Platform API configuration
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://platform:8700/api")
-PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
+PLATFORM_API_SECRET = (os.environ.get("PLATFORM_API_SECRET") or "").strip()
 # Escape hatch for controlled environments; keep secure-by-default behavior.
 PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_HTTP", "False").lower() in {
     "1",
@@ -98,7 +98,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # TLS terminated 
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
-SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"^status/$"]  # Allow health checks over HTTP from localhost
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
@@ -123,6 +123,10 @@ CACHES = {
         },
     }
 }
+
+# Portal sessions: use Django's signed-cookie backend (no DB, no cache worker affinity)
+# Each cookie is self-contained and HMAC-signed with SECRET_KEY, so any worker can read it.
+SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
 
 # Production logging — structured JSON with request ID tracing
 LOGGING = {

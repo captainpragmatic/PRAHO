@@ -27,7 +27,6 @@ DJANGO_APPS: list[str] = [
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
     "rest_framework.authtoken",  # 🔐 Token authentication for API access
-    "django_extensions",
     "ipware",
     "django_q",  # Async task processing
 ]

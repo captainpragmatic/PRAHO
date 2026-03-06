@@ -52,7 +52,7 @@
 
         - name: Verify health
           uri:
-            url: "http://localhost:{{ platform_port }}/health/"
+            url: "http://localhost:{{ platform_port }}/api/users/health/"
             status_code: 200
           register: health_check
           retries: 5

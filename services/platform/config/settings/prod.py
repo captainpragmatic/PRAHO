@@ -35,7 +35,7 @@ if not _db_password or _db_password in {"changeme", "development_password", "pas
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 
-_hmac_secret = os.environ.get("HMAC_SECRET", "")
+_hmac_secret = os.environ.get("HMAC_SECRET", "").strip()
 if not _hmac_secret:
     from django.core.exceptions import ImproperlyConfigured
 
@@ -43,6 +43,7 @@ if not _hmac_secret:
         "HMAC_SECRET must be set in production for portal↔platform authentication. "
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
+PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SECRET
 
 _webhook_secret = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
 if not _webhook_secret:
@@ -147,7 +148,7 @@ MIDDLEWARE = [
 # SSL/TLS Configuration - Behind TLS-terminating load balancer
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
-SECURE_REDIRECT_EXEMPT = [r"health/", r"^api/"]  # Allow health checks and internal API over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"^api/"]  # Allow internal API (incl. health checks) over HTTP from localhost
 
 # Cookie Security - Require HTTPS for all cookies
 SESSION_COOKIE_SECURE = True

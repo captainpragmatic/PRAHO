@@ -46,8 +46,10 @@ services:
       - DEBUG=0
       - DATABASE_URL=postgresql://praho:${DB_PASSWORD}@db:5432/praho
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},platform
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,platform
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
       - SERVICE_NAME=platform
     volumes:
@@ -59,7 +61,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8700/health/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -80,9 +82,13 @@ services:
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=http://platform:8700/api
-      - SECRET_KEY=${SECRET_KEY}
-      - DJANGO_SETTINGS_MODULE=config.settings
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},portal
+      - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
+      - PORTAL_DOMAIN=${DOMAIN:-localhost}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
       - SERVICE_NAME=portal
     volumes:
@@ -93,7 +99,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8701/health/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8701/status/"]
       interval: 30s
       timeout: 10s
       retries: 3

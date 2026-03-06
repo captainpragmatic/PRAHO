@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Token identity endpoint** (`GET /api/users/token/me/`) — correct token-auth introspection endpoint; the existing `verify_token` at `/api/users/token/verify/` requires HMAC customer context (portal-only) and returns 401 for CLI/API consumers; the new endpoint uses `TokenAuthentication` only, returns `email`, `staff_role`, and `token_created`; 3 tests added
-- **ADR-0030**: documents full state of API token authentication, 8 explicit gaps (no expiry, plaintext storage, one-token-per-user, broken verify endpoint), and rationale for `token_info` gap-1 fix
+- **ADR-0031**: documents full state of API token authentication, 8 explicit gaps (no expiry, plaintext storage, one-token-per-user, broken verify endpoint), and rationale for `token_info` gap-1 fix
 - **Payment model**: `updated_at = DateTimeField(auto_now=True)` on `Payment` (migration 0018); aligns with Invoice, Customer, PaymentRetryPolicy
 - **`TERMINAL_PAYMENT_STATUSES`** frozenset constant in `payment_models.py` — canonical set of statuses from which payments must not transition; includes both `cancelled`/`canceled` spellings
 - **`Payment.apply_gateway_event()`** method — idempotent gateway status transition with `select_for_update()` contract; replaces 3 separate inline implementations
@@ -87,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Docker**: Add `ENV PATH="/app/.venv/bin:$PATH"` to both Dockerfiles — uv-installed packages (python, gunicorn) were not found at runtime (#12)
+- **Docker**: Switch HEALTHCHECK from `python -c "import requests; ..."` to `curl -f` against actual health endpoints (`/api/users/health/` platform, `/status/` portal), bump `start-period` to 60s (#13)
+- **Docker**: Fix portal `DJANGO_SETTINGS_MODULE` from `config.settings` (empty `__init__.py`) to `config.settings.prod` in Dockerfile and all compose files (#14)
+- **Docker**: Move `django_extensions` from `base.py` to `dev.py` with `try/except ImportError` guard in both services — `--no-dev` Docker builds don't have it (#21)
+- **Docker**: Fix `import_isolation_guard._repo_root()` `IndexError` on `parents[3]` in Docker (shorter path depth) with `try/except` fallback (#26)
+- **Docker**: Add `PLATFORM_API_SECRET`, `PLATFORM_API_ALLOW_INSECURE_HTTP`, `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `PORTAL_DOMAIN` to portal environment in all production compose files (#44)
+- **Docker**: Fix health check URLs across all compose files and Ansible rollback playbook from nonexistent `/health/` to actual endpoints
 - **Retry-After Parser**: Capped return value to `MAX_RETRY_AFTER_SECONDS` (300s default,
   configurable via `settings.RETRY_AFTER_MAX_SECONDS`) to prevent unbounded server-dictated
   waits. Added `isascii()` guard against Unicode digit bypass, `OverflowError`/`OSError`

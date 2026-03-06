@@ -321,7 +321,7 @@ test-security:
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
 	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"

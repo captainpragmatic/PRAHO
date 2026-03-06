@@ -1,7 +1,9 @@
 # ===============================================================================
-# PRAHO SERVICES - PRODUCTION DOCKER COMPOSE 🐳
+# PRAHO SERVICES - LOCAL DOCKER COMPOSE (both services + DB + nginx)
 # ===============================================================================
-# Multi-service architecture with network isolation and no Redis dependency
+# Full-stack local environment with network isolation and no Redis dependency.
+# NOT for production — uses dev settings and DEBUG=1.
+# For production, see: docker-compose.single-server.yml or container-service.yml
 # Platform: Full Django + DB access | Portal: API-only, no DB access
 
 # ⚠️ SECURITY ARCHITECTURE:
@@ -48,6 +50,8 @@ services:
     environment:
       - DEBUG=1
       - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-dev_password_change_in_prod}@db:5432/praho_platform
+      - HMAC_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:-test-webhook-secret-do-not-use-in-prod}
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - PYTHONPATH=/app
@@ -60,7 +64,7 @@ services:
       - platform-network
       - api-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8700/users/login/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -81,11 +85,13 @@ services:
     environment:
       - DEBUG=1
       - PLATFORM_API_BASE_URL=http://platform:8700/api
+      - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
+      - PLATFORM_API_ALLOW_INSECURE_HTTP=true
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - DJANGO_SETTINGS_MODULE=config.settings
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SERVICE_NAME=portal
-      # ⚠️ CRITICAL: NO DATABASE_URL - portal has no DB access
-      # ⚠️ CRITICAL: NO PYTHONPATH - portal cannot import platform code
+      # No DATABASE_URL - portal has no DB access
+      # No PYTHONPATH - portal cannot import platform code
     depends_on:
       platform:
         condition: service_healthy
@@ -93,7 +99,7 @@ services:
     networks:
       - api-network  # Portal CANNOT access platform-network (no DB)
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8701/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8701/status/"]
       interval: 30s
       timeout: 10s
       retries: 3

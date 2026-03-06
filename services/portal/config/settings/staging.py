@@ -48,7 +48,7 @@ if not PORTAL_DOMAIN:
 
 # Platform API configuration for staging
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://platform-staging:8700/api")
-PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
+PLATFORM_API_SECRET = (os.environ.get("PLATFORM_API_SECRET") or "").strip()
 if not PLATFORM_API_SECRET:
     raise ValueError(
         "SECURITY ERROR: PLATFORM_API_SECRET must be set in staging.\n"
@@ -91,7 +91,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # Caddy terminate
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True
-SECURE_REDIRECT_EXEMPT = [r"health/"]  # Allow health checks over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"^status/$"]  # Allow health checks over HTTP from localhost
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"

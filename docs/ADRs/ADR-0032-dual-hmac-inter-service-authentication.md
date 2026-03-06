@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-03-06
 **Authors:** Development Team
-**Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0030 (API Token Authentication Strategy)
+**Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0031 (API Token Authentication Strategy)
 
 ---
 
