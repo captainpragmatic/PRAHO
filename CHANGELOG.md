@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+
+- fix(security): wire account lockout into `portal_login_api` (#53) — closes the same brute-force gap found in `obtain_token`; checks `is_account_locked()`, increments `failed_login_attempts` on failure, resets on success, uses PII-safe structured logging
+  - 4 regression tests added in `PortalLoginAPILockoutTests`
+  - `AUTHENTICATION.md` updated to document lockout enforcement across all credential endpoints
 
 ---
 
