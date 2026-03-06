@@ -23,8 +23,10 @@ services:
       - DEBUG=0
       - DATABASE_URL=${DATABASE_URL:?DATABASE_URL required}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},*.ondigitalocean.app
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - SERVICE_NAME=platform
     expose:
@@ -48,12 +50,12 @@ services:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:-http://platform:8700/api}
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
-      - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-false}
+      - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PORTAL_DOMAIN=${DOMAIN:-localhost}
-      - SECRET_KEY=${SECRET_KEY}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},*.ondigitalocean.app
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - SERVICE_NAME=portal
     expose:

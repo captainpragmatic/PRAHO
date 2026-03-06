@@ -1,7 +1,9 @@
 # ===============================================================================
-# PRAHO SERVICES - PRODUCTION DOCKER COMPOSE 🐳
+# PRAHO SERVICES - LOCAL DOCKER COMPOSE (both services + DB + nginx)
 # ===============================================================================
-# Multi-service architecture with network isolation and no Redis dependency
+# Full-stack local environment with network isolation and no Redis dependency.
+# NOT for production — uses dev settings and DEBUG=1.
+# For production, see: docker-compose.single-server.yml or container-service.yml
 # Platform: Full Django + DB access | Portal: API-only, no DB access
 
 # ⚠️ SECURITY ARCHITECTURE:

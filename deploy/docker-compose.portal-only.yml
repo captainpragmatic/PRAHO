@@ -27,7 +27,7 @@ services:
       - PORTAL_DOMAIN=${DOMAIN:-localhost}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},portal
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
       - SERVICE_NAME=portal
     volumes:

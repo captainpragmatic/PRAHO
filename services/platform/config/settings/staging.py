@@ -38,7 +38,7 @@ if not _db_password or _db_password in {"changeme", "development_password", "pas
         "DB_PASSWORD must be set to a strong value in staging. Current value is missing or a known default."
     )
 
-_hmac_secret = _os.environ.get("HMAC_SECRET", "")
+_hmac_secret = _os.environ.get("HMAC_SECRET", "").strip()
 if not _hmac_secret:
     raise _ImproperlyConfigured("HMAC_SECRET must be set in staging for portal-to-platform auth.")
 PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SECRET
@@ -102,7 +102,7 @@ MIDDLEWARE = [
 # Set SECURE_SSL_REDIRECT = False if staging uses HTTP
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True  # Set to False if staging is HTTP-only
-SECURE_REDIRECT_EXEMPT = [r"health/", r"^api/"]  # Allow health checks and internal API over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"^api/"]  # Allow internal API (incl. health checks) over HTTP from localhost
 
 # Cookie Security - Match production if staging has HTTPS
 SESSION_COOKIE_SECURE = True  # Set to False if staging is HTTP-only

@@ -216,19 +216,11 @@ SECURE_SSL_REDIRECT = not DEBUG
 # ===============================================================================
 # LOGGING
 # ===============================================================================
-# PLATFORM API INTEGRATION SETTINGS
+# PORTAL SERVICE IDENTIFICATION
 # ===============================================================================
 
 # Portal service identification for HMAC authentication
 PORTAL_ID = os.environ.get("PORTAL_ID", "portal-001")
-
-# Platform API connection settings
-PLATFORM_API_BASE_URL = os.environ.get(
-    "PLATFORM_API_BASE_URL",
-    "http://localhost:8700/api",  # Default to local development
-)
-PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
-PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
 # ===============================================================================
 # LOGGING CONFIGURATION

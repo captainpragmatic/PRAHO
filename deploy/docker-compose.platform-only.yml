@@ -57,7 +57,9 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://praho:${DB_PASSWORD}@db:5432/praho}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - ALLOWED_HOSTS=${DOMAIN:-localhost},platform
+      - HMAC_SECRET=${PLATFORM_API_SECRET:-}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:-}
+      - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,platform
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
       - SERVICE_NAME=platform
     volumes:

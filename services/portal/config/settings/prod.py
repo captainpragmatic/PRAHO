@@ -124,6 +124,10 @@ CACHES = {
     }
 }
 
+# Stateless portal: use cache-backed sessions (no database migration needed)
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
+
 # Production logging — structured JSON with request ID tracing
 LOGGING = {
     "version": 1,
