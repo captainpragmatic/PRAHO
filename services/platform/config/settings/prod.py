@@ -43,6 +43,7 @@ if not _hmac_secret:
         "HMAC_SECRET must be set in production for portal↔platform authentication. "
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
+PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SECRET
 
 _webhook_secret = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
 if not _webhook_secret:

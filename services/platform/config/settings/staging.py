@@ -41,6 +41,7 @@ if not _db_password or _db_password in {"changeme", "development_password", "pas
 _hmac_secret = _os.environ.get("HMAC_SECRET", "")
 if not _hmac_secret:
     raise _ImproperlyConfigured("HMAC_SECRET must be set in staging for portal-to-platform auth.")
+PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SECRET
 
 # ===============================================================================
 # STAGING ENVIRONMENT CONFIGURATION
