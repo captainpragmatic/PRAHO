@@ -3,15 +3,14 @@ Test Suite for Common App - Utilities and Helper Functions
 Tests Romanian date formatting, security utilities, and business logic helpers.
 """
 
-import hashlib
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytz
 from django.http import JsonResponse
 from django.test import TestCase
 from django.utils import timezone
-import pytz
 
 from apps.common.utils import (
     calculate_due_date,
@@ -168,7 +167,7 @@ class TestSecurityUtilities(TestCase):
         data = "sensitive_information"
         hashed = hash_sensitive_data(data)
 
-        # Should be SHA-256 hash (64 characters)
+        # Should be HMAC-SHA256 hash (64 characters)
         self.assertEqual(len(hashed), 64)
         self.assertRegex(hashed, r'^[0-9a-f]+$')
 
@@ -189,7 +188,7 @@ class TestSecurityUtilities(TestCase):
 
         # Same input should produce same hash
         self.assertEqual(result1, result2)
-        # Should be SHA-256 hash (64 characters)
+        # Should be HMAC-SHA256 hash (64 characters)
         self.assertEqual(len(result1), 64)
         self.assertRegex(result1, r'^[0-9a-f]+$')
 

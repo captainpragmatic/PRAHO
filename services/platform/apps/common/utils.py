@@ -5,7 +5,7 @@ Shared helper functions and decorators.
 
 from __future__ import annotations
 
-import hashlib
+import hmac
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -81,9 +81,11 @@ def generate_secure_token(length: int = 32) -> str:
 
 
 def hash_sensitive_data(data: str) -> str:
-    """Hash sensitive data for logging/storage"""
-    salt = getattr(settings, "SECRET_KEY", "default-salt")
-    return hashlib.sha256(f"{data}{salt}".encode()).hexdigest()
+    """Hash sensitive data for logging/storage using HMAC-SHA256."""
+    from apps.common.key_derivation import get_key_hex  # noqa: PLC0415
+
+    key = get_key_hex("sensitive-data-hash")
+    return hmac.new(key.encode(), data.encode(), "sha256").hexdigest()
 
 
 def mask_sensitive_data(data: str, show_last: int = 4) -> str:

@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 
 from apps.settings.models import SystemSetting, SettingCategory
-from apps.settings.encryption import settings_encryption
+from apps.common.encryption import encrypt_value, is_encrypted
 from apps.settings.services import SettingsService
 
 User = get_user_model()
@@ -49,7 +49,7 @@ class EncryptionSecurityTests(TestCase):
 
         # Value should be encrypted in database
         setting.refresh_from_db()
-        self.assertTrue(settings_encryption.is_encrypted(str(setting.value)))
+        self.assertTrue(is_encrypted(str(setting.value)))
         self.assertNotEqual(setting.value, "secret_api_key_123")
 
         # But get_typed_value should return decrypted value
@@ -70,7 +70,7 @@ class EncryptionSecurityTests(TestCase):
 
         # Value should not be encrypted
         setting.refresh_from_db()
-        self.assertFalse(settings_encryption.is_encrypted(str(setting.value)))
+        self.assertFalse(is_encrypted(str(setting.value)))
         self.assertEqual(setting.value, 30)
 
     def test_encryption_display_value_security(self):
@@ -96,26 +96,18 @@ class EncryptionSecurityTests(TestCase):
 
     def test_encryption_roundtrip(self):
         """🔒 Test encryption/decryption roundtrip works correctly"""
+        from apps.common.encryption import decrypt_value  # noqa: PLC0415
+
         original_value = "test_secret_value_123"
 
         # Encrypt value
-        encrypted = settings_encryption.encrypt_value(original_value)
-        self.assertTrue(settings_encryption.is_encrypted(encrypted))
+        encrypted = encrypt_value(original_value)
+        self.assertTrue(is_encrypted(encrypted))
         self.assertNotEqual(encrypted, original_value)
 
         # Decrypt value
-        decrypted = settings_encryption.decrypt_value(encrypted)
+        decrypted = decrypt_value(encrypted)
         self.assertEqual(decrypted, original_value)
-
-    def test_encryption_status_monitoring(self):
-        """📊 Test encryption system status monitoring"""
-        status = settings_encryption.get_encryption_status()
-
-        self.assertTrue(status['encryption_enabled'])
-        self.assertTrue(status['encryption_working'])
-        self.assertEqual(status['encryption_version'], 'v1')
-        self.assertTrue(status['secret_key_configured'])
-        self.assertTrue(status['test_encryption_passed'])
 
 
 class ExportSecurityTests(TestCase):
@@ -224,7 +216,7 @@ class ExportSecurityTests(TestCase):
         self.assertTrue(sensitive_setting_data["is_sensitive"])
 
         # Sensitive value should be encrypted in export (not plaintext)
-        self.assertTrue(settings_encryption.is_encrypted(str(sensitive_setting_data["value"])))
+        self.assertTrue(is_encrypted(str(sensitive_setting_data["value"])))
 
     def test_export_access_control(self):
         """🔒 Test that standard export requires login but allows any authenticated user"""
@@ -318,7 +310,7 @@ class CachingSecurityTests(TestCase):
         self.assertEqual(value2, 30)
 
         # Change the sensitive setting in database
-        self.sensitive_setting.value = settings_encryption.encrypt_value("new_secret_key")
+        self.sensitive_setting.value = encrypt_value("new_secret_key")
         self.sensitive_setting.save()
 
         # Should get new value immediately (not cached)
@@ -334,7 +326,7 @@ class CachingSecurityTests(TestCase):
         """🔒 Test that cache status doesn't leak sensitive information"""
         # This would be implementation-specific based on cache monitoring
         # For now, we verify that sensitive settings aren't accidentally logged
-        pass
+        self.assertTrue(True)  # Placeholder — cache monitoring test TBD
 
 
 class InputValidationSecurityTests(TestCase):

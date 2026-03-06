@@ -1,15 +1,17 @@
-# PRAHO Platform - 2FA Setup and Key Management Guide
+# PRAHO Platform - MFA Setup and Key Management Guide
+
+Operational guide for MFA setup, encryption key management, and backup code administration.
 
 ## Overview
 
-PRAHO Platform implements enterprise-grade Two-Factor Authentication (2FA) with encrypted storage of sensitive data. This guide covers setup, configuration, and operational procedures for development, testing, and production environments.
+PRAHO Platform implements enterprise-grade Multi-Factor Authentication (MFA) with encrypted storage of sensitive data. This guide covers setup, configuration, and operational procedures for development, testing, and production environments.
 
-## 🔐 Quick Start
+## Quick Start
 
 ### 1. Generate Encryption Key
 ```bash
-# Generate a new Fernet encryption key
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Generate a new AES-256-GCM encryption key
+python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 ```
 
 ### 2. Configure Environment
@@ -23,12 +25,12 @@ echo "DJANGO_ENCRYPTION_KEY=your-generated-key-here" >> .env
 python manage.py migrate
 ```
 
-### 4. Test 2FA Functionality
+### 4. Test MFA Functionality
 ```bash
-python manage.py test tests.test_2fa_security_improvements
+python manage.py test tests.users.test_2fa_models tests.users.test_2fa_services
 ```
 
-## 📋 Environment Setup
+## Environment Setup
 
 ### Development Environment
 
@@ -45,7 +47,7 @@ python manage.py test tests.test_2fa_security_improvements
 3. **Generate and Set Encryption Key**
    ```bash
    # Generate key
-   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
    # Add to .env (replace the placeholder)
    DJANGO_ENCRYPTION_KEY=VCxwdmuZL09WGdWLI203O64yhNs48IiafhjFIq0o_JE=
@@ -62,7 +64,7 @@ python manage.py test tests.test_2fa_security_improvements
 1. **Secure Key Generation**
    ```bash
    # Generate on secure, isolated system
-   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" > encryption_key.txt
+   python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())" > encryption_key.txt
 
    # Store in secure vault (HashiCorp Vault, AWS Secrets Manager, etc.)
    ```
@@ -93,17 +95,17 @@ python manage.py test tests.test_2fa_security_improvements
      DJANGO_ENCRYPTION_KEY: <base64-encoded-key>
    ```
 
-## 🏗️ System Architecture
+## System Architecture
 
 ### Encryption Flow
 ```
 User Input (TOTP Secret)
     ↓
-Fernet.encrypt(secret, DJANGO_ENCRYPTION_KEY)
+AESGCM.encrypt(secret, DJANGO_ENCRYPTION_KEY)
     ↓
 Encrypted Storage (User._two_factor_secret)
     ↓
-Fernet.decrypt(encrypted_secret, DJANGO_ENCRYPTION_KEY)
+AESGCM.decrypt(encrypted_secret, DJANGO_ENCRYPTION_KEY)
     ↓
 TOTP Verification (pyotp.TOTP.verify())
 ```
@@ -132,11 +134,27 @@ CREATE TABLE user_login_logs (
 );
 ```
 
-## 🔧 Configuration Options
+### WebAuthn/Passkeys Support
+
+PRAHO includes a WebAuthn framework for passwordless authentication:
+
+- **Model**: `WebAuthnCredential` in `apps/users/mfa.py` — stores credential ID, public key, AAGUID, transport, and sign count
+- **Service**: `WebAuthnService` — registration options, authentication verification, credential management
+- **Replay protection**: Signature counter validation — rejects authentication if `client_sign_count <= stored_sign_count`
+
+> Status: Framework implemented, pending UI integration. See [ADR-0004: Custom 2FA Implementation](../ADRs/ADR-0004-custom-2fa-implementation.md).
+
+### TOTP Security
+
+- **Time window tolerance**: `TIME_WINDOW_TOLERANCE = 1` (accepts codes +/-30 seconds from current period)
+- **Replay protection**: Cache-based detection with 90-second TTL prevents reuse of valid TOTP codes
+- **Rate limiting**: `_check_rate_limit()` — 5 attempts per 5-minute window via Django cache
+
+## Configuration Options
 
 ### Environment Variables
 ```bash
-# Required - Fernet encryption key for sensitive data
+# Required - AES-256-GCM encryption key for sensitive data
 DJANGO_ENCRYPTION_KEY=VCxwdmuZL09WGdWLI203O64yhNs48IiafhjFIq0o_JE=
 
 # Optional - Customize 2FA settings
@@ -156,7 +174,7 @@ TOTP_ISSUER_NAME = os.environ.get('TOTP_ISSUER_NAME', 'PRAHO Platform')
 BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
 ```
 
-## 👥 User Experience
+## User Experience
 
 ### 2FA Setup Flow
 1. **User navigates to Profile → Security**
@@ -179,7 +197,7 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
 - **Security Dashboard**: View 2FA adoption rates and usage stats
 - **Audit Logs**: Track all 2FA-related security events
 
-## 🔄 Operational Procedures
+## Operational Procedures
 
 ### Key Rotation (Planned Maintenance)
 
@@ -189,7 +207,7 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
    pg_dump praho_production > backup_pre_rotation.sql
 
    # Generate new key
-   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
    # Store old key temporarily
    export OLD_DJANGO_ENCRYPTION_KEY="current_key_value"
@@ -213,8 +231,8 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
 
 4. **Post-Rotation Verification**
    ```bash
-   # Test 2FA functionality
-   python manage.py test tests.test_2fa_security_improvements
+   # Test MFA functionality
+   python manage.py test tests.users.test_2fa_models tests.users.test_2fa_services
 
    # Verify user can authenticate
    # Monitor logs for encryption errors
@@ -281,24 +299,21 @@ BACKUP_CODES_COUNT = int(os.environ.get('BACKUP_CODES_COUNT', '8'))
            return False
    ```
 
-## 🧪 Testing Strategy
+## Testing Strategy
 
 ### Unit Tests
 ```bash
-# Test encryption utilities
-python manage.py test tests.test_2fa_security_improvements.EncryptionUtilsTestCase
+# Test encryption utilities and user model MFA methods
+python manage.py test tests.users.test_2fa_models
 
-# Test user model 2FA methods
-python manage.py test tests.test_2fa_security_improvements.UserModel2FATestCase
-
-# Test admin functionality
-python manage.py test tests.test_2fa_security_improvements.TwoFactorAdminTestCase
+# Test admin and service functionality
+python manage.py test tests.users.test_2fa_services
 ```
 
 ### Integration Tests
 ```bash
-# Test complete 2FA flows
-python manage.py test tests.test_2fa_security_improvements.TwoFactor2FAViewsTestCase
+# Test complete MFA flows
+python manage.py test tests.users.test_2fa_services
 
 # Test with different environments
 python manage.py test --settings=config.settings.test
@@ -324,7 +339,7 @@ except:
 "
 ```
 
-## 📊 Analytics and Reporting
+## Analytics and Reporting
 
 ### 2FA Adoption Metrics
 ```sql
@@ -340,8 +355,7 @@ SELECT
     DATE_TRUNC('day', timestamp) as date,
     COUNT(*) as backup_code_logins
 FROM user_login_logs
-WHERE status = 'success'
-  AND user_agent LIKE '%backup_code%'
+WHERE status = 'success_2fa_backup_code'
 GROUP BY DATE_TRUNC('day', timestamp)
 ORDER BY date DESC;
 ```
@@ -370,11 +384,11 @@ WHERE u.two_factor_enabled = true
 ORDER BY remaining_codes ASC;
 ```
 
-## 🚨 Security Considerations
+## Security Considerations
 
 ### Data Protection
-- **Encryption at Rest**: TOTP secrets encrypted with Fernet
-- **Hashed Backup Codes**: Uses Django's password hashing (Argon2)
+- **Encryption at Rest**: TOTP secrets encrypted with AES-256-GCM
+- **Hashed Backup Codes**: Backup codes are hashed with Argon2 via Django's `make_password()` and verified with `check_password()` (timing-safe). Optional `MFA_BACKUP_CODE_PEPPER` env var provides an additional HKDF-derived pepper via `apps/common/key_derivation.py`
 - **Secure Transport**: All 2FA operations over HTTPS only
 - **Session Security**: 2FA sessions isolated and time-limited
 
@@ -390,7 +404,7 @@ ORDER BY remaining_codes ASC;
 - **Audit Logs**: 7-year retention for Romanian tax compliance
 - **Right to Deletion**: 2FA data removed when user account deleted
 
-## 📞 Support and Troubleshooting
+## Support and Troubleshooting
 
 ### Common Issues
 
@@ -430,14 +444,17 @@ print(f'Encryption test: {test == decrypted}')
 "
 ```
 
-## 📚 Related Documentation
+## Related Documentation
 
+- [ADR-0004: Custom 2FA Implementation](../ADRs/ADR-0004-custom-2fa-implementation.md)
 - [ADR-0018: DJANGO_ENCRYPTION_KEY Management](../ADRs/ADR-0018-django-encryption-key-management.md)
-- [Security Configuration](SECURITY_CONFIGURATION.md)
+- [ADR-0033: Encryption Architecture Consolidation](../ADRs/ADR-0033-encryption-architecture-consolidation.md) — standards compliance mapping
+- [Security Configuration Guide](SECURITY_CONFIGURATION.md) — key setup and deployment settings
+- [Security Compliance Assessment](SECURITY_COMPLIANCE_ASSESSMENT.md) — full compliance posture
 - [Production Deployment Guide](../deployment/DEPLOYMENT.md)
 
 ---
 
-**Last Updated**: December 2024
-**Version**: 1.0
+**Last Updated**: March 2026
+**Version**: 2.0
 **Review Schedule**: Quarterly

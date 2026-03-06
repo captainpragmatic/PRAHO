@@ -35,7 +35,7 @@ if not _db_password or _db_password in {"changeme", "development_password", "pas
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 
-_hmac_secret = os.environ.get("HMAC_SECRET", "")
+_hmac_secret = os.environ.get("HMAC_SECRET", "").strip()
 if not _hmac_secret:
     from django.core.exceptions import ImproperlyConfigured
 
@@ -43,6 +43,7 @@ if not _hmac_secret:
         "HMAC_SECRET must be set in production for portal↔platform authentication. "
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
+PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SECRET
 
 _webhook_secret = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
 if not _webhook_secret:
@@ -52,6 +53,25 @@ if not _webhook_secret:
         "PLATFORM_TO_PORTAL_WEBHOOK_SECRET must be set in production for platform→portal webhooks. "
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
+
+_encryption_key = os.environ.get("DJANGO_ENCRYPTION_KEY", "")
+if not _encryption_key:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "DJANGO_ENCRYPTION_KEY must be set in production for AES-256-GCM encryption (2FA, sensitive data). "
+        'Generate one with: python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
+    )
+
+_vault_key = os.environ.get("CREDENTIAL_VAULT_MASTER_KEY", "")
+if not _vault_key:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "CREDENTIAL_VAULT_MASTER_KEY must be set in production for credential vault encryption. "
+        'Generate one with: python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
+    )
+
 
 # ===============================================================================
 # PRODUCTION FLAGS
@@ -128,7 +148,7 @@ MIDDLEWARE = [
 # SSL/TLS Configuration - Behind TLS-terminating load balancer
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
-SECURE_REDIRECT_EXEMPT = [r"health/", r"^api/"]  # Allow health checks and internal API over HTTP from localhost
+SECURE_REDIRECT_EXEMPT = [r"^api/"]  # Allow internal API (incl. health checks) over HTTP from localhost
 
 # Cookie Security - Require HTTPS for all cookies
 SESSION_COOKIE_SECURE = True
@@ -437,6 +457,15 @@ SIEM_CONFIG = {
 
 # Log directory for file-based SIEM integration
 SIEM_LOG_DIR = os.environ.get("SIEM_LOG_DIR", "/var/log/praho/siem")
+
+if SIEM_CONFIG.get("ENABLE_HASH_CHAIN") and not os.environ.get("SIEM_HASH_CHAIN_SECRET"):
+    import warnings
+
+    warnings.warn(
+        "SIEM_HASH_CHAIN_SECRET is not set. Hash chain will use HKDF-derived key from SECRET_KEY. "
+        "For production, set a dedicated SIEM_HASH_CHAIN_SECRET (>= 32 chars).",
+        stacklevel=1,
+    )
 
 # ===============================================================================
 # ENHANCED AUDIT LOGGING CONFIGURATION 📋

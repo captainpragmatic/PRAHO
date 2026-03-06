@@ -227,8 +227,8 @@ A fresh deployment works with only the `[REQUIRED]` variables filled in. The `[R
 | **Email sending** | `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | Emails silently fail — no notifications, password resets, or invoices |
 | **Stripe payments** | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Payment processing disabled |
 | **e-Factura (ANAF)** | `EFACTURA_API_URL`, `EFACTURA_API_KEY` | Romanian e-invoicing disabled |
-| **2FA encryption** | `DJANGO_ENCRYPTION_KEY` | TOTP secrets stored unencrypted |
-| **Credential vault** | `CREDENTIAL_VAULT_MASTER_KEY` | Provider credentials stored without encryption |
+| **2FA encryption** | `DJANGO_ENCRYPTION_KEY` | App fails to start in production. Generate: `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
+| **Credential vault** | `CREDENTIAL_VAULT_MASTER_KEY` | App fails to start in production. Generate: `python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"` |
 | **Sentry** | `SENTRY_DSN` | No error tracking — errors only in log files |
 | **Company info** | `COMPANY_NAME`, `COMPANY_CUI`, etc. | Placeholder data on invoices |
 

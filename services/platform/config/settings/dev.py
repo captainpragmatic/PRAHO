@@ -53,6 +53,14 @@ INSTALLED_APPS += [
     "debug_toolbar",
 ]
 
+# django_extensions is dev-only (not installed in prod Docker images)
+try:
+    import django_extensions  # noqa: F401
+
+    INSTALLED_APPS += ["django_extensions"]
+except ImportError:
+    pass
+
 # Django Silk configuration is below after is_testing is defined
 
 # ===============================================================================

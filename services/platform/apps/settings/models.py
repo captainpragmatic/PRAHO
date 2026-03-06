@@ -166,14 +166,10 @@ class SystemSetting(models.Model):
         """Save setting with automatic encryption for sensitive values"""
         # Handle encryption for sensitive settings
         if self.is_sensitive and self.value is not None:
-            from .encryption import (  # noqa: PLC0415  # Deferred: avoids circular import
-                SettingsEncryption,  # Circular: same-app  # Deferred: avoids circular import
-            )
+            from apps.common.encryption import encrypt_value, is_encrypted  # noqa: PLC0415
 
-            encryption = SettingsEncryption()
-            # Only encrypt if not already encrypted
-            if not encryption.is_encrypted(str(self.value)):
-                self.value = encryption.encrypt_value(str(self.value))
+            if not is_encrypted(str(self.value)):
+                self.value = encrypt_value(str(self.value))
 
         super().save(*args, **kwargs)
 
@@ -236,13 +232,10 @@ class SystemSetting(models.Model):
         # Handle decryption for sensitive settings
         raw_value = self.value
         if self.is_sensitive and raw_value is not None:
-            from .encryption import (  # noqa: PLC0415  # Deferred: avoids circular import
-                SettingsEncryption,  # Circular: same-app  # Deferred: avoids circular import
-            )
+            from apps.common.encryption import decrypt_value, is_encrypted  # noqa: PLC0415
 
-            encryption = SettingsEncryption()
-            if encryption.is_encrypted(str(raw_value)):
-                raw_value = encryption.decrypt_value(str(raw_value))
+            if is_encrypted(str(raw_value)):
+                raw_value = decrypt_value(str(raw_value))
 
         if self.data_type == "decimal" and raw_value is not None:
             return Decimal(str(raw_value))

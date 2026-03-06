@@ -194,7 +194,7 @@ class AccountLockoutTokenTests(TestCase):
 
 
 # ===============================================================================
-# TOKEN INFO ENDPOINT (ADR-0030 Gap 1 fix)
+# TOKEN INFO ENDPOINT (ADR-0031 Gap 1 fix)
 # ===============================================================================
 
 

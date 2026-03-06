@@ -15,7 +15,6 @@ and follows the principle of single responsibility for security-critical code.
 """
 
 import base64
-import hashlib
 import io
 import logging
 import secrets
@@ -330,40 +329,6 @@ class BackupCodeService:
 
         user.backup_tokens = hashed_codes
         return codes
-
-    # Enhanced stateless helpers for code generation and verification
-    @staticmethod
-    def generate_backup_codes(count: int = BACKUP_CODES_COUNT) -> list[str]:
-        """Generate `count` backup codes in XXXX-XXXX-XXXX format (uppercase alnum)."""
-        alphabet = string.ascii_uppercase + string.digits
-        codes: set[str] = set()
-        while len(codes) < count:
-            raw = "".join(secrets.choice(alphabet) for _ in range(12))
-            formatted = f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}"
-            codes.add(formatted)
-        return list(codes)
-
-    @staticmethod
-    def hash_backup_code(code: str) -> str:
-        """Deterministically hash a backup code with secret pepper (for tests and simplicity).
-
-        Uses HMAC-SHA256-like behavior via Django's SECRET_KEY; not intended for user passwords.
-        """
-        normalized = (code or "").strip().upper()
-        pepper = getattr(settings, "SECRET_KEY", "")
-        h = hashlib.sha256()
-        h.update((pepper + "|" + normalized).encode("utf-8"))
-        return h.hexdigest()
-
-    @staticmethod
-    def verify_backup_code(code: str, hashed: str) -> bool:
-        """Verify a backup code against a deterministic hash, case-insensitive."""
-        try:
-            if not code or not hashed:
-                return False
-            return BackupCodeService.hash_backup_code(code) == hashed
-        except Exception:  # pragma: no cover
-            return False
 
     @staticmethod
     def verify_and_consume_code(user: "User", code: str) -> bool:

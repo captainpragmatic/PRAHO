@@ -12,6 +12,8 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+
 
 class ServicePlan(models.Model):
     """Hosting service plans/packages"""
@@ -180,12 +182,18 @@ class Server(models.Model):
     os_type = models.CharField(max_length=100, verbose_name=_("Operating System"))
     control_panel = models.CharField(max_length=100, blank=True, verbose_name=_("Control Panel"))
 
-    # Management API configuration (stored encrypted at rest via service layer)
+    # Management API configuration (AES-256-GCM encrypted at rest)
     management_api_url = models.URLField(blank=True, verbose_name=_("Management API URL"))
-    management_api_key = models.TextField(blank=True, default="", verbose_name=_("Encrypted API Key"))
-    management_api_secret = models.TextField(blank=True, default="", verbose_name=_("Encrypted API Secret"))
+    management_api_key = models.TextField(blank=True, default="", verbose_name=_("AES-256-GCM Encrypted API Key"))
+    management_api_secret = models.TextField(blank=True, default="", verbose_name=_("AES-256-GCM Encrypted API Secret"))
     management_webhook_secret = models.CharField(
-        max_length=255, blank=True, default="", verbose_name=_("Webhook Secret for signature verification")
+        max_length=500, blank=True, default="", verbose_name=_("AES-256-GCM Encrypted Webhook Secret")
+    )
+
+    # Per-server Virtualmin API credentials (AES-256-GCM encrypted at rest)
+    api_username = models.CharField(max_length=100, blank=True, default="", verbose_name=_("Virtualmin API Username"))
+    _api_password_encrypted = models.TextField(
+        blank=True, default="", verbose_name=_("AES-256-GCM Encrypted API Password")
     )
 
     # Provider information (for cloud servers)
@@ -220,9 +228,34 @@ class Server(models.Model):
         return f"{self.name} ({self.hostname})"
 
     def get_management_api_credentials(self) -> tuple[str, str]:
-        """Return decrypted API credentials (placeholder: values are stored already encrypted)."""
-        # In test/dev, these may be empty; gateway will handle missing credentials.
-        return self.management_api_key or "", self.management_api_secret or ""
+        """Return decrypted API credentials (AES-256-GCM encrypted at rest)."""
+        return (
+            decrypt_value(self.management_api_key) if self.management_api_key else "",
+            decrypt_value(self.management_api_secret) if self.management_api_secret else "",
+        )
+
+    def get_decrypted_webhook_secret(self) -> str:
+        """Get decrypted webhook secret for signature verification."""
+        return decrypt_value(self.management_webhook_secret) if self.management_webhook_secret else ""
+
+    def set_encrypted_management_credentials(
+        self, *, api_key: str = "", api_secret: str = "", webhook_secret: str = ""
+    ) -> None:
+        """Encrypt and store management API credentials."""
+        if api_key:
+            self.management_api_key = encrypt_sensitive_data(api_key)
+        if api_secret:
+            self.management_api_secret = encrypt_sensitive_data(api_secret)
+        if webhook_secret:
+            self.management_webhook_secret = encrypt_sensitive_data(webhook_secret)
+
+    def get_api_password(self) -> str:
+        """Return decrypted Virtualmin API password."""
+        return decrypt_value(self._api_password_encrypted) if self._api_password_encrypted else ""
+
+    def set_api_password(self, password: str) -> None:
+        """Encrypt and store Virtualmin API password."""
+        self._api_password_encrypted = encrypt_sensitive_data(password) if password else ""
 
     @property
     def active_services_count(self) -> int:

@@ -171,8 +171,8 @@ class SecureServerGateway:
             return False
 
         try:
-            # Calculate expected signature
-            webhook_secret = server.management_webhook_secret.encode("utf-8")
+            # Calculate expected signature (decrypt AES-256-GCM encrypted secret)
+            webhook_secret = server.get_decrypted_webhook_secret().encode("utf-8")
             expected_signature = hmac.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
             # Compare signatures (timing-safe comparison)

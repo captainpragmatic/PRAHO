@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 from django.core.cache import cache
 
-from apps.settings.encryption import SettingsEncryption
+from apps.common.encryption import decrypt_value, encrypt_value, is_encrypted
 
 from .settings import efactura_settings
 
@@ -173,38 +173,25 @@ class OAuthToken(models.Model):
         super().save(*args, **kwargs)
 
     def _encrypt(self, value: str) -> str:
-        """Encrypt a value using settings encryption."""
-        try:
-            encryption = SettingsEncryption()
-            encrypted = encryption.encrypt_value(value)
-            return encrypted if encrypted is not None else value
-        except ImportError:
-            logger.warning("Encryption service not available, storing token unencrypted")
-            return value
-        except Exception as e:
-            logger.error(f"Encryption failed: {e}")
-            return value
+        """Encrypt a value using AES-256-GCM.
+
+        Raises on failure — never stores plaintext as fallback.
+        """
+        encrypted = encrypt_value(value)
+        if encrypted is None:
+            raise ValueError("Encryption returned None for non-None input")
+        return encrypted
 
     def _decrypt(self, value: str) -> str:
-        """Decrypt a value using settings encryption."""
-        try:
-            encryption = SettingsEncryption()
-            if encryption.is_encrypted(value):
-                return encryption.decrypt_value(value)
-            return value
-        except ImportError:
-            return value
-        except Exception as e:
-            logger.error(f"Decryption failed: {e}")
-            return value
+        """Decrypt a value using AES-256-GCM.
+
+        Raises on failure — never returns unverified plaintext.
+        """
+        return decrypt_value(value)
 
     def _is_encrypted(self, value: str) -> bool:
         """Check if a value is encrypted."""
-        try:
-            encryption = SettingsEncryption()
-            return encryption.is_encrypted(value)
-        except ImportError:
-            return False
+        return is_encrypted(value)
 
     @property
     def decrypted_access_token(self) -> str:

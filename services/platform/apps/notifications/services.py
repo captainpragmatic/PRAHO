@@ -17,7 +17,6 @@ Features:
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import re
 from dataclasses import dataclass
@@ -962,10 +961,12 @@ class EmailService:
 
     @staticmethod
     def _generate_unsubscribe_url(email: str, template_key: str) -> str:
-        """Generate unsubscribe URL for email."""
-        token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
+        """Generate unsubscribe URL using opaque DB token (GDPR Art. 5 data minimization)."""
+        from apps.notifications.models import UnsubscribeToken  # noqa: PLC0415
+
+        token = UnsubscribeToken.objects.create(email=email, template_key=template_key)
         base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
-        return f"{base_url}/email/unsubscribe/?email={email}&token={token}"
+        return f"{base_url}/email/unsubscribe/{token.id}/"
 
     @staticmethod
     def get_safe_email_preview(template_content: str, context: dict[str, Any]) -> str:
@@ -1410,13 +1411,12 @@ class EmailPreferenceService:
         return True
 
     @staticmethod
-    def process_unsubscribe(email: str, token: str, category: str | None = None) -> bool:
+    def process_unsubscribe(token_id: str, category: str | None = None) -> bool:
         """
-        Process an unsubscribe request.
+        Process an unsubscribe request using opaque DB token.
 
         Args:
-            email: Email address
-            token: Verification token
+            token_id: UUID of the UnsubscribeToken
             category: Optional specific category to unsubscribe from
 
         Returns:
@@ -1425,20 +1425,19 @@ class EmailPreferenceService:
         from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             Customer,  # Circular: cross-app  # Deferred: avoids circular import
         )
+        from apps.notifications.models import UnsubscribeToken  # noqa: PLC0415
 
-        # Verify token using timing-safe comparison
-        # Check against known template keys to validate
-        token_valid = False
-        for template_key in ["marketing", "newsletter", "all"]:
-            expected_token = hashlib.sha256(f"{email}:{template_key}:{settings.SECRET_KEY}".encode()).hexdigest()[:32]
-            # Use timing-safe comparison to prevent timing attacks
-            if hmac.compare_digest(token, expected_token):
-                token_valid = True
-                break
-
-        if not token_valid:
-            logger.warning(f"Invalid unsubscribe token for {email[:3]}***")
+        try:
+            token_obj = UnsubscribeToken.objects.get(id=token_id)
+        except (UnsubscribeToken.DoesNotExist, Exception):
+            logger.warning("⚠️ [Unsubscribe] Invalid or unknown token")
             return False
+
+        if not token_obj.consume():
+            logger.warning("⚠️ [Unsubscribe] Token already used or expired")
+            return False
+
+        email = token_obj.email
 
         # Find customer
         try:
@@ -1460,7 +1459,7 @@ class EmailPreferenceService:
                 },
             )
 
-            logger.info(f"Processed unsubscribe for {email[:3]}***")
+            logger.info(f"✅ [Unsubscribe] Processed for {email[:3]}***")
             return True
 
         except Customer.DoesNotExist:

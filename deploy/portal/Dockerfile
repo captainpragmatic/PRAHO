@@ -1,32 +1,44 @@
 # ===============================================================================
-# PRAHO PORTAL SERVICE - PRODUCTION DOCKERFILE 🌐
+# PRAHO PORTAL SERVICE - PRODUCTION DOCKERFILE
 # ===============================================================================
-# Lightweight customer portal - NO database access, API-only
+# Multi-stage build: builder stage compiles dependencies, final stage is minimal.
+# Lightweight customer portal - NO database access, API-only.
 
-FROM python:3.13-slim
+# ---------------------------------------------------------------------------
+# Stage 1: Builder — install build tools + compile Python dependencies
+# ---------------------------------------------------------------------------
+FROM python:3.13-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# ===============================================================================
-# METADATA & LABELS 📋
-# ===============================================================================
+WORKDIR /build
+
+# Copy workspace lockfile and pyproject files for dependency resolution
+COPY pyproject.toml uv.lock ./
+COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
+
+# Sync portal production dependencies into /build/.venv
+RUN uv sync --group portal --group prod --frozen --no-dev
+
+# ---------------------------------------------------------------------------
+# Stage 2: Runtime — minimal image with only runtime dependencies
+# ---------------------------------------------------------------------------
+FROM python:3.13-slim
+
 LABEL maintainer="PRAHO Platform Team"
 LABEL service="portal"
 LABEL description="PRAHO Portal Service - Customer-facing API gateway"
 
-# ===============================================================================
-# ENVIRONMENT CONFIGURATION 🌍
-# ===============================================================================
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DJANGO_SETTINGS_MODULE=config.settings \
+    DJANGO_SETTINGS_MODULE=config.settings.prod \
+    PYTHONPATH=/app \
     SERVICE_NAME=portal
 
-# ⚠️ CRITICAL: NO PYTHONPATH set - portal cannot import platform code
+# Portal uses config.settings.prod (not config.settings) because portal has a
+# settings package (config/settings/{base,dev,prod}.py), same as platform.
 
-# ===============================================================================
-# MINIMAL SYSTEM DEPENDENCIES 📦
-# ===============================================================================
+# Runtime-only system packages (no build tools, no uv)
 # Note: NO postgresql-client, NO libpq-dev - portal has no DB access
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -35,17 +47,10 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# ===============================================================================
-# APPLICATION SETUP 🏗️
-# ===============================================================================
 WORKDIR /app
 
-# Copy workspace lockfile and pyproject files for dependency resolution
-COPY pyproject.toml uv.lock ./
-COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
-
-# Sync portal production dependencies
-RUN uv sync --group portal --group prod --frozen --no-dev
+# Copy pre-built venv from builder stage
+COPY --from=builder /build/.venv /app/.venv
 
 # Activate venv — bare `python` resolves to .venv/bin/python
 ENV PATH="/app/.venv/bin:$PATH"
@@ -53,35 +58,28 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy portal service code
 COPY services/portal/ ./
 
-# ===============================================================================
-# STATIC FILES & ASSETS 📁
-# ===============================================================================
+# Copy entrypoint script
+COPY deploy/portal/entrypoint.sh /app/entrypoint.sh
+
 # Create required directories (minimal)
 RUN mkdir -p /app/staticfiles \
-    && mkdir -p /app/logs
+    && mkdir -p /app/logs \
+    && mkdir -p /var/log/praho/portal
 
-# ===============================================================================
-# SECURITY & PERMISSIONS 🔒
-# ===============================================================================
 # Create non-root user
 RUN addgroup --system django \
     && adduser --system --group django
 
 # Set proper permissions
-RUN chown -R django:django /app
+RUN chmod +x /app/entrypoint.sh \
+    && chown -R django:django /app \
+    && chown -R django:django /var/log/praho
 USER django
 
-# ===============================================================================
-# HEALTH CHECK 🏥
-# ===============================================================================
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8701/health/', timeout=10).raise_for_status()" \
-    || exit 1
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8701/status/ || exit 1
 
-# ===============================================================================
-# RUNTIME CONFIGURATION ⚙️
-# ===============================================================================
 EXPOSE 8701
 
-# Default command - lightweight gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8701", "--workers", "2", "--timeout", "60", "config.wsgi:application"]
+# Entrypoint collects static files, then starts Gunicorn
+ENTRYPOINT ["/app/entrypoint.sh"]

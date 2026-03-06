@@ -27,7 +27,6 @@ DJANGO_APPS: list[str] = [
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
     "rest_framework.authtoken",  # 🔐 Token authentication for API access
-    "django_extensions",
     "ipware",
     "django_q",  # Async task processing
 ]
@@ -471,8 +470,8 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # CREDENTIAL VAULT CONFIGURATION 🔐
 # ===============================================================================
 
-# Master encryption key for credential vault
-# Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+# Master encryption key for credential vault (AES-256-GCM)
+# Generate with: python -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'
 CREDENTIAL_VAULT_MASTER_KEY = os.environ.get("CREDENTIAL_VAULT_MASTER_KEY")
 
 # Vault configuration

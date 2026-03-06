@@ -8,6 +8,8 @@ from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+
 # ===============================================================================
 # TLD (TOP-LEVEL DOMAIN) MANAGEMENT
 # ===============================================================================
@@ -144,12 +146,12 @@ class Registrar(models.Model):
     # API configuration
     api_endpoint = models.URLField(help_text=_("Base API endpoint URL"))
     api_username = models.CharField(max_length=100, blank=True)
-    api_key = models.CharField(max_length=255, blank=True)
-    api_secret = models.CharField(max_length=255, blank=True)
+    api_key = models.CharField(max_length=500, blank=True, help_text=_("AES-256-GCM encrypted"))
+    api_secret = models.CharField(max_length=500, blank=True, help_text=_("AES-256-GCM encrypted"))
 
     # Webhook configuration
     webhook_secret = models.CharField(
-        max_length=255, blank=True, help_text=_("Secret for webhook signature verification")
+        max_length=500, blank=True, help_text=_("AES-256-GCM encrypted — webhook signature verification")
     )
     webhook_endpoint = models.URLField(blank=True, help_text=_("Our webhook endpoint for this registrar"))
 
@@ -200,9 +202,25 @@ class Registrar(models.Model):
         return TLD.objects.filter(registrar_assignments__registrar=self)
 
     def get_api_credentials(self) -> tuple[str, str]:
-        """🔑 Get API credentials for this registrar"""
-        # TODO: Implement secure credential retrieval
-        return (self.api_username or "", self.api_key or "")
+        """Get decrypted API credentials (username, key) for this registrar."""
+        return (self.api_username or "", decrypt_value(self.api_key) if self.api_key else "")
+
+    def get_decrypted_api_secret(self) -> str:
+        """Get decrypted API secret."""
+        return decrypt_value(self.api_secret) if self.api_secret else ""
+
+    def get_decrypted_webhook_secret(self) -> str:
+        """Get decrypted webhook secret for signature verification."""
+        return decrypt_value(self.webhook_secret) if self.webhook_secret else ""
+
+    def set_encrypted_credentials(self, *, api_key: str = "", api_secret: str = "", webhook_secret: str = "") -> None:
+        """Encrypt and store API credentials."""
+        if api_key:
+            self.api_key = encrypt_sensitive_data(api_key)
+        if api_secret:
+            self.api_secret = encrypt_sensitive_data(api_secret)
+        if webhook_secret:
+            self.webhook_secret = encrypt_sensitive_data(webhook_secret)
 
     # Signal-related attributes for change tracking
     _original_registrar_values: dict[str, str | None] | None = None
@@ -297,7 +315,9 @@ class Domain(models.Model):
 
     # Registrar information
     registrar_domain_id = models.CharField(max_length=100, blank=True, help_text=_("Domain ID at registrar"))
-    epp_code = models.CharField(max_length=100, blank=True, help_text=_("EPP/Auth code for transfers"))
+    epp_code = models.CharField(
+        max_length=300, blank=True, help_text=_("AES-256-GCM encrypted EPP/Auth code for transfers")
+    )
 
     # Domain settings
     auto_renew = models.BooleanField(default=True, help_text=_("Automatically renew domain before expiration"))
@@ -367,6 +387,14 @@ class Domain(models.Model):
         """💰 Last paid amount in RON"""
         return self.last_paid_amount_cents / 100
 
+    def get_decrypted_epp_code(self) -> str:
+        """Get decrypted EPP/Auth code for domain transfers."""
+        return decrypt_value(self.epp_code) if self.epp_code else ""
+
+    def set_encrypted_epp_code(self, code: str) -> None:
+        """Encrypt and store EPP/Auth code."""
+        self.epp_code = encrypt_sensitive_data(code) if code else ""
+
     def clean(self) -> None:
         """🔍 Validate domain data"""
         if self.name:
@@ -433,7 +461,9 @@ class DomainOrderItem(models.Model):
     auto_renew = models.BooleanField(default=True, help_text=_("Enable auto-renewal for this domain"))
 
     # Transfer-specific fields
-    epp_code = models.CharField(max_length=100, blank=True, help_text=_("EPP/Auth code for domain transfer"))
+    epp_code = models.CharField(
+        max_length=300, blank=True, help_text=_("AES-256-GCM encrypted EPP/Auth code for domain transfer")
+    )
 
     # Linked domain (after processing)
     domain = models.ForeignKey(
@@ -476,3 +506,11 @@ class DomainOrderItem(models.Model):
     def total_price(self) -> float:
         """💰 Total price in RON"""
         return self.total_price_cents / 100
+
+    def get_decrypted_epp_code(self) -> str:
+        """Get decrypted EPP/Auth code for domain transfer."""
+        return decrypt_value(self.epp_code) if self.epp_code else ""
+
+    def set_encrypted_epp_code(self, code: str) -> None:
+        """Encrypt and store EPP/Auth code."""
+        self.epp_code = encrypt_sensitive_data(code) if code else ""

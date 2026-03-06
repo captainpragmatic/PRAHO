@@ -3,22 +3,7 @@ Management command to set up required Virtualmin settings in SystemSettings.
 
 This creates the necessary database configuration entries for Virtualmin
 integration, following the hybrid approach where operational settings
-are stored in the database and security credentials in environ        self.stdout.write('The following environment variables are required for Virtualmin authentication:')
-        self.stdout.write('  - VIRTUALMIN_ADMIN_USER=your_admin_username')
-        self.stdout.write('  - VIRTUALMIN_ADMIN_PASSWORD=your_admin_password')
-        self.stdout.write('')
-        self.stdout.write('Optional performance tuning:')
-        self.stdout.write('  - VIRTUALMIN_PINNED_CERT_SHA256=sha256_hash_for_cert_pinning')
-        self.stdout.write('')
-        self.stdout.write('For credential vault (recommended):')
-        self.stdout.write('  1. Set up credential vault: python manage.py setup_credential_vault')
-        self.stdout.write('  2. Migrate credentials: python manage.py setup_credential_vault --migrate-env-vars')
-        self.stdout.write('  3. Enable vault in settings: CREDENTIAL_VAULT_ENABLED=true')
-        self.stdout.write('')
-        self.stdout.write('Next steps:')
-        self.stdout.write('  1. Configure your Virtualmin settings in the admin panel')
-        self.stdout.write('  2. Test connection: python manage.py test_virtualmin_connection')
-        self.stdout.write('  3. Run health check: python manage.py virtualmin_health_check')ables.
+are stored in the database and security credentials in the credential vault.
 
 Usage:
     python manage.py setup_virtualmin_settings
@@ -334,12 +319,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"🎉 Setup complete! Created {created_count} new settings"))
         self.stdout.write("")
         self.stdout.write(self.style.WARNING("🔒 Security reminder:"))
-        self.stdout.write("The following environment variables are required for Virtualmin authentication:")
-        self.stdout.write("  - VIRTUALMIN_ADMIN_USER=your_admin_username")
-        self.stdout.write("  - VIRTUALMIN_ADMIN_PASSWORD=your_admin_password")
-        self.stdout.write("")
-        self.stdout.write("Optional performance tuning environment variables:")
-        self.stdout.write("  - VIRTUALMIN_REQUEST_TIMEOUT=60")
-        self.stdout.write("  - VIRTUALMIN_MAX_RETRIES=3")
-        self.stdout.write("  - VIRTUALMIN_RATE_QPS=10")
-        self.stdout.write("  - VIRTUALMIN_PINNED_CERT_SHA256=sha256_hash_for_certificate_pinning")
+        self.stdout.write("Virtualmin API credentials should be configured via:")
+        self.stdout.write("  Option 1 (recommended): Credential vault")
+        self.stdout.write("    python manage.py setup_credential_vault")
+        self.stdout.write("    python manage.py setup_credential_vault --migrate-env-vars")
+        self.stdout.write("  Option 2: Per-server credentials in Server model")
+        self.stdout.write("    Set api_username and api_password on each Server instance")

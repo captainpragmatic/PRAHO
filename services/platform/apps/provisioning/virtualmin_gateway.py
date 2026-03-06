@@ -223,9 +223,7 @@ def get_virtualmin_config() -> dict[str, Any]:
         "ssl_auto_renewal_enabled": SettingsService.get_setting("virtualmin.ssl_auto_renewal_enabled", True),
         "monitoring_enabled": SettingsService.get_setting("virtualmin.monitoring_enabled", True),
         "log_retention_days": SettingsService.get_setting("virtualmin.log_retention_days", 30),
-        # Security credentials from credential vault or environment fallback
-        "admin_user": os.environ.get("VIRTUALMIN_ADMIN_USER", ""),
-        "admin_password": os.environ.get("VIRTUALMIN_ADMIN_PASSWORD", ""),
+        # Security credentials
         "pinned_cert_sha256": os.environ.get("VIRTUALMIN_PINNED_CERT_SHA256", ""),
     }
 
@@ -600,9 +598,7 @@ class VirtualminGateway:
             )
 
             if vault_result.is_ok():
-                credentials_data = vault_result.unwrap()
-                username = credentials_data.get("username")  # type: ignore[union-attr]
-                password = credentials_data.get("password")  # type: ignore[union-attr]
+                username, password, _metadata = vault_result.unwrap()
                 if username and password:
                     logger.debug(f"🔐 [Virtualmin Gateway] Using vault credentials for {self.server.hostname}")
                     return Ok((username, password))
@@ -611,9 +607,8 @@ class VirtualminGateway:
                     f"⚠️ [Virtualmin Gateway] Vault failed for {self.server.hostname}: {vault_result.unwrap_err()}"
                 )
 
-        # Fall back to environment variables (current migration approach)
+        # Try server-specific credentials
         try:
-            # Try server-specific credentials first
             if hasattr(self.server, "api_username") and hasattr(self.server, "get_api_password"):
                 username = self.server.api_username
                 password = self.server.get_api_password()
@@ -622,18 +617,7 @@ class VirtualminGateway:
                     logger.debug(f"🔐 [Virtualmin Gateway] Using server credentials for {self.server.hostname}")
                     return Ok((username, password))
 
-            # Fall back to global environment variables
-            env_username = os.environ.get("VIRTUALMIN_ADMIN_USER")
-            env_password = os.environ.get("VIRTUALMIN_ADMIN_PASSWORD")
-
-            if env_username and env_password:
-                # SECURITY: Use DEBUG level to avoid credential exposure in production logs
-                logger.debug(
-                    f"🔐 [Virtualmin Gateway] Using environment credentials for {self.server.hostname} (migration needed)"
-                )
-                return Ok((env_username, env_password))
-
-            return Err("No valid credentials found in vault, server config, or environment")
+            return Err("No valid credentials found in vault or server config")
 
         except Exception:
             # SECURITY: Don't expose exception details that could leak credential info

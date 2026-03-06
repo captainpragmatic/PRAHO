@@ -5,7 +5,7 @@ from typing import Any, ClassVar, cast
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from apps.settings.encryption import settings_encryption
+from apps.common.encryption import encrypt_value
 
 from .models import TLD, Registrar
 
@@ -68,12 +68,13 @@ class RegistrarForm(forms.ModelForm):
 
     def save(self, commit: bool = True) -> Registrar:
         instance = super().save(commit=False)
-        # Encrypt secrets at rest
+        # Encrypt all secrets at rest using AES-256-GCM
         if self.cleaned_data.get("api_key"):
-            instance.api_key = settings_encryption.encrypt_value(self.cleaned_data["api_key"]) or ""
+            instance.api_key = encrypt_value(self.cleaned_data["api_key"]) or ""
         if self.cleaned_data.get("api_secret"):
-            instance.api_secret = settings_encryption.encrypt_value(self.cleaned_data["api_secret"]) or ""
-        # webhook_secret may be used raw by webhooks; keep as provided (write-only)
+            instance.api_secret = encrypt_value(self.cleaned_data["api_secret"]) or ""
+        if self.cleaned_data.get("webhook_secret"):
+            instance.webhook_secret = encrypt_value(self.cleaned_data["webhook_secret"]) or ""
         if commit:
             instance.save()
         return cast(Registrar, instance)
