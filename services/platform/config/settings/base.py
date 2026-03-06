@@ -415,7 +415,7 @@ if not SECRET_KEY:
 MIN_SECRET_KEY_LENGTH = 50
 
 
-def validate_production_secret_key(secret_key: str) -> None:
+def validate_production_secret_key(secret_key: str | None) -> None:
     """Validate that SECRET_KEY is safe for production use."""
     secret_key = secret_key.strip() if secret_key else ""
 

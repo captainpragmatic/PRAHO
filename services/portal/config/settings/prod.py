@@ -15,7 +15,9 @@ from apps.common.security_validation import validate_all_secrets  # noqa: E402
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
-    raise ValueError(
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
         "SECURITY ERROR: DJANGO_SECRET_KEY environment variable must be set in production.\n"
         'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )

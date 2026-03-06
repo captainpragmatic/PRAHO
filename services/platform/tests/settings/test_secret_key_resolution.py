@@ -81,10 +81,26 @@ class ProductionSecretKeyValidationTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             self.validate(long_key)
 
+    def test_rejects_dev_portal_key_prefix(self):
+        long_key = "dev-portal-key-" + "x" * 50
+        with self.assertRaises(ImproperlyConfigured):
+            self.validate(long_key)
+
     def test_rejects_well_known_values(self):
         for value in ["changeme", "secret", "password"]:
-            with self.assertRaises(ImproperlyConfigured):
+            with self.subTest(value=value), self.assertRaises(ImproperlyConfigured):
                 self.validate(value)
+
+    def test_accepts_exactly_min_length(self):
+        """Key with exactly MIN_SECRET_KEY_LENGTH (50) chars should pass."""
+        key = "x" * 50
+        self.validate(key)  # Should not raise
+
+    def test_rejects_one_below_min_length(self):
+        """Key with 49 chars should be rejected."""
+        key = "x" * 49
+        with self.assertRaises(ImproperlyConfigured):
+            self.validate(key)
 
     def test_accepts_strong_key(self):
         strong_key = "a" * 60  # 60 chars, no insecure prefix

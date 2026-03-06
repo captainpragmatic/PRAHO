@@ -43,8 +43,8 @@ check_service caddy
 
 echo ""
 echo "HTTP Endpoints:"
-check_http "Platform" "http://localhost:{{ platform_port }}/health/"
-check_http "Portal" "http://localhost:{{ portal_port }}/"
+check_http "Platform" "http://localhost:{{ platform_port }}/api/users/health/"
+check_http "Portal" "http://localhost:{{ portal_port }}/status/"
 
 echo ""
 if [ $ERRORS -eq 0 ]; then

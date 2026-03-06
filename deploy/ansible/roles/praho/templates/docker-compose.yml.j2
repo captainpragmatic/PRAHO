@@ -34,7 +34,11 @@ services:
     container_name: praho_platform
     environment:
       - DEBUG=0
-      - DATABASE_URL=${DATABASE_URL}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS={{ platform_domain }},{{ portal_domain }},localhost
@@ -93,7 +97,7 @@ services:
 {% endif %}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:{{ portal_port }}/"]
+      test: ["CMD", "curl", "-f", "http://localhost:{{ portal_port }}/status/"]
       interval: 30s
       timeout: 10s
       retries: 3
