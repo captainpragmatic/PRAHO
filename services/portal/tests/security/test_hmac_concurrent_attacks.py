@@ -13,19 +13,20 @@ These tests ensure HMAC authentication remains secure under concurrent
 load and sophisticated coordinated attacks.
 """
 
+import concurrent.futures
+import contextlib
 import hashlib
 import hmac
 import json
 import threading
 import time
-import concurrent.futures
 from collections import defaultdict
-from unittest.mock import patch, Mock
-from typing import Dict, List, Any, Callable
+from typing import Any
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, override_settings
 
-from apps.api_client.services import PlatformAPIClient
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 
 class HMACConcurrentAttackTestCase(SimpleTestCase):
@@ -42,7 +43,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
         self.attack_results = []
         self.result_lock = threading.Lock()
 
-    def _record_result(self, result: Dict[str, Any]) -> None:
+    def _record_result(self, result: dict[str, Any]) -> None:
         """Thread-safe result recording"""
         with self.result_lock:
             self.attack_results.append(result)
@@ -50,7 +51,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
     def test_concurrent_brute_force_signature_attack(self):
         """🔐 Test resistance to concurrent brute force signature attacks"""
 
-        def brute_force_worker(worker_id: int, signature_prefix: str) -> Dict[str, Any]:
+        def brute_force_worker(worker_id: int, signature_prefix: str) -> dict[str, Any]:
             """Worker thread for brute force attack"""
             attempts = 0
             successful_auths = 0
@@ -149,7 +150,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
     def test_nonce_exhaustion_attack(self):
         """🔐 Test resistance to nonce exhaustion attacks"""
 
-        def nonce_exhaustion_worker(worker_id: int) -> Dict[str, Any]:
+        def nonce_exhaustion_worker(worker_id: int) -> dict[str, Any]:
             """Worker thread attempting to exhaust nonce space"""
             nonces_used = set()
             cache_hits = 0
@@ -185,7 +186,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
 
                 # Attempt to use many nonces rapidly
                 for i in range(50):
-                    with patch('requests.request', side_effect=mock_nonce_tracking):
+                    with patch('requests.request', side_effect=mock_nonce_tracking), contextlib.suppress(PlatformAPIError):
                         client.authenticate_customer(f'nonce_attacker{worker_id}@example.com', 'password123')
 
                 return {
@@ -217,7 +218,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
     def test_distributed_coordinated_attack_simulation(self):
         """🔐 Test resistance to distributed coordinated attacks"""
 
-        def coordinated_attack_worker(worker_id: int, coordination_data: Dict[str, Any]) -> Dict[str, Any]:
+        def coordinated_attack_worker(worker_id: int, coordination_data: dict[str, Any]) -> dict[str, Any]:
             """Worker simulating part of coordinated attack"""
 
             attack_start_time = coordination_data['start_time']
@@ -268,15 +269,17 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
                     attack_results['attempts'] += 1
 
                     with patch('requests.request', side_effect=mock_coordinated_defense):
-                        result = client.authenticate_customer(
-                            f'coordinated_attacker{worker_id}@example.com',
-                            'password123'
-                        )
+                        try:
+                            result = client.authenticate_customer(
+                                f'coordinated_attacker{worker_id}@example.com',
+                                'password123'
+                            )
 
-                        if result:
-                            attack_results['successes'] += 1
-                        # Check for rate limiting response (simplified)
-                        attack_results['rate_limited_responses'] += 1 if len(self.attack_results) > 100 else 0
+                            if result:
+                                attack_results['successes'] += 1
+                        except PlatformAPIError as exc:
+                            if exc.is_rate_limited:
+                                attack_results['rate_limited_responses'] += 1
 
                     self._record_result({'worker': worker_id, 'timestamp': time.time()})
 

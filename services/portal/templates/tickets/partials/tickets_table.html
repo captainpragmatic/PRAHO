@@ -1,7 +1,9 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% if tickets %}
+{% if rate_limited %}
+{% include "components/rate_limit_inline_alert.html" %}
+{% elif tickets %}
 
 <!-- Desktop Table View (hidden on mobile) -->
 <div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">

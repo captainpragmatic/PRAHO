@@ -24,6 +24,7 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
+from apps.common.rate_limit_feedback import is_rate_limited_error
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -91,6 +92,8 @@ def _get_user_customer_memberships(request: HttpRequest) -> list[dict] | None:
         return None
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Portal] Failed to fetch user customers: {e}")
         return None
 
@@ -286,9 +289,20 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
-            except PlatformAPIError as e:
-                logger.error(f"🔥 [Portal Auth] Platform API error during login: {e}")
-                messages.error(request, _("Authentication service is temporarily unavailable. Please try again later."))
+            except PlatformAPIError as e:  # noqa: rate-limit-aware  — custom form error with retry_after countdown
+                if getattr(e, "is_rate_limited", False):
+                    retry_after = getattr(e, "retry_after", None) or 30
+                    logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
+                    form.add_error(
+                        None,
+                        _("Too many login attempts. Please try again in %(seconds)s seconds.")
+                        % {"seconds": retry_after},
+                    )
+                else:
+                    logger.error(f"🔥 [Portal Auth] Platform API error during login: {e}")
+                    messages.error(
+                        request, _("Authentication service is temporarily unavailable. Please try again later.")
+                    )
 
             except Exception as e:
                 logger.error(f"🔥 [Portal Auth] Unexpected error during login: {e}")
@@ -617,9 +631,21 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
                         )
                         messages.error(request, _("Error updating password. Please try again."))
 
-            except PlatformAPIError as e:
-                logger.error(f"🔥 [Portal Change Password] Platform API error: {e}")
-                messages.error(request, _("Authentication service is temporarily unavailable. Please try again later."))
+            except PlatformAPIError as e:  # noqa: rate-limit-aware  — custom warning with retry_after countdown
+                if getattr(e, "is_rate_limited", False):
+                    retry_after = getattr(e, "retry_after", None) or 30
+                    logger.warning(
+                        f"⚠️ [Portal Change Password] Rate-limited for {customer_email} (retry_after={retry_after}s)"
+                    )
+                    messages.warning(
+                        request,
+                        _("Too many attempts. Please try again in %(seconds)s seconds.") % {"seconds": retry_after},
+                    )
+                else:
+                    logger.error(f"🔥 [Portal Change Password] Platform API error: {e}")
+                    messages.error(
+                        request, _("Authentication service is temporarily unavailable. Please try again later.")
+                    )
 
             except Exception as e:
                 logger.error(f"🔥 [Portal Change Password] Unexpected error: {e}")
@@ -702,7 +728,9 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
             else:
                 messages.error(request, _("Failed to create export request. Please try again."))
 
-        except PlatformAPIError:
+        except PlatformAPIError as e:
+            if is_rate_limited_error(e):
+                raise
             logger.warning("⚠️ [Portal Data Export] Platform API unavailable")
             messages.error(request, _("Service temporarily unavailable. Please try again later."))
         except Exception as e:
@@ -720,7 +748,7 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
             result = api_client.get_data_export_status(user_id)
             if result.get("success"):
                 exports = result.get("exports", [])
-    except PlatformAPIError:
+    except PlatformAPIError:  # noqa: rate-limit-aware  — informational status fetch, graceful degradation
         logger.warning("⚠️ [Portal Data Export] Could not fetch export status")
 
     context = {
@@ -766,7 +794,7 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
             if result.get("success"):
                 consent_history = result.get("consent_history", [])
                 cookie_consent_history = result.get("cookie_consent_history", [])
-    except PlatformAPIError:
+    except PlatformAPIError:  # noqa: rate-limit-aware  — informational history fetch, graceful degradation
         logger.warning("⚠️ [Portal Consent] Failed to fetch consent history from Platform")
 
     context = {
@@ -978,6 +1006,8 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
             messages.error(request, _("Unable to load company profile data."))
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Portal] Company profile API error: {e}")
         messages.error(request, _("Error loading company profile. Please try again."))
     except Exception as e:
@@ -1125,6 +1155,8 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
                     messages.error(request, _("Failed to update profile: {}").format(error_msg))
 
             except PlatformAPIError as e:
+                if is_rate_limited_error(e):
+                    raise
                 logger.error(f"🔥 [Portal] Company profile update API error: {e}")
                 messages.error(request, _("Error updating company profile. Please try again."))
             except Exception as e:
@@ -1208,6 +1240,8 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         # permissions = verification_data.get('permissions', [])  # noqa: ERA001
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(
             f"🔥 [Security] Customer switch verification failed: user {user_id} -> customer {customer_id}, error: {e}"
         )
@@ -1344,6 +1378,8 @@ def create_company_view(request: HttpRequest) -> HttpResponse:
                     messages.error(request, _("Failed to create company: {}").format(error_msg))
 
             except PlatformAPIError as e:
+                if is_rate_limited_error(e):
+                    raise
                 logger.error(f"🔥 [Portal] Company creation API error: {e}")
                 messages.error(request, _("Error creating company. Please try again."))
 

@@ -134,6 +134,8 @@ def _verify_customer_access_realtime(request: HttpRequest, customer_id: str) -> 
         return None
 
     except PlatformAPIError as e:
+        if e.is_rate_limited:
+            raise
         logger.error(f"🔥 [Security] Failed to verify customer access: {e}")
         return None
 

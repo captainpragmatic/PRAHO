@@ -96,6 +96,8 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
                 return None
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.error(f"🔥 [Auth] Platform API error during authentication: {e}")
             return None
 
@@ -113,6 +115,8 @@ class PlatformAPIAuthenticationBackend(BaseBackend):
                 return None
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.error(f"🔥 [Auth] Failed to get user {user_id}: {e}")
             return None
 

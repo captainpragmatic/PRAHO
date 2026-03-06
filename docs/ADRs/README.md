@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0026**)
+2. Use the next available number (currently: **ADR-0031**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -56,6 +56,11 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0020](ADR-0020-async-task-processing-architecture.md) | Async Task Processing Architecture | Accepted | 2025-09-02 |
 | [ADR-0021](ADR-0021-email-enumeration-prevention.md) | Email Enumeration Prevention | Implemented | 2025-01-08 |
 | [ADR-0025](ADR-0025-monetary-amounts-in-cents.md) | Store Monetary Amounts in Cents | Accepted | 2025-08-19 |
+| [ADR-0026](ADR-0026-portal-frontend-architecture.md) | Portal Frontend Architecture | Accepted | 2026-03-02 |
+| [ADR-0027](ADR-0027-hcloud-sdk-infrastructure-provisioning.md) | Infrastructure Provisioning via hcloud Python SDK | Accepted | 2026-03-03 |
+| [ADR-0028](ADR-0028-server-log-checking-e2e.md) | Server Log Checking in E2E Tests | Accepted | 2026-03-03 |
+| [ADR-0029](ADR-0029-config-drift-detection.md) | Config Drift Detection & Remediation | Proposed | 2026-03-03 |
+| [ADR-0030](ADR-0030-rate-limiting-architecture.md) | Rate Limiting Architecture and Single Source of Truth | Accepted | 2026-03-05 |
 
 ### 🟡 Partially Superseded
 
@@ -96,7 +101,11 @@ Configuration & Organization
 
 Infrastructure & Provisioning
   ADR-0019 (virtualmin) ──related──▶ ADR-0020 (async tasks / Django-Q2)
+  ADR-0027 (hcloud SDK) ──related──▶ ADR-0029 (config drift detection)
   ADR-0013 (uv migration) ──standalone──
+
+Platform Traffic Management
+  ADR-0030 (rate limiting architecture) ──related──▶ ADR-0017 (portal fail-open)
 ```
 
 ---
@@ -107,6 +116,7 @@ Infrastructure & Provisioning
 - [ADR-0001](ADR-0001-pytest-playwright-for-e2e-testing.md) — E2E testing with Playwright
 - [ADR-0002](ADR-0002-strategic-linting-framework.md) — Ruff linting strategy
 - [ADR-0014](ADR-0014-no-test-suppression-policy.md) — No skipping/suppressing tests
+- [ADR-0028](ADR-0028-server-log-checking-e2e.md) — Backend log verification during E2E
 
 ### 🔒 Security & Authentication
 - [ADR-0004](ADR-0004-custom-2fa-implementation.md) — Custom TOTP 2FA
@@ -114,6 +124,7 @@ Infrastructure & Provisioning
 - [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) — Portal fail-open auth
 - [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
+- [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
 
 ### 🏗️ Architecture & Code Organization
 - [ADR-0005](ADR-0005-single-constants-file-architecture.md) — Constants file pattern
@@ -122,6 +133,7 @@ Infrastructure & Provisioning
 - [ADR-0012](ADR-0012-internal-app-organization.md) — App file structure
 - [ADR-0015](ADR-0015-configuration-resolution-order.md) — Configuration resolution
 - [ADR-0016](ADR-0016-audit-trail-enforcement.md) — Audit trail enforcement
+- [ADR-0026](ADR-0026-portal-frontend-architecture.md) — HTMX and component architecture for Portal
 
 ### 🔧 Type Safety & Tooling
 - [ADR-0003](ADR-0003-comprehensive-type-safety-implementation.md) — Type safety (partially superseded)
@@ -133,13 +145,12 @@ Infrastructure & Provisioning
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
 - [ADR-0020](ADR-0020-async-task-processing-architecture.md) — Django-Q2 async tasks
 - [ADR-0025](ADR-0025-monetary-amounts-in-cents.md) — Monetary amounts in cents
+- [ADR-0027](ADR-0027-hcloud-sdk-infrastructure-provisioning.md) — Hetzner SDK provisioning
+- [ADR-0029](ADR-0029-config-drift-detection.md) — Drift detection and remediation workflow
 
 ---
 
 ## Statistics
 
-- **Total ADRs**: 25 (ADR-0001 through ADR-0025)
-- **Active**: 20 (Accepted + Implemented)
-- **Partially Superseded**: 1
-- **Superseded / Historical**: 4
-- **Next available**: ADR-0026
+- **Total ADRs**: 30 (ADR-0001 through ADR-0030)
+- **Next available**: ADR-0031

@@ -1,25 +1,200 @@
 """
 API Rate Limiting and Throttling for PRAHO Platform
 
-Provides DRF-compatible throttling classes with:
-- Customer-aware rate limiting
-- Burst and sustained rate limiting
-- Service-specific throttling
-- Rate limit headers for API responses
+THROTTLE ARCHITECTURE
+─────────────────────
+Layer 1 (global defaults; this module):
+- Portal HMAC traffic: PortalHMACRateThrottle + PortalHMACBurstThrottle
+- Direct traffic: CustomerRateThrottle + BurstRateThrottle
+
+Layer 2 (per-viewset API throttles; this module, re-exported by apps.api.core.throttling):
+- StandardAPIThrottle (sustained)
+- BurstAPIThrottle (read-heavy)
+- AuthThrottle (anonymous auth endpoints)
+
+Layer 3 (portal middleware):
+- Portal-side middleware limits requests before DRF is reached.
 """
 
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any, ClassVar, cast
+import re
+from collections.abc import Sequence
+from typing import Any, cast
 
-from django.conf import settings
-from django.core.cache import cache
+from django.core.exceptions import ImproperlyConfigured
+from django.utils.module_loading import import_string
 from rest_framework.request import Request
-from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
 
 logger = logging.getLogger(__name__)
+
+_RATE_PATTERN = re.compile(r"^\s*(?P<num>\d+)\s*/\s*(?P<period>[A-Za-z0-9]+)\s*$")
+_RATE_WORD_SECONDS: dict[str, int] = {
+    "sec": 1,
+    "second": 1,
+    "seconds": 1,
+    "min": 60,
+    "minute": 60,
+    "minutes": 60,
+    "hour": 3600,
+    "hours": 3600,
+    "day": 86400,
+    "days": 86400,
+}
+_RATE_UNIT_SECONDS: dict[str, int] = {
+    "s": 1,
+    "m": 60,
+    "h": 3600,
+    "d": 86400,
+}
+_KNOWN_THROTTLE_CLASS_SCOPES: dict[str, str] = {
+    "apps.common.performance.rate_limiting.PortalHMACRateThrottle": "portal_hmac",
+    "apps.common.performance.rate_limiting.PortalHMACBurstThrottle": "portal_hmac_burst",
+    "apps.common.performance.rate_limiting.CustomerRateThrottle": "customer",
+    "apps.common.performance.rate_limiting.BurstRateThrottle": "burst",
+    "apps.api.core.throttling.StandardAPIThrottle": "sustained",
+    "apps.api.core.throttling.BurstAPIThrottle": "api_burst",
+    "apps.api.core.throttling.AuthThrottle": "auth",
+    "apps.api.orders.views.OrderCreateThrottle": "order_create",
+    "apps.api.orders.views.OrderCalculateThrottle": "order_calculate",
+    "apps.api.orders.views.OrderListThrottle": "order_list",
+    "apps.api.orders.views.ProductCatalogThrottle": "product_catalog",
+    "rest_framework.throttling.AnonRateThrottle": "anon",
+}
+
+
+def parse_rate_string(rate: str) -> tuple[int, int]:
+    """
+    Parse DRF-like throttle rates with support for custom shorthand windows.
+
+    Supported examples:
+    - ``100/minute``
+    - ``50/10s``
+    - ``100/hour``
+    """
+    text_rate = str(rate).strip()
+    match = _RATE_PATTERN.fullmatch(text_rate)
+    if not match:
+        raise ValueError(f"Invalid rate format: {rate!r}")
+
+    num_requests = int(match.group("num"))
+    if num_requests <= 0:
+        raise ValueError(f"Rate request count must be > 0: {rate!r}")
+
+    period = match.group("period").lower()
+    if period in _RATE_WORD_SECONDS:
+        return num_requests, _RATE_WORD_SECONDS[period]
+
+    if period[-1] in _RATE_UNIT_SECONDS:
+        unit_seconds = _RATE_UNIT_SECONDS[period[-1]]
+        if len(period) == 1:
+            multiplier = 1
+        else:
+            if not period[:-1].isdigit():
+                raise ValueError(f"Invalid rate period: {rate!r}")
+            multiplier = int(period[:-1])
+            if multiplier <= 0:
+                raise ValueError(f"Rate period multiplier must be > 0: {rate!r}")
+        return num_requests, multiplier * unit_seconds
+
+    raise ValueError(f"Unsupported rate period: {rate!r}")
+
+
+def validate_throttle_rate_map(rates: dict[str, str]) -> None:
+    """Validate throttle rates and raise clear startup errors for invalid values."""
+    invalid_entries: list[str] = []
+    for scope, rate in rates.items():
+        try:
+            parse_rate_string(rate)
+        except (TypeError, ValueError) as exc:
+            invalid_entries.append(f"{scope}={rate!r} ({exc})")
+
+    if invalid_entries:
+        joined = ", ".join(invalid_entries)
+        raise ImproperlyConfigured(f"Invalid throttle rate configuration: {joined}")
+
+
+def validate_throttle_class_scopes(class_paths: Sequence[str | type[Any]], rates: dict[str, str]) -> None:
+    """
+    Validate throttle class import paths and ensure scoped classes have configured rates.
+    """
+    errors: list[str] = []
+    for class_path in class_paths:
+        if isinstance(class_path, str):
+            display_name = class_path
+            known_scope = _KNOWN_THROTTLE_CLASS_SCOPES.get(class_path)
+            if known_scope:
+                scope = known_scope
+            else:
+                try:
+                    throttle_cls = import_string(class_path)
+                except Exception as exc:  # pragma: no cover - defensive startup validation
+                    errors.append(f"{class_path} (import failed: {exc})")
+                    continue
+                scope = getattr(throttle_cls, "scope", None)
+        elif isinstance(class_path, type):
+            throttle_cls = class_path
+            display_name = f"{class_path.__module__}.{class_path.__name__}"
+            scope = getattr(throttle_cls, "scope", None)
+        else:
+            errors.append(f"{class_path!r} (invalid throttle class reference)")
+            continue
+
+        if scope and scope not in rates:
+            errors.append(f"{display_name} (missing scope '{scope}' in THROTTLE_RATES)")
+
+    if errors:
+        raise ImproperlyConfigured("Invalid throttle class configuration: " + ", ".join(errors))
+
+
+def _is_portal_authenticated(request: Request) -> bool:
+    """True when request passed HMAC service authentication middleware."""
+    return bool(getattr(request, "_portal_authenticated", False))
+
+
+def _extract_hmac_identity(request: Request) -> str:
+    """
+    Build a stable HMAC throttle identity.
+
+    Use a portal-only key so callers cannot bypass limits by rotating signed
+    payload fields (customer_id/user_id) and creating unbounded cache keys.
+    """
+    return request.headers.get("X-Portal-Id", "unknown")
+
+
+class _CustomTimeRateMixin:
+    """Support custom shorthand rates such as `50/10s`."""
+
+    def parse_rate(self, rate: str) -> tuple[int, int]:
+        return parse_rate_string(rate)
+
+
+class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Per-portal throttling for service-to-service HMAC requests."""
+
+    scope = "portal_hmac"
+    cache_format = "throttle_portal_hmac_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if not _is_portal_authenticated(request):
+            return None
+        ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Burst throttling for HMAC traffic to protect against request spikes."""
+
+    scope = "portal_hmac_burst"
+    cache_format = "throttle_portal_hmac_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if not _is_portal_authenticated(request):
+            return None
+        ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
 class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
@@ -36,15 +211,12 @@ class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     scope = "customer"
     cache_format = "throttle_customer_%(scope)s_%(ident)s"
 
-    # Default rates by customer tier
-    TIER_RATES: ClassVar[dict[str, str]] = {
-        "basic": "100/minute",
-        "professional": "500/minute",
-        "enterprise": "2000/minute",
-    }
-
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         """Generate a cache key based on customer ID."""
+        if _is_portal_authenticated(request):
+            # Portal HMAC traffic is handled by PortalHMAC*Throttle classes.
+            return None
+
         if not request.user or not request.user.is_authenticated:
             # Use IP for unauthenticated requests
             ident = self.get_ident(request)
@@ -61,219 +233,43 @@ class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
         # Fall back to user-based limiting
         return self.cache_format % {"scope": self.scope, "ident": f"user_{request.user.pk}"}
 
-    def get_rate(self) -> str:
-        """Get rate based on customer tier."""
-        # Default rate - can be overridden based on customer tier
-        return getattr(settings, "DEFAULT_CUSTOMER_THROTTLE_RATE", "100/minute")
 
-
-class BurstRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
+class BurstRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """
     Throttle for burst traffic - short-term high-frequency limiting.
     Prevents API abuse from rapid requests.
 
-    Default: 30 requests per 10 seconds
+    Default is configured via THROTTLE_RATES["burst"].
     """
 
     scope = "burst"
-    rate = "30/10s"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         """Generate cache key based on user or IP for burst limiting."""
+        if _is_portal_authenticated(request):
+            # Portal HMAC traffic is handled by PortalHMAC*Throttle classes.
+            return None
+
         ident = str(request.user.pk) if request.user and request.user.is_authenticated else self.get_ident(request)
         return cast("str | None", self.cache_format % {"scope": self.scope, "ident": ident})
 
-    def parse_rate(self, rate: str) -> tuple[int, int]:
-        """Parse rate string with custom time units."""
-        num, period = rate.split("/")
-        num_requests = int(num)
 
-        # Handle custom time periods
-        if period.endswith("s"):
-            duration = int(period[:-1])
-        elif period == "sec":
-            duration = 1
-        elif period in {"min", "minute"}:
-            duration = 60
-        elif period == "hour":
-            duration = 3600
-        elif period == "day":
-            duration = 86400
-        else:
-            duration = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(period[-1], 1)
-            if period[:-1].isdigit():
-                duration *= int(period[:-1])
-
-        return (num_requests, duration)
-
-
-class SustainedRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
-    """
-    Throttle for sustained traffic - long-term rate limiting.
-    Prevents API overuse over time.
-
-    Default: 1000 requests per hour
-    """
+class StandardAPIThrottle(UserRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Per-view sustained throttle for standard API operations."""
 
     scope = "sustained"
-    rate = "1000/hour"
 
 
-class ServiceRateThrottle(BaseThrottle):  # type: ignore[misc]
-    """
-    Specialized throttle for service provisioning and heavy operations.
-    Implements token bucket algorithm for more flexible limiting.
+class BurstAPIThrottle(UserRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Per-view burst throttle for read-heavy API operations."""
 
-    Features:
-    - Token bucket with configurable refill rate
-    - Per-operation cost weighting
-    - Queue-based waiting for rate-limited requests
-    """
-
-    # Tokens per operation type
-    OPERATION_COSTS: ClassVar[dict[str, int]] = {
-        "provision": 10,
-        "backup": 5,
-        "sync": 2,
-        "query": 1,
-    }
-
-    # Default bucket configuration
-    BUCKET_CAPACITY = 100
-    REFILL_RATE = 10  # tokens per second
-
-    def __init__(self) -> None:
-        self.cache_key_prefix = "throttle_service"
-        self.capacity = getattr(settings, "SERVICE_THROTTLE_CAPACITY", self.BUCKET_CAPACITY)
-        self.refill_rate = getattr(settings, "SERVICE_THROTTLE_REFILL_RATE", self.REFILL_RATE)
-
-    def allow_request(self, request: Request, view: Any) -> bool:
-        """Check if request is allowed based on token bucket."""
-        ident = self._get_ident(request)
-        operation = self._get_operation(request, view)
-        cost = self.OPERATION_COSTS.get(operation, 1)
-
-        cache_key = f"{self.cache_key_prefix}_{ident}"
-        bucket = cache.get(cache_key)
-
-        now = time.time()
-
-        if bucket is None:
-            # Initialize new bucket
-            bucket = {
-                "tokens": self.capacity - cost,
-                "last_update": now,
-            }
-        else:
-            # Refill tokens based on time elapsed
-            elapsed = now - bucket["last_update"]
-            refill = int(elapsed * self.refill_rate)
-            bucket["tokens"] = min(self.capacity, bucket["tokens"] + refill)
-            bucket["last_update"] = now
-
-            # Check if we have enough tokens
-            if bucket["tokens"] < cost:
-                self._wait_time = (cost - bucket["tokens"]) / self.refill_rate
-                return False
-
-            bucket["tokens"] -= cost
-
-        # Store updated bucket
-        cache.set(cache_key, bucket, timeout=3600)
-
-        # Store rate limit info for headers
-        request._throttle_info = {
-            "remaining": bucket["tokens"],
-            "limit": self.capacity,
-            "reset": int(now + (self.capacity - bucket["tokens"]) / self.refill_rate),
-        }
-
-        return True
-
-    def wait(self) -> float | None:
-        """Return the recommended wait time."""
-        return getattr(self, "_wait_time", None)
-
-    def _get_ident(self, request: Request) -> str:
-        """Get identifier for rate limiting."""
-        if request.user and request.user.is_authenticated:
-            customer_id = getattr(request, "current_customer_id", None)
-            if customer_id:
-                return f"customer_{customer_id}"
-            return f"user_{request.user.pk}"
-
-        # Fall back to IP
-        xff = request.META.get("HTTP_X_FORWARDED_FOR")
-        remote_addr = request.META.get("REMOTE_ADDR")
-        return (xff.split(",")[0].strip() if xff else remote_addr) or "unknown"
-
-    def _get_operation(  # noqa: PLR0911  # Complexity: multi-step business logic
-        self, request: Request, view: Any
-    ) -> str:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
-        """Determine the operation type from the request."""
-        # Check view action
-        if hasattr(view, "action"):
-            action = view.action
-            if action in ["create", "provision"]:
-                return "provision"
-            if action in ["backup"]:
-                return "backup"
-            if action in ["sync", "update"]:
-                return "sync"
-
-        # Check URL path
-        path = request.path.lower()
-        if "provision" in path:
-            return "provision"
-        if "backup" in path:
-            return "backup"
-        if "sync" in path:
-            return "sync"
-
-        return "query"
+    scope = "api_burst"
 
 
-class AnonymousRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
-    """
-    Strict rate limiting for unauthenticated requests.
-    Prevents abuse from anonymous users.
+class AuthThrottle(AnonRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Restrictive anonymous throttle for authentication-related endpoints."""
 
-    Default: 20 requests per minute
-    """
-
-    scope = "anon"
-    rate = "20/minute"
-
-    def get_cache_key(self, request: Request, view: Any) -> str | None:
-        if request.user and request.user.is_authenticated:
-            return None  # Only throttle unauthenticated requests
-
-        return cast(
-            "str | None",
-            self.cache_format
-            % {
-                "scope": self.scope,
-                "ident": self.get_ident(request),
-            },
-        )
-
-
-class WriteOperationThrottle(SimpleRateThrottle):  # type: ignore[misc]
-    """
-    Throttle for write operations (POST, PUT, PATCH, DELETE).
-    More restrictive than read operations.
-
-    Default: 60 write operations per minute
-    """
-
-    scope = "write"
-    rate = "60/minute"
-
-    def allow_request(self, request: Request, view: Any) -> bool:
-        if request.method in ("GET", "HEAD", "OPTIONS"):
-            return True  # Don't throttle read operations
-
-        return cast(bool, super().allow_request(request, view))
+    scope = "auth"
 
 
 # Rate limit header utilities
@@ -306,77 +302,3 @@ def add_rate_limit_headers(response: Any, request: Request) -> Any:
     for key, value in headers.items():
         response[key] = value
     return response
-
-
-# Rate limit configuration for different endpoints
-
-ENDPOINT_THROTTLE_RATES = {
-    # High-security endpoints - very restrictive
-    "login": "5/minute",
-    "password_reset": "3/minute",
-    "2fa_verify": "10/minute",
-    # Financial operations - moderately restrictive
-    "payment": "30/minute",
-    "invoice": "60/minute",
-    "refund": "10/minute",
-    # Provisioning - resource-intensive
-    "provision": "10/minute",
-    "backup": "5/minute",
-    # Standard CRUD - less restrictive
-    "list": "100/minute",
-    "detail": "200/minute",
-    "create": "50/minute",
-    "update": "100/minute",
-    # Read-heavy operations - permissive
-    "search": "60/minute",
-    "export": "10/minute",
-}
-
-
-def get_throttle_rate_for_endpoint(endpoint: str) -> str:
-    """Get the configured throttle rate for an endpoint."""
-    return ENDPOINT_THROTTLE_RATES.get(endpoint, "100/minute")
-
-
-class EndpointThrottle(SimpleRateThrottle):  # type: ignore[misc]
-    """
-    Dynamic throttle that applies different rates based on endpoint.
-    Rate is determined by view's throttle_scope attribute.
-    """
-
-    scope_attr = "throttle_scope"
-
-    def __init__(self) -> None:
-        pass  # Don't call super().__init__() to avoid rate parsing
-
-    def allow_request(self, request: Request, view: Any) -> bool:
-        # Get scope from view
-        self.scope = getattr(view, self.scope_attr, "default")
-        self.rate = get_throttle_rate_for_endpoint(self.scope)
-
-        # Parse rate and check
-        self.num_requests, self.duration = self.parse_rate(self.rate)
-        self.key = self.get_cache_key(request, view)
-
-        if self.key is None:
-            return True
-
-        self.history = cache.get(self.key, [])
-        self.now = time.time()
-
-        # Drop old entries
-        while self.history and self.history[-1] <= self.now - self.duration:
-            self.history.pop()
-
-        if len(self.history) >= self.num_requests:
-            return self.throttle_failure()
-
-        return self.throttle_success()
-
-    def throttle_success(self) -> bool:
-        self.history.insert(0, self.now)
-        cache.set(self.key, self.history, self.duration)
-        return True
-
-    def throttle_failure(self) -> bool:
-        return False

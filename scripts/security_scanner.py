@@ -401,6 +401,34 @@ class SecurityScanner:
             (r'PRIVATE_KEY\s*=\s*["\']-----BEGIN', "Private Key Exposure", Severity.CRITICAL, None),
         ]
 
+        # Defensive coding patterns (rate-limit hardening, external value bounds)
+        self.defensive_patterns = [
+            (
+                r"response\.json\(\)",
+                "Unguarded response.json() - may crash on non-JSON body (use try/except or safe wrapper)",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+            ),
+            (
+                r"int\s*\(\s*response\.\w+\.get\s*\(",
+                "Unbounded int() cast from API response - clamp with min()/max() to prevent extreme values",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+            ),
+            (
+                r"int\s*\(\s*headers\.\w*get\s*\(",
+                "Unbounded int() cast from HTTP headers - clamp with min()/max() to prevent extreme values",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+            ),
+            (
+                r'int\s*\(\s*\w+\.get\s*\(\s*["\'](?:retry.after|content.length|x-)',
+                "Unbounded int() cast from HTTP header - clamp with min()/max()",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+            ),
+        ]
+
         # Logging failures
         self.logging_patterns = [
             (
@@ -612,6 +640,7 @@ class SecurityScanner:
             + self.cve_patterns
             + self.secret_patterns
             + self.logging_patterns
+            + self.defensive_patterns
         )
 
         for pattern, description, severity, owasp_cat in all_patterns:
@@ -707,6 +736,8 @@ class SecurityScanner:
             "MD5": "Use bcrypt, argon2, or PBKDF2 for password hashing",
             "SSRF": "Validate and whitelist URLs, use IP allowlisting",
             "Weak Crypto": "Use AES-256-GCM or ChaCha20-Poly1305 for encryption",
+            "Unguarded response.json": "Wrap response.json() in try/except (ValueError, TypeError) or use a safe wrapper",
+            "Unbounded int": "Clamp external values with min(max(1, value), MAX_VALUE) before use",
         }
 
         for key, rec in recommendations.items():
@@ -806,6 +837,47 @@ class ASTSecurityVisitor(ast.NodeVisitor):
                     owasp_category=OWASPCategory.A08_SOFTWARE_DATA_INTEGRITY,
                     code_snippet=self.lines[node.lineno - 1].strip()[:200],
                 )
+
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        """Check for except PlatformAPIError blocks that silently swallow rate-limited errors"""
+        if not isinstance(node.type, ast.Name) or node.type.id != "PlatformAPIError":
+            self.generic_visit(node)
+            return
+
+        # Check if the handler body contains a raise or known rate-limit-aware helper
+        safe_helpers = {"_raise_if_rate_limited", "is_rate_limited_error", "handle_platform_error"}
+        has_reraise = False
+        for child in ast.walk(node):
+            if isinstance(child, ast.Raise):
+                has_reraise = True
+                break
+            if isinstance(child, ast.Call):
+                func = child.func
+                func_name = func.id if isinstance(func, ast.Name) else None
+                if func_name in safe_helpers:
+                    has_reraise = True
+                    break
+
+        # Allow inline suppression via # noqa: rate-limit-aware
+        handler_source = self.lines[node.lineno - 1] if node.lineno <= len(self.lines) else ""
+        if "noqa: rate-limit-aware" in handler_source:
+            self.generic_visit(node)
+            return
+
+        if not has_reraise:
+            self._add_finding(
+                line=node.lineno,
+                title="Silent Rate-Limit Swallowing",
+                description=(
+                    "except PlatformAPIError block without raise or _raise_if_rate_limited() — "
+                    "rate-limited (429) errors will be silently swallowed instead of propagating for UX feedback"
+                ),
+                severity=Severity.MEDIUM,
+                owasp_category=OWASPCategory.A04_INSECURE_DESIGN,
+                code_snippet=self.lines[node.lineno - 1].strip()[:200] if node.lineno <= len(self.lines) else "",
+            )
 
         self.generic_visit(node)
 

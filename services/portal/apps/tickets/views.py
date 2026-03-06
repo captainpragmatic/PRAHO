@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.common.api_utils import DictAsObj
 from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
 from apps.services.services import services_api
 
 from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
@@ -124,9 +125,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         logger.info(f"✅ [Tickets View] Loaded {len(tickets)} tickets for customer {customer_id}")
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Tickets View] Error loading tickets for customer {customer_id}: {e}")
-        messages.error(request, _("Unable to load support tickets. Please try again later."))
-        # Create empty paginator data for error state
+        error_ctx = handle_platform_error(
+            request, e, logger, fallback_message=_("Unable to load support tickets. Please try again later.")
+        )
         paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
 
         context = {
@@ -148,6 +149,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
                 {"value": "0", "label": _("Total Tickets"), "color": "text-white"},
             ],
             "filter_tabs": TICKET_STATUS_TABS,
+            **error_ctx,
         }
 
     return render(request, "tickets/ticket_list.html", context)
@@ -185,6 +187,8 @@ def ticket_detail(request: HttpRequest, ticket_id: int) -> HttpResponse:
         logger.info(f"✅ [Tickets View] Loaded ticket {ticket_id} details for customer {customer_id}")
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Tickets View] Error loading ticket {ticket_id} for customer {customer_id}: {e}")
         messages.error(request, _("Ticket not found or access denied."))
         return redirect("tickets:list")
@@ -259,6 +263,8 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
                 return redirect("tickets:list")
 
         except PlatformAPIError as e:
+            if is_rate_limited_error(e):
+                raise
             logger.error(f"🔥 [Tickets View] Error creating ticket for customer {customer_id}: {e}")
             messages.error(request, _("Unable to create support ticket. Please try again later."))
             # Preserve form data on API error
@@ -390,6 +396,8 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
         return _handle_ticket_success_response(request, ticket_id, _("Reply added successfully."))
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Tickets View] Error adding reply to ticket {ticket_id} for customer {customer_id}: {e}")
         return _handle_ticket_error_response(
             request, ticket_id, _("Unable to add reply. Please try again later."), status=500
@@ -440,25 +448,16 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         )
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Tickets View] Error searching tickets for customer {customer_id}: {e}")
-        # Create empty paginator data for error state
+        error_ctx = handle_platform_error(request, e, logger)
         paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
 
-        return render(
-            request,
-            "tickets/partials/tickets_table.html",
-            {
-                "tickets": [],
-                "error": _("Search failed. Please try again."),
-                "total_count": 0,
-                "current_page": 1,
-                "total_pages": 1,
-                "has_next": False,
-                "has_previous": False,
-                "paginator_data": paginator_data,
-                "pagination_params": "",
-            },
-        )
+        context = {
+            "tickets": [],
+            "paginator_data": paginator_data,
+            "pagination_params": "",
+            **error_ctx,
+        }
+        return render(request, "tickets/partials/tickets_table.html", context)
 
 
 def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
@@ -486,10 +485,10 @@ def tickets_dashboard_widget(request: HttpRequest) -> HttpResponse:
 
         return render(request, "tickets/partials/dashboard_widget.html", context)
 
-    except PlatformAPIError:
-        # Return empty widget on error
+    except PlatformAPIError as e:
+        error_ctx = handle_platform_error(request, e, logger)
         return render(
             request,
             "tickets/partials/dashboard_widget.html",
-            {"summary": {"total_tickets": 0, "open_tickets": 0}, "recent_tickets": [], "error": True},
+            {"summary": {"total_tickets": 0, "open_tickets": 0}, "recent_tickets": [], "error": True, **error_ctx},
         )

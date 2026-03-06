@@ -21,6 +21,12 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 logger = logging.getLogger(__name__)
 
 
+def _raise_if_rate_limited(exc: Exception) -> None:
+    """Re-raise rate-limited errors so views can show appropriate feedback."""
+    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
+        raise exc
+
+
 class ServicesAPIClient(PlatformAPIClient):
     """
     Customer hosting services API client for portal service.
@@ -61,7 +67,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if service_type:
                 data["service_type"] = service_type
 
-            response = self._make_request("POST", "/services/", user_id=user_id, data=data)
+            response = self._make_request("POST", "/services/", user_id=user_id, data=data, idempotent=True)
 
             # Transform platform API response format to expected portal format
             if response.get("success") and "data" in response:
@@ -97,7 +103,9 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", f"/services/{service_id}/", user_id=user_id, data=data)
+            response = self._make_request(
+                "POST", f"/services/{service_id}/", user_id=user_id, data=data, idempotent=True
+            )
 
             # Extract service data from nested platform API response
             if response.get("success") and "data" in response and "service" in response["data"]:
@@ -127,7 +135,9 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id, "period": period}
-            response = self._make_request("POST", f"/services/{service_id}/usage/", user_id=user_id, data=data)
+            response = self._make_request(
+                "POST", f"/services/{service_id}/usage/", user_id=user_id, data=data, idempotent=True
+            )
 
             # Extract usage data from nested platform API response
             if response.get("success") and "data" in response and "usage" in response["data"]:
@@ -148,6 +158,7 @@ class ServicesAPIClient(PlatformAPIClient):
             logger.error(
                 f"🔥 [Services API] Error retrieving usage for service {service_id} for customer {customer_id}: {e}"
             )
+            _raise_if_rate_limited(e)
             # Return empty usage on error to avoid breaking UI
             return {"bandwidth_used": 0, "bandwidth_limit": 0, "storage_used": 0, "storage_limit": 0, "period": period}
 
@@ -164,7 +175,7 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", "/services/summary/", user_id=user_id, data=data)
+            response = self._make_request("POST", "/services/summary/", user_id=user_id, data=data, idempotent=True)
 
             # Extract summary data from nested response structure
             if response.get("success") and "data" in response and "summary" in response["data"]:
@@ -184,6 +195,7 @@ class ServicesAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services summary for customer {customer_id}: {e}")
+            _raise_if_rate_limited(e)
             # Return empty summary on error
             return {
                 "total_services": 0,
@@ -206,12 +218,14 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id}
-            response = self._make_request("POST", f"/services/{service_id}/domains/", data=data)
+            response = self._make_request("POST", f"/services/{service_id}/domains/", data=data, idempotent=True)
 
             logger.info(f"✅ [Services API] Retrieved domains for service {service_id} for customer {customer_id}")
             return cast(list[dict[str, Any]], response.get("domains", []))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             # Domains API endpoint not yet implemented on platform (returns 404).
             # Gracefully degrade — log as warning, not error.
             http_not_found = 404
@@ -281,6 +295,8 @@ class ServicesAPIClient(PlatformAPIClient):
             return cast(list[dict[str, Any]], response.get("plans", []))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.error(f"🔥 [Services API] Error retrieving plans for customer {customer_id}: {e}")
             return []
 

@@ -398,6 +398,8 @@ class GDPRCompliantCartSession:
                 raise ValidationError(_("Product is not available"))
 
         except PlatformAPIError as e:
+            if getattr(e, "is_rate_limited", False):
+                raise  # Let view handle rate-limit UX
             logger.warning(f"⚠️ [Cart] Product lookup unavailable for {product_slug}: {e}")
             product_data = {
                 "id": product_slug,
@@ -680,6 +682,8 @@ class CartCalculationService:
             return result
 
         except PlatformAPIError as e:
+            if getattr(e, "is_rate_limited", False):
+                raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Cart] Calculation failed: {e}")
             logger.error(
                 f"🔥 [Cart] PlatformAPIError details - status_code: {e.status_code}, response_data: {e.response_data}"
@@ -775,6 +779,8 @@ class OrderCreationService:
             }
 
         except PlatformAPIError as e:
+            if getattr(e, "is_rate_limited", False):
+                raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Preflight validation failed: {e}")
 
             # Try to extract specific error message from the exception
@@ -864,5 +870,7 @@ class OrderCreationService:
             return result
 
         except PlatformAPIError as e:
+            if getattr(e, "is_rate_limited", False):
+                raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Order creation failed: {e}")
             raise ValidationError(_("Error creating order")) from e

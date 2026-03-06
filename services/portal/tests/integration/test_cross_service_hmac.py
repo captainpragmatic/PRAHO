@@ -532,24 +532,26 @@ class CrossServiceHMACPerformanceTestCase(SimpleTestCase):
                 PORTAL_ID="portal-performance-test"
             ):
                 client = PlatformAPIClient()
-
-                with patch('requests.request') as mock_request:
-                    mock_response = Mock()
-                    mock_response.status_code = 200
-                    mock_response.json.return_value = {
-                        'success': True,
-                        'user': {'id': user_id, 'email': f'user{user_id}@example.com'},
-                        'authenticated': True
-                    }
-                    mock_request.return_value = mock_response
-
-                    result = client.authenticate_customer(f'user{user_id}@example.com', 'password123')
-                    return result is not None and result['valid']
+                result = client.authenticate_customer(f'user{user_id}@example.com', 'password123')
+                return result is not None and result['valid']
 
         # Test 50 concurrent authentications
         start_time = time.time()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        def _mock_portal_request(*args, **kwargs):
+            response = Mock()
+            response.status_code = 200
+            response.json.return_value = {
+                "success": True,
+                "user": {"id": 1, "customer_id": 1, "email": "load@example.com"},
+                "authenticated": True,
+            }
+            return response
+
+        with (
+            patch("apps.api_client.services.portal_request", side_effect=_mock_portal_request),
+            concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor,
+        ):
             futures = [executor.submit(authenticate_user, i) for i in range(50)]
             results = [future.result() for future in concurrent.futures.as_completed(futures)]
 

@@ -18,6 +18,20 @@
   </div>
   {% endif %}
 
+  {% if rate_limited %}
+  <div class="mb-6 bg-amber-900/30 border border-amber-500/50 rounded-lg p-4">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center">
+        {% icon "warning" size="sm" css_class="text-amber-300 mr-2" %}
+        <span class="text-amber-100 text-sm sm:text-base">{{ rate_limit_message }}</span>
+      </div>
+      <a href="{{ rate_limit_retry_url|default:request.get_full_path }}" class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-500 transition-colors">
+        {% trans "Try again" %}
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Header -->
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-white">
@@ -84,7 +98,11 @@
           </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
-            {% trans 'No recent documents found' %}
+            {% if "billing" in sections_rate_limited %}
+              {% trans 'Billing data is temporarily rate limited. Please try again shortly.' %}
+            {% else %}
+              {% trans 'No recent documents found' %}
+            {% endif %}
           </p>
           {% endfor %}
         </div>
@@ -133,7 +151,11 @@
           </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
-            {% trans 'No recent support tickets' %}
+            {% if "tickets" in sections_rate_limited %}
+              {% trans 'Ticket data is temporarily rate limited. Please try again shortly.' %}
+            {% else %}
+              {% trans 'No recent support tickets' %}
+            {% endif %}
           </p>
           {% endfor %}
         </div>

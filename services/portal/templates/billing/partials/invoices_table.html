@@ -2,7 +2,9 @@
 {% load ui_components %}
 {% load formatting %}
 
-{% if invoices %}
+{% if rate_limited %}
+{% include "components/rate_limit_inline_alert.html" %}
+{% elif invoices %}
 
 {# Desktop Table #}
 <div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">

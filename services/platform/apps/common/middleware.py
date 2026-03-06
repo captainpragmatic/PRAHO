@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import time
 import traceback
 import urllib.parse
@@ -331,19 +332,36 @@ class PortalServiceHMACMiddleware:
         self._rl_window = int(getattr(settings, "HMAC_RATE_LIMIT_WINDOW", 60))
         self._rl_max_calls = int(getattr(settings, "HMAC_RATE_LIMIT_MAX_CALLS", 300))
 
-    def _rate_limited(self, portal_id: str, client_ip: str) -> bool:
-        """Simple rate limiting keyed by portal_id and client IP using Django cache."""
+    def _rate_limited(self, portal_id: str, client_ip: str) -> tuple[bool, int]:
+        """Rate limiting keyed by portal_id and IP with accurate remaining wait seconds."""
+        key = f"hmac_rl:{portal_id}:{client_ip}"
+        window_start_key = f"{key}:start"
+        now = time.time()
         try:
-            key = f"hmac_rl:{portal_id}:{client_ip}"
             # Initialize counter if absent
             cache.add(key, 0, timeout=self._rl_window)
+            cache.add(window_start_key, now, timeout=self._rl_window)
             # Increment atomically
             current = cache.incr(key)
         except Exception:
             # Fallback if backend doesn't support incr reliably
             current = (cache.get(key) or 0) + 1
             cache.set(key, current, timeout=self._rl_window)
-        return current > self._rl_max_calls
+            if cache.get(window_start_key) is None:
+                cache.set(window_start_key, now, timeout=self._rl_window)
+
+        if current <= self._rl_max_calls:
+            return False, 0
+
+        window_start_raw = cache.get(window_start_key)
+        try:
+            window_start = float(window_start_raw)
+        except (TypeError, ValueError):
+            window_start = now
+
+        elapsed = max(0.0, now - window_start)
+        retry_after = max(1, math.ceil(self._rl_window - elapsed))
+        return True, retry_after
 
     def _validate_hmac_signature(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
         self, request: HttpRequest
@@ -503,11 +521,25 @@ class PortalServiceHMACMiddleware:
             request._portal_id = request.META.get("HTTP_X_PORTAL_ID", "unknown")
 
             # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
-            if rate_limit_enabled and self._rate_limited(request._portal_id, client_ip):
-                logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={request._portal_id} ip={client_ip}")
-                return HttpResponse(
-                    json.dumps({"error": "Too Many Requests"}), status=429, content_type="application/json"
-                )
+            if rate_limit_enabled:
+                is_limited, retry_after = self._rate_limited(request._portal_id, client_ip)
+                if is_limited:
+                    logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={request._portal_id} ip={client_ip}")
+                    response = HttpResponse(
+                        json.dumps(
+                            {
+                                "success": False,
+                                "error": "Too many requests",
+                                "detail": "Too Many Requests",
+                                "retry_after": retry_after,
+                                "status": 429,
+                            }
+                        ),
+                        status=429,
+                        content_type="application/json",
+                    )
+                    response["Retry-After"] = str(retry_after)
+                    return response
 
             logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {client_ip}")
 

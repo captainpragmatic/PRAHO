@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from apps.api_client.services import PlatformAPIClient
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 from .schemas import Currency, Invoice, Proforma
 from .serializers import (
@@ -26,6 +26,12 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_if_rate_limited(exc: Exception) -> None:
+    """Re-raise rate-limited errors so views can show appropriate feedback."""
+    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
+        raise exc
 
 
 class InvoiceViewService:
@@ -65,6 +71,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving invoices for customer {customer_id}: {e}")
+            _raise_if_rate_limited(e)
             return []
 
     def get_invoice_detail(
@@ -99,6 +106,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving invoice {invoice_number}: {e}")
+            _raise_if_rate_limited(e)
             return None
 
     def get_invoice_summary(self, customer_id: int, user_id: int) -> dict[str, Any]:
@@ -133,10 +141,12 @@ class InvoiceViewService:
 
             except Exception as e:
                 logger.error(f"🔥 [Invoice API] Failed to parse summary for customer {customer_id}: {e}")
+                _raise_if_rate_limited(e)
                 return self._empty_summary()
 
         except Exception as e:
             logger.error(f"🔥 [Invoice API] Error retrieving summary for customer {customer_id}: {e}")
+            _raise_if_rate_limited(e)
             return self._empty_summary()
 
     def get_customer_proformas(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Proforma]:
@@ -170,6 +180,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Proforma API] Error retrieving proformas for customer {customer_id}: {e}")
+            _raise_if_rate_limited(e)
             return []
 
     def get_proforma_detail(
@@ -231,6 +242,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Proforma API] Error retrieving proforma {proforma_number}: {e}")
+            _raise_if_rate_limited(e)
             return None
 
     def get_invoice_pdf(self, invoice_number: str, customer_id: int, user_id: int | None = None) -> bytes:
@@ -282,6 +294,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Payment Methods API] Error for customer {customer_id}: {e}")
+            _raise_if_rate_limited(e)
             return []
 
     def request_refund(
@@ -319,6 +332,7 @@ class InvoiceViewService:
 
         except Exception as e:
             logger.error(f"🔥 [Refund API] Error requesting refund for invoice {invoice_number}: {e}")
+            _raise_if_rate_limited(e)
             return {"success": False, "error": str(e)}
 
     def _empty_summary(self) -> dict[str, Any]:
@@ -355,6 +369,7 @@ class BillingDataSyncService:
 
         except Exception as e:
             logger.error(f"🔥 [Billing Sync] Sync error for customer {customer_id}: {e}")
+            _raise_if_rate_limited(e)
             return []
 
     def get_currencies(self) -> list[Currency]:
@@ -382,6 +397,7 @@ class BillingDataSyncService:
 
         except Exception as e:
             logger.error(f"🔥 [Currency API] Error retrieving currencies: {e}")
+            _raise_if_rate_limited(e)
             return []
 
 

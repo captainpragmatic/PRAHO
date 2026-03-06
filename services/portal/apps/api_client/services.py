@@ -22,8 +22,10 @@ import hmac
 import json
 import logging
 import math
+import random
 import re
 import secrets
+import threading
 import time
 import urllib.parse
 from http import HTTPStatus
@@ -34,10 +36,12 @@ from django.conf import settings
 from django.core.cache import cache
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
+from apps.common.retry_after import coerce_retry_after_seconds
 
 # HTTP status code constants
 HTTP_OK = 200
 HTTP_MULTIPLE_CHOICES = 300
+HTTP_TOO_MANY_REQUESTS = 429
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +58,21 @@ _HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
 class PlatformAPIError(Exception):
     """Exception raised when platform API calls fail"""
 
-    def __init__(self, message: str, status_code: int | None = None, response_data: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response_data: dict[str, Any] | None = None,
+        retry_after: int | None = None,
+        is_rate_limited: bool | None = None,
+    ):
         self.message = message
         self.status_code = status_code
         self.response_data = response_data
+        self.retry_after = retry_after
+        self.is_rate_limited = bool(
+            is_rate_limited if is_rate_limited is not None else status_code == HTTPStatus.TOO_MANY_REQUESTS
+        )
         super().__init__(message)
 
 
@@ -79,7 +94,9 @@ class PlatformAPIClient:
         self.timeout = settings.PLATFORM_API_TIMEOUT
         # Keep retries conservative by default; callers can opt in per request.
         self.retry_backoff_seconds = float(getattr(settings, "PLATFORM_API_RETRY_BACKOFF_SECONDS", 0.05))
-        self._last_request_headers: dict[str, str] = {}
+        self.max_read_retry_attempts = int(getattr(settings, "PLATFORM_API_READ_MAX_RETRIES", 2))
+        self.max_retry_wait_seconds = float(getattr(settings, "PLATFORM_API_MAX_RETRY_WAIT_SECONDS", 2.5))
+        self._thread_local = threading.local()
 
     def _generate_hmac_headers(
         self, method: str, path: str, body: bytes, fixed_timestamp: str | None = None
@@ -253,6 +270,59 @@ class PlatformAPIClient:
             return False
         return math.isfinite(timestamp_value) and timestamp_value > 0
 
+    def _normalize_endpoint(self, endpoint: str) -> str:
+        normalized = "/" + endpoint.strip().lstrip("/")
+        if not normalized.endswith("/"):
+            normalized = f"{normalized}/"
+        if normalized.startswith("/api/"):
+            normalized = normalized[len("/api") :]
+        return normalized
+
+    def _is_read_retry_candidate(self, method: str, endpoint: str, *, idempotent: bool = False) -> bool:
+        normalized_method = method.upper()
+        if normalized_method == "GET":
+            return True
+        return bool(normalized_method == "POST" and idempotent)
+
+    def _get_retry_after_seconds(self, response: requests.Response) -> int | None:
+        header_retry_after = coerce_retry_after_seconds(response.headers.get("Retry-After"))
+        if header_retry_after is not None:
+            return header_retry_after
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        if isinstance(payload, dict):
+            return coerce_retry_after_seconds(payload.get("retry_after"))
+        return None
+
+    def _extract_error_message(self, error_data: dict[str, Any]) -> str:
+        for key in ("error", "detail", "message"):
+            value = error_data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "Request failed"
+
+    def _safe_parse_json(self, response: requests.Response) -> dict[str, Any]:
+        """Parse JSON response body safely, never raising on malformed input."""
+        try:
+            data = response.json()
+        except (ValueError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {"_raw": data}
+
+    def _compute_retry_delay(self, response: requests.Response, attempt: int) -> float:
+        """
+        Exponential backoff with full jitter, bounded by a hard wait cap.
+        `attempt` is zero-based.
+        """
+        retry_after_seconds = self._get_retry_after_seconds(response)
+        exponential_backoff = self.retry_backoff_seconds * (2**attempt)
+        jitter = random.uniform(0.0, max(exponential_backoff, 0.001))  # noqa: S311
+        chosen_delay = max(retry_after_seconds or 0, jitter)
+        return min(chosen_delay, self.max_retry_wait_seconds)
+
     def _handle_api_response(self, response: requests.Response, endpoint: str) -> dict[str, Any]:
         if HTTP_OK <= response.status_code < HTTP_MULTIPLE_CHOICES:
             try:
@@ -264,14 +334,21 @@ class PlatformAPIClient:
             error_data = response.json()
         except ValueError:
             error_data = {"error": "Invalid response format"}
+        if not isinstance(error_data, dict):
+            error_data = {"error": str(error_data)}
+
+        error_message = self._extract_error_message(error_data)
+        retry_after = self._get_retry_after_seconds(response)
 
         raise PlatformAPIError(
-            message=f"API request failed: {error_data.get('error', 'Unknown error')}",
+            message=f"API request failed: {error_message}",
             status_code=response.status_code,
             response_data=error_data,
+            retry_after=retry_after,
+            is_rate_limited=response.status_code == HTTPStatus.TOO_MANY_REQUESTS,
         )
 
-    def _make_request(  # noqa: PLR0913
+    def _make_request(  # noqa: C901, PLR0912, PLR0913, PLR0915
         self,
         method: str,
         endpoint: str,
@@ -280,6 +357,7 @@ class PlatformAPIClient:
         params: dict[str, Any] | None = None,
         retry_on_status: set[int] | None = None,
         max_retries: int = 0,
+        idempotent: bool = False,
     ) -> dict[str, Any]:
         """Make HMAC-authenticated request to platform API"""
         url = self._build_url(endpoint)
@@ -287,14 +365,22 @@ class PlatformAPIClient:
         # Prepare JSON body and headers
         body_bytes, payload = self._prepare_json_body(data, user_id)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
-        headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
-        self._last_request_headers = dict(headers)
 
-        retry_statuses = retry_on_status or set()
+        auto_retry = self._is_read_retry_candidate(method, endpoint, idempotent=idempotent)
+        retry_statuses = retry_on_status or ({503} if auto_retry else set())
+        if auto_retry and max_retries == 0:
+            max_retries = self.max_read_retry_attempts
+        use_legacy_canonical = False
         legacy_retry_attempted = False
 
         try:
             for attempt in range(max_retries + 1):
+                if use_legacy_canonical:
+                    headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
+                else:
+                    headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
+                self._thread_local.last_request_headers = dict(headers)
+
                 response = portal_request(
                     method=method,
                     url=url,
@@ -308,13 +394,23 @@ class PlatformAPIClient:
 
                 should_retry = response.status_code in retry_statuses and attempt < max_retries
                 if should_retry:
-                    # Short bounded retry for transient upstream overload.
-                    backoff = self.retry_backoff_seconds * (attempt + 1)
+                    server_backoff = self._get_retry_after_seconds(response)
+                    if server_backoff is not None and server_backoff > self.max_retry_wait_seconds:
+                        logger.warning(
+                            "⚠️ [API Client] Server requested backoff %ds exceeds cap %.1fs, not retrying %s %s",
+                            server_backoff,
+                            self.max_retry_wait_seconds,
+                            method,
+                            endpoint,
+                        )
+                        return self._handle_api_response(response, endpoint)
+                    backoff = self._compute_retry_delay(response, attempt)
                     logger.warning(
-                        "⚠️ [API Client] Retrying %s %s after %s (%d/%d)",
+                        "⚠️ [API Client] Retrying %s %s after %s in %.2fs (%d/%d)",
                         method,
                         endpoint,
                         response.status_code,
+                        backoff,
                         attempt + 1,
                         max_retries,
                     )
@@ -325,7 +421,7 @@ class PlatformAPIClient:
                     not legacy_retry_attempted
                     and response.status_code == HTTPStatus.UNAUTHORIZED
                     and urllib.parse.urlsplit(url).scheme.lower() == "https"
-                    and not self._should_use_legacy_canonical(url)
+                    and not use_legacy_canonical
                 ):
                     try:
                         error_data = response.json()
@@ -333,22 +429,38 @@ class PlatformAPIClient:
                         error_data = {}
                     error_text = str(error_data.get("error", "")).lower()
                     if "hmac" in error_text:
-                        legacy_headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
-                        headers = legacy_headers
-                        self._last_request_headers = dict(headers)
+                        use_legacy_canonical = True
                         legacy_retry_attempted = True
                         continue
 
+                # Authentication endpoint: 429 is a throttle, not an auth failure — raise it.
+                if endpoint == "/users/login/" and response.status_code == HTTP_TOO_MANY_REQUESTS:
+                    retry_after = self._get_retry_after_seconds(response)
+                    error_msg = self._extract_error_message(
+                        self._safe_parse_json(response)
+                        if response.headers.get("content-type", "").startswith("application/json")
+                        else {}
+                    )
+                    raise PlatformAPIError(
+                        error_msg or "Too many requests",
+                        status_code=429,
+                        retry_after=retry_after,
+                        is_rate_limited=True,
+                    )
+
                 # Authentication endpoint: avoid exception-heavy path on expected auth failures.
-                if endpoint == "/users/login/" and response.status_code in {400, 401, 403, 429}:
+                if endpoint == "/users/login/" and response.status_code in {400, 401, 403}:
                     try:
                         error_data = response.json()
                     except ValueError:
                         error_data = {"error": "Authentication failed"}
+                    if not isinstance(error_data, dict):
+                        error_data = {"error": "Authentication failed"}
+                    error_msg = self._extract_error_message(error_data)
                     return {
                         "success": False,
                         "authenticated": False,
-                        "error": error_data.get("error", "Authentication failed"),
+                        "error": error_msg,
                     }
 
                 return self._handle_api_response(response, endpoint)
@@ -376,11 +488,17 @@ class PlatformAPIClient:
             error_data = response.json()
         except ValueError:
             error_data = {"error": "Invalid response format"}
+        if not isinstance(error_data, dict):
+            error_data = {"error": str(error_data)}
+
+        error_message = self._extract_error_message(error_data)
 
         raise PlatformAPIError(
-            message=f"Binary API request failed: {error_data.get('error', 'Unknown error')}",
+            message=f"Binary API request failed: {error_message}",
             status_code=response.status_code,
             response_data=error_data,
+            retry_after=self._get_retry_after_seconds(response),
+            is_rate_limited=response.status_code == HTTPStatus.TOO_MANY_REQUESTS,
         )
 
     def _make_binary_request(
@@ -486,11 +604,15 @@ class PlatformAPIClient:
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                 }
-            if data.get("success") and self._headers_allow_success_fallback(self._last_request_headers):
+            if data.get("success") and self._headers_allow_success_fallback(
+                getattr(self._thread_local, "last_request_headers", {})
+            ):
                 return {"valid": True}
             return None
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise  # Let caller handle rate-limit UX
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
         finally:
@@ -539,7 +661,7 @@ class PlatformAPIClient:
             "timestamp": time.time(),
         }
         # Pass user_id to _make_request so it auto-injects 'user_id' in the signed body (defensive)
-        data = self._make_request("POST", "/users/customers/", user_id=user_id, data=request_data)
+        data = self._make_request("POST", "/users/customers/", user_id=user_id, data=request_data, idempotent=True)
         customers = data.get("results", []) if data.get("success") else []
         cache.set(cache_key, customers, 300)
         return customers
@@ -551,6 +673,7 @@ class PlatformAPIClient:
             "/customers/details/",
             user_id=user_id,
             data={"customer_id": customer_id, "action": "get_customer_details"},
+            idempotent=True,
         )
 
     def search_customers(self, query: str, user_id: int) -> list[dict[str, Any]]:
@@ -563,13 +686,15 @@ class PlatformAPIClient:
         """Get user profile data (user-scoped, HMAC body with user_id)"""
         try:
             payload = {"user_id": user_id, "timestamp": time.time()}
-            data = self._make_request("POST", "/users/profile/", user_id=user_id, data=payload)
+            data = self._make_request("POST", "/users/profile/", user_id=user_id, data=payload, idempotent=True)
 
             if data.get("success"):
                 return data.get("profile")
             return None
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to get customer profile: {e}")
             return None
 
@@ -589,6 +714,8 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
 
@@ -608,6 +735,8 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
             return False
 
@@ -621,6 +750,8 @@ class PlatformAPIClient:
             data = self._make_request("GET", "/users/mfa/status/", data={"customer_id": customer_id})
             return data if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to get MFA status: {e}")
             return None
 
@@ -637,6 +768,8 @@ class PlatformAPIClient:
                 }
             return None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
 
@@ -648,6 +781,8 @@ class PlatformAPIClient:
             )
             return bool(data.get("success", False))
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
             return False
 
@@ -657,6 +792,8 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/setup/webauthn/", data={"customer_id": customer_id})
             return data if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None
 
@@ -666,6 +803,8 @@ class PlatformAPIClient:
             data = self._make_request("GET", "/users/mfa/backup-codes/", data={"customer_id": customer_id})
             return data.get("backup_codes") if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to get backup codes: {e}")
             return None
 
@@ -675,6 +814,8 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/regenerate-backup-codes/", data={"customer_id": customer_id})
             return data.get("backup_codes") if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to regenerate backup codes: {e}")
             return None
 
@@ -688,6 +829,8 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/disable/", data=request_data)
             return bool(data.get("success", False))
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to disable MFA: {e}")
             return False
 
@@ -852,17 +995,17 @@ class PlatformAPIClient:
     def get_customer_invoices_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer invoices - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_invoices", "timestamp": time.time()}
-        return self._make_request("POST", "/api/billing/invoices/", data=request_data)
+        return self._make_request("POST", "/api/billing/invoices/", data=request_data, idempotent=True)
 
     def get_customer_proformas_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer proformas - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_proformas", "timestamp": time.time()}
-        return self._make_request("POST", "/api/billing/proformas/", data=request_data)
+        return self._make_request("POST", "/api/billing/proformas/", data=request_data, idempotent=True)
 
     def get_billing_summary_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get billing summary - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_billing_summary", "timestamp": time.time()}
-        return self._make_request("POST", "/api/billing/summary/", data=request_data)
+        return self._make_request("POST", "/api/billing/summary/", data=request_data, idempotent=True)
 
     def get_invoice_detail_secure(self, customer_id: int, invoice_number: str) -> dict[str, Any]:
         """🔒 Get invoice detail - SECURE HMAC BODY"""
@@ -872,7 +1015,9 @@ class PlatformAPIClient:
             "action": "get_invoice_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/billing/invoices/{invoice_number}/", data=request_data)
+        return self._make_request(
+            "POST", f"/api/billing/invoices/{invoice_number}/", data=request_data, idempotent=True
+        )
 
     def get_proforma_detail_secure(self, customer_id: int, proforma_number: str) -> dict[str, Any]:
         """🔒 Get proforma detail - SECURE HMAC BODY"""
@@ -882,7 +1027,9 @@ class PlatformAPIClient:
             "action": "get_proforma_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/billing/proformas/{proforma_number}/", data=request_data)
+        return self._make_request(
+            "POST", f"/api/billing/proformas/{proforma_number}/", data=request_data, idempotent=True
+        )
 
     # ===============================================================================
     # SECURE TICKETS API ENDPOINTS 🎫
@@ -891,7 +1038,7 @@ class PlatformAPIClient:
     def get_customer_tickets_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer tickets - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_tickets", "timestamp": time.time()}
-        return self._make_request("POST", "/api/tickets/", data=request_data)
+        return self._make_request("POST", "/api/tickets/", data=request_data, idempotent=True)
 
     def get_ticket_detail_secure(self, customer_id: int, ticket_number: str) -> dict[str, Any]:
         """🔒 Get ticket detail - SECURE HMAC BODY"""
@@ -901,7 +1048,7 @@ class PlatformAPIClient:
             "action": "get_ticket_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/tickets/{ticket_number}/", data=request_data)
+        return self._make_request("POST", f"/api/tickets/{ticket_number}/", data=request_data, idempotent=True)
 
     def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
@@ -926,7 +1073,7 @@ class PlatformAPIClient:
     def get_customer_services_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer services - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_services", "timestamp": time.time()}
-        return self._make_request("POST", "/api/services/", data=request_data)
+        return self._make_request("POST", "/api/services/", data=request_data, idempotent=True)
 
     def get_service_detail_secure(self, customer_id: int, service_id: int) -> dict[str, Any]:
         """🔒 Get service detail - SECURE HMAC BODY"""
@@ -936,12 +1083,12 @@ class PlatformAPIClient:
             "action": "get_service_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/services/{service_id}/", data=request_data)
+        return self._make_request("POST", f"/api/services/{service_id}/", data=request_data, idempotent=True)
 
     def get_services_summary_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get services summary - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_services_summary", "timestamp": time.time()}
-        return self._make_request("POST", "/api/services/summary/", data=request_data)
+        return self._make_request("POST", "/api/services/summary/", data=request_data, idempotent=True)
 
     def update_service_auto_renew_secure(self, customer_id: int, service_id: int, auto_renew: bool) -> dict[str, Any]:
         """🔒 Update service auto-renew - SECURE HMAC BODY"""

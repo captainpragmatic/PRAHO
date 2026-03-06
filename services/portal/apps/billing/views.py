@@ -12,8 +12,10 @@ from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
+from apps.api_client.services import PlatformAPIError
 from apps.common.decorators import log_access_attempt, require_billing_access
 from apps.common.pagination import PaginatorData, build_pagination_params
+from apps.common.rate_limit_feedback import handle_platform_error
 
 from .services import BillingDataSyncService, InvoiceViewService
 
@@ -250,15 +252,17 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         logger.info(f"✅ [Portal Billing] Invoice list displayed for customer {customer_id}")
         return render(request, "billing/invoices_list.html", context)
 
-    except Exception as e:
-        logger.error(f"🔥 [Portal Billing] Invoice list error for customer {customer_id}: {e}")
-        messages.error(request, _("Unable to load invoices. Please try again."))
+    except (PlatformAPIError, Exception) as e:
+        error_ctx = handle_platform_error(
+            request, e, logger, fallback_message=_("Unable to load invoices. Please try again.")
+        )
         context = {
             "invoices": [],
             "error": True,
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
-            **_invoices_base_context(),
+            **_invoices_base_context(doc_type, status_filter, search_query),
+            **error_ctx,
         }
         return render(request, "billing/invoices_list.html", context)
 
@@ -315,17 +319,15 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
             },
         )
 
-    except Exception as e:
-        logger.error(f"🔥 [Portal Billing] Invoice search error for customer {customer_id}: {e}")
-        return render(
-            request,
-            "billing/partials/invoices_table.html",
-            {
-                "invoices": [],
-                "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
-                "pagination_params": "",
-            },
-        )
+    except (PlatformAPIError, Exception) as e:
+        error_ctx = handle_platform_error(request, e, logger)
+        context = {
+            "invoices": [],
+            "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
+            "pagination_params": "",
+            **error_ctx,
+        }
+        return render(request, "billing/partials/invoices_table.html", context)
 
 
 # ===============================================================================

@@ -22,8 +22,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 
+from apps.api.core.throttling import AuthThrottle
 from apps.api.secure_auth import require_customer_authentication, require_user_authentication
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
+from apps.common.performance.rate_limiting import PortalHMACBurstThrottle, PortalHMACRateThrottle
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
@@ -163,17 +165,6 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     }
 
     return Response({"success": True, "user": user_data})
-
-
-# ===============================================================================
-# TOKEN AUTHENTICATION ENDPOINTS 🎫
-# ===============================================================================
-
-
-class AuthThrottle(AnonRateThrottle):
-    """Custom throttle for auth endpoints - more restrictive"""
-
-    rate = "5/min"
 
 
 @api_view(["POST"])
@@ -954,7 +945,7 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
-@throttle_classes([])  # Internal HMAC-signed API — not subject to DRF throttling
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle])
 @require_user_authentication
 def user_customers_api(request: HttpRequest, user: User) -> Response:
     """

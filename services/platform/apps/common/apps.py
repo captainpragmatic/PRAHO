@@ -5,9 +5,14 @@ Shared utilities, types, and middleware.
 
 import logging
 import socket
+from collections.abc import Sequence
+from typing import Any
 
 from django.apps import AppConfig
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+
+from apps.common.performance.rate_limiting import validate_throttle_class_scopes, validate_throttle_rate_map
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +24,7 @@ class CommonConfig(AppConfig):
 
     def ready(self) -> None:
         _validate_internal_service_domains()
+        _validate_throttle_rates_at_startup()
 
 
 def _validate_internal_service_domains() -> None:
@@ -36,3 +42,30 @@ def _validate_internal_service_domains() -> None:
                 "unreachable host: %s — inter-service requests to this host will fail",
                 domain,
             )
+
+
+def _validate_throttle_rates_at_startup() -> None:
+    """Fail fast on invalid DRF throttle rates from env/config."""
+    rest_framework = getattr(settings, "REST_FRAMEWORK", {})
+    throttle_rates = rest_framework.get("DEFAULT_THROTTLE_RATES", {})
+    if not isinstance(throttle_rates, dict):
+        raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_RATES must be a dict")
+    validate_throttle_rate_map(throttle_rates)
+
+    default_classes = rest_framework.get("DEFAULT_THROTTLE_CLASSES", [])
+    if not isinstance(default_classes, Sequence) or isinstance(default_classes, str):
+        raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_CLASSES must be a list or tuple")
+
+    # Global defaults + known per-view throttle classes must all have valid scopes.
+    scoped_class_paths: list[str | type[Any]] = [
+        *default_classes,
+        "apps.api.core.throttling.StandardAPIThrottle",
+        "apps.api.core.throttling.BurstAPIThrottle",
+        "apps.api.core.throttling.AuthThrottle",
+        "apps.api.orders.views.OrderCreateThrottle",
+        "apps.api.orders.views.OrderCalculateThrottle",
+        "apps.api.orders.views.OrderListThrottle",
+        "apps.api.orders.views.ProductCatalogThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ]
+    validate_throttle_class_scopes(scoped_class_paths, throttle_rates)

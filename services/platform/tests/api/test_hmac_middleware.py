@@ -3,16 +3,24 @@ import hashlib
 import hmac
 import json
 import time
+import urllib.parse
+from unittest.mock import patch
 
-from django.conf import settings
 from django.http import HttpResponse
-from django.test import TestCase, RequestFactory, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common import middleware as _middleware_module
 from apps.common.middleware import PortalServiceHMACMiddleware
-from config.settings.test import LOCMEM_TEST_CACHE
+
+LOCMEM_TEST_CACHE = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "hmac-middleware-tests",
+    }
+}
 
 
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class PortalHMACTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
@@ -21,10 +29,8 @@ class PortalHMACTests(TestCase):
         self.nonce = "a" * 32
         self.nonce_alt = "b" * 32
 
-    def _sign(self, method: str, path: str, body: bytes, portal_id: str, nonce: str, timestamp: str) -> str:
+    def _sign(self, method: str, path: str, body: bytes, portal_id: str, nonce: str, timestamp: str) -> str:  # noqa: PLR0913
         # Server canonicalization: normalize path/query and content-type
-        import urllib.parse
-
         parsed = urllib.parse.urlsplit(path)
         pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         pairs.sort(key=lambda kv: (kv[0], kv[1]))
@@ -198,6 +204,32 @@ class PortalHMACTests(TestCase):
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r2.status_code, 200)
         self.assertEqual(r3.status_code, 429)
+        retry_after = int(r3["Retry-After"])
+        self.assertGreaterEqual(retry_after, 1)
+        self.assertLessEqual(retry_after, 60)
+        payload = json.loads(r3.content.decode())
+        self.assertEqual(payload["error"], "Too many requests")
+        self.assertEqual(payload["status"], 429)
+        self.assertEqual(payload["retry_after"], retry_after)
+
+    @override_settings(PLATFORM_API_SECRET='unit-test-secret', HMAC_RATE_LIMIT_WINDOW=60, HMAC_RATE_LIMIT_MAX_CALLS=2)
+    def test_rate_limit_returns_remaining_window_seconds(self):
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse('ok', status=200))
+
+        with patch("apps.common.middleware.time.time", return_value=1000.0):
+            is_limited, retry_after = middleware._rate_limited("portal-rl", "127.0.0.1")
+        self.assertFalse(is_limited)
+        self.assertEqual(retry_after, 0)
+
+        with patch("apps.common.middleware.time.time", return_value=1000.0):
+            is_limited, retry_after = middleware._rate_limited("portal-rl", "127.0.0.1")
+        self.assertFalse(is_limited)
+        self.assertEqual(retry_after, 0)
+
+        with patch("apps.common.middleware.time.time", return_value=1005.0):
+            is_limited, retry_after = middleware._rate_limited("portal-rl", "127.0.0.1")
+        self.assertTrue(is_limited)
+        self.assertEqual(retry_after, 55)
 
     @override_settings(PLATFORM_API_SECRET="unit-test-secret", CACHES=LOCMEM_TEST_CACHE)
     def test_nonce_replay_rejected(self):

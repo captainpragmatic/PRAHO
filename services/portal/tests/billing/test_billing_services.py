@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from apps.api_client.services import PlatformAPIClient
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.billing.services import InvoiceViewService
 
 
@@ -273,3 +273,35 @@ class SubscriptionClientTests(unittest.TestCase):
         data = call_args[1].get('data') or call_args[0][1] if len(call_args[0]) > 1 else call_args[1]['data']
         self.assertEqual(data['invoice_id'], 1)
         self.assertEqual(data['amount_cents'], 5000)
+
+
+class BillingRateLimitPropagationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.service = InvoiceViewService()
+
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_get_customer_invoices_reraises_rate_limit_error(self, mock_post):
+        mock_post.side_effect = PlatformAPIError(
+            "Too many requests", status_code=429, retry_after=5, is_rate_limited=True
+        )
+
+        with self.assertRaises(PlatformAPIError):
+            self.service.get_customer_invoices(customer_id=1, user_id=2)
+
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_get_customer_proformas_reraises_rate_limit_error(self, mock_post):
+        mock_post.side_effect = PlatformAPIError(
+            "Too many requests", status_code=429, retry_after=5, is_rate_limited=True
+        )
+
+        with self.assertRaises(PlatformAPIError):
+            self.service.get_customer_proformas(customer_id=1, user_id=2)
+
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_get_invoice_summary_reraises_rate_limit_error(self, mock_post):
+        mock_post.side_effect = PlatformAPIError(
+            "Too many requests", status_code=429, retry_after=5, is_rate_limited=True
+        )
+
+        with self.assertRaises(PlatformAPIError):
+            self.service.get_invoice_summary(customer_id=1, user_id=2)
