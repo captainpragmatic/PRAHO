@@ -10,7 +10,7 @@ from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 
 from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import handle_platform_error
+from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
 
 from .services import PlatformAPIError, services_api
 
@@ -213,6 +213,8 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
         logger.info(f"✅ [Services View] Loaded service {service_id} details for customer {customer_id}")
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Services View] Error loading service {service_id} for customer {customer_id}: {e}")
         messages.error(request, _("Service not found or access denied."))
         return redirect("services:list")
@@ -244,6 +246,8 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
         )
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Services View] Error loading usage for service {service_id}: {e}")
         return render(
             request,
@@ -302,6 +306,8 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
             )
 
         except PlatformAPIError as e:
+            if is_rate_limited_error(e):
+                raise
             logger.error(
                 f"🔥 [Services View] Error submitting {action} request for service {service_id} by customer {customer_id}: {e}"
             )
@@ -329,6 +335,8 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
         return render(request, "services/service_request_action.html", context)
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Services View] Error loading service action form for service {service_id}: {e}")
         messages.error(request, _("Service not found or access denied."))
         return redirect("services:list")
@@ -359,12 +367,12 @@ def services_dashboard_widget(request: HttpRequest) -> HttpResponse:
 
         return render(request, "services/partials/dashboard_widget.html", context)
 
-    except PlatformAPIError:
-        # Return empty widget on error
+    except PlatformAPIError as e:
+        error_ctx = handle_platform_error(request, e, logger)
         return render(
             request,
             "services/partials/dashboard_widget.html",
-            {"summary": {"total_services": 0, "active_services": 0}, "recent_services": [], "error": True},
+            {"summary": {"total_services": 0, "active_services": 0}, "recent_services": [], "error": True, **error_ctx},
         )
 
 
@@ -398,6 +406,7 @@ def service_plans(request: HttpRequest) -> HttpResponse:
         return render(request, "services/plans_list.html", context)
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Services View] Error loading plans for customer {customer_id}: {e}")
-        messages.error(request, _("Unable to load hosting plans. Please try again later."))
-        return render(request, "services/plans_list.html", {"plans": [], "error": True})
+        error_ctx = handle_platform_error(
+            request, e, logger, fallback_message=_("Unable to load hosting plans. Please try again later.")
+        )
+        return render(request, "services/plans_list.html", {"plans": [], "error": True, **error_ctx})

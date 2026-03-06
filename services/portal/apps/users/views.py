@@ -24,6 +24,7 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
+from apps.common.rate_limit_feedback import is_rate_limited_error
 from apps.users.forms import (
     ChangePasswordForm,
     CompanyCreationForm,
@@ -91,6 +92,8 @@ def _get_user_customer_memberships(request: HttpRequest) -> list[dict] | None:
         return None
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Portal] Failed to fetch user customers: {e}")
         return None
 
@@ -725,7 +728,9 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
             else:
                 messages.error(request, _("Failed to create export request. Please try again."))
 
-        except PlatformAPIError:
+        except PlatformAPIError as e:
+            if is_rate_limited_error(e):
+                raise
             logger.warning("⚠️ [Portal Data Export] Platform API unavailable")
             messages.error(request, _("Service temporarily unavailable. Please try again later."))
         except Exception as e:
@@ -1001,6 +1006,8 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
             messages.error(request, _("Unable to load company profile data."))
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(f"🔥 [Portal] Company profile API error: {e}")
         messages.error(request, _("Error loading company profile. Please try again."))
     except Exception as e:
@@ -1148,6 +1155,8 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
                     messages.error(request, _("Failed to update profile: {}").format(error_msg))
 
             except PlatformAPIError as e:
+                if is_rate_limited_error(e):
+                    raise
                 logger.error(f"🔥 [Portal] Company profile update API error: {e}")
                 messages.error(request, _("Error updating company profile. Please try again."))
             except Exception as e:
@@ -1231,6 +1240,8 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
         # permissions = verification_data.get('permissions', [])  # noqa: ERA001
 
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
         logger.error(
             f"🔥 [Security] Customer switch verification failed: user {user_id} -> customer {customer_id}, error: {e}"
         )
@@ -1367,6 +1378,8 @@ def create_company_view(request: HttpRequest) -> HttpResponse:
                     messages.error(request, _("Failed to create company: {}").format(error_msg))
 
             except PlatformAPIError as e:
+                if is_rate_limited_error(e):
+                    raise
                 logger.error(f"🔥 [Portal] Company creation API error: {e}")
                 messages.error(request, _("Error creating company. Please try again."))
 
