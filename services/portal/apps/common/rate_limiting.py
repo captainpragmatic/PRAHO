@@ -147,8 +147,8 @@ class AuthenticationRateLimitMiddleware:
                 {"error": error_msg, "retry_after": retry_after, "attempts_remaining": 0},
                 status=status_code,
             )
-        # Browser form submission — redirect back to login with error message.
-        # nosemgrep: open-redirect — request.path is server-parsed, not user-controlled input.
+        # Browser form submission — redirect to login page with error message.
+        # nosemgrep: open-redirect — LOGIN_URL is a server-side Django setting, not user input.
         messages.error(request, error_msg)
         login_url = settings.LOGIN_URL if hasattr(settings, "LOGIN_URL") else "/login/"
         return redirect(login_url)
