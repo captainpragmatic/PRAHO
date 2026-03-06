@@ -147,9 +147,11 @@ class AuthenticationRateLimitMiddleware:
                 {"error": error_msg, "retry_after": retry_after, "attempts_remaining": 0},
                 status=status_code,
             )
-        # Browser form submission — redirect back to login with error message
+        # Browser form submission — redirect back to login with error message.
+        # nosemgrep: open-redirect — request.path is server-parsed, not user-controlled input.
         messages.error(request, error_msg)
-        return redirect(request.path)
+        login_url = settings.LOGIN_URL if hasattr(settings, "LOGIN_URL") else "/login/"
+        return redirect(login_url)
 
     def _record_failed_attempt(self, request: HttpRequest) -> None:
         """🔒 Record failed authentication attempt for both IP and account"""

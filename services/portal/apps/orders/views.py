@@ -1148,11 +1148,10 @@ def _verify_platform_webhook(request: HttpRequest) -> bool:
 
     Replay prevention
     -----------------
-    After verifying the signature, the first 32 hex characters of the
-    signature are stored via ``cache.add()`` with a TTL equal to the
-    replay-window (5 minutes).  ``cache.add()`` is atomic and returns
-    ``False`` when the key already exists, which rejects duplicate
-    deliveries.
+    After verifying the signature, the full 64-char hex signature is stored
+    via ``cache.add()`` with a TTL equal to the replay-window (5 minutes).
+    ``cache.add()`` is atomic and returns ``False`` when the key already
+    exists, which rejects duplicate deliveries.
 
     **Limitation:** replay markers live only in the Django cache backend.
     If the cache is restarted (or the Portal pod is recycled with a

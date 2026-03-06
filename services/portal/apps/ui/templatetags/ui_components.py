@@ -650,7 +650,7 @@ class PageHeaderNode(template.Node):
                 "ph_actions": mark_safe(actions_html),  # noqa: S308  — rendered from Django templates, not user input
             }
         ):
-            return t.render(context)
+            return t.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render(), not Jinja2
 
 
 @register.tag("page_header")
@@ -705,7 +705,7 @@ class SectionCardNode(template.Node):
                 "sc_content": mark_safe(content_html),  # noqa: S308
             }
         ):
-            return t.render(context)
+            return t.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render(), not Jinja2
 
 
 @register.tag("section_card")

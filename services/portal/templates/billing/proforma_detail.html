@@ -38,10 +38,12 @@
   <!-- Status Banner -->
   {% if proforma.is_expired %}
     {% trans "Proforma Expired" as alert_title %}
+    {# nosemgrep: template-blocktranslate-no-escape — asvar stores in variable, autoescaped when rendered #}
     {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}This proforma expired on {{ date }}. It can no longer be processed.{% endblocktrans %}
     {% alert alert_msg variant="danger" title=alert_title css_class="mb-6" %}
   {% else %}
     {% trans "Proforma Valid" as alert_title %}
+    {# nosemgrep: template-blocktranslate-no-escape — asvar stores in variable, autoescaped when rendered #}
     {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}Valid until {{ date }}. Please contact us to proceed with this quote.{% endblocktrans %}
     {% alert alert_msg variant="success" title=alert_title css_class="mb-6" %}
   {% endif %}
