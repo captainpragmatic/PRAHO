@@ -3,13 +3,18 @@ from __future__ import annotations
 import inspect
 
 from django.conf import settings
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
 from django.utils.module_loading import import_string
 from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
 from apps.api.core import throttling as core_throttling
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle
-from apps.api.orders.views import OrderCalculateThrottle, OrderCreateThrottle, OrderListThrottle, ProductCatalogThrottle
+from apps.api.orders.views import (
+    OrderCalculateThrottle,
+    OrderCreateThrottle,
+    OrderListThrottle,
+    ProductCatalogThrottle,
+)
 from apps.api.users import views as users_views
 from apps.common.performance import rate_limiting
 
@@ -76,3 +81,18 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "get_throttle_rate_for_endpoint",
         ):
             self.assertFalse(hasattr(rate_limiting, removed_name))
+
+    def test_portal_hmac_throttle_key_is_stable_for_same_portal(self) -> None:
+        factory = RequestFactory()
+        throttle = rate_limiting.PortalHMACRateThrottle()
+        request1 = factory.post("/api/users/customers/", data={"customer_id": 1}, content_type="application/json")
+        request2 = factory.post("/api/users/customers/", data={"customer_id": 99999}, content_type="application/json")
+        request1._portal_authenticated = True  # type: ignore[attr-defined]  # test sets internal HMAC flag
+        request2._portal_authenticated = True  # type: ignore[attr-defined]  # test sets internal HMAC flag
+        request1.META["HTTP_X_PORTAL_ID"] = "portal-a"
+        request2.META["HTTP_X_PORTAL_ID"] = "portal-a"
+
+        key1 = throttle.get_cache_key(request1, view=None)
+        key2 = throttle.get_cache_key(request2, view=None)
+
+        self.assertEqual(key1, key2)

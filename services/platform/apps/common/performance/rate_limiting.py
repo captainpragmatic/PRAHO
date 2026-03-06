@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any, cast
 
 from django.core.exceptions import ImproperlyConfigured
@@ -47,6 +48,20 @@ _RATE_UNIT_SECONDS: dict[str, int] = {
     "m": 60,
     "h": 3600,
     "d": 86400,
+}
+_KNOWN_THROTTLE_CLASS_SCOPES: dict[str, str] = {
+    "apps.common.performance.rate_limiting.PortalHMACRateThrottle": "portal_hmac",
+    "apps.common.performance.rate_limiting.PortalHMACBurstThrottle": "portal_hmac_burst",
+    "apps.common.performance.rate_limiting.CustomerRateThrottle": "customer",
+    "apps.common.performance.rate_limiting.BurstRateThrottle": "burst",
+    "apps.api.core.throttling.StandardAPIThrottle": "sustained",
+    "apps.api.core.throttling.BurstAPIThrottle": "api_burst",
+    "apps.api.core.throttling.AuthThrottle": "auth",
+    "apps.api.orders.views.OrderCreateThrottle": "order_create",
+    "apps.api.orders.views.OrderCalculateThrottle": "order_calculate",
+    "apps.api.orders.views.OrderListThrottle": "order_list",
+    "apps.api.orders.views.ProductCatalogThrottle": "product_catalog",
+    "rest_framework.throttling.AnonRateThrottle": "anon",
 }
 
 
@@ -101,21 +116,34 @@ def validate_throttle_rate_map(rates: dict[str, str]) -> None:
         raise ImproperlyConfigured(f"Invalid throttle rate configuration: {joined}")
 
 
-def validate_throttle_class_scopes(class_paths: list[str], rates: dict[str, str]) -> None:
+def validate_throttle_class_scopes(class_paths: Sequence[str | type[Any]], rates: dict[str, str]) -> None:
     """
     Validate throttle class import paths and ensure scoped classes have configured rates.
     """
     errors: list[str] = []
     for class_path in class_paths:
-        try:
-            throttle_cls = import_string(class_path)
-        except Exception as exc:  # pragma: no cover - defensive startup validation
-            errors.append(f"{class_path} (import failed: {exc})")
+        if isinstance(class_path, str):
+            display_name = class_path
+            known_scope = _KNOWN_THROTTLE_CLASS_SCOPES.get(class_path)
+            if known_scope:
+                scope = known_scope
+            else:
+                try:
+                    throttle_cls = import_string(class_path)
+                except Exception as exc:  # pragma: no cover - defensive startup validation
+                    errors.append(f"{class_path} (import failed: {exc})")
+                    continue
+                scope = getattr(throttle_cls, "scope", None)
+        elif isinstance(class_path, type):
+            throttle_cls = class_path
+            display_name = f"{class_path.__module__}.{class_path.__name__}"
+            scope = getattr(throttle_cls, "scope", None)
+        else:
+            errors.append(f"{class_path!r} (invalid throttle class reference)")
             continue
 
-        scope = getattr(throttle_cls, "scope", None)
         if scope and scope not in rates:
-            errors.append(f"{class_path} (missing scope '{scope}' in THROTTLE_RATES)")
+            errors.append(f"{display_name} (missing scope '{scope}' in THROTTLE_RATES)")
 
     if errors:
         raise ImproperlyConfigured("Invalid throttle class configuration: " + ", ".join(errors))
@@ -128,27 +156,12 @@ def _is_portal_authenticated(request: Request) -> bool:
 
 def _extract_hmac_identity(request: Request) -> str:
     """
-    Build a stable throttle identity from signed request context.
+    Build a stable HMAC throttle identity.
 
-    Priority:
-    1) customer_id in signed body
-    2) user_id in signed body
-    3) portal_id only
+    Use a portal-only key so callers cannot bypass limits by rotating signed
+    payload fields (customer_id/user_id) and creating unbounded cache keys.
     """
-    portal_id = request.headers.get("X-Portal-Id", "unknown")
-    identity = ""
-    try:
-        payload = request.data if hasattr(request, "data") else {}
-        if isinstance(payload, dict):
-            if payload.get("customer_id") is not None:
-                identity = f"customer_{payload['customer_id']}"
-            elif payload.get("user_id") is not None:
-                identity = f"user_{payload['user_id']}"
-    except Exception:
-        # Fall back to portal-only identity when body is unavailable.
-        identity = ""
-
-    return f"{portal_id}:{identity}" if identity else portal_id
+    return request.headers.get("X-Portal-Id", "unknown")
 
 
 class _CustomTimeRateMixin:

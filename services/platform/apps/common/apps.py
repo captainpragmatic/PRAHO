@@ -5,6 +5,8 @@ Shared utilities, types, and middleware.
 
 import logging
 import socket
+from collections.abc import Sequence
+from typing import Any
 
 from django.apps import AppConfig
 from django.conf import settings
@@ -51,11 +53,11 @@ def _validate_throttle_rates_at_startup() -> None:
     validate_throttle_rate_map(throttle_rates)
 
     default_classes = rest_framework.get("DEFAULT_THROTTLE_CLASSES", [])
-    if not isinstance(default_classes, list):
-        raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_CLASSES must be a list")
+    if not isinstance(default_classes, Sequence) or isinstance(default_classes, str):
+        raise ImproperlyConfigured("REST_FRAMEWORK.DEFAULT_THROTTLE_CLASSES must be a list or tuple")
 
     # Global defaults + known per-view throttle classes must all have valid scopes.
-    scoped_class_paths = [
+    scoped_class_paths: list[str | type[Any]] = [
         *default_classes,
         "apps.api.core.throttling.StandardAPIThrottle",
         "apps.api.core.throttling.BurstAPIThrottle",
