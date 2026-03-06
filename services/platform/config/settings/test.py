@@ -177,7 +177,7 @@ RATELIMIT_ENABLED = False
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 
 # ===============================================================================
-# ENCRYPTION (Test encryption key)
+# ENCRYPTION (Test AES-256-GCM key — URL-safe base64 of 32 random bytes)
 # ===============================================================================
 
 ENCRYPTION_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
@@ -186,7 +186,7 @@ ENCRYPTION_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = "test-webhook-secret-do-not-use-in-prod"
 
 # ===============================================================================
-# CREDENTIAL VAULT (Test key — NOT for production use)
+# CREDENTIAL VAULT (Test AES-256-GCM key — NOT for production use)
 # ===============================================================================
 
 CREDENTIAL_VAULT_MASTER_KEY = "Lp1_hlEyzfJEnH1nUkylaN9c5YvtvOMrXYnc_CEYoSw="

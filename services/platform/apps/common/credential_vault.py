@@ -1,13 +1,12 @@
 """
 Encrypted Credential Vault - PRAHO Platform
-Centralized credential management with encryption, rotation, and audit.
+Centralized credential management with AES-256-GCM encryption, rotation, and audit.
 
-Implements the CredentialVault service design from virtualmin_review.md:
-- Master key encryption with Fernet
+- AES-256-GCM master key encryption (NIST SP 800-38D)
 - Per-service credential storage
 - Automatic rotation capabilities
 - Comprehensive audit logging
-- Access control and permissions
+- Role-based access control (staff/superuser)
 """
 
 from __future__ import annotations
@@ -24,7 +23,10 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     pass
 
-from cryptography.fernet import Fernet
+import base64
+import os
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models, transaction
@@ -249,7 +251,7 @@ class CredentialVault:
     🔐 CRITICAL: Centralized credential management service.
 
     Implements the secure credential vault design:
-    - Master key encryption using Fernet
+    - Master key encryption using AES-256-GCM
     - Per-service credential storage with audit
     - Automatic expiration and rotation
     - Access control and permissions
@@ -257,36 +259,56 @@ class CredentialVault:
     """
 
     def __init__(self) -> None:
-        """Initialize credential vault with master key"""
+        """Initialize credential vault with AES-256-GCM master key."""
         self._master_key = self._get_master_key()
-        self._cipher = Fernet(self._master_key)
+        self._aesgcm = AESGCM(self._master_key)
         self._verify_vault_integrity()
 
     def _get_master_key(self) -> bytes:
-        """Get or generate master encryption key"""
+        """Load and validate AES-256-GCM master key.
+
+        Expects URL-safe base64-encoded 32 random bytes.
+        Generate with: python -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'
+        """
         master_key = getattr(settings, "CREDENTIAL_VAULT_MASTER_KEY", None)
 
         if not master_key:
             raise ImproperlyConfigured(
                 "CREDENTIAL_VAULT_MASTER_KEY must be set in environment. "
-                "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                "Generate with: python -c 'import secrets, base64; "
+                "print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'"
             )
 
         try:
-            # Validate key format
-            key_bytes = master_key.encode() if isinstance(master_key, str) else master_key
-            Fernet(key_bytes)  # Test key validity
-            return key_bytes
+            key_str = master_key if isinstance(master_key, str) else master_key.decode("ascii")
+            key_bytes = base64.urlsafe_b64decode(key_str)
         except Exception as e:
-            raise ImproperlyConfigured(f"Invalid CREDENTIAL_VAULT_MASTER_KEY: {e}") from e
+            raise ImproperlyConfigured(f"Invalid CREDENTIAL_VAULT_MASTER_KEY (not valid base64): {e}") from e
+
+        expected_key_length = 32
+        if len(key_bytes) != expected_key_length:
+            raise ImproperlyConfigured(f"CREDENTIAL_VAULT_MASTER_KEY must decode to 32 bytes, got {len(key_bytes)}")
+
+        return key_bytes
+
+    def _encrypt_data(self, data: bytes) -> bytes:
+        """Encrypt data using AES-256-GCM. Returns nonce + ciphertext + tag."""
+        nonce = os.urandom(12)
+        return nonce + self._aesgcm.encrypt(nonce, data, None)
+
+    def _decrypt_data(self, data: bytes) -> bytes:
+        """Decrypt AES-256-GCM encrypted data. Expects nonce + ciphertext + tag."""
+        min_encrypted_length = 28  # 12 (nonce) + 16 (minimum tag)
+        if len(data) < min_encrypted_length:
+            raise CredentialVaultError("Encrypted data too short")
+        return self._aesgcm.decrypt(data[:12], data[12:], None)
 
     def _verify_vault_integrity(self) -> None:
-        """Verify vault is working correctly"""
+        """Verify vault encryption is working correctly."""
         try:
-            # Test encryption/decryption
-            test_data = "vault_integrity_test"
-            encrypted = self._cipher.encrypt(test_data.encode())
-            decrypted = self._cipher.decrypt(encrypted).decode()
+            test_data = b"vault_integrity_test"
+            encrypted = self._encrypt_data(test_data)
+            decrypted = self._decrypt_data(encrypted)
 
             if decrypted != test_data:
                 raise CredentialVaultError("Vault integrity check failed")
@@ -310,13 +332,13 @@ class CredentialVault:
         try:
             with transaction.atomic():
                 # Encrypt credential data
-                encrypted_username = self._cipher.encrypt(credential_data.username.encode())
-                encrypted_password = self._cipher.encrypt(credential_data.password.encode())
+                encrypted_username = self._encrypt_data(credential_data.username.encode())
+                encrypted_password = self._encrypt_data(credential_data.password.encode())
                 encrypted_metadata = None
 
                 if credential_data.metadata:
                     metadata_json = json.dumps(credential_data.metadata)
-                    encrypted_metadata = self._cipher.encrypt(metadata_json.encode())
+                    encrypted_metadata = self._encrypt_data(metadata_json.encode())
 
                 # Calculate expiration
                 expires_at = timezone.now() + timedelta(days=credential_data.expires_in_days)
@@ -443,12 +465,12 @@ class CredentialVault:
                 return Err("Access denied to credential")
 
             # Decrypt credential data
-            username = self._cipher.decrypt(bytes(credential.encrypted_username)).decode()
-            password = self._cipher.decrypt(bytes(credential.encrypted_password)).decode()
+            username = self._decrypt_data(bytes(credential.encrypted_username)).decode()
+            password = self._decrypt_data(bytes(credential.encrypted_password)).decode()
 
             metadata = None
             if credential.encrypted_metadata:
-                metadata_json = self._cipher.decrypt(bytes(credential.encrypted_metadata)).decode()
+                metadata_json = self._decrypt_data(bytes(credential.encrypted_metadata)).decode()
                 metadata = json.loads(metadata_json)
 
             # Update access tracking
@@ -503,7 +525,7 @@ class CredentialVault:
 
                 # Get current username if new one not provided
                 if not rotation_data.new_username:
-                    current_username = self._cipher.decrypt(bytes(credential.encrypted_username)).decode()
+                    current_username = self._decrypt_data(bytes(credential.encrypted_username)).decode()
                     rotation_data.new_username = current_username
 
                 # Test new credential works (implement service-specific testing)
@@ -531,15 +553,17 @@ class CredentialVault:
                 store_result = self.store_credential(credential_data)
 
                 if store_result.is_err():
+                    credential.refresh_from_db()
                     credential.rotation_failure_count += 1
                     credential.rotation_in_progress = False
-                    credential.save()
+                    credential.save(update_fields=["rotation_failure_count", "rotation_in_progress"])
                     return store_result  # type: ignore[return-value]
 
-                # Mark rotation complete
+                # Refresh from DB since store_credential did update_or_create
+                credential.refresh_from_db()
                 credential.rotation_in_progress = False
                 credential.rotation_failure_count = 0
-                credential.save()
+                credential.save(update_fields=["rotation_in_progress", "rotation_failure_count"])
 
                 logger.info(
                     f"🔄 [Credential Vault] Rotated credential: "
@@ -621,10 +645,16 @@ class CredentialVault:
         return "".join(secrets.choice(alphabet) for _ in range(length))
 
     def _check_credential_access_permission(self, credential: EncryptedCredential, user: Any | None) -> bool:
-        """Check if user has permission to access credential"""
-        # Implement your authorization logic here
-        # For now, allow all access - customize based on your needs
-        return True
+        """Check if user has permission to access credential.
+
+        Access rules:
+        - System/task access (user=None): allowed for management commands, gateways
+        - Superuser or staff: allowed
+        - All others: denied
+        """
+        if user is None:
+            return True
+        return getattr(user, "is_superuser", False) or getattr(user, "is_staff", False)
 
     def _log_credential_access(self, access_data: AccessLogData) -> None:
         """Log credential access for audit trail"""

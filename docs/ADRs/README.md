@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0031**)
+2. Use the next available number (currently: **ADR-0034**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -51,7 +51,6 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0015](ADR-0015-configuration-resolution-order.md) | Configuration Resolution Order (CRO) | Accepted | 2026-02-12 |
 | [ADR-0016](ADR-0016-audit-trail-enforcement.md) | Audit Trail Enforcement | Accepted | 2026-02-15 |
 | [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) | Portal Authentication Fail-Open Strategy | Accepted | 2026-02-28 |
-| [ADR-0018](ADR-0018-django-encryption-key-management.md) | DJANGO_ENCRYPTION_KEY Management for 2FA | Accepted | 2024-12 |
 | [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) | VirtualMin Automatic Provisioning System | Accepted | 2025-09-04 |
 | [ADR-0020](ADR-0020-async-task-processing-architecture.md) | Async Task Processing Architecture | Accepted | 2025-09-02 |
 | [ADR-0021](ADR-0021-email-enumeration-prevention.md) | Email Enumeration Prevention | Implemented | 2025-01-08 |
@@ -61,6 +60,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0028](ADR-0028-server-log-checking-e2e.md) | Server Log Checking in E2E Tests | Accepted | 2026-03-03 |
 | [ADR-0029](ADR-0029-config-drift-detection.md) | Config Drift Detection & Remediation | Proposed | 2026-03-03 |
 | [ADR-0030](ADR-0030-rate-limiting-architecture.md) | Rate Limiting Architecture and Single Source of Truth | Accepted | 2026-03-05 |
+| [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) | Encryption Architecture Consolidation (4→2 Systems) | Accepted | 2026-03-06 |
 
 ### 🟡 Partially Superseded
 
@@ -73,6 +73,7 @@ providing a historical record of why the system is built the way it is.
 | # | Title | Status | Notes |
 |---|-------|--------|-------|
 | [ADR-0008](ADR-0008-mypy-removal.md) | MyPy Removal | Superseded | Replaced by [ADR-0009](ADR-0009-pragmatic-mypy-strategy.md) (pragmatic approach instead of full removal) |
+| [ADR-0018](ADR-0018-django-encryption-key-management.md) | DJANGO_ENCRYPTION_KEY Management for 2FA | Superseded | Replaced by [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) (AES-256-GCM consolidation) |
 | [ADR-0022](ADR-0022-project-structure-strategic-seams.md) | Project Structure - Strategic Seams | Superseded | Described original single-service monolith; platform migrated to two-service split |
 | [ADR-0023](ADR-0023-database-structure.md) | Complete Database Schema | Historical Reference | Pre-implementation design target; actual ORM models have diverged |
 | [ADR-0024](ADR-0024-user-role-clarification.md) | User Model Design: is_staff vs admin_role | Superseded | Proposed `admin_role` rename was not implemented; actual field is `staff_role` |
@@ -90,8 +91,9 @@ Type Safety Chain
   ADR-0009 ──related──▶ ADR-0010 (admin type annotations)
 
 Security & Auth
-  ADR-0004 (custom 2FA) ──related──▶ ADR-0018 (encryption key mgmt)
-  ADR-0017 (portal fail-open) ──related──▶ ADR-0004, ADR-0018, ADR-0021
+  ADR-0004 (custom 2FA) ──related──▶ ADR-0033 (encryption consolidation)
+  ADR-0018 (encryption key mgmt) ──superseded by──▶ ADR-0033 (AES-256-GCM)
+  ADR-0017 (portal fail-open) ──related──▶ ADR-0004, ADR-0033, ADR-0021
   ADR-0021 (email enumeration) ──standalone──
 
 Configuration & Organization
@@ -122,7 +124,8 @@ Platform Traffic Management
 - [ADR-0004](ADR-0004-custom-2fa-implementation.md) — Custom TOTP 2FA
 - [ADR-0006](ADR-0006-security-warning-configuration.md) — Security warning config
 - [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) — Portal fail-open auth
-- [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management
+- [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management (superseded by ADR-0033)
+- [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) — Encryption architecture consolidation
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
 - [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
 
@@ -152,5 +155,8 @@ Platform Traffic Management
 
 ## Statistics
 
-- **Total ADRs**: 30 (ADR-0001 through ADR-0030)
-- **Next available**: ADR-0031
+- **Total ADRs**: 33 (ADR-0001 through ADR-0033)
+- **Active**: 27 (Accepted + Implemented)
+- **Partially Superseded**: 1
+- **Superseded / Historical**: 5
+- **Next available**: ADR-0034

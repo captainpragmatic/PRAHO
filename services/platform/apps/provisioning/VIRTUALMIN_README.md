@@ -135,8 +135,8 @@ def suspend_customer_services(customer, reason):
 
 ### Environment Variables
 ```bash
-# Encryption key for sensitive data
-DJANGO_ENCRYPTION_KEY="your-fernet-key-here"
+# AES-256-GCM encryption key for sensitive data (32 bytes, URL-safe base64)
+DJANGO_ENCRYPTION_KEY="your-base64-encoded-32-byte-key-here"
 
 # Optional SSL certificate pinning
 VIRTUALMIN_PINNED_CERT_SHA256="sha256:abcd1234..."

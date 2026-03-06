@@ -157,6 +157,16 @@ repos:
         pass_filenames: true
         verbose: true
 
+      # Block new direct usage of settings.SECRET_KEY in app code
+      - id: secret-key-isolation
+        name: "Security: SECRET_KEY Isolation Check"
+        entry: uv run python
+        args: [scripts/check_secret_key_usage.py]
+        language: system
+        files: ^services/platform/apps/.*\.py$
+        exclude: ^(tests/.*\.py|.*/management/commands/.*\.py)$
+        pass_filenames: true
+
   # ===============================================================================
   # i18n COVERAGE CHECK 🌍
   # ===============================================================================

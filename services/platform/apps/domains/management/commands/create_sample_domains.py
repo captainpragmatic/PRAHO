@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from apps.billing.models import Currency
+from apps.common.encryption import encrypt_sensitive_data
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 from apps.orders.models import Order
@@ -133,7 +134,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.namecheap.com/",
                 "api_endpoint": "https://api.namecheap.com/xml.response",
                 "api_username": "test_user",
-                "api_key": "test_key_123",
+                "api_key": encrypt_sensitive_data("test_key_123"),
                 "status": "active",
                 "currency": "USD",
                 "default_nameservers": ["ns1.example.com", "ns2.example.com"],
@@ -145,7 +146,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.rotld.ro/",
                 "api_endpoint": "https://api.rotld.ro/",
                 "api_username": "praho_test",
-                "api_key": "rotld_key_456",
+                "api_key": encrypt_sensitive_data("rotld_key_456"),
                 "status": "active",
                 "currency": "RON",
                 "default_nameservers": ["ns1.rotld.ro", "ns2.rotld.ro"],
@@ -157,7 +158,7 @@ class Command(BaseCommand):
                 "website_url": "https://www.godaddy.com/",
                 "api_endpoint": "https://api.godaddy.com/v1/",
                 "api_username": "godaddy_user",
-                "api_key": "godaddy_secret_789",
+                "api_key": encrypt_sensitive_data("godaddy_secret_789"),
                 "status": "active",
                 "currency": "USD",
                 "default_nameservers": ["ns01.domaincontrol.com", "ns02.domaincontrol.com"],
@@ -349,7 +350,9 @@ class Command(BaseCommand):
                     "registered_at": registered_at,
                     "expires_at": expires_at,
                     "registrar_domain_id": f"DOM_{random.randint(100000, 999999)}",  # Sample data generation  # Safe: sample data generation, not security  # noqa: S311  # Safe: non-cryptographic usage
-                    "epp_code": f"EPP{random.randint(100000, 999999)}",  # Sample data generation  # Safe: sample data generation, not security  # noqa: S311  # Safe: non-cryptographic usage
+                    "epp_code": encrypt_sensitive_data(
+                        f"EPP{random.randint(100000, 999999)}"  # noqa: S311
+                    ),
                     "auto_renew": random.choice(  # noqa: S311  # Safe: non-cryptographic usage
                         [True, True, False]
                     ),  # Sample data generation  # Safe: sample data generation, not security  # Safe: non-cryptographic usage

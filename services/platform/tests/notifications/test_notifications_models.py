@@ -85,11 +85,9 @@ class EmailLogSecurityTests(TestCase):
     """🔒 Tests for EmailLog model security"""
 
     @patch('apps.notifications.models.ENCRYPTION_AVAILABLE', True)
-    @patch('apps.notifications.models.settings_encryption')
-    def test_email_content_encryption_on_save(self, mock_encryption):
-        """🔒 Test that EmailLog encrypts content on save"""
-        mock_encryption.is_encrypted.return_value = False
-        mock_encryption.encrypt_value.return_value = "enc:v1:encrypted"
+    @patch('apps.notifications.models.encrypt_value', return_value="aes:encrypted")
+    @patch('apps.notifications.models.is_encrypted', return_value=False)
+    def test_email_content_encryption_on_save(self, mock_is_encrypted, mock_encrypt):
 
         email_log = EmailLog(
             to_addr="test@example.com",
@@ -103,7 +101,7 @@ class EmailLogSecurityTests(TestCase):
         email_log.save()
 
         # Should have called encryption
-        mock_encryption.encrypt_value.assert_called()
+        mock_encrypt.assert_called()
 
     def test_email_validation_on_clean(self):
         """🔒 Test that EmailLog validates fields on clean()"""
@@ -133,10 +131,8 @@ class EmailLogSecurityTests(TestCase):
             email_log.clean()
 
     @patch('apps.notifications.models.ENCRYPTION_AVAILABLE', True)
-    @patch('apps.notifications.models.settings_encryption')
-    def test_safe_content_preview(self, mock_encryption):
-        """🔒 Test that content preview is safe and limited"""
-        mock_encryption.decrypt_if_needed.return_value = "Very long email content " * 100
+    @patch('apps.notifications.models.decrypt_if_needed', return_value="Very long email content " * 100)
+    def test_safe_content_preview(self, mock_decrypt):
 
         email_log = EmailLog(
             to_addr="test@example.com",

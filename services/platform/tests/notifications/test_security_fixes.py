@@ -16,6 +16,7 @@ import hmac
 import json
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.cache import cache
@@ -23,59 +24,38 @@ from django.http import HttpRequest
 from django.test import TestCase, override_settings
 
 from apps.common.outbound_http import OutboundSecurityError
+from apps.customers.models import Customer
+from apps.notifications.models import UnsubscribeToken
+from apps.notifications.services import EmailPreferenceService, EmailService, EmailSuppressionService
 from config.settings.test import LOCMEM_TEST_CACHE
 
 
-class TimingSafeTokenTests(TestCase):
-    """Test timing-safe token comparison for unsubscribe."""
+class UnsubscribeTokenSecurityTests(TestCase):
+    """Test opaque DB-token unsubscribe flow (replaces hash-based tokens)."""
 
     def test_valid_token_accepted(self):
         """Test valid unsubscribe token is accepted."""
-        from apps.notifications.services import EmailPreferenceService, EmailSuppressionService
-
         email = "token-test@example.com"
-        # Generate valid token
-        token = hashlib.sha256(
-            f"{email}:marketing:{settings.SECRET_KEY}".encode()
-        ).hexdigest()[:32]
+        token = UnsubscribeToken.objects.create(email=email, template_key="marketing")
 
-        # Mock Customer.DoesNotExist to trigger suppression path
-        from apps.customers.models import Customer
         with patch.object(Customer.objects, 'get') as mock_get:
             mock_get.side_effect = Customer.DoesNotExist()
-            result = EmailPreferenceService.process_unsubscribe(email, token, "marketing")
-            # Will return True because it suppresses the email when customer not found
+            result = EmailPreferenceService.process_unsubscribe(str(token.id), "marketing")
             self.assertTrue(result)
-            # Email should be suppressed
             self.assertTrue(EmailSuppressionService.is_suppressed(email))
 
     def test_invalid_token_rejected(self):
-        """Test invalid unsubscribe token is rejected."""
-        from apps.notifications.services import EmailPreferenceService
-
-        email = "test@example.com"
-        invalid_token = "invalidtoken12345678901234567890"
-
-        result = EmailPreferenceService.process_unsubscribe(email, invalid_token, "marketing")
+        """Test invalid/unknown token ID is rejected."""
+        result = EmailPreferenceService.process_unsubscribe(str(uuid4()), "marketing")
         self.assertFalse(result)
 
-    def test_token_uses_hmac_compare_digest(self):
-        """Test that token comparison uses timing-safe function."""
-        from apps.notifications.services import EmailPreferenceService
-        import hmac as hmac_module
-
-        email = "test@example.com"
-        token = hashlib.sha256(
-            f"{email}:marketing:{settings.SECRET_KEY}".encode()
-        ).hexdigest()[:32]
-
-        # Patch hmac.compare_digest to verify it's called
-        with patch.object(hmac_module, 'compare_digest', wraps=hmac_module.compare_digest) as mock_compare:
-            with patch("apps.customers.models.Customer.objects"):
-                EmailPreferenceService.process_unsubscribe(email, token, "marketing")
-
-            # Verify compare_digest was called (timing-safe comparison)
-            self.assertTrue(mock_compare.called)
+    def test_no_email_in_unsubscribe_url(self):
+        """GDPR Art. 5: Unsubscribe URL must not contain email address."""
+        url = EmailService._generate_unsubscribe_url(
+            "sensitive@example.com", "marketing"
+        )
+        self.assertNotIn("sensitive@example.com", url)
+        self.assertNotIn("email=", url)
 
 
 class SSRFProtectionTests(TestCase):
