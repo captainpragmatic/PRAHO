@@ -1,0 +1,54 @@
+# Version control
+.git
+.gitignore
+
+# Environment files (secrets)
+.env
+.env.*
+.envrc
+
+# Python
+.venv
+.venv-Darwin
+__pycache__
+*.pyc
+*.pyo
+
+# Node
+node_modules
+
+# Testing & linting caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+
+# IDE
+.vscode
+.idea
+
+# Database
+db.sqlite3
+
+# Build artifacts
+logs
+backups
+
+# Test directories (not needed in production images)
+tests
+services/platform/tests
+services/portal/tests
+
+# Deployment configs (not needed inside images)
+deploy/terraform
+deploy/ansible
+docs
+
+# Project tooling
+.claude
+.github
+.pre-commit-config.yaml
+Makefile
+*.md
+package.json
+package-lock.json

@@ -59,7 +59,7 @@ WORKDIR /app
 # Copy pre-built venv from builder stage
 COPY --from=builder /build/.venv /app/.venv
 
-# Make venv available on PATH so python/gunicorn/manage.py just work
+# Activate venv — bare `python` resolves to .venv/bin/python
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy platform service code (includes assets/ and static/)

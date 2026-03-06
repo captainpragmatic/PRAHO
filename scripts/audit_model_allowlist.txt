@@ -97,4 +97,5 @@ infrastructure.NodeDeploymentCostRecord  # append-only cost records (operational
 infrastructure.NodeDeploymentLog         # IS the deployment audit trail (append-only log)
 infrastructure.PanelType        # static panel type definitions (reference data, rarely changes)
 notifications.EmailCampaign     # campaign management (future: will get signals when campaign service is built)
+notifications.UnsubscribeToken  # short-lived HMAC token for email unsubscribe (no business state, rotated frequently)
 promotions.LoyaltyTier          # tier definitions (changes audited via LoyaltyProgram parent)

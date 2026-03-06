@@ -21,6 +21,7 @@ _PROD_ENV = {
     "SECRET_KEY": "test-only-secret-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "DB_PASSWORD": "test-only-db-password-for-logging-tests",
     "HMAC_SECRET": "test-only-hmac-secret-for-logging-tests",
+    "DJANGO_ENCRYPTION_KEY": "dGVzdC1vbmx5LWVuY3J5cHRpb24ta2V5LTMyYnl0ZXM=",
     "ALLOWED_HOSTS": "localhost,127.0.0.1",
     "PORTAL_DOMAIN": "portal.test.local",
     "PLATFORM_DOMAIN": "platform.test.local",

@@ -26,6 +26,11 @@ services:
 {% if deploy_platform %}
   platform:
     image: ${REGISTRY:-}praho-platform:${VERSION:-latest}
+{% if build_from_source | default(false) %}
+    build:
+      context: "{{ project_root }}"
+      dockerfile: deploy/platform/Dockerfile
+{% endif %}
     container_name: praho_platform
     environment:
       - DEBUG=0
@@ -62,6 +67,11 @@ services:
 {% if deploy_portal %}
   portal:
     image: ${REGISTRY:-}praho-portal:${VERSION:-latest}
+{% if build_from_source | default(false) %}
+    build:
+      context: "{{ project_root }}"
+      dockerfile: deploy/portal/Dockerfile
+{% endif %}
     container_name: praho_portal
     environment:
       - DEBUG=0
