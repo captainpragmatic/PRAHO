@@ -18,7 +18,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from apps.api.secure_auth import require_customer_authentication
+from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.audit.services import AuditService
 from apps.billing.models import Currency
 from apps.common.types import Ok
@@ -79,9 +79,11 @@ class ProductCatalogThrottle(ScopedRateThrottle):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @throttle_classes([ProductCatalogThrottle])
+@public_api_endpoint
 def product_list(request: Request) -> Response:
     """
-    Public endpoint for product catalog listing.
+    Public product catalog listing -- intentionally public.
+
     Supports filtering by product type and featured status.
     """
 
@@ -110,10 +112,9 @@ def product_list(request: Request) -> Response:
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @throttle_classes([ProductCatalogThrottle])
+@public_api_endpoint
 def product_detail(request: Request, slug: str) -> Response:
-    """
-    Public endpoint for product detail by slug.
-    """
+    """Public product details by slug -- intentionally public."""
 
     try:
         product = Product.objects.prefetch_related("prices").get(slug=slug, is_active=True, is_public=True)

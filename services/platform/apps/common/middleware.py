@@ -299,6 +299,9 @@ class GDPRComplianceMiddleware:
 # The startswith->exact-match change (commit 2577b41d) was intentional:
 # it prevents unintended sub-path exemptions (e.g., /api/users/password/reset/confirm/).
 # Exempt paths stored without trailing slash; matching normalizes both sides.
+#
+# Each exempt path must have @public_api_endpoint on the corresponding view.
+# CI test tests.api.test_api_auth_coverage enforces this invariant.
 _AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
     {
         "/api/users/register",
