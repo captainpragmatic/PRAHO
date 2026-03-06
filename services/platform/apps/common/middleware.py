@@ -361,14 +361,24 @@ class PortalServiceAuthMiddleware:
 # ===============================================================================
 
 
-AUTH_EXEMPT_EXACT_PATHS: frozenset[str] = frozenset(
+# Exempt paths stored without trailing slash; matching normalizes both sides.
+_AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
     {
-        "/api/users/register/",
-        "/api/users/password/reset/",
-        "/api/users/health/",
-        "/api/orders/products/",
+        "/api/users/register",
+        "/api/users/password/reset",
+        "/api/users/health",
+        "/api/orders/products",
     }
 )
+
+
+def _is_auth_exempt(path: str) -> bool:
+    """Check if a request path is exempt from HMAC authentication.
+
+    Normalizes trailing slashes so both '/api/users/register' and
+    '/api/users/register/' match, regardless of Django's APPEND_SLASH setting.
+    """
+    return path.rstrip("/") in _AUTH_EXEMPT_EXACT_PATHS_RAW
 
 
 class PortalServiceHMACMiddleware:
@@ -525,7 +535,7 @@ class PortalServiceHMACMiddleware:
             # NOTE: /api/users/login/ is NOT exempt - the portal service signs
             # login requests with HMAC, so we validate portal origin to prevent
             # direct credential brute-force from external attackers.
-            if request.path in AUTH_EXEMPT_EXACT_PATHS:
+            if _is_auth_exempt(request.path):
                 logger.debug("🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: %s", request.path)
                 return self.get_response(request)
 

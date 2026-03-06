@@ -48,15 +48,17 @@ def get_safe_client_ip(request: HttpRequest) -> str:
         return remote_addr
 
     # If the direct connection is from a trusted proxy, extract the client IP
-    # from the leftmost forwarded header entry.
+    # from the rightmost non-trusted XFF entry (prevents attacker-injected leftmost).
     if _is_trusted_proxy(remote_addr, trusted_proxies):
         for header in _PROXY_HEADERS:
             raw = request.META.get(header, "").strip()
             if raw:
-                # XFF is comma-separated; leftmost is the original client IP
-                candidate = raw.split(",")[0].strip()
-                if candidate and _is_valid_ip(candidate):
-                    return candidate
+                # Walk right-to-left: skip trusted proxies, return first untrusted IP.
+                # Proxies *append* to XFF, so rightmost entries are most trustworthy.
+                candidates = [ip.strip() for ip in raw.split(",")]
+                for candidate in reversed(candidates):
+                    if candidate and _is_valid_ip(candidate) and not _is_trusted_proxy(candidate, trusted_proxies):
+                        return candidate
 
     # No matching proxy header found, or proxy not trusted — fall back to direct IP.
     return remote_addr
