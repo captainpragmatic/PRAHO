@@ -24,7 +24,6 @@ DJANGO_APPS: list[str] = [
 ]
 
 THIRD_PARTY_APPS: list[str] = [
-    "django_extensions",
     "ipware",
 ]
 

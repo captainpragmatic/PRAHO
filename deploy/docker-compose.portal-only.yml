@@ -21,8 +21,12 @@ services:
     environment:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:?PLATFORM_API_BASE_URL required}
+      - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-false}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
+      - PORTAL_DOMAIN=${DOMAIN:-localhost}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
-      - DJANGO_SETTINGS_MODULE=config.settings
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},portal
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
       - SERVICE_NAME=portal
@@ -31,7 +35,7 @@ services:
       - portal_logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8701/health/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8701/status/"]
       interval: 30s
       timeout: 10s
       retries: 3

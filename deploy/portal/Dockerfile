@@ -19,10 +19,11 @@ LABEL description="PRAHO Portal Service - Customer-facing API gateway"
 # ===============================================================================
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DJANGO_SETTINGS_MODULE=config.settings \
+    DJANGO_SETTINGS_MODULE=config.settings.prod \
     SERVICE_NAME=portal
 
-# ⚠️ CRITICAL: NO PYTHONPATH set - portal cannot import platform code
+# Portal uses config.settings.prod (not config.settings) because portal has a
+# settings package (config/settings/{base,dev,prod}.py), same as platform.
 
 # ===============================================================================
 # MINIMAL SYSTEM DEPENDENCIES 📦
@@ -46,6 +47,9 @@ COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
 
 # Sync portal production dependencies
 RUN uv sync --group portal --group prod --frozen --no-dev
+
+# Make venv available on PATH so python/gunicorn just work
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy portal service code
 COPY services/portal/ ./
@@ -71,9 +75,8 @@ USER django
 # ===============================================================================
 # HEALTH CHECK 🏥
 # ===============================================================================
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8701/health/', timeout=10)" \
-    || exit 1
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8701/status/ || exit 1
 
 # ===============================================================================
 # RUNTIME CONFIGURATION ⚙️

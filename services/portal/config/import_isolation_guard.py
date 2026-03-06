@@ -19,8 +19,13 @@ _TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 
 def _repo_root() -> Path:
-    # services/portal/config/import_isolation_guard.py -> repo root is parents[3]
-    return Path(__file__).resolve().parents[3]
+    # In dev: services/portal/config/import_isolation_guard.py -> parents[3] = repo root
+    # In Docker: /app/config/import_isolation_guard.py -> only 3 parents, use parents[1] = /app
+    resolved = Path(__file__).resolve()
+    try:
+        return resolved.parents[3]
+    except IndexError:
+        return resolved.parents[1]
 
 
 def _forbidden_paths() -> tuple[Path, Path]:

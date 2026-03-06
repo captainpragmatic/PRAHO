@@ -50,6 +50,9 @@ COPY services/platform/pyproject.toml ./services/platform/pyproject.toml
 # Sync platform production dependencies
 RUN uv sync --group platform --group prod --frozen --no-dev
 
+# Make venv available on PATH so python/gunicorn/manage.py just work
+ENV PATH="/app/.venv/bin:$PATH"
+
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ ./
 
@@ -82,9 +85,8 @@ USER django
 # ===============================================================================
 # HEALTH CHECK 🏥
 # ===============================================================================
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8700/health/', timeout=10)" \
-    || exit 1
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8700/api/users/health/ || exit 1
 
 # ===============================================================================
 # RUNTIME CONFIGURATION ⚙️
