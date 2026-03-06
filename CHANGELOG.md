@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Payment.apply_gateway_event()`** method — idempotent gateway status transition with `select_for_update()` contract; replaces 3 separate inline implementations
 - **Django system check `portal.W001`** — deploy-time warning when `IPWARE_TRUSTED_PROXY_LIST` is empty in non-debug mode
 - **`ACCOUNT_LOCKOUT_THRESHOLD`** setting (default=1) — makes lockout threshold configurable without code changes
+- **Testing**: Cross-service parity test (`test_cross_service_parity.py`) prevents
+  `retry_after.py` drift between platform and portal services
+- **Testing**: Thread-safety test verifies concurrent requests produce unique nonces
+- **Testing**: 11 integration tests for rate-limit flows (login 429, orders 429,
+  retry-after propagation, idempotent retry contract)
+- **Testing**: E2E Playwright tests for rate-limit UX (login throttle, dashboard/catalog
+  under normal load)
+- **Testing**: 4 orders rate-limit unit tests (catalog warning, confirm-payment 429,
+  service re-raise for calculate and create_order)
 
 ### Changed
 
@@ -37,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PaymentService.confirm_payment()`** — uses shared `TERMINAL_PAYMENT_STATUSES` constant instead of inline set
 - **`obtain_token`** — uses `get_safe_client_ip()` instead of raw `REMOTE_ADDR`
 - **`_mask_email()`** — adds null byte (`\0`) stripping; removes redundant domain-level `\n`/`\r` sanitization
+- **Portal API Client**: Replaced static `_READ_ONLY_POST_RETRY_ENDPOINTS` allowlist with
+  call-site `idempotent=True` parameter on `_make_request` — eliminates manual endpoint
+  maintenance and makes retry safety explicit at each call site
+- **Portal API Client**: 18+ read-only POST endpoints now pass `idempotent=True` (invoices,
+  tickets, services, billing summaries, etc.)
 
 ### Removed
 
@@ -45,6 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Portal Auth**: Login 429 now shows throttle message ("Too many login attempts, try again
+  in N seconds") instead of silently treating rate-limits as invalid credentials
+- **Portal Auth**: `authenticate_customer` re-raises `PlatformAPIError(is_rate_limited=True)`
+  instead of swallowing it and returning `None`
+- **Portal Auth**: Password change view shows rate-limit warning via Django messages framework
+- **Portal Template**: Removed dead `rate_limit_banner` slot from `base.html` (context
+  processor sets `rate_limited`, not `rate_limit_banner`)
+- **Portal API Client**: Thread-safety fix — `_last_request_headers` moved to
+  `threading.local()` to prevent cross-thread header contamination on the singleton
+- **Portal Orders**: All 4 PlatformAPIError catch sites in services (add_to_cart, calculate,
+  preflight, create_order) now re-raise rate-limited errors instead of swallowing them
+- **Portal Orders**: Views show warning-level rate-limit messages (amber, not red);
+  `confirm_payment` returns 429 JSON with `retry_after` field
 - fix(settings): remove duplicate `RATELIMIT_USE_CACHE = "default"` in prod.py that overrode the correct conditional assignment
 - fix(settings): add `RATELIMIT_ENABLE = True/False` alongside `RATELIMIT_ENABLED` in prod/staging/e2e (both needed: library vs custom middleware)
 - fix(settings): add `HMAC_SECRET` startup validation to staging.py (was only in prod.py)

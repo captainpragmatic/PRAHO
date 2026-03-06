@@ -64,7 +64,7 @@ class RateLimitTemplateTests(SimpleTestCase):
         self.assertIn("Billing data is temporarily rate limited", content)
         self.assertIn("Ticket data is temporarily rate limited", content)
 
-    def test_base_template_renders_rate_limit_banner_slot(self) -> None:
+    def test_base_template_does_not_have_dead_rate_limit_banner_slot(self) -> None:
+        """The rate_limit_banner slot was removed as dead code (never populated by context processor)."""
         content = (REPO_ROOT / "services" / "portal" / "templates" / "base.html").read_text(encoding="utf-8")
-        self.assertIn("{% if rate_limit_banner %}", content)
-        self.assertIn('include "components/account_status_banner.html" with banner=rate_limit_banner', content)
+        self.assertNotIn("rate_limit_banner", content)

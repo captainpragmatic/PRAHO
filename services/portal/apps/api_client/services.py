@@ -25,6 +25,7 @@ import math
 import random
 import re
 import secrets
+import threading
 import time
 import urllib.parse
 from http import HTTPStatus
@@ -40,6 +41,7 @@ from apps.common.retry_after import coerce_retry_after_seconds
 # HTTP status code constants
 HTTP_OK = 200
 HTTP_MULTIPLE_CHOICES = 300
+HTTP_TOO_MANY_REQUESTS = 429
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +53,6 @@ _HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
 _HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 # Int-only — platform validates with int(), floats would fail
 _HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
-_READ_ONLY_POST_RETRY_ENDPOINTS = {
-    "/users/profile/",
-    "/users/customers/",
-    "/customers/details/",
-    "/services/",
-    "/services/summary/",
-    "/tickets/",
-    "/tickets/summary/",
-    "/billing/invoices/",
-    "/billing/proformas/",
-    "/billing/summary/",
-}
 
 
 class PlatformAPIError(Exception):
@@ -106,7 +96,7 @@ class PlatformAPIClient:
         self.retry_backoff_seconds = float(getattr(settings, "PLATFORM_API_RETRY_BACKOFF_SECONDS", 0.05))
         self.max_read_retry_attempts = int(getattr(settings, "PLATFORM_API_READ_MAX_RETRIES", 2))
         self.max_retry_wait_seconds = float(getattr(settings, "PLATFORM_API_MAX_RETRY_WAIT_SECONDS", 2.5))
-        self._last_request_headers: dict[str, str] = {}
+        self._thread_local = threading.local()
 
     def _generate_hmac_headers(
         self, method: str, path: str, body: bytes, fixed_timestamp: str | None = None
@@ -288,13 +278,11 @@ class PlatformAPIClient:
             normalized = normalized[len("/api") :]
         return normalized
 
-    def _is_read_retry_candidate(self, method: str, endpoint: str) -> bool:
+    def _is_read_retry_candidate(self, method: str, endpoint: str, *, idempotent: bool = False) -> bool:
         normalized_method = method.upper()
         if normalized_method == "GET":
             return True
-        if normalized_method != "POST":
-            return False
-        return self._normalize_endpoint(endpoint) in _READ_ONLY_POST_RETRY_ENDPOINTS
+        return bool(normalized_method == "POST" and idempotent)
 
     def _get_retry_after_seconds(self, response: requests.Response) -> int | None:
         header_retry_after = coerce_retry_after_seconds(response.headers.get("Retry-After"))
@@ -361,6 +349,7 @@ class PlatformAPIClient:
         params: dict[str, Any] | None = None,
         retry_on_status: set[int] | None = None,
         max_retries: int = 0,
+        idempotent: bool = False,
     ) -> dict[str, Any]:
         """Make HMAC-authenticated request to platform API"""
         url = self._build_url(endpoint)
@@ -369,7 +358,7 @@ class PlatformAPIClient:
         body_bytes, payload = self._prepare_json_body(data, user_id)
         body_ts = str(payload.get("timestamp")) if "timestamp" in payload else None
 
-        auto_retry = self._is_read_retry_candidate(method, endpoint)
+        auto_retry = self._is_read_retry_candidate(method, endpoint, idempotent=idempotent)
         retry_statuses = retry_on_status or ({503} if auto_retry else set())
         if auto_retry and max_retries == 0:
             max_retries = self.max_read_retry_attempts
@@ -382,7 +371,7 @@ class PlatformAPIClient:
                     headers = self._prepare_legacy_request_headers(method, url, params, body_bytes, body_ts)
                 else:
                     headers = self._prepare_request_headers(method, url, params, body_bytes, body_ts)
-                self._last_request_headers = dict(headers)
+                self._thread_local.last_request_headers = dict(headers)
 
                 response = portal_request(
                     method=method,
@@ -426,8 +415,23 @@ class PlatformAPIClient:
                         legacy_retry_attempted = True
                         continue
 
+                # Authentication endpoint: 429 is a throttle, not an auth failure — raise it.
+                if endpoint == "/users/login/" and response.status_code == HTTP_TOO_MANY_REQUESTS:
+                    retry_after = self._get_retry_after_seconds(response)
+                    error_msg = self._extract_error_message(
+                        response.json()
+                        if response.headers.get("content-type", "").startswith("application/json")
+                        else {}
+                    )
+                    raise PlatformAPIError(
+                        error_msg or "Too many requests",
+                        status_code=429,
+                        retry_after=retry_after,
+                        is_rate_limited=True,
+                    )
+
                 # Authentication endpoint: avoid exception-heavy path on expected auth failures.
-                if endpoint == "/users/login/" and response.status_code in {400, 401, 403, 429}:
+                if endpoint == "/users/login/" and response.status_code in {400, 401, 403}:
                     try:
                         error_data = response.json()
                     except ValueError:
@@ -582,11 +586,15 @@ class PlatformAPIClient:
                     "customer_id": user_data.get("customer_id"),
                     "customer_data": data.get("user", {}),
                 }
-            if data.get("success") and self._headers_allow_success_fallback(self._last_request_headers):
+            if data.get("success") and self._headers_allow_success_fallback(
+                getattr(self._thread_local, "last_request_headers", {})
+            ):
                 return {"valid": True}
             return None
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise  # Let caller handle rate-limit UX
             logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
             return None
         finally:
@@ -635,7 +643,7 @@ class PlatformAPIClient:
             "timestamp": time.time(),
         }
         # Pass user_id to _make_request so it auto-injects 'user_id' in the signed body (defensive)
-        data = self._make_request("POST", "/users/customers/", user_id=user_id, data=request_data)
+        data = self._make_request("POST", "/users/customers/", user_id=user_id, data=request_data, idempotent=True)
         customers = data.get("results", []) if data.get("success") else []
         cache.set(cache_key, customers, 300)
         return customers
@@ -647,6 +655,7 @@ class PlatformAPIClient:
             "/customers/details/",
             user_id=user_id,
             data={"customer_id": customer_id, "action": "get_customer_details"},
+            idempotent=True,
         )
 
     def search_customers(self, query: str, user_id: int) -> list[dict[str, Any]]:
@@ -659,7 +668,7 @@ class PlatformAPIClient:
         """Get user profile data (user-scoped, HMAC body with user_id)"""
         try:
             payload = {"user_id": user_id, "timestamp": time.time()}
-            data = self._make_request("POST", "/users/profile/", user_id=user_id, data=payload)
+            data = self._make_request("POST", "/users/profile/", user_id=user_id, data=payload, idempotent=True)
 
             if data.get("success"):
                 return data.get("profile")
@@ -948,17 +957,17 @@ class PlatformAPIClient:
     def get_customer_invoices_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer invoices - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_invoices", "timestamp": time.time()}
-        return self._make_request("POST", "/api/billing/invoices/", data=request_data)
+        return self._make_request("POST", "/api/billing/invoices/", data=request_data, idempotent=True)
 
     def get_customer_proformas_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer proformas - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_proformas", "timestamp": time.time()}
-        return self._make_request("POST", "/api/billing/proformas/", data=request_data)
+        return self._make_request("POST", "/api/billing/proformas/", data=request_data, idempotent=True)
 
     def get_billing_summary_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get billing summary - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_billing_summary", "timestamp": time.time()}
-        return self._make_request("POST", "/api/billing/summary/", data=request_data)
+        return self._make_request("POST", "/api/billing/summary/", data=request_data, idempotent=True)
 
     def get_invoice_detail_secure(self, customer_id: int, invoice_number: str) -> dict[str, Any]:
         """🔒 Get invoice detail - SECURE HMAC BODY"""
@@ -968,7 +977,9 @@ class PlatformAPIClient:
             "action": "get_invoice_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/billing/invoices/{invoice_number}/", data=request_data)
+        return self._make_request(
+            "POST", f"/api/billing/invoices/{invoice_number}/", data=request_data, idempotent=True
+        )
 
     def get_proforma_detail_secure(self, customer_id: int, proforma_number: str) -> dict[str, Any]:
         """🔒 Get proforma detail - SECURE HMAC BODY"""
@@ -978,7 +989,9 @@ class PlatformAPIClient:
             "action": "get_proforma_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/billing/proformas/{proforma_number}/", data=request_data)
+        return self._make_request(
+            "POST", f"/api/billing/proformas/{proforma_number}/", data=request_data, idempotent=True
+        )
 
     # ===============================================================================
     # SECURE TICKETS API ENDPOINTS 🎫
@@ -987,7 +1000,7 @@ class PlatformAPIClient:
     def get_customer_tickets_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer tickets - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_tickets", "timestamp": time.time()}
-        return self._make_request("POST", "/api/tickets/", data=request_data)
+        return self._make_request("POST", "/api/tickets/", data=request_data, idempotent=True)
 
     def get_ticket_detail_secure(self, customer_id: int, ticket_number: str) -> dict[str, Any]:
         """🔒 Get ticket detail - SECURE HMAC BODY"""
@@ -997,7 +1010,7 @@ class PlatformAPIClient:
             "action": "get_ticket_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/tickets/{ticket_number}/", data=request_data)
+        return self._make_request("POST", f"/api/tickets/{ticket_number}/", data=request_data, idempotent=True)
 
     def create_ticket_secure(self, customer_id: int, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Create ticket - SECURE HMAC BODY"""
@@ -1022,7 +1035,7 @@ class PlatformAPIClient:
     def get_customer_services_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get customer services - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_services", "timestamp": time.time()}
-        return self._make_request("POST", "/api/services/", data=request_data)
+        return self._make_request("POST", "/api/services/", data=request_data, idempotent=True)
 
     def get_service_detail_secure(self, customer_id: int, service_id: int) -> dict[str, Any]:
         """🔒 Get service detail - SECURE HMAC BODY"""
@@ -1032,12 +1045,12 @@ class PlatformAPIClient:
             "action": "get_service_detail",
             "timestamp": time.time(),
         }
-        return self._make_request("POST", f"/api/services/{service_id}/", data=request_data)
+        return self._make_request("POST", f"/api/services/{service_id}/", data=request_data, idempotent=True)
 
     def get_services_summary_secure(self, customer_id: int) -> dict[str, Any]:
         """🔒 Get services summary - SECURE HMAC BODY"""
         request_data = {"customer_id": customer_id, "action": "get_services_summary", "timestamp": time.time()}
-        return self._make_request("POST", "/api/services/summary/", data=request_data)
+        return self._make_request("POST", "/api/services/summary/", data=request_data, idempotent=True)
 
     def update_service_auto_renew_secure(self, customer_id: int, service_id: int, auto_renew: bool) -> dict[str, Any]:
         """🔒 Update service auto-renew - SECURE HMAC BODY"""

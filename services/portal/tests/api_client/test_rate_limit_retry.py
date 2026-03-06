@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, override_settings
 
-from apps.api_client.services import _READ_ONLY_POST_RETRY_ENDPOINTS, PlatformAPIClient, PlatformAPIError
+from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 
 def _response(status_code: int, payload: object, headers: dict[str, str] | None = None) -> MagicMock:
@@ -51,23 +51,23 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         self.assertIn("throttled", str(ctx.exception))
 
     @patch("apps.api_client.services.portal_request")
-    def test_make_request_does_not_retry_allowlisted_read_post_on_429(self, mock_portal_request: MagicMock) -> None:
+    def test_make_request_does_not_retry_idempotent_post_on_429(self, mock_portal_request: MagicMock) -> None:
         mock_portal_request.return_value = _response(429, {"detail": "Too many requests"}, headers={"Retry-After": "1"})
 
         with self.assertRaises(PlatformAPIError):
-            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2})
+            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2}, idempotent=True)
 
         self.assertEqual(mock_portal_request.call_count, 1)
 
     @patch("apps.api_client.services.time.sleep")
     @patch("apps.api_client.services.portal_request")
-    def test_make_request_retries_allowlisted_read_post_on_503(self, mock_portal_request: MagicMock, _mock_sleep: MagicMock) -> None:
+    def test_make_request_retries_idempotent_post_on_503(self, mock_portal_request: MagicMock, _mock_sleep: MagicMock) -> None:
         mock_portal_request.side_effect = [
             _response(503, {"error": "Service unavailable"}),
             _response(200, {"success": True, "data": {"summary": {}}}),
         ]
 
-        data = self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2})
+        data = self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2}, idempotent=True)
 
         self.assertTrue(data["success"])
         self.assertEqual(mock_portal_request.call_count, 2)
@@ -90,7 +90,7 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
                 {"X-Nonce": "nonce-2", "X-Timestamp": "2", "X-Signature": "b", "Content-Type": "application/json"},
             ],
         ) as mock_prepare_headers:
-            data = self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2})
+            data = self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2}, idempotent=True)
 
         self.assertTrue(data["success"])
         self.assertEqual(mock_prepare_headers.call_count, 2)
@@ -132,7 +132,7 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         ]
 
         with self.assertRaises(PlatformAPIError) as ctx:
-            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2})
+            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2}, idempotent=True)
 
         self.assertEqual(ctx.exception.status_code, 503)
         self.assertFalse(ctx.exception.is_rate_limited)
@@ -169,7 +169,10 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
         self.assertEqual(self.client._normalize_endpoint("tickets/summary"), "/tickets/summary/")
         self.assertEqual(self.client._normalize_endpoint("///services/"), "/services/")
 
-    def test_read_retry_allowlist_excludes_known_write_endpoints(self) -> None:
-        self.assertNotIn("/tickets/create/", _READ_ONLY_POST_RETRY_ENDPOINTS)
-        self.assertNotIn("/orders/create/", _READ_ONLY_POST_RETRY_ENDPOINTS)
+    def test_idempotent_false_post_is_not_retryable(self) -> None:
         self.assertFalse(self.client._is_read_retry_candidate("POST", "/tickets/create/"))
+        self.assertFalse(self.client._is_read_retry_candidate("POST", "/orders/create/"))
+
+    def test_idempotent_true_post_is_retryable(self) -> None:
+        self.assertTrue(self.client._is_read_retry_candidate("POST", "/tickets/summary/", idempotent=True))
+        self.assertTrue(self.client._is_read_retry_candidate("POST", "/orders/calculate/", idempotent=True))

@@ -23,6 +23,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
+from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
 
 from .security import OrderSecurityHardening
 from .services import (
@@ -160,8 +161,15 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
         logger.info(f"✅ [Catalog] Loaded {len(products)} products")
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Catalog] Failed to load products: {e}")
-        messages.error(request, _("Error loading products. Please try again."))
+        # Orders uses messaging-only rate-limit UX (no automatic retry).
+        # Order write operations (create, confirm-payment) are non-idempotent;
+        # retrying could cause double-charges or duplicate orders.
+        if is_rate_limited_error(e):
+            logger.warning(f"⚠️ [Catalog] Rate-limited loading products: {e}")
+            messages.warning(request, get_rate_limit_message(e.retry_after))
+        else:
+            logger.error(f"🔥 [Catalog] Failed to load products: {e}")
+            messages.error(request, _("Error loading products. Please try again."))
 
         context = {
             "products": [],
@@ -209,8 +217,12 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
         logger.info(f"✅ [Product] Loaded product details: {product_slug}")
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Product] Failed to load product {product_slug}: {e}")
-        messages.error(request, _("Product not found."))
+        if is_rate_limited_error(e):
+            logger.warning(f"⚠️ [Product] Rate-limited loading product {product_slug}: {e}")
+            messages.warning(request, get_rate_limit_message(e.retry_after))
+        else:
+            logger.error(f"🔥 [Product] Failed to load product {product_slug}: {e}")
+            messages.error(request, _("Product not found."))
         return redirect("orders:catalog")
 
     return render(request, "orders/product_detail.html", context)
@@ -1100,8 +1112,12 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
         return render(request, "orders/order_confirmation.html", context)
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Orders] Failed to load order {order_id}: {e}")
-        messages.error(request, _("Error loading order details."))
+        if is_rate_limited_error(e):
+            logger.warning(f"⚠️ [Orders] Rate-limited loading order {order_id}: {e}")
+            messages.warning(request, get_rate_limit_message(e.retry_after))
+        else:
+            logger.error(f"🔥 [Orders] Failed to load order {order_id}: {e}")
+            messages.error(request, _("Error loading order details."))
         return redirect("orders:catalog")
 
 
@@ -1317,6 +1333,16 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid request data"}, status=400)
     except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            logger.warning(f"⚠️ [Orders] Rate-limited during payment confirmation: {e}")
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Too many requests. Please wait and try again.",
+                    "retry_after": e.retry_after,
+                },
+                status=429,
+            )
         logger.error(f"🔥 Platform API error: {e}")
         return JsonResponse({"success": False, "error": "Failed to communicate with platform"}, status=500)
     except Exception as e:

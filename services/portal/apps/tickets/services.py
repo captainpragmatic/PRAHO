@@ -78,7 +78,7 @@ class TicketsAPIClient(PlatformAPIClient):
             if filters.search:
                 request_data["search"] = filters.search
 
-            response = self._make_request("POST", "/tickets/", data=request_data)
+            response = self._make_request("POST", "/tickets/", data=request_data, idempotent=True)
 
             # Transform platform API response format to expected portal format
             if response.get("success") and "data" in response:
@@ -115,7 +115,7 @@ class TicketsAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", f"/tickets/{ticket_id}/", data=data)
+            response = self._make_request("POST", f"/tickets/{ticket_id}/", data=data, idempotent=True)
 
             logger.info(f"✅ [Tickets API] Retrieved ticket {ticket_id} details for customer {customer_id}")
             return response
@@ -231,7 +231,7 @@ class TicketsAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", f"/tickets/{ticket_id}/reply/", data=data)
+            response = self._make_request("POST", f"/tickets/{ticket_id}/reply/", data=data, idempotent=True)
 
             logger.info(f"✅ [Tickets API] Retrieved replies for ticket {ticket_id} for customer {customer_id}")
             return cast(list[dict[str, Any]], response.get("replies", []))
@@ -254,7 +254,7 @@ class TicketsAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", "/tickets/summary/", data=data)
+            response = self._make_request("POST", "/tickets/summary/", data=data, idempotent=True)
 
             # Extract data from platform API response format (same as other methods)
             if response.get("success") and "data" in response:

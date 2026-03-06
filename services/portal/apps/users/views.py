@@ -287,8 +287,19 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
             except PlatformAPIError as e:
-                logger.error(f"🔥 [Portal Auth] Platform API error during login: {e}")
-                messages.error(request, _("Authentication service is temporarily unavailable. Please try again later."))
+                if getattr(e, "is_rate_limited", False):
+                    retry_after = getattr(e, "retry_after", None) or 30
+                    logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
+                    form.add_error(
+                        None,
+                        _("Too many login attempts. Please try again in %(seconds)s seconds.")
+                        % {"seconds": retry_after},
+                    )
+                else:
+                    logger.error(f"🔥 [Portal Auth] Platform API error during login: {e}")
+                    messages.error(
+                        request, _("Authentication service is temporarily unavailable. Please try again later.")
+                    )
 
             except Exception as e:
                 logger.error(f"🔥 [Portal Auth] Unexpected error during login: {e}")
@@ -618,8 +629,20 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
                         messages.error(request, _("Error updating password. Please try again."))
 
             except PlatformAPIError as e:
-                logger.error(f"🔥 [Portal Change Password] Platform API error: {e}")
-                messages.error(request, _("Authentication service is temporarily unavailable. Please try again later."))
+                if getattr(e, "is_rate_limited", False):
+                    retry_after = getattr(e, "retry_after", None) or 30
+                    logger.warning(
+                        f"⚠️ [Portal Change Password] Rate-limited for {customer_email} (retry_after={retry_after}s)"
+                    )
+                    messages.warning(
+                        request,
+                        _("Too many attempts. Please try again in %(seconds)s seconds.") % {"seconds": retry_after},
+                    )
+                else:
+                    logger.error(f"🔥 [Portal Change Password] Platform API error: {e}")
+                    messages.error(
+                        request, _("Authentication service is temporarily unavailable. Please try again later.")
+                    )
 
             except Exception as e:
                 logger.error(f"🔥 [Portal Change Password] Unexpected error: {e}")

@@ -61,7 +61,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if service_type:
                 data["service_type"] = service_type
 
-            response = self._make_request("POST", "/services/", user_id=user_id, data=data)
+            response = self._make_request("POST", "/services/", user_id=user_id, data=data, idempotent=True)
 
             # Transform platform API response format to expected portal format
             if response.get("success") and "data" in response:
@@ -97,7 +97,9 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", f"/services/{service_id}/", user_id=user_id, data=data)
+            response = self._make_request(
+                "POST", f"/services/{service_id}/", user_id=user_id, data=data, idempotent=True
+            )
 
             # Extract service data from nested platform API response
             if response.get("success") and "data" in response and "service" in response["data"]:
@@ -127,7 +129,9 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id, "period": period}
-            response = self._make_request("POST", f"/services/{service_id}/usage/", user_id=user_id, data=data)
+            response = self._make_request(
+                "POST", f"/services/{service_id}/usage/", user_id=user_id, data=data, idempotent=True
+            )
 
             # Extract usage data from nested platform API response
             if response.get("success") and "data" in response and "usage" in response["data"]:
@@ -164,7 +168,7 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id, "user_id": user_id}
-            response = self._make_request("POST", "/services/summary/", user_id=user_id, data=data)
+            response = self._make_request("POST", "/services/summary/", user_id=user_id, data=data, idempotent=True)
 
             # Extract summary data from nested response structure
             if response.get("success") and "data" in response and "summary" in response["data"]:
@@ -208,7 +212,7 @@ class ServicesAPIClient(PlatformAPIClient):
         """
         try:
             data = {"customer_id": customer_id}
-            response = self._make_request("POST", f"/services/{service_id}/domains/", data=data)
+            response = self._make_request("POST", f"/services/{service_id}/domains/", data=data, idempotent=True)
 
             logger.info(f"✅ [Services API] Retrieved domains for service {service_id} for customer {customer_id}")
             return cast(list[dict[str, Any]], response.get("domains", []))
