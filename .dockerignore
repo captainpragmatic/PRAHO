@@ -34,8 +34,21 @@ db.sqlite3
 logs
 backups
 
+# Test directories (not needed in production images)
+tests
+services/platform/tests
+services/portal/tests
+
 # Deployment configs (not needed inside images)
 deploy/terraform
 deploy/ansible
 docs
-tests
+
+# Project tooling
+.claude
+.github
+.pre-commit-config.yaml
+Makefile
+*.md
+package.json
+package-lock.json

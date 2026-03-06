@@ -46,6 +46,12 @@ usage() {
 rollback_version() {
     local VERSION="$1"
 
+    # Validate version format to prevent sed injection
+    if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+        log_error "Invalid version format: ${VERSION} (expected vX.Y.Z or X.Y.Z)"
+        exit 1
+    fi
+
     log_info "Rolling back to version: ${VERSION}"
 
     echo -e "${YELLOW}WARNING: This will restart services with version ${VERSION}${NC}"
