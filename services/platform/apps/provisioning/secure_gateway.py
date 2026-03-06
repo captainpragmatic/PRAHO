@@ -87,7 +87,7 @@ class SecureServerGateway:
     """
 
     @staticmethod
-    def create_service_on_server(server: Server, service_data: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    def create_service_on_server(server: Server, service_data: dict[str, Any]) -> tuple[bool, dict[str, Any]]:  # noqa: PLR0911
         """🆕 Create hosting service on server"""
         # Security validations
         if not SecureServerGateway._validate_server_endpoint(server.management_api_url):
@@ -104,7 +104,13 @@ class SecureServerGateway:
             return False, {"error": "Invalid service configuration"}
 
         # Get decrypted API credentials
-        api_key, _api_secret = server.get_management_api_credentials()
+        try:
+            api_key, _api_secret = server.get_management_api_credentials()
+        except DecryptionError:
+            logger.error(
+                f"🔥 [Server Gateway] Credential decryption failed for {server.name} — encryption key may have rotated"
+            )
+            return False, {"error": "Credential decryption failed"}
         if not api_key:
             logger.error(f"🔥 [Server Gateway] No API credentials for {server.name}")
             return False, {"error": "Missing API credentials"}
@@ -327,7 +333,13 @@ class SecureServerGateway:
     ) -> tuple[bool, dict[str, Any]]:
         """🔒 Make secure HTTP API call to server management system"""
         full_url = f"{server.management_api_url.rstrip('/')}{endpoint}"
-        api_key, api_secret = server.get_management_api_credentials()
+        try:
+            api_key, api_secret = server.get_management_api_credentials()
+        except DecryptionError:
+            logger.error(
+                f"🔥 [Server Gateway] Credential decryption failed for {server.name} — encryption key may have rotated"
+            )
+            return False, {"error": "Credential decryption failed"}
         timeouts = get_api_timeouts()
         request_timeout = timeouts.get("REQUEST_TIMEOUT", 30)
         max_retries = timeouts.get("MAX_RETRIES", 3)

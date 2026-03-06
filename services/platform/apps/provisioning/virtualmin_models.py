@@ -158,13 +158,21 @@ class VirtualminServer(models.Model):
         return False
 
     def get_api_password(self) -> str:
-        """Decrypt and return API password"""
+        """Decrypt and return API password.
+
+        Raises DecryptionError on key rotation / corrupted ciphertext
+        so callers can handle it explicitly instead of silently getting "".
+        """
+        from apps.common.encryption import DecryptionError  # noqa: PLC0415
+
         try:
             # Convert memoryview to bytes if needed
             encrypted_data = self.encrypted_api_password
             if isinstance(encrypted_data, memoryview):
                 encrypted_data = encrypted_data.tobytes()
             return decrypt_sensitive_data(encrypted_data.decode())
+        except DecryptionError:
+            raise
         except Exception as e:
             logger.error(f"Failed to decrypt API password for server {self.name}: {e}")
             return ""
