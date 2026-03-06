@@ -304,6 +304,14 @@ class PlatformAPIClient:
                 return value.strip()
         return "Request failed"
 
+    def _safe_parse_json(self, response: requests.Response) -> dict[str, Any]:
+        """Parse JSON response body safely, never raising on malformed input."""
+        try:
+            data = response.json()
+        except (ValueError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {"_raw": data}
+
     def _compute_retry_delay(self, response: requests.Response, attempt: int) -> float:
         """
         Exponential backoff with full jitter, bounded by a hard wait cap.
@@ -386,6 +394,16 @@ class PlatformAPIClient:
 
                 should_retry = response.status_code in retry_statuses and attempt < max_retries
                 if should_retry:
+                    server_backoff = self._get_retry_after_seconds(response)
+                    if server_backoff is not None and server_backoff > self.max_retry_wait_seconds:
+                        logger.warning(
+                            "⚠️ [API Client] Server requested backoff %ds exceeds cap %.1fs, not retrying %s %s",
+                            server_backoff,
+                            self.max_retry_wait_seconds,
+                            method,
+                            endpoint,
+                        )
+                        return self._handle_api_response(response, endpoint)
                     backoff = self._compute_retry_delay(response, attempt)
                     logger.warning(
                         "⚠️ [API Client] Retrying %s %s after %s in %.2fs (%d/%d)",
@@ -419,7 +437,7 @@ class PlatformAPIClient:
                 if endpoint == "/users/login/" and response.status_code == HTTP_TOO_MANY_REQUESTS:
                     retry_after = self._get_retry_after_seconds(response)
                     error_msg = self._extract_error_message(
-                        response.json()
+                        self._safe_parse_json(response)
                         if response.headers.get("content-type", "").startswith("application/json")
                         else {}
                     )

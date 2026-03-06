@@ -41,8 +41,9 @@ class ListViewsRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Temporarily rate limited")
         self.assertTrue(response.context["rate_limited"])
+        # Inline alert only — no duplicate Django toast message
         messages = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
+        self.assertFalse(any("many requests right now" in message.lower() for message in messages))
 
     @patch("apps.tickets.views.tickets_api.get_customer_tickets")
     def test_tickets_list_shows_rate_limited_state(self, mock_get_tickets) -> None:
@@ -56,8 +57,9 @@ class ListViewsRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Temporarily rate limited")
         self.assertTrue(response.context["rate_limited"])
+        # Inline alert only — no duplicate Django toast message
         messages = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
+        self.assertFalse(any("many requests right now" in message.lower() for message in messages))
 
     @patch("apps.billing.views._fetch_filtered_documents")
     def test_billing_list_shows_rate_limited_state(self, mock_fetch_documents) -> None:
@@ -71,8 +73,9 @@ class ListViewsRateLimitTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Temporarily rate limited")
         self.assertTrue(response.context["rate_limited"])
+        # Inline alert only — no duplicate Django toast message
         messages = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
+        self.assertFalse(any("many requests right now" in message.lower() for message in messages))
 
 
 class DashboardRateLimitTests(SimpleTestCase):
@@ -106,6 +109,8 @@ class DashboardRateLimitTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured_context["rate_limited"])
+        self.assertIn("billing", captured_context["sections_rate_limited"])
         self.assertIn("Please try again in", captured_context["rate_limit_message"])
-        messages = [str(message) for message in get_messages(request)]
-        self.assertTrue(any("many requests right now" in message.lower() for message in messages))
+        # Inline alert only — no duplicate Django toast message
+        queued = [str(message) for message in get_messages(request)]
+        self.assertFalse(any("many requests right now" in message.lower() for message in queued))

@@ -59,6 +59,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Retry-After Parser**: Capped return value to `MAX_RETRY_AFTER_SECONDS` (300s default,
+  configurable via `settings.RETRY_AFTER_MAX_SECONDS`) to prevent unbounded server-dictated
+  waits. Added `isascii()` guard against Unicode digit bypass, `OverflowError`/`OSError`
+  handling for extreme dates, and tighter type annotation (`int | float | str | None`)
+- **Portal API Client**: Added `_safe_parse_json` helper to prevent crashes on malformed
+  JSON in 429 responses. Login 429 handler no longer calls unguarded `response.json()`
+- **Portal API Client**: Retry loop now fails fast when server's `Retry-After` exceeds
+  `max_retry_wait_seconds` cap, preventing futile retries with long backoffs
+- **Portal Services**: All billing, services, and tickets service methods now re-raise
+  `PlatformAPIError(is_rate_limited=True)` instead of swallowing into fallback returns.
+  Consolidated via `_raise_if_rate_limited()` helper in each service module
+- **Portal Views**: Centralized error handling via `handle_platform_error()` helper —
+  eliminates duplicate `except PlatformAPIError` / `except Exception` blocks in billing,
+  services, and tickets views
+- **Portal Views**: Removed duplicate toast message from `build_rate_limited_context()` —
+  rate-limited views now show inline alert only, no redundant Django message
+- **Portal Dashboard**: Per-section rate-limit tracking preserves data from successful API
+  calls when only some sections are rate-limited (e.g., billing 429 doesn't hide tickets)
+- **Portal Templates**: Added `role="alert"` and `aria-live="polite"` to rate-limit inline
+  alert for screen reader accessibility
+
 - **Portal Auth**: Login 429 now shows throttle message ("Too many login attempts, try again
   in N seconds") instead of silently treating rate-limits as invalid credentials
 - **Portal Auth**: `authenticate_customer` re-raises `PlatformAPIError(is_rate_limited=True)`

@@ -14,10 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from apps.common.api_utils import DictAsObj
 from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import (
-    build_rate_limited_context,
-    is_rate_limited_error,
-)
+from apps.common.rate_limit_feedback import handle_platform_error
 from apps.services.services import services_api
 
 from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
@@ -128,11 +125,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         logger.info(f"✅ [Tickets View] Loaded {len(tickets)} tickets for customer {customer_id}")
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Tickets View] Error loading tickets for customer {customer_id}: {e}")
-        rate_limited = is_rate_limited_error(e)
-        if not rate_limited:
-            messages.error(request, _("Unable to load support tickets. Please try again later."))
-        # Create empty paginator data for error state
+        error_ctx = handle_platform_error(
+            request, e, logger, fallback_message=_("Unable to load support tickets. Please try again later.")
+        )
         paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
 
         context = {
@@ -154,9 +149,8 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
                 {"value": "0", "label": _("Total Tickets"), "color": "text-white"},
             ],
             "filter_tabs": TICKET_STATUS_TABS,
+            **error_ctx,
         }
-        if rate_limited:
-            context.update(build_rate_limited_context(request, e))
 
     return render(request, "tickets/ticket_list.html", context)
 
@@ -448,23 +442,15 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         )
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Tickets View] Error searching tickets for customer {customer_id}: {e}")
-        # Create empty paginator data for error state
+        error_ctx = handle_platform_error(request, e, logger)
         paginator_data = PaginatorData(total_count=0, current_page=1, page_size=25)
 
         context = {
             "tickets": [],
-            "error": _("Search failed. Please try again."),
-            "total_count": 0,
-            "current_page": 1,
-            "total_pages": 1,
-            "has_next": False,
-            "has_previous": False,
             "paginator_data": paginator_data,
             "pagination_params": "",
+            **error_ctx,
         }
-        if is_rate_limited_error(e):
-            context.update(build_rate_limited_context(request, e))
         return render(request, "tickets/partials/tickets_table.html", context)
 
 

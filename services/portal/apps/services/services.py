@@ -21,6 +21,12 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 logger = logging.getLogger(__name__)
 
 
+def _raise_if_rate_limited(exc: Exception) -> None:
+    """Re-raise rate-limited errors so views can show appropriate feedback."""
+    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
+        raise exc
+
+
 class ServicesAPIClient(PlatformAPIClient):
     """
     Customer hosting services API client for portal service.
@@ -152,6 +158,7 @@ class ServicesAPIClient(PlatformAPIClient):
             logger.error(
                 f"🔥 [Services API] Error retrieving usage for service {service_id} for customer {customer_id}: {e}"
             )
+            _raise_if_rate_limited(e)
             # Return empty usage on error to avoid breaking UI
             return {"bandwidth_used": 0, "bandwidth_limit": 0, "storage_used": 0, "storage_limit": 0, "period": period}
 
@@ -188,8 +195,7 @@ class ServicesAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services summary for customer {customer_id}: {e}")
-            if e.is_rate_limited:
-                raise
+            _raise_if_rate_limited(e)
             # Return empty summary on error
             return {
                 "total_services": 0,

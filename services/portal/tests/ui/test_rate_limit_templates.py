@@ -64,6 +64,12 @@ class RateLimitTemplateTests(SimpleTestCase):
         self.assertIn("Billing data is temporarily rate limited", content)
         self.assertIn("Ticket data is temporarily rate limited", content)
 
+    def test_inline_alert_has_aria_attributes(self) -> None:
+        rendered = self._render_partial("components/rate_limit_inline_alert.html")
+        self.assertIn('role="alert"', rendered)
+        self.assertIn('aria-live="polite"', rendered)
+        self.assertIn('aria-label=', rendered)
+
     def test_base_template_does_not_have_dead_rate_limit_banner_slot(self) -> None:
         """The rate_limit_banner slot was removed as dead code (never populated by context processor)."""
         content = (REPO_ROOT / "services" / "portal" / "templates" / "base.html").read_text(encoding="utf-8")

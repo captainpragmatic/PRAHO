@@ -98,7 +98,7 @@
           </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
-            {% if rate_limited %}
+            {% if "billing" in sections_rate_limited %}
               {% trans 'Billing data is temporarily rate limited. Please try again shortly.' %}
             {% else %}
               {% trans 'No recent documents found' %}
@@ -151,7 +151,7 @@
           </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
-            {% if rate_limited %}
+            {% if "tickets" in sections_rate_limited %}
               {% trans 'Ticket data is temporarily rate limited. Please try again shortly.' %}
             {% else %}
               {% trans 'No recent support tickets' %}

@@ -7,10 +7,13 @@ from __future__ import annotations
 import math
 import time
 from email.utils import parsedate_to_datetime
-from typing import Any
+
+from django.conf import settings
+
+MAX_RETRY_AFTER_SECONDS: int = 300
 
 
-def coerce_retry_after_seconds(value: Any) -> int | None:
+def coerce_retry_after_seconds(value: int | float | str | None) -> int | None:
     """
     Convert Retry-After style values into positive integer seconds.
 
@@ -30,13 +33,14 @@ def coerce_retry_after_seconds(value: Any) -> int | None:
         text = str(value).strip()
         if not text:
             return parsed
-        if text.isdigit():
+        if text.isascii() and text.isdigit():
             parsed = int(text)
         else:
             try:
                 target_dt = parsedate_to_datetime(text)
-            except (TypeError, ValueError, IndexError):
+            except (TypeError, ValueError, IndexError, OverflowError, OSError):
                 return parsed
             parsed = math.ceil(target_dt.timestamp() - time.time())
 
-    return max(1, parsed)
+    cap = int(getattr(settings, "RETRY_AFTER_MAX_SECONDS", MAX_RETRY_AFTER_SECONDS))
+    return min(max(1, parsed), cap)

@@ -10,10 +10,7 @@ from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 
 from apps.common.pagination import PaginatorData, build_pagination_params
-from apps.common.rate_limit_feedback import (
-    build_rate_limited_context,
-    is_rate_limited_error,
-)
+from apps.common.rate_limit_feedback import handle_platform_error
 
 from .services import PlatformAPIError, services_api
 
@@ -118,19 +115,17 @@ def service_list(request: HttpRequest) -> HttpResponse:
         logger.info(f"✅ [Services View] Loaded {len(services)} services for customer {customer_id}")
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Services View] Error loading services for customer {customer_id}: {e}")
-        rate_limited = is_rate_limited_error(e)
-        if not rate_limited:
-            messages.error(request, _("Unable to load hosting services. Please try again later."))
+        error_ctx = handle_platform_error(
+            request, e, logger, fallback_message=_("Unable to load hosting services. Please try again later.")
+        )
         context = {
             "services": [],
             "error": True,
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
             **_services_base_context(status_filter, search_query),
+            **error_ctx,
         }
-        if rate_limited:
-            context.update(build_rate_limited_context(request, e))
 
     return render(request, "services/service_list.html", context)
 
@@ -174,14 +169,13 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
         )
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Services View] Error searching services for customer {customer_id}: {e}")
+        error_ctx = handle_platform_error(request, e, logger)
         context = {
             "services": [],
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
+            **error_ctx,
         }
-        if is_rate_limited_error(e):
-            context.update(build_rate_limited_context(request, e))
         return render(request, "services/partials/services_table.html", context)
 
 

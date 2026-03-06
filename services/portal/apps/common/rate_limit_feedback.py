@@ -4,6 +4,9 @@ Helpers for user-facing rate-limit feedback in Portal views/templates.
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from django.contrib import messages
 from django.http import HttpRequest
 from django.utils.translation import gettext as _
@@ -47,10 +50,31 @@ def record_rate_limit_banner(request: HttpRequest, retry_after: int | None) -> N
 
 def build_rate_limited_context(request: HttpRequest, error: Exception) -> dict[str, str | bool | int | None]:
     retry_after = get_retry_after_from_error(error)
-    record_rate_limit_banner(request, retry_after)
     return {
         "rate_limited": True,
         "rate_limit_retry_after": retry_after,
         "rate_limit_message": get_rate_limit_message(retry_after),
         "rate_limit_retry_url": request.get_full_path(),
     }
+
+
+def handle_platform_error(
+    request: HttpRequest,
+    error: Exception,
+    error_logger: logging.Logger,
+    *,
+    fallback_message: str = "",
+) -> dict[str, Any]:
+    """
+    Centralized error handler for platform API errors in views.
+
+    Returns context dict for rate-limited errors (inline alert),
+    or adds messages.error for other errors and returns empty dict.
+    """
+    if is_rate_limited_error(error):
+        error_logger.warning("⚠️ Rate limited: %s", error)
+        return build_rate_limited_context(request, error)
+    error_logger.error("🔥 %s", error)
+    if fallback_message:
+        messages.error(request, fallback_message)
+    return {}

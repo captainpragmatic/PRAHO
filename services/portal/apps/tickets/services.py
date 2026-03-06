@@ -13,6 +13,12 @@ from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 logger = logging.getLogger(__name__)
 
 
+def _raise_if_rate_limited(exc: Exception) -> None:
+    """Re-raise rate-limited errors so views can show appropriate feedback."""
+    if isinstance(exc, PlatformAPIError) and exc.is_rate_limited:
+        raise exc
+
+
 @dataclass
 class TicketFilters:
     """Filter parameters for ticket listing"""
@@ -273,8 +279,7 @@ class TicketsAPIClient(PlatformAPIClient):
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error retrieving ticket summary for customer {customer_id}: {e}")
-            if e.is_rate_limited:
-                raise
+            _raise_if_rate_limited(e)
             # Return empty summary on error to avoid breaking dashboard
             return {
                 "total_tickets": 0,

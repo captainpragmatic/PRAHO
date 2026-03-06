@@ -1,7 +1,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-<div class="bg-amber-900/30 border border-amber-500/50 rounded-lg p-6">
+<div class="bg-amber-900/30 border border-amber-500/50 rounded-lg p-6" role="alert" aria-live="polite">
   <div class="flex items-start gap-3">
     <div class="mt-0.5">
       {% icon "warning" size="sm" css_class="text-amber-300" %}
@@ -12,6 +12,7 @@
       <a
         href="{{ rate_limit_retry_url|default:request.get_full_path }}"
         class="mt-4 inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-500 transition-colors"
+        aria-label="{% trans 'Try again' %}"
       >
         {% trans "Try again" %}
       </a>

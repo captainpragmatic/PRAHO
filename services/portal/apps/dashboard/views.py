@@ -15,7 +15,8 @@ from apps.api_client.services import PlatformAPIError, api_client
 from apps.billing.services import InvoiceViewService
 from apps.common.api_utils import DictAsObj
 from apps.common.rate_limit_feedback import (
-    build_rate_limited_context,
+    get_rate_limit_message,
+    get_retry_after_from_error,
     is_rate_limited_error,
 )
 from apps.services.services import ServicesAPIClient
@@ -24,26 +25,45 @@ from apps.tickets.services import TicketFilters, TicketsAPIClient
 logger = logging.getLogger(__name__)
 
 
+def _empty_billing_summary() -> dict[str, Any]:
+    """Return empty billing summary matching InvoiceViewService._empty_summary shape."""
+    return {
+        "total_invoices": 0,
+        "draft_invoices": 0,
+        "issued_invoices": 0,
+        "overdue_invoices": 0,
+        "paid_invoices": 0,
+        "total_amount_due": 0,
+        "recent_invoices": [],
+    }
+
+
 def _get_billing_data(
     invoice_service: InvoiceViewService, customer_id: str, user_id: int
 ) -> tuple[list[Any], dict[str, Any]]:
     """Get billing documents and invoice summary"""
-    cid = int(customer_id)
-    invoices = invoice_service.get_customer_invoices(cid, user_id)
-    proformas = invoice_service.get_customer_proformas(cid, user_id)
-    invoice_summary = invoice_service.get_invoice_summary(cid, user_id)
+    try:
+        cid = int(customer_id)
+        invoices = invoice_service.get_customer_invoices(cid, user_id)
+        proformas = invoice_service.get_customer_proformas(cid, user_id)
+        invoice_summary = invoice_service.get_invoice_summary(cid, user_id)
 
-    # Recent documents (invoices and proformas combined): newest first, show 4
-    recent_documents: list[Any] = []
-    for invoice in invoices[:4]:
-        invoice.document_type = "invoice"
-        recent_documents.append(invoice)
-    for proforma in proformas[:4]:
-        proforma.document_type = "proforma"
-        recent_documents.append(proforma)
+        # Recent documents (invoices and proformas combined): newest first, show 4
+        recent_documents: list[Any] = []
+        for invoice in invoices[:4]:
+            invoice.document_type = "invoice"
+            recent_documents.append(invoice)
+        for proforma in proformas[:4]:
+            proforma.document_type = "proforma"
+            recent_documents.append(proforma)
 
-    recent_documents.sort(key=lambda x: x.created_at, reverse=True)
-    return recent_documents[:4], invoice_summary
+        recent_documents.sort(key=lambda x: x.created_at, reverse=True)
+        return recent_documents[:4], invoice_summary
+    except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            raise
+        logger.warning("⚠️ [Dashboard] Failed to load billing data: %s", e)
+        return [], _empty_billing_summary()
 
 
 def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str | None]:
@@ -111,7 +131,7 @@ def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_i
         return 0
 
 
-def dashboard_view(request: HttpRequest) -> HttpResponse:
+def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
     """
     Protected customer dashboard view with data from platform API.
     Uses Django sessions for authentication.
@@ -140,60 +160,105 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         "platform_available": True,
     }
 
-    # Get dashboard data from platform API using helper functions
+    # Per-section rate-limit tracking for partial data preservation
+    sections_rate_limited: set[str] = set()
+    retry_afters: list[int] = []
+
+    invoice_service = InvoiceViewService()
+    tickets_api = TicketsAPIClient()
+    services_api = ServicesAPIClient()
+    user_id = int(request.user.id)  # type: ignore[union-attr, arg-type]  # request.user may be AnonymousUser
+    cid_str = str(customer_id)
+
+    # --- Billing section ---
     try:
-        invoice_service = InvoiceViewService()
-        tickets_api = TicketsAPIClient()
-        services_api = ServicesAPIClient()
-        user_id = int(request.user.id)  # type: ignore[union-attr, arg-type]
-
-        # Get all data using helper functions
-        recent_documents, invoice_summary = _get_billing_data(invoice_service, str(customer_id), user_id)
-        customers, greeting_name = _get_customer_data(str(customer_id), user_id)
-        recent_tickets, open_tickets_count = _get_ticket_data(tickets_api, str(customer_id), user_id)
-        active_services = _get_services_data(services_api, str(customer_id), user_id)
-
-        # Fallback for greeting name if not resolved - use generic greeting instead of email
-        if not greeting_name:
-            greeting_name = None  # Template will handle showing just "Welcome" without name
-
-        dashboard_data = {
-            "customers": customers,
-            "recent_documents": recent_documents,
-            "recent_tickets": recent_tickets,
-            "stats": {
-                "total_customers": len(customers),
-                "active_services": active_services,
-                "open_tickets": open_tickets_count,
-                "total_invoices": invoice_summary.get("total_invoices", 0),
-            },
-        }
-
-        context["greeting_name"] = greeting_name
-        context["dashboard_data"] = dashboard_data
-
-        logger.debug(f"✅ [Dashboard] Loaded data for customer {customer_id}")
-
+        recent_documents, invoice_summary = _get_billing_data(invoice_service, cid_str, user_id)
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
-            logger.warning("⚠️ [Dashboard] Rate limited for customer %s: %s", customer_id, e)
-            context.update(build_rate_limited_context(request, e))
+            sections_rate_limited.add("billing")
+            ra = get_retry_after_from_error(e)
+            if ra:
+                retry_afters.append(ra)
         else:
-            logger.error(f"🔥 [Dashboard] Failed to load data for customer {customer_id}: {e}")
-            context["platform_available"] = False
-            messages.error(
-                request,
-                _(
-                    "Could not load account information. Please try again later or contact support if the problem persists."
-                ),
-            )
-    except Exception as e:
-        logger.error(f"🔥 [Dashboard] Failed to load data for customer {customer_id}: {e}")
-        context["platform_available"] = False
-        messages.error(
-            request,
-            _("Could not load account information. Please try again later or contact support if the problem persists."),
+            logger.error("🔥 [Dashboard] Failed to load billing data for customer %s: %s", customer_id, e)
+        recent_documents, invoice_summary = [], _empty_billing_summary()
+
+    # --- Customer section ---
+    try:
+        customers, greeting_name = _get_customer_data(cid_str, user_id)
+    except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            sections_rate_limited.add("customer")
+            ra = get_retry_after_from_error(e)
+            if ra:
+                retry_afters.append(ra)
+        else:
+            logger.error("🔥 [Dashboard] Failed to load customer data for customer %s: %s", customer_id, e)
+        customers, greeting_name = [], None
+
+    # --- Tickets section ---
+    try:
+        recent_tickets, open_tickets_count = _get_ticket_data(tickets_api, cid_str, user_id)
+    except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            sections_rate_limited.add("tickets")
+            ra = get_retry_after_from_error(e)
+            if ra:
+                retry_afters.append(ra)
+        else:
+            logger.error("🔥 [Dashboard] Failed to load ticket data for customer %s: %s", customer_id, e)
+        recent_tickets, open_tickets_count = [], 0
+
+    # --- Services section ---
+    try:
+        active_services = _get_services_data(services_api, cid_str, user_id)
+    except PlatformAPIError as e:
+        if is_rate_limited_error(e):
+            sections_rate_limited.add("services")
+            ra = get_retry_after_from_error(e)
+            if ra:
+                retry_afters.append(ra)
+        else:
+            logger.error("🔥 [Dashboard] Failed to load services data for customer %s: %s", customer_id, e)
+        active_services = 0
+
+    # Fallback for greeting name if not resolved
+    if not greeting_name:
+        greeting_name = None  # Template will handle showing just "Welcome" without name
+
+    dashboard_data = {
+        "customers": customers,
+        "recent_documents": recent_documents,
+        "recent_tickets": recent_tickets,
+        "stats": {
+            "total_customers": len(customers),
+            "active_services": active_services,
+            "open_tickets": open_tickets_count,
+            "total_invoices": invoice_summary.get("total_invoices", 0),
+        },
+    }
+
+    context["greeting_name"] = greeting_name
+    context["dashboard_data"] = dashboard_data
+
+    # Add per-section rate-limit context if any section was rate-limited
+    if sections_rate_limited:
+        retry_after = max(retry_afters) if retry_afters else None
+        context.update(
+            {
+                "rate_limited": True,
+                "sections_rate_limited": sections_rate_limited,
+                "rate_limit_message": get_rate_limit_message(retry_after),
+                "rate_limit_retry_url": request.get_full_path(),
+            }
         )
+        logger.warning(
+            "⚠️ [Dashboard] Rate limited sections for customer %s: %s",
+            customer_id,
+            sections_rate_limited,
+        )
+
+    logger.debug("✅ [Dashboard] Loaded data for customer %s", customer_id)
 
     return render(request, "dashboard/dashboard.html", context)
 

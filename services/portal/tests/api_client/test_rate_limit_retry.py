@@ -176,3 +176,57 @@ class PlatformAPIClientRateLimitRetryTests(SimpleTestCase):
     def test_idempotent_true_post_is_retryable(self) -> None:
         self.assertTrue(self.client._is_read_retry_candidate("POST", "/tickets/summary/", idempotent=True))
         self.assertTrue(self.client._is_read_retry_candidate("POST", "/orders/calculate/", idempotent=True))
+
+    def test_safe_parse_json_malformed_body(self) -> None:
+        response = _response(429, ValueError("No JSON"))
+        result = self.client._safe_parse_json(response)
+        self.assertEqual(result, {})
+
+    def test_safe_parse_json_list_body(self) -> None:
+        response = _response(429, ["throttled"])
+        result = self.client._safe_parse_json(response)
+        self.assertEqual(result, {"_raw": ["throttled"]})
+
+    def test_safe_parse_json_dict_body(self) -> None:
+        response = _response(429, {"detail": "Too many requests"})
+        result = self.client._safe_parse_json(response)
+        self.assertEqual(result, {"detail": "Too many requests"})
+
+    @patch("apps.api_client.services.portal_request")
+    def test_login_429_malformed_json(self, mock_portal_request: MagicMock) -> None:
+        resp = _response(429, ValueError("No JSON"), headers={"Retry-After": "5", "content-type": "application/json"})
+        mock_portal_request.return_value = resp
+
+        with self.assertRaises(PlatformAPIError) as ctx:
+            self.client._make_request("POST", "/users/login/", data={"email": "a@b.com", "password": "x"})
+
+        self.assertTrue(ctx.exception.is_rate_limited)
+        self.assertEqual(ctx.exception.retry_after, 5)
+
+    @patch("apps.api_client.services.time.sleep")
+    @patch("apps.api_client.services.portal_request")
+    def test_retry_respects_large_retry_after(self, mock_portal_request: MagicMock, _mock_sleep: MagicMock) -> None:
+        """503 with Retry-After: 60 -> no retry, raises with retry_after=60"""
+        mock_portal_request.return_value = _response(503, {"error": "Service unavailable"}, headers={"Retry-After": "60"})
+
+        with self.assertRaises(PlatformAPIError) as ctx:
+            self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2}, idempotent=True)
+
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.retry_after, 60)
+        # Should NOT have retried - only 1 call
+        self.assertEqual(mock_portal_request.call_count, 1)
+
+    @patch("apps.api_client.services.time.sleep")
+    @patch("apps.api_client.services.portal_request")
+    def test_retry_503_small_retry_after(self, mock_portal_request: MagicMock, _mock_sleep: MagicMock) -> None:
+        """503 with Retry-After: 1 -> still retries normally"""
+        mock_portal_request.side_effect = [
+            _response(503, {"error": "Service unavailable"}, headers={"Retry-After": "1"}),
+            _response(200, {"success": True, "data": {"summary": {}}}),
+        ]
+
+        data = self.client._make_request("POST", "/tickets/summary/", data={"customer_id": 1, "user_id": 2}, idempotent=True)
+
+        self.assertTrue(data["success"])
+        self.assertEqual(mock_portal_request.call_count, 2)
