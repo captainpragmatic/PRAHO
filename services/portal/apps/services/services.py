@@ -224,6 +224,8 @@ class ServicesAPIClient(PlatformAPIClient):
             return cast(list[dict[str, Any]], response.get("domains", []))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             # Domains API endpoint not yet implemented on platform (returns 404).
             # Gracefully degrade — log as warning, not error.
             http_not_found = 404
@@ -293,6 +295,8 @@ class ServicesAPIClient(PlatformAPIClient):
             return cast(list[dict[str, Any]], response.get("plans", []))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.error(f"🔥 [Services API] Error retrieving plans for customer {customer_id}: {e}")
             return []
 

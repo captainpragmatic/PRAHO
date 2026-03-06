@@ -274,6 +274,8 @@ class PortalAuthenticationMiddleware:
                 return False
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.error(f"🔥 [Auth] Platform API error during validation for {customer_id}: {e}")
 
             # Fail-open strategy: Allow access during API outages but don't update metadata

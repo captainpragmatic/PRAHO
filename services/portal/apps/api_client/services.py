@@ -693,6 +693,8 @@ class PlatformAPIClient:
             return None
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to get customer profile: {e}")
             return None
 
@@ -712,6 +714,8 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
 
@@ -731,6 +735,8 @@ class PlatformAPIClient:
             return bool(data.get("success", False))
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to update customer password: {e}")
             return False
 
@@ -744,6 +750,8 @@ class PlatformAPIClient:
             data = self._make_request("GET", "/users/mfa/status/", data={"customer_id": customer_id})
             return data if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to get MFA status: {e}")
             return None
 
@@ -760,6 +768,8 @@ class PlatformAPIClient:
                 }
             return None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
 
@@ -771,6 +781,8 @@ class PlatformAPIClient:
             )
             return bool(data.get("success", False))
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
             return False
 
@@ -780,6 +792,8 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/setup/webauthn/", data={"customer_id": customer_id})
             return data if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None
 
@@ -789,6 +803,8 @@ class PlatformAPIClient:
             data = self._make_request("GET", "/users/mfa/backup-codes/", data={"customer_id": customer_id})
             return data.get("backup_codes") if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to get backup codes: {e}")
             return None
 
@@ -798,6 +814,8 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/regenerate-backup-codes/", data={"customer_id": customer_id})
             return data.get("backup_codes") if data.get("success") else None
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to regenerate backup codes: {e}")
             return None
 
@@ -811,6 +829,8 @@ class PlatformAPIClient:
             data = self._make_request("POST", "/users/mfa/disable/", data=request_data)
             return bool(data.get("success", False))
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.warning(f"⚠️ [API Client] Failed to disable MFA: {e}")
             return False
 

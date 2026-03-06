@@ -390,6 +390,8 @@ class CustomerRegistrationForm(forms.Form):
             return response
 
         except PlatformAPIError as e:
+            if e.is_rate_limited:
+                raise
             logger.error(f"🔥 [Portal Registration] Platform API error: {e}")
             return None
         except Exception as e:

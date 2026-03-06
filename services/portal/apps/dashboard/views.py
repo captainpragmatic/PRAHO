@@ -6,7 +6,6 @@ Customer-facing dashboard with API integration - STATELESS ARCHITECTURE.
 import logging
 from typing import Any
 
-from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
@@ -17,6 +16,7 @@ from apps.common.api_utils import DictAsObj
 from apps.common.rate_limit_feedback import (
     get_rate_limit_message,
     get_retry_after_from_error,
+    handle_platform_error,
     is_rate_limited_error,
 )
 from apps.services.services import ServicesAPIClient
@@ -291,8 +291,10 @@ def account_overview_view(request: HttpRequest) -> HttpResponse:
         logger.debug(f"✅ [Account] Loaded details for customer {customer_id}")
 
     except PlatformAPIError as e:
-        logger.error(f"🔥 [Account] Failed to load details for customer {customer_id}: {e}")
+        error_ctx = handle_platform_error(
+            request, e, logger, fallback_message=_("Could not load account information. Please try again later.")
+        )
         context["platform_available"] = False
-        messages.error(request, _("Could not load account information. Please try again later."))
+        context.update(error_ctx)
 
     return render(request, "dashboard/account_overview.html", context)
