@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - fix(security): wire account lockout into `portal_login_api` (#53) — closes the same brute-force gap found in `obtain_token`; checks `is_account_locked()`, increments `failed_login_attempts` on failure, resets on success, uses PII-safe structured logging
-  - 4 regression tests added in `PortalLoginAPILockoutTests`
-  - `AUTHENTICATION.md` updated to document lockout enforcement across all credential endpoints
+  - 7 regression tests added in `PortalLoginAPILockoutTests` (including inactive account and byte-identical response verification across all 4 failure modes)
+  - `AUTHENTICATION.md` and `SECURITY_COMPLIANCE_ASSESSMENT.md` updated to document lockout enforcement across all 3 credential endpoints
+- fix(security): atomic lockout counter — `increment_failed_login_attempts()` now uses `F()` expression to prevent lost increments under concurrent requests
+- docs(security): timing side-channel and HMAC rate limiting documented as accepted risks with rationale in `portal_login_api` and `obtain_token`
 - fix(security): harden 9 real vulnerabilities from security audit (confirmed by dual Claude+Codex adversarial review; 33 regression tests + 8 new security linter patterns)
   - **Critical** — token revocation self-revocation pattern: `DELETE /api/users/token/revoke/` now uses `TokenAuthentication` + `request.auth`; no ownership check needed (#60)
   - **Critical** — payment success webhook: HMAC-SHA256 + timestamp + 5-minute replay window using dedicated `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` (#49)
