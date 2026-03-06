@@ -179,8 +179,11 @@ These are the `[REQUIRED]` variables in the `.env.example.*` files — PRAHO won
 | `SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal-to-Platform auth secret | `openssl rand -base64 32` |
+| `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC secret | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 
 `HMAC_SECRET` is **critical** — Portal authenticates every API request to Platform using HMAC-SHA256 signatures. Without it, Portal cannot communicate with Platform.
+
+`PLATFORM_TO_PORTAL_WEBHOOK_SECRET` is required for Platform→Portal payment webhooks. Both services validate this secret at startup in production — missing it causes a startup error.
 
 The `.env.example.*` files also list `[RECOMMENDED]` variables (email, Stripe, e-Factura) and `[OPTIONAL]` variables with sensible defaults. See the file comments for details.
 
@@ -189,7 +192,7 @@ The `.env.example.*` files also list `[RECOMMENDED]` variables (email, Stripe, e
 Before deploying, the playbook checks:
 1. `praho_env` is defined and one of `dev`, `staging`, `prod`
 2. Ubuntu >= 24.04
-3. The `.env.{praho_env}` file exists and contains all required variables (`SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`)
+3. The `.env.{praho_env}` file exists and contains all required variables (`SECRET_KEY`, `DB_PASSWORD`, `HMAC_SECRET`, `PLATFORM_TO_PORTAL_WEBHOOK_SECRET`, `PORTAL_DOMAIN`, `PLATFORM_DOMAIN`)
 4. Both FQDNs resolve to the server IP (DNS pre-flight)
 
 #### Post-Deploy
@@ -612,6 +615,7 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 | `SECRET_KEY` | Django secret key | `openssl rand -base64 50` |
 | `DB_PASSWORD` | PostgreSQL password | `openssl rand -base64 32` |
 | `HMAC_SECRET` | Portal ↔ Platform HMAC auth | `openssl rand -base64 32` |
+| `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | Platform→Portal webhook HMAC | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ACME_EMAIL` | Let's Encrypt email | `admin@pragmatichost.com` |
 
 ### Docker Deployment
@@ -630,6 +634,7 @@ All variables live in your `.env.{env}` file. See `.env.example.prod` for the fu
 |----------|-------------|---------|
 | `platform_allowed_ips` | IP whitelist for Platform access (Ansible extra-var) | `[]` (unrestricted) |
 | `HMAC_SECRET` | HMAC shared secret for Portal ↔ Platform auth | (required in `.env`) |
+| `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` | HMAC secret for Platform→Portal webhooks | (required in `.env`) |
 
 ### Portal-Specific Variables
 
@@ -716,11 +721,12 @@ sudo ufw status
 
 **3. Portal can't connect to Platform**
 
-This usually means `HMAC_SECRET` is missing or mismatched between services.
+This usually means `HMAC_SECRET` or `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` is missing or mismatched between services.
 
 ```bash
-# Check HMAC secret is set in the .env
+# Check HMAC secrets are set in the .env
 grep HMAC_SECRET /opt/praho/.env
+grep PLATFORM_TO_PORTAL_WEBHOOK_SECRET /opt/praho/.env
 
 # Verify Platform is responding
 curl http://localhost:8700/api/users/health/

@@ -25,6 +25,7 @@ _PROD_ENV = {
     "PORTAL_DOMAIN": "portal.test.local",
     "PLATFORM_DOMAIN": "platform.test.local",
     "PLATFORM_API_SECRET": "dGVzdC1vbmx5LXNlY3JldC1rZXktZm9yLWxvZ2dpbmctdGVzdHM=",
+    "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "test-only-webhook-secret-for-logging-tests",
     "SENTRY_DSN": "",  # Disable Sentry during test imports (placeholder in .env triggers BadDsn)
 }
 

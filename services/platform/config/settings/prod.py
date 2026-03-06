@@ -44,6 +44,15 @@ if not _hmac_secret:
         'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
 
+_webhook_secret = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+if not _webhook_secret:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "PLATFORM_TO_PORTAL_WEBHOOK_SECRET must be set in production for platform→portal webhooks. "
+        'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
 # ===============================================================================
 # PRODUCTION FLAGS
 # ===============================================================================

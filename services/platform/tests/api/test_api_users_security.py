@@ -310,3 +310,89 @@ class HMACExemptPathsExactMatchTests(TestCase):
         """Non-API paths should not appear in the HMAC exempt set (unrelated paths)."""
         self.assertNotIn("/users/register/", AUTH_EXEMPT_EXACT_PATHS)
         self.assertNotIn("/register/", AUTH_EXEMPT_EXACT_PATHS)
+
+
+# ===============================================================================
+# PORTAL LOGIN API LOCKOUT TESTS (related to #53)
+# ===============================================================================
+
+
+class PortalLoginAPILockoutTests(TestCase):
+    """portal_login_api must integrate with account lockout model methods.
+
+    Mirrors AccountLockoutTokenTests but targets /api/users/login/ — the
+    Portal-to-Platform credential validation endpoint.  Without lockout
+    integration an attacker who compromises the HMAC secret (or exploits a
+    Portal bug) gets unlimited brute-force against every account.
+    """
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(
+            email="portal-lockout@example.com",
+            password=self.password,
+            first_name="Portal",
+            last_name="Lockout",
+        )
+        self.url = "/api/users/login/"
+
+    def test_portal_login_increments_failed_attempts_on_wrong_password(self) -> None:
+        """Failed portal login with wrong password must increment failed_login_attempts."""
+        response = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "WRONG_PASSWORD"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.user.refresh_from_db()
+        self.assertGreater(self.user.failed_login_attempts, 0)
+
+    def test_portal_login_locked_account_returns_401(self) -> None:
+        """Locked account must return the same 401 as wrong credentials.
+
+        Attacker must not be able to distinguish locked from wrong password.
+        """
+        self.user.account_locked_until = timezone.now() + timedelta(minutes=30)
+        self.user.failed_login_attempts = 1
+        self.user.save()
+
+        response = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        data = response.json()
+        self.assertEqual(data.get("error"), "Invalid email or password")
+
+    def test_portal_login_resets_counter_on_success(self) -> None:
+        """Successful authentication must reset failed_login_attempts to 0."""
+        self.user.failed_login_attempts = 2
+        self.user.account_locked_until = timezone.now() - timedelta(minutes=10)
+        self.user.save()
+
+        response = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.failed_login_attempts, 0)
+        self.assertIsNone(self.user.account_locked_until)
+
+    def test_portal_login_nonexistent_email_returns_401(self) -> None:
+        """Non-existent email must return 401 without raising an exception."""
+        response = self.client.post(
+            self.url,
+            {"email": "nonexistent@example.com", "password": "anything"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        data = response.json()
+        self.assertEqual(data.get("error"), "Invalid email or password")

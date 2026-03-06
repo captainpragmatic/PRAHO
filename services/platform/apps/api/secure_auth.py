@@ -85,8 +85,8 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> tuple[dict[str,
             return None, _uniform_error_response("Invalid request format", 400)
 
         # Timestamp freshness check (within 5 minutes)
-        current_time = datetime.now(UTC).timestamp()
-        if abs(current_time - request_timestamp) > HMAC_TIMESTAMP_WINDOW_SECONDS:
+        current_time = int(datetime.now(UTC).timestamp())
+        if not (0 <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
             logger.warning(f"🚨 [API Security] Portal {portal_id} stale timestamp in HMAC context")
             return None, _uniform_error_response("Invalid request format", 400)
 
@@ -323,8 +323,8 @@ def validate_portal_service_request(request: HttpRequest) -> tuple[dict[str, Any
             logger.warning(f"🚨 [API Security] Portal {portal_id} missing timestamp in service request")
             return None, _uniform_error_response("Invalid request format", 400)
 
-        current_time = datetime.now(UTC).timestamp()
-        if abs(current_time - request_timestamp) > HMAC_TIMESTAMP_WINDOW_SECONDS:
+        current_time = int(datetime.now(UTC).timestamp())
+        if not (0 <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
             logger.warning(f"🚨 [API Security] Portal {portal_id} stale timestamp in service request")
             return None, _uniform_error_response("Invalid request format", 400)
 

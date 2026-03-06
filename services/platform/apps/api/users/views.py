@@ -87,29 +87,44 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
         if not email or not password:
             return JsonResponse({"success": False, "error": "Email and password are required"}, status=400)
 
+        client_ip = request.META.get("REMOTE_ADDR", "unknown")
+
         # Authenticate user
         user = authenticate(request, username=email, password=password)
 
-        if user and user.is_active:
-            # Successful authentication
-            logger.info(f"✅ [Portal API Auth] User {email} authenticated successfully")
-
-            # Return user data for portal service
-            user_data = {
-                "id": user.id,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "is_staff": user.is_staff,
-                "is_active": user.is_active,
-                "customer_id": user.primary_customer.id if user.primary_customer else None,
-            }
-
-            return JsonResponse({"success": True, "user": user_data, "message": "Authentication successful"})
-        else:
-            # Failed authentication
-            logger.warning(f"🔥 [Portal API Auth] Authentication failed for {email}")
+        if user is None:
+            # Increment counter silently (no-op if email doesn't exist)
+            with contextlib.suppress(User.DoesNotExist):
+                failed_user = User.objects.get(email=email)
+                failed_user.increment_failed_login_attempts()
+            logger.warning("[Portal API Auth] Failed login — ip=%s", client_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
+
+        # Same generic error for locked/inactive — attacker cannot distinguish
+        if user.is_account_locked() or not user.is_active:
+            reason = "locked" if user.is_account_locked() else "inactive"
+            logger.warning("[Portal API Auth] Login rejected (%s) — ip=%s", reason, client_ip)
+            return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
+
+        # Success: reset lockout counter
+        user.failed_login_attempts = 0
+        user.account_locked_until = None
+        user.save(update_fields=["failed_login_attempts", "account_locked_until"])
+
+        logger.info("[Portal API Auth] User authenticated successfully — ip=%s", client_ip)
+
+        # Return user data for portal service
+        user_data = {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_staff": user.is_staff,
+            "is_active": user.is_active,
+            "customer_id": user.primary_customer.id if user.primary_customer else None,
+        }
+
+        return JsonResponse({"success": True, "user": user_data, "message": "Authentication successful"})
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON in request body"}, status=400)
@@ -416,8 +431,8 @@ def validate_session_secure(request: HttpRequest) -> Response:
                 return _uniform_session_error(security_headers)
 
             # Basic timestamp freshness check (within 5 minutes)
-            current_time = datetime.now(UTC).timestamp()
-            if abs(current_time - request_timestamp) > HMAC_TIMESTAMP_WINDOW_SECONDS:
+            current_time = int(datetime.now(UTC).timestamp())
+            if not (0 <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
                 logger.warning(f"🚨 [Security] Portal {portal_id} stale timestamp in context")
                 return _uniform_session_error(security_headers)
 

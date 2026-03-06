@@ -125,10 +125,10 @@ class PortalHMACTests(TestCase):
         raw_path = '/api/test/'
         portal_id = 'portal-rl'
         nonce_base = 'nonce-rl-'
-        ts = str(time.time())
+        ts = str(int(time.time()))
 
         def make_req(i: int):
-            body = json.dumps({'user_id': 1, 'customer_id': 2, 'timestamp': float(ts)}).encode()
+            body = json.dumps({'user_id': 1, 'customer_id': 2, 'timestamp': int(ts)}).encode()
             signature = self._sign(method, raw_path, body, portal_id, f'{nonce_base}{i}', ts)
             req = self.factory.post(raw_path, data=body, content_type='application/json')
             req.META['HTTP_X_PORTAL_ID'] = portal_id
@@ -153,8 +153,8 @@ class PortalHMACTests(TestCase):
         raw_path = '/api/test/'
         portal_id = 'portal-replay'
         nonce = 'replay-n'
-        ts = str(time.time())
-        body = json.dumps({'user_id': 1, 'customer_id': 2, 'timestamp': float(ts)}).encode()
+        ts = str(int(time.time()))
+        body = json.dumps({'user_id': 1, 'customer_id': 2, 'timestamp': int(ts)}).encode()
         signature = self._sign(method, raw_path, body, portal_id, nonce, ts)
 
         request1 = self.factory.post(raw_path, data=body, content_type='application/json')

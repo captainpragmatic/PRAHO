@@ -310,7 +310,9 @@ make fixtures         # Load sample data via platform
 
 ### Service Communication
 - **Internal APIs**: <10ms latency between services in Docker network
-- **Authentication**: HMAC-signed headers (SHA-256) for service-to-service
+- **Authentication**: Two independent HMAC-SHA256 systems:
+  - **System 1** (Portal→Platform): Canonical string signing with nonce dedup (`HMAC_SECRET`)
+  - **System 2** (Platform→Portal webhooks): `ts.body` signing with replay dedup (`PLATFORM_TO_PORTAL_WEBHOOK_SECRET`)
 - **Rate Limiting**: Per-service and per-customer limits
 
 ### Health Monitoring

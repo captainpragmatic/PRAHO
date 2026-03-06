@@ -1130,6 +1130,7 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
 from django.views.decorators.csrf import csrf_exempt  # noqa: E402
 
 _WEBHOOK_REPLAY_WINDOW_SECONDS: int = 300  # 5 minutes
+_HMAC_SHA256_HEX_LENGTH: int = 64  # HMAC-SHA256 produces 64 lowercase hex chars
 
 
 def _verify_platform_webhook(request: HttpRequest) -> bool:
@@ -1139,17 +1140,28 @@ def _verify_platform_webhook(request: HttpRequest) -> bool:
         logger.error("[Webhook] PLATFORM_TO_PORTAL_WEBHOOK_SECRET not configured — rejecting all webhooks")
         return False
     sig: str = request.headers.get("X-Platform-Signature", "")
+    if len(sig) != _HMAC_SHA256_HEX_LENGTH or not all(c in "0123456789abcdef" for c in sig):
+        logger.warning("[Webhook] Invalid signature format")
+        return False
     ts: str = request.headers.get("X-Platform-Timestamp", "")
     try:
-        if abs(_time_module.time() - float(ts)) > _WEBHOOK_REPLAY_WINDOW_SECONDS:
-            logger.warning("[Webhook] Replay attack detected — timestamp too old")
-            return False
+        request_time = int(ts)
+        current_time = int(_time_module.time())
+        timestamp_valid = 0 <= (current_time - request_time) <= _WEBHOOK_REPLAY_WINDOW_SECONDS
     except (ValueError, TypeError):
-        logger.warning("[Webhook] Invalid or missing X-Platform-Timestamp")
+        timestamp_valid = False
+    if not timestamp_valid:
+        logger.warning("[Webhook] Invalid or stale X-Platform-Timestamp")
         return False
     payload: bytes = ts.encode() + b"." + request.body
     expected: str = _hmac_module.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return _hmac_module.compare_digest(sig, expected)
+    if not _hmac_module.compare_digest(sig, expected):
+        return False
+    cache_key = f"webhook:sig:{sig[:32]}"
+    if not cache.add(cache_key, 1, timeout=_WEBHOOK_REPLAY_WINDOW_SECONDS):
+        logger.warning("[Webhook] Replay detected — signature already seen")
+        return False
+    return True
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -1185,8 +1197,8 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
         return JsonResponse({"success": True})
 
-    except Exception as e:
-        logger.error(f"🔥 Error processing payment webhook: {e}")
+    except Exception:
+        logger.exception("🔥 [Webhook] Error processing payment webhook")
         return JsonResponse({"error": "Webhook processing failed"}, status=500)
 
 

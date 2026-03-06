@@ -4,6 +4,7 @@
 **Date:** 2026-03-06
 **Authors:** Development Team
 **Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0024 (User Role Clarification)
+**Gap tracking:** [Issue #77 — close ADR-0030 token authentication gaps](https://github.com/captainpragmatic/PRAHO/issues/77)
 
 ---
 

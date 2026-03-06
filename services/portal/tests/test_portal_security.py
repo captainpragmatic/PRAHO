@@ -61,7 +61,7 @@ class WebhookAuthenticationTests(SimpleTestCase):
     @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
     def test_webhook_rejected_with_invalid_signature(self) -> None:
         """POST with a wrong signature must return 401."""
-        ts = str(time.time())
+        ts = str(int(time.time()))
         request = self.factory.post(
             self.url,
             data=self.body,
@@ -78,7 +78,7 @@ class WebhookAuthenticationTests(SimpleTestCase):
     @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
     def test_webhook_rejected_with_old_timestamp(self) -> None:
         """Valid signature but timestamp older than 300 s must return 401 (replay protection)."""
-        stale_ts = str(time.time() - 400)  # 400 seconds old — outside the 300 s window
+        stale_ts = str(int(time.time()) - 400)  # 400 seconds old — outside the 300 s window
         sig = _build_valid_sig(self.body, stale_ts)
 
         request = self.factory.post(
@@ -97,7 +97,7 @@ class WebhookAuthenticationTests(SimpleTestCase):
     @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
     def test_webhook_accepted_with_valid_signature(self) -> None:
         """Correct HMAC with a fresh timestamp must NOT return 401."""
-        ts = str(time.time())
+        ts = str(int(time.time()))
         sig = _build_valid_sig(self.body, ts)
 
         request = self.factory.post(
@@ -116,6 +116,157 @@ class WebhookAuthenticationTests(SimpleTestCase):
             401,
             msg=f"Webhook with valid signature returned {response.status_code}; expected non-401",
         )
+
+
+# ===============================================================================
+# WEBHOOK HARDENING TESTS (PR #76 follow-up)
+# ===============================================================================
+
+
+class WebhookHardeningTests(SimpleTestCase):
+    """Extended webhook security tests: format validation, replay dedup, future timestamps."""
+
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+        self.body = json.dumps({"order_id": "1", "status": "paid"}).encode()
+        self.url = _WEBHOOK_URL
+
+    def _make_webhook_request(
+        self, body: bytes, ts: str, sig: str,
+    ) -> HttpRequest:
+        return self.factory.post(
+            self.url,
+            data=body,
+            content_type="application/json",
+            HTTP_X_PLATFORM_SIGNATURE=sig,
+            HTTP_X_PLATFORM_TIMESTAMP=ts,
+        )
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_rejected_body_tampering(self) -> None:
+        """Valid sig over original body + tampered body = 401."""
+        ts = str(int(time.time()))
+        sig = _build_valid_sig(self.body, ts)
+        tampered_body = json.dumps({"order_id": "999", "status": "paid"}).encode()
+
+        request = self._make_webhook_request(tampered_body, ts, sig)
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        response = payment_success_webhook(request)
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_rejected_future_timestamp(self) -> None:
+        """Timestamp 400s in the future must return 401 (preplay prevention)."""
+        future_ts = str(int(time.time()) + 400)
+        sig = _build_valid_sig(self.body, future_ts)
+
+        request = self._make_webhook_request(self.body, future_ts, sig)
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        response = payment_success_webhook(request)
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET="")
+    def test_webhook_rejected_empty_secret(self) -> None:
+        """Empty secret must return 401 (fail-secure)."""
+        ts = str(int(time.time()))
+        sig = _build_valid_sig(self.body, ts, secret="")
+
+        request = self._make_webhook_request(self.body, ts, sig)
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        response = payment_success_webhook(request)
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_rejected_missing_timestamp(self) -> None:
+        """No X-Platform-Timestamp header must return 401."""
+        request = self.factory.post(
+            self.url,
+            data=self.body,
+            content_type="application/json",
+            HTTP_X_PLATFORM_SIGNATURE="a" * 64,
+        )
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        response = payment_success_webhook(request)
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_replay_rejected(self) -> None:
+        """Same valid request twice = second gets 401 (per-process dedup)."""
+        from django.core.cache import cache as _cache  # noqa: PLC0415
+
+        _cache.clear()
+
+        ts = str(int(time.time()))
+        sig = _build_valid_sig(self.body, ts)
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        req1 = self._make_webhook_request(self.body, ts, sig)
+        resp1 = payment_success_webhook(req1)
+        self.assertNotEqual(resp1.status_code, 401, "First request should pass HMAC verification")
+
+        req2 = self._make_webhook_request(self.body, ts, sig)
+        resp2 = payment_success_webhook(req2)
+        self.assertEqual(resp2.status_code, 401, "Replayed request should be rejected")
+
+        _cache.clear()
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_accepts_unicode_body(self) -> None:
+        """Romanian chars in body with valid sig should not cause 401."""
+        unicode_body = json.dumps({"order_id": "1", "status": "plătit"}).encode()
+        ts = str(int(time.time()))
+        sig = _build_valid_sig(unicode_body, ts)
+
+        request = self._make_webhook_request(unicode_body, ts, sig)
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        response = payment_success_webhook(request)
+        self.assertNotEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_rejected_empty_body(self) -> None:
+        """Empty body with valid sig returns 400 (no order_id)."""
+        empty_body = b""
+        ts = str(int(time.time()))
+        sig = _build_valid_sig(empty_body, ts)
+
+        request = self._make_webhook_request(empty_body, ts, sig)
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        response = payment_success_webhook(request)
+        # Empty body can't be parsed as JSON or has no order_id — expect 400 or 500
+        self.assertIn(response.status_code, (400, 500))
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
+    def test_webhook_rejected_invalid_sig_format(self) -> None:
+        """Non-hex or wrong-length sig must return 401 (format validation)."""
+        ts = str(int(time.time()))
+        invalid_sigs = [
+            "too-short",
+            "g" * 64,  # non-hex character
+            "a" * 63,  # one char too short
+            "a" * 65,  # one char too long
+            "",
+        ]
+
+        from apps.orders.views import payment_success_webhook  # noqa: PLC0415
+
+        for bad_sig in invalid_sigs:
+            with self.subTest(sig=bad_sig[:20]):
+                request = self._make_webhook_request(self.body, ts, bad_sig)
+                response = payment_success_webhook(request)
+                self.assertEqual(response.status_code, 401, f"Bad sig {bad_sig[:20]!r} should be rejected")
 
 
 # ===============================================================================

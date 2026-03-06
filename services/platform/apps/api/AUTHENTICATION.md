@@ -116,6 +116,7 @@ Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
 | **Authenticated** | 1000/hour | General API usage |
 | **Burst** | 60/min | Search/autocomplete |
 | **Auth endpoints** | 5/min | Login/token requests |
+| **All credential endpoints** | Account lockout | `/users/login/`, `/api/users/token/`, `/api/users/login/` |
 
 ### **Rate Limit Headers**
 API responses include rate limit information:
@@ -216,3 +217,48 @@ Token.objects.filter(user=user).delete()
 | Platform web UI (staff) | Django session cookies | Automatic for logged-in staff |
 | CLI tools / external API clients | DRF token (`Authorization: Token ...`) | `POST /api/users/token/` to obtain |
 | Platform→Portal webhooks | Dedicated HMAC (`PLATFORM_TO_PORTAL_WEBHOOK_SECRET`) | `X-Platform-Signature` + `X-Platform-Timestamp` headers |
+
+## Platform→Portal Webhook Authentication (System 2)
+
+PRAHO uses **two independent HMAC systems** with separate secrets for different trust boundaries:
+
+| | System 1: Portal → Platform | System 2: Platform → Portal Webhook |
+|---|---|---|
+| **Secret** | `PLATFORM_API_SECRET` / `HMAC_SECRET` | `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` |
+| **Direction** | Portal calls Platform API | Platform pushes payment notifications |
+| **Maturity** | Battle-tested (nonce dedup, canonical signing, rate limiting) | Signature-based dedup, format validation |
+| **Why separate** | Multi-endpoint API, untrusted client | Single endpoint, trusted internal service |
+
+**Why not unify:** Portal is stateless (LocMemCache per-process, no DB). Can't do reliable cross-worker nonce dedup. Different threat models. Different trust boundaries. Secret isolation is a feature.
+
+### Signature Scheme
+
+```
+signature = HMAC-SHA256(secret, str(int(ts)) + "." + body)
+```
+
+- **Payload**: integer Unix timestamp concatenated with `"."` and the raw JSON body bytes
+- **Algorithm**: HMAC-SHA256 (timing-safe comparison via `hmac.compare_digest`)
+- **Headers**: `X-Platform-Signature` (64-char lowercase hex), `X-Platform-Timestamp` (integer Unix)
+
+### Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| **Replay window** | 5 minutes (`_WEBHOOK_REPLAY_WINDOW_SECONDS = 300`) |
+| **Future timestamps** | Rejected — only `0 <= (now - ts) <= window` accepted |
+| **Signature format** | Pre-validated: exactly 64 lowercase hex characters |
+| **Per-process replay dedup** | `cache.add()` with signature prefix as key (LocMemCache) |
+| **Fail-secure** | Empty/missing secret → all webhooks rejected |
+| **Startup validation** | Both `prod.py` settings raise on missing secret |
+
+### Endpoint
+
+```
+POST /orders/payment/webhook/
+```
+
+- CSRF-exempt (HMAC-authenticated inter-service endpoint)
+- Idempotent handler (logs + session hint — safe for per-process dedup)
+- Sender: `apps.integrations.webhooks.stripe._notify_portal_payment_success()`
+- Receiver: `apps.orders.views.payment_success_webhook()`

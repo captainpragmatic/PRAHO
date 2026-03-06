@@ -431,9 +431,9 @@ class PortalServiceHMACMiddleware:
             request_body = b""
             if not error_msg:
                 try:
-                    request_time = float(timestamp)
-                    current_time = time.time()
-                    if abs(current_time - request_time) > HMAC_TIMESTAMP_WINDOW_SECONDS:
+                    request_time = int(timestamp)
+                    current_time = int(time.time())
+                    if not (0 <= (current_time - request_time) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
                         error_msg = "Request timestamp outside allowed window"
                 except ValueError:
                     error_msg = "Invalid timestamp format"

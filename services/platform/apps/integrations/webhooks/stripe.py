@@ -404,7 +404,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             # Compute HMAC-SHA256 signature: ts + "." + body (matches portal _verify_platform_webhook)
             body = json.dumps(data, separators=(",", ":")).encode()
-            ts = str(time.time())
+            ts = str(int(time.time()))
             payload = ts.encode() + b"." + body
             signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
 

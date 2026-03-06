@@ -225,7 +225,7 @@ class TestWebhookHMACValidation:
         # This tests the signature algorithm matches the documented spec (ts + "." + body, SHA-256).
         secret = "integration-test-secret"
         body = b'{"order_id": "test-123", "status": "paid"}'
-        ts = str(time.time())
+        ts = str(int(time.time()))
         payload = ts.encode() + b"." + body
         expected_sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
@@ -261,6 +261,176 @@ class TestWebhookHMACValidation:
         assert match is not None, (
             "payment_success_webhook must be decorated with @csrf_exempt "
             "(HMAC-signed inter-service endpoint does not use CSRF tokens)"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_webhook_uses_integer_timestamps(self):
+        """Webhook verification must use int() timestamps, not float()."""
+        views_path = PORTAL_DIR / "apps" / "orders" / "views.py"
+        source = views_path.read_text()
+
+        # Find the _verify_platform_webhook function body
+        match = re.search(
+            r'def _verify_platform_webhook\(.*?\n((?:    [^\n]*\n|\n)*)',
+            source,
+        )
+        assert match is not None, "Could not locate _verify_platform_webhook body"
+        body = match.group(1)
+
+        assert "int(ts)" in body or "int(" in body, (
+            "_verify_platform_webhook must use int() timestamps (not float)"
+        )
+        assert "float(ts)" not in body, (
+            "_verify_platform_webhook must NOT use float(ts) — use int(ts) instead"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_webhook_rejects_future_timestamps(self):
+        """Webhook must reject future timestamps (no abs() pattern)."""
+        views_path = PORTAL_DIR / "apps" / "orders" / "views.py"
+        source = views_path.read_text()
+
+        match = re.search(
+            r'def _verify_platform_webhook\(.*?\n((?:    [^\n]*\n|\n)*)',
+            source,
+        )
+        assert match is not None
+        body = match.group(1)
+
+        assert "abs(" not in body, (
+            "_verify_platform_webhook must NOT use abs() — "
+            "must reject future timestamps with 0 <= (now - ts) <= window"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_webhook_validates_signature_format(self):
+        """Webhook must validate signature is 64-char lowercase hex before HMAC check."""
+        views_path = PORTAL_DIR / "apps" / "orders" / "views.py"
+        source = views_path.read_text()
+
+        match = re.search(
+            r'def _verify_platform_webhook\(.*?\n((?:    [^\n]*\n|\n)*)',
+            source,
+        )
+        assert match is not None
+        body = match.group(1)
+
+        assert '_HMAC_SHA256_HEX_LENGTH' in body or 'len(sig)' in body, (
+            "_verify_platform_webhook must validate signature length (64 hex chars)"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_webhook_has_replay_dedup(self):
+        """Webhook must cache seen signatures for per-process replay dedup."""
+        views_path = PORTAL_DIR / "apps" / "orders" / "views.py"
+        source = views_path.read_text()
+
+        match = re.search(
+            r'def _verify_platform_webhook\(.*?\n((?:    [^\n]*\n|\n)*)',
+            source,
+        )
+        assert match is not None
+        body = match.group(1)
+
+        assert "cache.add(" in body or "cache_key" in body, (
+            "_verify_platform_webhook must use cache.add() for per-process replay dedup"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_webhook_sender_uses_integer_timestamps(self):
+        """Platform webhook sender must use int() timestamps."""
+        stripe_path = PLATFORM_DIR / "apps" / "integrations" / "webhooks" / "stripe.py"
+        source = stripe_path.read_text()
+
+        # Find the section that sends the portal webhook
+        assert "str(int(time.time()))" in source, (
+            "Platform webhook sender must use str(int(time.time())) — not float timestamps"
+        )
+        # Ensure no bare str(time.time()) remains
+        assert "str(time.time())" not in source.replace("str(int(time.time()))", ""), (
+            "Platform webhook sender must not have any bare str(time.time()) calls"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_portal_api_client_uses_integer_timestamps(self):
+        """Portal API client must use int() timestamps for System 1 HMAC."""
+        client_path = PORTAL_DIR / "apps" / "api_client" / "services.py"
+        source = client_path.read_text()
+
+        assert "str(int(time.time()))" in source, (
+            "Portal API client must use str(int(time.time())) for HMAC timestamps"
+        )
+        assert "str(time.time())" not in source.replace("str(int(time.time()))", ""), (
+            "Portal API client must not have any bare str(time.time()) calls"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_platform_hmac_middleware_uses_integer_timestamps(self):
+        """Platform HMAC middleware must use int() timestamps and reject future."""
+        middleware_path = PLATFORM_DIR / "apps" / "common" / "middleware.py"
+        source = middleware_path.read_text()
+
+        assert "int(timestamp)" in source, (
+            "Platform HMAC middleware must parse timestamps with int() — not float()"
+        )
+        assert "float(timestamp)" not in source, (
+            "Platform HMAC middleware must NOT use float(timestamp)"
+        )
+        assert "abs(current_time" not in source, (
+            "Platform HMAC middleware must NOT use abs() — must reject future timestamps"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_webhook_hmac_signature_logic_with_integer_timestamp(self):
+        """Verify the HMAC signature scheme works with integer timestamps."""
+        secret = "integration-test-secret"
+        body = b'{"order_id": "test-123", "status": "paid"}'
+        ts = str(int(time.time()))
+        payload = ts.encode() + b"." + body
+        expected_sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+
+        # Verify signature is 64-char lowercase hex
+        assert len(expected_sig) == 64
+        assert all(c in "0123456789abcdef" for c in expected_sig)
+
+        # Verify the signature matches itself (sanity)
+        assert hmac.compare_digest(expected_sig, expected_sig)
+
+        # Verify a different secret produces a different signature
+        wrong_sig = hmac.new(b"wrong-secret", payload, hashlib.sha256).hexdigest()
+        assert not hmac.compare_digest(expected_sig, wrong_sig)
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_prod_settings_require_webhook_secret(self):
+        """Production settings must require PLATFORM_TO_PORTAL_WEBHOOK_SECRET."""
+        # Check Portal prod.py
+        portal_prod = PORTAL_DIR / "config" / "settings" / "prod.py"
+        portal_source = portal_prod.read_text()
+        assert "PLATFORM_TO_PORTAL_WEBHOOK_SECRET" in portal_source, (
+            "Portal prod.py must reference PLATFORM_TO_PORTAL_WEBHOOK_SECRET"
+        )
+        # Must raise if not set
+        assert "raise ValueError" in portal_source or "raise ImproperlyConfigured" in portal_source, (
+            "Portal prod.py must raise on missing PLATFORM_TO_PORTAL_WEBHOOK_SECRET"
+        )
+
+        # Check Platform prod.py
+        platform_prod = PLATFORM_DIR / "config" / "settings" / "prod.py"
+        platform_source = platform_prod.read_text()
+        assert "PLATFORM_TO_PORTAL_WEBHOOK_SECRET" in platform_source, (
+            "Platform prod.py must reference PLATFORM_TO_PORTAL_WEBHOOK_SECRET"
+        )
+        assert "ImproperlyConfigured" in platform_source, (
+            "Platform prod.py must raise ImproperlyConfigured on missing webhook secret"
         )
 
 

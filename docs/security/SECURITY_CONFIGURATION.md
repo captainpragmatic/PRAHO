@@ -30,6 +30,12 @@ DB_HOST="localhost"
 DB_PORT="5432"
 DB_SSLMODE="require"
 
+# 🔐 Inter-Service HMAC Authentication
+HMAC_SECRET="portal-to-platform-hmac-secret"
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
+PLATFORM_TO_PORTAL_WEBHOOK_SECRET="platform-to-portal-webhook-hmac-secret"
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
+
 # 🔐 Redis Security
 REDIS_URL="redis://localhost:6379/0"
 

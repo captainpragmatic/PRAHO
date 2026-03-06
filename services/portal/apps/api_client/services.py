@@ -89,7 +89,7 @@ class PlatformAPIClient:
         """
         # Generate unique nonce and timestamp
         nonce = secrets.token_urlsafe(32)
-        timestamp = fixed_timestamp or str(time.time())
+        timestamp = fixed_timestamp or str(int(time.time()))
 
         # Compute body hash
         body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
@@ -147,7 +147,7 @@ class PlatformAPIClient:
         if user_id is not None and "user_id" not in payload:
             payload["user_id"] = user_id
         if "timestamp" not in payload:
-            payload["timestamp"] = time.time()
+            payload["timestamp"] = int(time.time())
 
         # Serialize to JSON first to ensure we get the exact representation
         body_bytes = json.dumps(payload).encode("utf-8")
@@ -200,7 +200,7 @@ class PlatformAPIClient:
         the legacy canonical format with pipe separators.
         """
         nonce = secrets.token_urlsafe(32)
-        timestamp = body_ts or str(time.time())
+        timestamp = body_ts or str(int(time.time()))
         body_hash = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
         path_with_query = self._normalized_path_with_query(url, params)
         body_text = body.decode("utf-8")

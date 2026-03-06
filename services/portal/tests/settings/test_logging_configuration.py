@@ -20,6 +20,7 @@ _PROD_ENV = {
     "PLATFORM_API_ALLOW_INSECURE_HTTP": "true",
     "ALLOWED_HOSTS": "portal.pragmatichost.com",
     "PORTAL_DOMAIN": "portal.pragmatichost.com",
+    "PLATFORM_TO_PORTAL_WEBHOOK_SECRET": "test-webhook-secret-for-logging-config-tests",
 }
 
 
