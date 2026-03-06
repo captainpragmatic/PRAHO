@@ -36,7 +36,6 @@ services:
       - DEBUG=0
       - DATABASE_URL=${DATABASE_URL}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
-      - SECRET_KEY=${SECRET_KEY}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS={{ platform_domain }},{{ portal_domain }},localhost
       - CSRF_TRUSTED_ORIGINS=https://{{ platform_domain }},https://{{ portal_domain }}
@@ -78,7 +77,7 @@ services:
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL}
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
-      - SECRET_KEY=${SECRET_KEY}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS={{ portal_domain }},localhost
       - CSRF_TRUSTED_ORIGINS=https://{{ portal_domain }}

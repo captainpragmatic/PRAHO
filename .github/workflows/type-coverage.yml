@@ -18,7 +18,7 @@ on:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
-  SECRET_KEY: test-secret-key-for-ci
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:

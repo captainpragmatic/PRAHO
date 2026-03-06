@@ -25,7 +25,7 @@ if not SECRET_KEY:
     SECRET_KEY = "dev-portal-key-for-local-development-only-not-for-production"
     import logging
 
-    logging.getLogger(__name__).info("🔍 [Dev] Using development SECRET_KEY fallback")
+    logging.getLogger(__name__).info("🔍 [Dev] Using development DJANGO_SECRET_KEY fallback")
 
 # Allow all hosts in development
 ALLOWED_HOSTS = ["*"]

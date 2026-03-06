@@ -195,26 +195,26 @@ verify_deployment() {
 
     case $TYPE in
         single-server)
-            if curl -sf http://localhost:8700/health/ > /dev/null; then
+            if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
                 log_success "Platform is healthy"
             else
                 log_warn "Platform health check failed"
             fi
-            if curl -sf http://localhost:8701/health/ > /dev/null; then
+            if curl -sf http://localhost:8701/status/ > /dev/null; then
                 log_success "Portal is healthy"
             else
                 log_warn "Portal health check failed"
             fi
             ;;
         platform-only)
-            if curl -sf http://localhost:8700/health/ > /dev/null; then
+            if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
                 log_success "Platform is healthy"
             else
                 log_warn "Platform health check failed"
             fi
             ;;
         portal-only)
-            if curl -sf http://localhost:8701/health/ > /dev/null; then
+            if curl -sf http://localhost:8701/status/ > /dev/null; then
                 log_success "Portal is healthy"
             else
                 log_warn "Portal health check failed"

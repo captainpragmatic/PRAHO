@@ -7,7 +7,7 @@
 # Required environment variables in .env:
 #   - DOMAIN (e.g., praho.example.com)
 #   - DB_PASSWORD
-#   - SECRET_KEY
+#   - DJANGO_SECRET_KEY
 #   - ACME_EMAIL (for Let's Encrypt)
 
 services:
@@ -30,6 +30,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     networks:
       - internal
 
@@ -44,8 +52,12 @@ services:
     container_name: praho_platform
     environment:
       - DEBUG=0
-      - DATABASE_URL=postgresql://praho:${DB_PASSWORD}@db:5432/praho
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=praho
+      - DB_USER=praho
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
@@ -66,6 +78,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     networks:
       - internal
       - web
@@ -86,7 +106,7 @@ services:
       - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PORTAL_DOMAIN=${DOMAIN:-localhost}
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
@@ -104,6 +124,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
     networks:
       - web
 

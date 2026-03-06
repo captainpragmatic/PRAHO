@@ -30,7 +30,7 @@ from .base import *  # noqa: F403  # Django settings pattern
 # STAGING SECURITY VALIDATION
 # ===============================================================================
 
-validate_production_secret_key()  # Rejects django-insecure-* prefix
+validate_production_secret_key(SECRET_KEY)  # Rejects insecure prefixes and short keys
 
 _db_password = _os.environ.get("DB_PASSWORD", "")
 if not _db_password or _db_password in {"changeme", "development_password", "password", "postgres"}:

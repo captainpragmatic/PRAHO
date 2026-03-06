@@ -5,8 +5,8 @@
 # Database and SSL handled by the cloud provider
 #
 # Required environment variables:
-#   - DATABASE_URL (managed PostgreSQL connection string)
-#   - SECRET_KEY
+#   - DB_HOST, DB_NAME, DB_USER, DB_PASSWORD (managed PostgreSQL)
+#   - DJANGO_SECRET_KEY
 #   - DOMAIN
 #   - PLATFORM_API_BASE_URL (for portal -> platform communication)
 
@@ -21,8 +21,12 @@ services:
       dockerfile: deploy/platform/Dockerfile
     environment:
       - DEBUG=0
-      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL required}
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DB_HOST=${DB_HOST:?DB_HOST required}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:?DB_NAME required}
+      - DB_USER=${DB_USER:?DB_USER required}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
@@ -31,6 +35,14 @@ services:
       - SERVICE_NAME=platform
     expose:
       - "8700"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8700/api/users/health/"]
       interval: 30s
@@ -53,13 +65,21 @@ services:
       - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PORTAL_DOMAIN=${DOMAIN:-localhost}
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - SERVICE_NAME=portal
     expose:
       - "8701"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8701/status/"]
       interval: 30s

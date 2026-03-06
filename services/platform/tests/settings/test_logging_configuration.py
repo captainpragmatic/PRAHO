@@ -18,7 +18,7 @@ from django.test import SimpleTestCase
 # Prod/staging settings run secret validation at import time.
 # We provide dummy env vars so the import succeeds.
 _PROD_ENV = {
-    "SECRET_KEY": "test-only-secret-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "DJANGO_SECRET_KEY": "test-only-secret-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "DB_PASSWORD": "test-only-db-password-for-logging-tests",
     "HMAC_SECRET": "test-only-hmac-secret-for-logging-tests",
     "DJANGO_ENCRYPTION_KEY": "dGVzdC1vbmx5LWVuY3J5cHRpb24ta2V5LTMyYnl0ZXM=",

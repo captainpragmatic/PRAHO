@@ -347,7 +347,7 @@ def validate_all_secrets() -> bool:
     all_valid = True
 
     # Validate Django SECRET_KEY
-    secret_key = os.environ.get("SECRET_KEY")
+    secret_key = os.environ.get("DJANGO_SECRET_KEY")
     if secret_key:
         try:
             valid = validate_django_secret_key(secret_key, environment)
@@ -356,9 +356,9 @@ def validate_all_secrets() -> bool:
             all_valid = False
             raise
     else:
-        logger.warning("⚠️ [Security] SECRET_KEY not found in environment")
+        logger.warning("⚠️ [Security] DJANGO_SECRET_KEY not found in environment")
         if environment == "production":
-            raise ValueError("SECURITY ERROR: SECRET_KEY environment variable must be set in production")
+            raise ValueError("SECURITY ERROR: DJANGO_SECRET_KEY environment variable must be set in production")
 
     # Validate Platform API Secret
     api_secret = os.environ.get("PLATFORM_API_SECRET")

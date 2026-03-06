@@ -49,10 +49,14 @@ services:
       - logs_volume:/app/logs
     environment:
       - DEBUG=1
-      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-dev_password_change_in_prod}@db:5432/praho_platform
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=praho_platform
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD:-dev_password_change_in_prod}
       - HMAC_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:-test-webhook-secret-do-not-use-in-prod}
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - PYTHONPATH=/app
       - SERVICE_NAME=platform
@@ -87,10 +91,10 @@ services:
       - PLATFORM_API_BASE_URL=http://platform:8700/api
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SERVICE_NAME=portal
-      # No DATABASE_URL - portal has no DB access
+      # No DB_* vars - portal has no DB access
       # No PYTHONPATH - portal cannot import platform code
     depends_on:
       platform:

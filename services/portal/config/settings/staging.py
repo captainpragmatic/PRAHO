@@ -20,10 +20,10 @@ from .base import *  # noqa: F403
 
 # Security - similar to production but with debug info
 DEBUG = False
-SECRET_KEY = os.environ.get("SECRET_KEY")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError(
-        "SECURITY ERROR: SECRET_KEY environment variable must be set in staging.\n"
+        "SECURITY ERROR: DJANGO_SECRET_KEY environment variable must be set in staging.\n"
         'Generate one with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )
 
