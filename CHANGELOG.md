@@ -7,36 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.25.0] - 2026-03-06
+
 ### Added
 
 - **HKDF key derivation utility** (`apps/common/key_derivation.py`) — domain-separated cryptographic keys using HKDF-SHA256 (RFC 5869) for NIST SP 800-57 Section 5.2 key separation; 4 domains: `mfa-backup`, `unsubscribe`, `siem-hash-chain`, `sensitive-data-hash`; optional per-domain env var overrides; 8 unit tests
 - **`UnsubscribeToken` model** — opaque UUID-based unsubscribe tokens replacing hash-based tokens that contained email addresses (GDPR Art. 5(1)(c) data minimization); 30-day expiry with `consume()` and `is_expired()` methods; `cleanup_unsubscribe_tokens` management command; 18 unit tests
 - **Per-server Virtualmin credentials** — `api_username` and `_api_password_encrypted` fields on `Server` model with AES-256-GCM encryption; vault-first, server-model-second credential resolution
 - **`check_secret_key_usage.py` pre-commit hook** — blocks new direct `settings.SECRET_KEY` usage in application code; allows `config/settings/` and `# noqa: SECRET_KEY` annotation
-
-### Changed
-
-- **Unsubscribe URLs** no longer contain email addresses — opaque UUID tokens replace `sha256(email:template_key:SECRET_KEY)` pattern (GDPR Art. 5(1)(c) data minimization)
-- **`hash_sensitive_data()`** uses HKDF-derived key via HMAC-SHA256 instead of bare SHA-256 with `settings.SECRET_KEY` and `"default-salt"` fallback
-- **SIEM `HashChainManager`** uses domain-specific derived key (`siem-hash-chain`) instead of raw `settings.SECRET_KEY`
-- **Virtualmin credentials** vault-only resolution — env var fallback (`VIRTUALMIN_ADMIN_USER`/`VIRTUALMIN_ADMIN_PASSWORD`) removed in non-debug mode
-
-### Removed
-
-- **`BackupCodeService.hash_backup_code()`** — weak SHA-256 with SECRET_KEY pepper; production uses Argon2 via `apps.common.encryption.hash_backup_code`
-- **`BackupCodeService.verify_backup_code()`** — timing-unsafe `==` comparison (CWE-208); production uses Django's `check_password()` (constant-time)
-- **`BackupCodeService.generate_backup_codes()`** — unused XXXX-XXXX-XXXX format helper; production uses `generate_codes()` (8-digit + Argon2)
-- **`VIRTUALMIN_ADMIN_USER`/`VIRTUALMIN_ADMIN_PASSWORD`** env var support — credentials must come from vault or per-server encrypted fields
-
-### Security
-
-- **Fixed CWE-208** timing side-channel in backup code verification (removed bare `==` comparison)
-- **Fixed GDPR Art. 5(1)(c) violation** — unsubscribe URLs no longer contain PII (email addresses)
-- **NIST SP 800-57 Section 5.2** key separation compliance — all HMAC/hash operations use domain-specific HKDF-derived keys instead of raw SECRET_KEY
-- **NIST SP 800-108** KDF-derived keys — `hash_sensitive_data`, SIEM hash chain, and price sealing all use derived or dedicated keys
-
-### Added
-
 - **Token identity endpoint** (`GET /api/users/token/me/`) — correct token-auth introspection endpoint; the existing `verify_token` at `/api/users/token/verify/` requires HMAC customer context (portal-only) and returns 401 for CLI/API consumers; the new endpoint uses `TokenAuthentication` only, returns `email`, `staff_role`, and `token_created`; 3 tests added
 - **ADR-0031**: documents full state of API token authentication, 8 explicit gaps (no expiry, plaintext storage, one-token-per-user, broken verify endpoint), and rationale for `token_info` gap-1 fix
 - **Payment model**: `updated_at = DateTimeField(auto_now=True)` on `Payment` (migration 0018); aligns with Invoice, Customer, PaymentRetryPolicy
@@ -56,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: Encryption Architecture Consolidation** — Consolidated 4 encryption systems into 2, both using AES-256-GCM (NIST SP 800-38D). See [ADR-0033](docs/ADRs/ADR-0033-encryption-architecture-consolidation.md).
+  - Replaced Fernet (AES-128-CBC) with AES-256-GCM for app-level encryption
+  - Replaced Django Signer (HMAC signing) with real AES-256-GCM encryption for settings, tokens, notifications
+  - Replaced Fernet with AES-256-GCM in CredentialVault
+  - Deleted dead `aes256_encryption.py` module (zero production imports)
+  - Deleted `settings/encryption.py` (was signing, not encryption)
+  - New key format: URL-safe base64-encoded 32 random bytes (replaces Fernet key format)
+- **Unsubscribe URLs** no longer contain email addresses — opaque UUID tokens replace `sha256(email:template_key:SECRET_KEY)` pattern (GDPR Art. 5(1)(c) data minimization)
+- **`hash_sensitive_data()`** uses HKDF-derived key via HMAC-SHA256 instead of bare SHA-256 with `settings.SECRET_KEY` and `"default-salt"` fallback
+- **SIEM `HashChainManager`** uses domain-specific derived key (`siem-hash-chain`) instead of raw `settings.SECRET_KEY`
+- **Virtualmin credentials** vault-only resolution — env var fallback (`VIRTUALMIN_ADMIN_USER`/`VIRTUALMIN_ADMIN_PASSWORD`) removed in non-debug mode
 - **Middleware ordering** (prod.py, staging.py) — `PortalServiceHMACMiddleware` and `StaffOnlyPlatformMiddleware` moved after `AuthenticationMiddleware`; staff bypass now has access to `request.user`
 - **HMAC timestamp validation** — allow 2s forward clock skew (`-2 <= delta`) for NTP jitter between portal and platform; shared `HMAC_TIMESTAMP_WINDOW_SECONDS` constant extracted to `apps.common.constants`
 - **HMAC timestamp parsing** — `int(float(timestamp))` for rolling-deploy backward compatibility
@@ -82,11 +75,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`BackupCodeService.hash_backup_code()`** — weak SHA-256 with SECRET_KEY pepper; production uses Argon2 via `apps.common.encryption.hash_backup_code`
+- **`BackupCodeService.verify_backup_code()`** — timing-unsafe `==` comparison (CWE-208); production uses Django's `check_password()` (constant-time)
+- **`BackupCodeService.generate_backup_codes()`** — unused XXXX-XXXX-XXXX format helper; production uses `generate_codes()` (8-digit + Argon2)
+- **`VIRTUALMIN_ADMIN_USER`/`VIRTUALMIN_ADMIN_PASSWORD`** env var support — credentials must come from vault or per-server encrypted fields
 - **`PaymentService.handle_webhook_payment()`** and **`_handle_stripe_payment_intent()`** — legacy duplicate handlers; Stripe webhook handling consolidated in `StripeWebhookProcessor`
 - Associated test classes removed from `test_payment_service.py` and `test_billing_27_todos.py`
 
 ### Fixed
 
+- **CredentialVault RBAC bypass** — Permission check was always returning `True`; now restricts to staff/superuser/system
+- **Plaintext fallback in e-Factura token storage** — Encryption failures now raise instead of silently storing plaintext
+- **Silent decrypt failure** — `decrypt_sensitive_data()` now raises `DecryptionError` instead of returning empty string
+- **Dict-vs-tuple bug in virtualmin_gateway.py** — `get_credential()` returns tuple, not dict
+- **Stale object bug in credential rotation** — `refresh_from_db()` after `store_credential()` prevents overwriting
 - **Docker**: Add `ENV PATH="/app/.venv/bin:$PATH"` to both Dockerfiles — uv-installed packages (python, gunicorn) were not found at runtime (#12)
 - **Docker**: Switch HEALTHCHECK from `python -c "import requests; ..."` to `curl -f` against actual health endpoints (`/api/users/health/` platform, `/status/` portal), bump `start-period` to 60s (#13)
 - **Docker**: Fix portal `DJANGO_SETTINGS_MODULE` from `config.settings` (empty `__init__.py`) to `config.settings.prod` in Dockerfile and all compose files (#14)
@@ -114,7 +116,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls when only some sections are rate-limited (e.g., billing 429 doesn't hide tickets)
 - **Portal Templates**: Added `role="alert"` and `aria-live="polite"` to rate-limit inline
   alert for screen reader accessibility
-
 - **Portal Auth**: Login 429 now shows throttle message ("Too many login attempts, try again
   in N seconds") instead of silently treating rate-limits as invalid credentials
 - **Portal Auth**: `authenticate_customer` re-raises `PlatformAPIError(is_rate_limited=True)`
@@ -158,7 +159,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(billing): migration 0017 — add `RunPython` step to convert `gateway_txn_id=""` → `NULL` before applying the unique constraint; PostgreSQL treats each NULL as distinct so multiple empty strings would fail the migration on production
 - fix(settings): rename `RATELIMIT_ENABLE` → `RATELIMIT_ENABLED` in `e2e.py`, `prod.py`, and `staging.py` to match the key read by middleware; E2E tests were silently not disabling rate limiting due to this mismatch
 - fix(billing): portal webhook signing in `_send_portal_webhook` — compute HMAC-SHA256 of `(ts + "." + body)` and send `X-Platform-Signature` + `X-Platform-Timestamp` headers; without these, every payment success notification was rejected with 401
-
 - fix(security): `PortalServiceHMACMiddleware` — batch hardening (no new dependencies)
   - **Removed `PortalServiceAuthMiddleware`** dead code — weak shared-secret auth with no replay protection; regression test `test_legacy_auth_middleware_removed` added to prevent re-introduction
   - **Removed body timestamp cross-check** — redundant JSON parse that blocked non-JSON bodies; `body_hash` in the canonical string already cryptographically covers any payload timestamp; comment documents this invariant
@@ -167,6 +167,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(security): replace direct `REMOTE_ADDR` with `get_safe_client_ip()` at all remaining callsites — `REMOTE_ADDR` is always the immediate TCP peer (the proxy in production); audit logs, rate-limit keys, and security logs recorded the proxy IP instead of the real client; fixed in `audit/signals.py`, `api/customers/views.py`, `api/customers/serializers.py`, `api/users/views.py` (×2), `common/decorators.py` (platform + portal)
 - fix(security): add scanner pattern for direct `REMOTE_ADDR` access in `security_scanner.py` — pattern #9 flags `request.META.get("REMOTE_ADDR")` / `request.META["REMOTE_ADDR"]` outside `request_ip.py`; severity MEDIUM; OWASP A09:2021
 - fix(settings): `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` in `portal/config/settings/staging.py` — changed from hard fail (`ValueError`) to optional (`WARNING` log); staging rarely tests the end-to-end payment confirmation flow; comment clarifies this is NOT the Stripe webhook secret — it signs Platform→Portal internal calls only
+
+### Security
+
+- **Fixed CWE-208** timing side-channel in backup code verification (removed bare `==` comparison)
+- **Fixed GDPR Art. 5(1)(c) violation** — unsubscribe URLs no longer contain PII (email addresses)
+- **NIST SP 800-57 Section 5.2** key separation compliance — all HMAC/hash operations use domain-specific HKDF-derived keys instead of raw SECRET_KEY
+- **NIST SP 800-108** KDF-derived keys — `hash_sensitive_data`, SIEM hash chain, and price sealing all use derived or dedicated keys
 
 ### Tests
 
@@ -179,28 +186,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AUTHENTICATION.md` updated: correct `obtain_token` response (removed stale `is_staff` field), fix revoke verb `POST → DELETE`, replace fictional portal JS token-auth code with accurate description of HMAC-signed `api_client` flow; consumer→method table covering all 4 auth paths
 - `AUTHENTICATION.md` dual HMAC architecture section added, `DEPLOYMENT.md` env var tables updated, `SECURITY_CONFIGURATION.md` and `ARCHITECTURE.md` updated with data-flow diagram
-
----
-
-## [0.25.0] - 2026-03-06
-
-### Changed
-
-- **BREAKING: Encryption Architecture Consolidation** — Consolidated 4 encryption systems into 2, both using AES-256-GCM (NIST SP 800-38D). See [ADR-0033](docs/ADRs/ADR-0033-encryption-architecture-consolidation.md).
-  - Replaced Fernet (AES-128-CBC) with AES-256-GCM for app-level encryption
-  - Replaced Django Signer (HMAC signing) with real AES-256-GCM encryption for settings, tokens, notifications
-  - Replaced Fernet with AES-256-GCM in CredentialVault
-  - Deleted dead `aes256_encryption.py` module (zero production imports)
-  - Deleted `settings/encryption.py` (was signing, not encryption)
-  - New key format: URL-safe base64-encoded 32 random bytes (replaces Fernet key format)
-
-### Fixed
-
-- **CredentialVault RBAC bypass** — Permission check was always returning `True`; now restricts to staff/superuser/system
-- **Plaintext fallback in e-Factura token storage** — Encryption failures now raise instead of silently storing plaintext
-- **Silent decrypt failure** — `decrypt_sensitive_data()` now raises `DecryptionError` instead of returning empty string
-- **Dict-vs-tuple bug in virtualmin_gateway.py** — `get_credential()` returns tuple, not dict
-- **Stale object bug in credential rotation** — `refresh_from_db()` after `store_credential()` prevents overwriting
 
 ### Migration Notes
 

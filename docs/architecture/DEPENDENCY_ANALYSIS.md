@@ -1,7 +1,7 @@
 # PRAHO Platform - Dependency Analysis Report
 
 **Generated:** March 1, 2026
-**Version:** 0.24.0
+**Version:** 0.25.0
 
 ---
 
@@ -231,7 +231,7 @@ Services that are imported across 3+ app boundaries should expose abstract inter
 
 ## 8. Success Metrics
 
-| Metric | Current (v0.24.0) | Target |
+| Metric | Current (v0.25.0) | Target |
 |--------|-------------------|--------|
 | Circular dependency pairs | 14 | 0 |
 | `common` outbound domain imports | 7 apps | 0 apps |
