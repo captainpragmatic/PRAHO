@@ -13,7 +13,7 @@ Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/platform
 Environment=PYTHONPATH={{ project_root }}/src/services/platform
 EnvironmentFile={{ project_root }}/.env
-ExecStart={{ project_root }}/.venv/bin/python manage.py qcluster
+ExecStart={{ project_root }}/.venv-linux/bin/python manage.py qcluster
 Restart=on-failure
 RestartSec=10
 

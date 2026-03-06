@@ -19,7 +19,7 @@ on:
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
   SECRET_KEY: test-secret-key-for-ci
-  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
   type-check:
@@ -43,13 +43,13 @@ jobs:
       run: |
         echo "Running type coverage analysis..."
         cd services/platform
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python ../../scripts/type_coverage_report.py || echo "Warning: Type coverage script failed, continuing..."
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python ../../scripts/type_coverage_report.py || echo "Warning: Type coverage script failed, continuing..."
 
     - name: Run mypy type checking
       run: |
         echo "Running mypy type checking..."
         cd services/platform
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/mypy apps/ --config-file ../../pyproject.toml --no-error-summary > mypy_errors.txt || true
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/mypy apps/ --config-file ../../pyproject.toml --no-error-summary > mypy_errors.txt || true
         echo "Mypy output saved to mypy_errors.txt"
         head -20 mypy_errors.txt || echo "No mypy output file or file is empty"
 

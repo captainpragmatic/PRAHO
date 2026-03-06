@@ -156,6 +156,8 @@
     rsync_opts:
       - "--exclude=.git"
       - "--exclude=.venv"
+      - "--exclude=.venv-darwin"
+      - "--exclude=.venv-linux"
       - "--exclude=__pycache__"
       - "--exclude=node_modules"
       - "--exclude=*.pyc"
@@ -212,9 +214,9 @@
   command: >
     /usr/local/bin/uv venv
     --python python{{ python_version }}
-    {{ project_root }}/.venv
+    {{ project_root }}/.venv-linux
   args:
-    creates: "{{ project_root }}/.venv/bin/python"
+    creates: "{{ project_root }}/.venv-linux/bin/python"
   become_user: "{{ project_user }}"
 
 - name: Install dependencies with uv
@@ -227,7 +229,7 @@
     chdir: "{{ project_root }}/src"
   become_user: "{{ project_user }}"
   environment:
-    UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv"
+    UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv-linux"
 
 # ---------------------------------------------------------------------------
 # 6. Environment file (.env as single source of truth)
@@ -314,7 +316,7 @@
 
 - name: Run database migrations
   command: >
-    {{ project_root }}/.venv/bin/python manage.py migrate --noinput
+    {{ project_root }}/.venv-linux/bin/python manage.py migrate --noinput
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
@@ -322,7 +324,7 @@
 
 - name: Create database cache table
   command: >
-    {{ project_root }}/.venv/bin/python manage.py createcachetable
+    {{ project_root }}/.venv-linux/bin/python manage.py createcachetable
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
@@ -331,7 +333,7 @@
 
 - name: Collect Platform static files
   command: >
-    {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
+    {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
@@ -339,7 +341,7 @@
 
 - name: Collect Portal static files
   command: >
-    {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
+    {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
   args:
     chdir: "{{ project_root }}/src/services/portal"
   become_user: "{{ project_user }}"
@@ -356,7 +358,7 @@
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
   command: >
-    {{ project_root }}/.venv/bin/python manage.py setup_initial_data
+    {{ project_root }}/.venv-linux/bin/python manage.py setup_initial_data
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"

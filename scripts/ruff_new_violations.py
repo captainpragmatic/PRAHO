@@ -5,8 +5,9 @@ This script compares Ruff diagnostics for the current tree against a baseline
 git ref (default: HEAD). Existing debt is tolerated; new violations fail.
 
 Typical usage:
-  .venv/bin/python scripts/ruff_new_violations.py --staged
-  .venv/bin/python scripts/ruff_new_violations.py --baseline-ref <base_sha>
+    .venv-darwin/bin/python scripts/ruff_new_violations.py --staged
+    .venv-linux/bin/python scripts/ruff_new_violations.py --staged
+    UV_PROJECT_ENVIRONMENT=.venv-darwin uv run python scripts/ruff_new_violations.py --baseline-ref <base_sha>
 """
 
 from __future__ import annotations
@@ -27,7 +28,11 @@ PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 import os as _os
 
 _uv_env = _os.environ.get("UV_PROJECT_ENVIRONMENT")
-DEFAULT_RUFF = (REPO_ROOT / _uv_env / "bin" / "ruff") if _uv_env else REPO_ROOT / ".venv" / "bin" / "ruff"
+if _uv_env:
+    DEFAULT_RUFF = REPO_ROOT / _uv_env / "bin" / "ruff"
+else:
+    _fallback_name = ".venv-darwin" if sys.platform == "darwin" else ".venv-linux"
+    DEFAULT_RUFF = REPO_ROOT / _fallback_name / "bin" / "ruff"
 del _os, _uv_env
 
 

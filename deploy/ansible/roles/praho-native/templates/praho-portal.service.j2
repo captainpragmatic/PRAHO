@@ -12,7 +12,7 @@ User={{ project_user }}
 Group={{ project_group }}
 WorkingDirectory={{ project_root }}/src/services/portal
 EnvironmentFile={{ project_root }}/.env
-ExecStart={{ project_root }}/.venv/bin/gunicorn \
+ExecStart={{ project_root }}/.venv-linux/bin/gunicorn \
     --bind 127.0.0.1:{{ portal_port }} \
     --workers {{ gunicorn_workers_portal }} \
     --timeout {{ gunicorn_timeout_portal }} \

@@ -24,7 +24,7 @@ on:
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
   SECRET_KEY: test-secret-key-for-ci
-  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
   platform-test:
@@ -65,9 +65,9 @@ jobs:
       run: |
         cd services/platform
         echo "Running platform unit tests with coverage..."
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/coverage run manage.py test tests --verbosity=2
-        ${{ github.workspace }}/.venv/bin/coverage xml -o coverage-platform.xml
-        ${{ github.workspace }}/.venv/bin/coverage report --show-missing
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage run manage.py test tests --verbosity=2
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage xml -o coverage-platform.xml
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage report --show-missing
 
     - name: Ruff no-new-debt gate (platform)
       run: |
@@ -84,7 +84,7 @@ jobs:
           git fetch origin "${BASE_REF}" --depth=1 || true
         fi
         echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
-        ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py \
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py \
           --baseline-ref "$BASE_REF" \
           --path-prefix services/platform
 
@@ -92,7 +92,7 @@ jobs:
       run: |
         cd services/platform
         echo "Running linting for platform service..."
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/ruff check apps/ || echo "Linting completed with issues"
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/ruff check apps/ || echo "Linting completed with issues"
 
     - name: Upload platform artifacts
       uses: actions/upload-artifact@v4
@@ -126,7 +126,7 @@ jobs:
       run: |
         echo "Running Bandit security analysis..."
         cd services/platform
-        ${{ github.workspace }}/.venv/bin/bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
 
     - name: Upload Security Reports
       uses: actions/upload-artifact@v4
