@@ -92,7 +92,7 @@ restore_backup() {
 
     # Drop and recreate database
     log_info "Preparing database..."
-    docker exec praho_db psql -U praho -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" postgres
+    docker exec praho_db psql -U praho -d praho -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 
     # Restore
     log_info "Restoring database..."

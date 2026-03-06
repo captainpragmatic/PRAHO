@@ -47,6 +47,9 @@ COPY services/portal/pyproject.toml ./services/portal/pyproject.toml
 # Sync portal production dependencies
 RUN uv sync --group portal --group prod --frozen --no-dev
 
+# Activate venv — bare `python` resolves to .venv/bin/python
+ENV PATH="/app/.venv/bin:$PATH"
+
 # Copy portal service code
 COPY services/portal/ ./
 

@@ -26,14 +26,21 @@
 # 1. PostgreSQL 15
 # ---------------------------------------------------------------------------
 
-- name: Add PostgreSQL APT signing key
-  apt_key:
+- name: Create keyrings directory
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download PostgreSQL GPG key
+  get_url:
     url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
-    state: present
+    dest: /etc/apt/keyrings/postgresql.asc
+    mode: "0644"
 
 - name: Add PostgreSQL APT repository
   apt_repository:
-    repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    repo: "deb [signed-by=/etc/apt/keyrings/postgresql.asc] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
     state: present
 
 - name: Install PostgreSQL 15
@@ -137,6 +144,7 @@
     - "{{ project_root }}/static"
     - "{{ project_root }}/portal-static"
     - "{{ project_root }}/media"
+    - "{{ project_root }}/logs"
     - /var/log/praho
     - /var/log/praho/portal
 

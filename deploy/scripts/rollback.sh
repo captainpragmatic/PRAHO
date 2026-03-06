@@ -64,7 +64,7 @@ rollback_version() {
 
     # Update .env with new version
     if grep -q "^VERSION=" .env 2>/dev/null; then
-        sed -i "s/^VERSION=.*/VERSION=${VERSION}/" .env
+        sed -i.bak "s/^VERSION=.*/VERSION=${VERSION}/" .env && rm -f .env.bak
     else
         echo "VERSION=${VERSION}" >> .env
     fi

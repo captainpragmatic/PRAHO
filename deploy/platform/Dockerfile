@@ -50,6 +50,9 @@ COPY services/platform/pyproject.toml ./services/platform/pyproject.toml
 # Sync platform production dependencies
 RUN uv sync --group platform --group prod --frozen --no-dev
 
+# Activate venv — bare `python` resolves to .venv/bin/python
+ENV PATH="/app/.venv/bin:$PATH"
+
 # Copy platform service code (includes assets/ and static/)
 COPY services/platform/ ./
 
