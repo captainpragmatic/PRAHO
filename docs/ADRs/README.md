@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0031**)
+2. Use the next available number (currently: **ADR-0033**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -61,6 +61,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0028](ADR-0028-server-log-checking-e2e.md) | Server Log Checking in E2E Tests | Accepted | 2026-03-03 |
 | [ADR-0029](ADR-0029-config-drift-detection.md) | Config Drift Detection & Remediation | Proposed | 2026-03-03 |
 | [ADR-0030](ADR-0030-rate-limiting-architecture.md) | Rate Limiting Architecture and Single Source of Truth | Accepted | 2026-03-05 |
+| [ADR-0031](ADR-0031-api-token-authentication-strategy.md) | API Token Authentication Strategy | Accepted | 2026-03-06 |
 
 ### 🟡 Partially Superseded
 
@@ -106,6 +107,10 @@ Infrastructure & Provisioning
 
 Platform Traffic Management
   ADR-0030 (rate limiting architecture) ──related──▶ ADR-0017 (portal fail-open)
+
+Token & Inter-Service Auth
+  ADR-0031 (API token auth) ──related──▶ ADR-0017, ADR-0024
+  ADR-0032 (dual HMAC) ──related──▶ ADR-0017, ADR-0031
 ```
 
 ---
@@ -125,6 +130,7 @@ Platform Traffic Management
 - [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
 - [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
+- [ADR-0031](ADR-0031-api-token-authentication-strategy.md) — Token auth gaps and roadmap
 
 ### 🏗️ Architecture & Code Organization
 - [ADR-0005](ADR-0005-single-constants-file-architecture.md) — Constants file pattern
@@ -152,5 +158,5 @@ Platform Traffic Management
 
 ## Statistics
 
-- **Total ADRs**: 30 (ADR-0001 through ADR-0030)
-- **Next available**: ADR-0031
+- **Total ADRs**: 32 (ADR-0001 through ADR-0032)
+- **Next available**: ADR-0033
