@@ -254,6 +254,33 @@ def revoke_token(request: HttpRequest) -> Response:
 
 
 @api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def token_info(request: HttpRequest) -> Response:
+    """
+    Return identity of the authenticated token caller.
+
+    GET /api/users/token/me/
+    Authorization: Token <key>
+
+    Designed for CLI tools and scripts to confirm their token is valid and
+    see which user it belongs to. Uses TokenAuthentication only — no HMAC
+    or session required.
+    """
+    user = cast(User, request.user)
+    token = request.auth
+    return Response(
+        {
+            "user_id": user.id,
+            "email": user.email,
+            "staff_role": user.staff_role,
+            "is_active": user.is_active,
+            "token_created": token.created.isoformat(),
+        }
+    )
+
+
+@api_view(["GET"])
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def verify_token(request: HttpRequest, customer: Customer) -> Response:

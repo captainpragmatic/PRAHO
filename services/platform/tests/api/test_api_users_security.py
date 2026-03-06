@@ -194,6 +194,57 @@ class AccountLockoutTokenTests(TestCase):
 
 
 # ===============================================================================
+# TOKEN INFO ENDPOINT (ADR-0030 Gap 1 fix)
+# ===============================================================================
+
+
+class TokenInfoTests(TestCase):
+    """GET /api/users/token/me/ must use TokenAuthentication, not HMAC."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="tokeninfo@example.com",
+            password="StrongPass123!",
+            first_name="Token",
+            last_name="Info",
+        )
+        self.url = "/api/users/token/me/"
+
+    def test_token_info_requires_token_auth(self) -> None:
+        """Unauthenticated GET must return 401."""
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_token_info_returns_caller_identity(self) -> None:
+        """Authenticated GET returns user_id, staff_role, and token_created."""
+        token = Token.objects.create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = self.client.get(self.url)
+        data = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["user_id"], self.user.id)
+        self.assertIn("token_created", data)
+        self.assertIn("staff_role", data)
+
+    def test_token_info_does_not_require_hmac_headers(self) -> None:
+        """No portal HMAC headers needed — pure token auth is sufficient."""
+        token = Token.objects.create(user=self.user)
+        # Only set Authorization header, no X-Portal-Id, X-Signature, etc.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg="token/me/ must not require HMAC headers — it is for CLI/script consumers",
+        )
+
+
+# ===============================================================================
 # EMAIL PII MASKING IN LOGS (#54)
 # ===============================================================================
 
