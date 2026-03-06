@@ -2,7 +2,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 import urllib.parse
 from unittest.mock import patch
@@ -12,7 +11,6 @@ from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common import middleware as _middleware_module
 from apps.common.middleware import PortalServiceHMACMiddleware
-from config.settings.test import LOCMEM_TEST_CACHE
 
 LOCMEM_TEST_CACHE = {
     "default": {
