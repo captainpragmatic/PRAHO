@@ -156,17 +156,27 @@ class AuthenticationRateLimitMiddleware:
         try:
             client_ip = self._get_client_ip(request)
 
-            # Record IP-based attempt
+            # Atomic increment — prevents lost updates under concurrent requests.
+            # Pattern: cache.add() initializes if absent; cache.incr() atomically increments.
             ip_cache_key = f"auth_ip_attempts_{client_ip}"
-            ip_attempts = cache.get(ip_cache_key, 0) + 1
-            cache.set(ip_cache_key, ip_attempts, timeout=self.IP_WINDOW_SECONDS)
+            try:
+                cache.add(ip_cache_key, 0, timeout=self.IP_WINDOW_SECONDS)
+                ip_attempts = cache.incr(ip_cache_key)
+            except ValueError:
+                cache.set(ip_cache_key, 1, timeout=self.IP_WINDOW_SECONDS)
+                ip_attempts = 1
 
             # Record account-based attempt (if email provided)
             email = self._extract_email_from_request(request)
             if email:
                 account_cache_key = f"auth_account_attempts_{email}"
-                account_attempts = cache.get(account_cache_key, 0) + 1
-                cache.set(account_cache_key, account_attempts, timeout=self.ACCOUNT_WINDOW_SECONDS)
+                # Atomic increment — prevents lost updates under concurrent requests.
+                try:
+                    cache.add(account_cache_key, 0, timeout=self.ACCOUNT_WINDOW_SECONDS)
+                    account_attempts = cache.incr(account_cache_key)
+                except ValueError:
+                    cache.set(account_cache_key, 1, timeout=self.ACCOUNT_WINDOW_SECONDS)
+                    account_attempts = 1
 
                 logger.info(
                     f"🔒 [RateLimit] Failed auth recorded: IP {client_ip} ({ip_attempts}), "
@@ -327,16 +337,26 @@ class APIRateLimitMiddleware:
                     status=429,
                 )
 
-            # Record the request
-            cache.set(burst_cache_key, burst_requests + 1, timeout=self.BURST_WINDOW_SECONDS)
-            cache.set(general_cache_key, general_requests + 1, timeout=self.GENERAL_WINDOW_SECONDS)
+            # Atomic increment — prevents lost updates under concurrent requests.
+            # Pattern: cache.add() initializes if absent; cache.incr() atomically increments.
+            try:
+                cache.add(burst_cache_key, 0, timeout=self.BURST_WINDOW_SECONDS)
+                cache.incr(burst_cache_key)
+            except ValueError:
+                cache.set(burst_cache_key, 1, timeout=self.BURST_WINDOW_SECONDS)
+
+            try:
+                cache.add(general_cache_key, 0, timeout=self.GENERAL_WINDOW_SECONDS)
+                cache.incr(general_cache_key)
+            except ValueError:
+                cache.set(general_cache_key, 1, timeout=self.GENERAL_WINDOW_SECONDS)
 
             return None  # Rate limits not exceeded
 
-        except Exception as e:
-            logger.error(f"🔥 [APIRateLimit] Rate limiting check failed: {e}")
-            # Don't block requests if rate limiting fails (fail open for API)
-            return None
+        except Exception:
+            # Fail-closed: matches AuthenticationRateLimitMiddleware behavior
+            logger.error("🔥 [API Rate Limit] Cache error — failing closed")
+            return JsonResponse({"error": "Service temporarily unavailable"}, status=503)
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""

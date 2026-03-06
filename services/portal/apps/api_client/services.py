@@ -47,7 +47,8 @@ HMAC_TIMING_THRESHOLD = 0.002
 _HMAC_SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
 _HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-_HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
+# Int-only — platform validates with int(), floats would fail
+_HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
 
 
 class PlatformAPIError(Exception):

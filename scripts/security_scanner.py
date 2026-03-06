@@ -24,7 +24,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 # Configure logging
@@ -433,12 +433,13 @@ class SecurityScanner:
         # path_glob=None means match all files; otherwise only files matching the glob suffix
         self.scoped_patterns: list[tuple[str, str, Severity, str | None, str | None]] = [
             # 1. Raw email in log f-strings — privacy violation
+            # Excludes _mask_email() and similar safe wrappers
             (
-                r'logger\.\w+\(f["\'].*\{.*email.*\}',
+                r'logger\.\w+\(f["\'].*\{(?!.*(_mask|masked|hashed|redact)).*\.email.*\}',
                 "Raw email in log message — use _mask_email() for privacy",
                 Severity.HIGH,
                 "A09:2021-Security Logging and Monitoring Failures",
-                "*.py",
+                "**/*.py",
             ),
             # 2. AllowAny on API views — access control risk
             (
@@ -446,7 +447,7 @@ class SecurityScanner:
                 "AllowAny on API view — verify this endpoint is intentionally public",
                 Severity.MEDIUM,
                 "A01:2021-Broken Access Control",
-                "apps/api/**/*.py",
+                "**/apps/api/**/*.py",
             ),
             # 3. Security feature flags via os.environ — use Django settings
             (
@@ -454,15 +455,15 @@ class SecurityScanner:
                 "Security feature flag via os.environ — use Django settings instead",
                 Severity.HIGH,
                 "A05:2021-Security Misconfiguration",
-                "*.py",
+                "**/*.py",
             ),
             # 4. Direct HTTP_X_FORWARDED_FOR access — use safe helper
             (
-                r'request\.META\.get\(["\'"]HTTP_X_FORWARDED_FOR',
+                r'request\.META\.get\(["\']HTTP_X_FORWARDED_FOR',
                 "Direct HTTP_X_FORWARDED_FOR — use get_safe_client_ip() from apps.common.request_ip",
                 Severity.HIGH,
                 "A01:2021-Broken Access Control",
-                "*.py",
+                "**/*.py",
             ),
             # 5. Webhook views without auth annotation — verify HMAC
             (
@@ -470,15 +471,15 @@ class SecurityScanner:
                 "Webhook endpoint found — verify HMAC signature verification is present",
                 Severity.MEDIUM,
                 "A07:2021-Identification and Authentication Failures",
-                "apps/**/views.py",
+                "**/apps/**/views.py",
             ),
             # 6. Unsecured ORM get on payment models — use select_for_update
             (
                 r"(Order|Payment)\.objects\.get\(",
-                "Direct .get() on Order/Payment — use select_for_update() inside transaction.atomic()",
-                Severity.LOW,
+                "Direct .get() on financial model — use select_for_update() inside transaction.atomic() for concurrent safety",
+                Severity.MEDIUM,
                 "A04:2021-Insecure Design",
-                "apps/**/*.py",
+                "**/apps/**/*.py",
             ),
             # 7. Path prefix auth exemptions — use frozenset membership
             (
@@ -486,7 +487,7 @@ class SecurityScanner:
                 "Path prefix match for auth exemption — prefer exact frozenset membership check",
                 Severity.MEDIUM,
                 "A01:2021-Broken Access Control",
-                "apps/**/middleware.py",
+                "**/apps/**/middleware.py",
             ),
             # 8. Terraform 0.0.0.0/0 as default — must use default=[] with validation
             (
@@ -506,6 +507,48 @@ class SecurityScanner:
                 Severity.MEDIUM,
                 "A09:2021-Security Logging and Monitoring Failures",
                 "services/**/*.py",
+            ),
+            # 10. Leftmost XFF trust — split(",")[0] on forwarded headers returns attacker-controlled IP.
+            # Proxies append to XFF, so the leftmost entry is client-supplied.
+            # Correct approach: rightmost-trusted-hop (walk right-to-left, skip trusted proxies).
+            # Only flag in request_ip.py / middleware where IP extraction actually happens.
+            (
+                r'split\(\s*["\'],["\']\s*\)\s*\[\s*0\s*\]',
+                "Leftmost XFF trust — split(',')[0] returns attacker-controlled IP. "
+                "Use rightmost-trusted-hop: walk right-to-left, skip trusted proxy IPs",
+                Severity.HIGH,
+                "A01:2021-Broken Access Control",
+                "**/request_ip.py",
+            ),
+            # 11. Non-constant-time HMAC comparison — timing oracle for signature forgery.
+            # Must use hmac.compare_digest() instead of == for signature verification.
+            (
+                r"signature\s*(?:==|!=)\s*|(?:==|!=)\s*signature",
+                "Non-constant-time HMAC comparison — use hmac.compare_digest() to prevent timing attacks",
+                Severity.HIGH,
+                "A02:2021-Cryptographic Failures",
+                "**/middleware.py",
+            ),
+            # 12. ALLOW_INSECURE_HTTP without startup warning — silent security downgrade.
+            # When the HTTP escape hatch is active, a logger.warning() must be present
+            # so ops monitoring catches it. Only relevant in prod/staging settings.
+            (
+                r"ALLOW_INSECURE_HTTP.*=.*True",
+                "Insecure HTTP flag enabled — verify a logger.warning() exists nearby to surface this in monitoring",
+                Severity.MEDIUM,
+                "A05:2021-Security Misconfiguration",
+                "**/settings/prod.py",
+            ),
+            # 13. Unique constraint migration without preflight duplicate check.
+            # AlterField(unique=True) will fail if duplicate non-null values exist.
+            # A RunPython step should check for and report duplicates before the AlterField.
+            (
+                r"unique=True",
+                "Unique constraint in migration — verify a RunPython preflight checks for "
+                "duplicate values before this AlterField to prevent deployment failures",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+                "**/migrations/*.py",
             ),
         ]
 
@@ -538,23 +581,22 @@ class SecurityScanner:
         return findings
 
     def _matches_path_glob(self, file_path: Path, glob_pattern: str | None) -> bool:
-        """Check whether file_path matches a glob pattern relative to codebase root."""
+        """Check whether file_path matches a glob pattern relative to codebase root.
+
+        Uses Python 3.13's PurePath.full_match() which supports ** recursive wildcards.
+        Patterns without **/ prefix are auto-expanded to match anywhere in the path tree.
+        """
         if glob_pattern is None:
             return True
-        from fnmatch import fnmatch
-
-        # Match against the path relative to the codebase root, or the filename alone
         try:
-            rel = str(file_path.relative_to(self.codebase_path))
+            rel = file_path.relative_to(self.codebase_path).as_posix()
         except ValueError:
-            rel = str(file_path)
-
-        # Support ** by matching against both the full relative path and basename
-        if fnmatch(rel, glob_pattern):
-            return True
-        # Flatten ** patterns: strip leading **/
-        simplified = glob_pattern.lstrip("*/")
-        return fnmatch(file_path.name, simplified) or fnmatch(rel, simplified)
+            rel = file_path.as_posix()
+        rel_path = PurePosixPath(rel)
+        candidates = [glob_pattern]
+        if not glob_pattern.startswith("**/"):
+            candidates.append(f"**/{glob_pattern}")
+        return any(rel_path.full_match(pattern) for pattern in candidates)
 
     def _scan_patterns(self, file_path: Path, content: str, lines: list[str]) -> list[SecurityFinding]:
         """Scan file using regex patterns"""

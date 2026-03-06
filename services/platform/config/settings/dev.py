@@ -130,7 +130,7 @@ if not RATELIMIT_ENABLE:
 # Webhook signing secret for platform→portal notifications (dev/test value)
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get(
     "PLATFORM_TO_PORTAL_WEBHOOK_SECRET",
-    "dev-webhook-secret-do-not-use-in-prod",
+    "test-webhook-secret-do-not-use-in-prod",
 )
 # Portal payment webhook URL (defaults to local portal for development)
 PORTAL_PAYMENT_WEBHOOK_URL = os.environ.get(

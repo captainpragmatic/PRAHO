@@ -230,6 +230,15 @@ class User(AbstractUser):
     def increment_failed_login_attempts(self) -> None:
         """Increment failed login attempts and apply progressive lockout.
 
+        Design: Lockout starts on FIRST failed attempt (no threshold).
+        This is intentional — progressive delays (5->15->30->60->120->240 min)
+        make brute-force impractical while keeping the implementation simple.
+        Combined with rate limiting (10/min per IP, 5/min per email), this
+        provides defense-in-depth.
+
+        The deprecated MAX_LOGIN_ATTEMPTS constant in constants.py is NOT used.
+        To adjust lockout behavior, modify lockout_delays below.
+
         Uses F() expression for atomic increment to prevent lost updates
         under concurrent requests.
         """
@@ -245,6 +254,12 @@ class User(AbstractUser):
         )
         # Refresh to get the actual DB value for lockout delay calculation
         self.refresh_from_db(fields=["failed_login_attempts"])
+
+        # Configurable threshold: how many failed attempts before lockout kicks in
+        threshold = getattr(settings, "ACCOUNT_LOCKOUT_THRESHOLD", 1)
+        if self.failed_login_attempts < threshold:
+            self.save(update_fields=["failed_login_attempts"])
+            return
 
         # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
         lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes

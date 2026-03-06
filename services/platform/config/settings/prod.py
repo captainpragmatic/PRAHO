@@ -107,12 +107,13 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",  # MUST be first
     "apps.common.middleware.RequestIDMiddleware",
-    "apps.common.middleware.PortalServiceHMACMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
+    "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.common.middleware.AuditMiddleware",
@@ -307,8 +308,8 @@ STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 # RATE LIMITING (Production)
 # ===============================================================================
 
-RATELIMIT_ENABLED = True
-RATELIMIT_USE_CACHE = "default"
+RATELIMIT_ENABLE = True  # django-ratelimit library decorators (@ratelimit)
+RATELIMIT_ENABLED = True  # Custom middleware (PortalServiceHMACMiddleware, etc.)
 
 # ===============================================================================
 # OUTBOUND HTTP — INTERNAL SERVICE DOMAINS (Production)

@@ -11,11 +11,9 @@ from typing import Any
 from django.http import HttpRequest, JsonResponse
 from rest_framework.response import Response
 
+from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
-
-# Security configuration constants
-HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +84,8 @@ def validate_hmac_authenticated_request(request: HttpRequest) -> tuple[dict[str,
 
         # Timestamp freshness check (within 5 minutes)
         current_time = int(datetime.now(UTC).timestamp())
-        if not (0 <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
+        # Allow 2s forward skew for NTP jitter between portal and platform clocks.
+        if not (-HMAC_NTP_SKEW_SECONDS <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
             logger.warning(f"🚨 [API Security] Portal {portal_id} stale timestamp in HMAC context")
             return None, _uniform_error_response("Invalid request format", 400)
 
@@ -324,7 +323,8 @@ def validate_portal_service_request(request: HttpRequest) -> tuple[dict[str, Any
             return None, _uniform_error_response("Invalid request format", 400)
 
         current_time = int(datetime.now(UTC).timestamp())
-        if not (0 <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
+        # Allow 2s forward skew for NTP jitter between portal and platform clocks.
+        if not (-HMAC_NTP_SKEW_SECONDS <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
             logger.warning(f"🚨 [API Security] Portal {portal_id} stale timestamp in service request")
             return None, _uniform_error_response("Invalid request format", 400)
 

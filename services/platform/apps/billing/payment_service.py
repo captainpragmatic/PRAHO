@@ -10,19 +10,18 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django.utils import timezone
 
 from apps.common.validators import log_security_event
 from apps.customers.models import (
     Customer,
 )
-from apps.notifications.services import EmailService
 from apps.orders.models import Order
 
 from .currency_models import Currency
 from .gateways import PaymentGatewayFactory
 from .gateways.base import PaymentConfirmResult, PaymentIntentResult, SubscriptionResult
 from .models import Payment
+from .payment_models import TERMINAL_PAYMENT_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +38,9 @@ class PaymentService:
     Provides unified interface for:
     - Payment creation and confirmation
     - Subscription management
-    - Webhook event processing
     - Multiple payment gateway support
+
+    # Stripe webhook handling is in apps.integrations.webhooks.stripe.StripeWebhookProcessor
     """
 
     @staticmethod
@@ -284,8 +284,7 @@ class PaymentService:
                         payment = Payment.objects.select_for_update().get(gateway_txn_id=payment_intent_id)
 
                         # Idempotency guard — skip if already in terminal state
-                        _terminal_statuses = {"succeeded", "refunded", "failed"}
-                        if payment.status in _terminal_statuses:
+                        if payment.status in TERMINAL_PAYMENT_STATUSES:
                             logger.info(
                                 "💰 [PaymentService] confirm_payment: payment %s already in terminal state %s — skipping",
                                 payment.id,
@@ -440,126 +439,6 @@ class PaymentService:
             return SubscriptionResult(
                 success=False, subscription_id=None, status=None, error=f"Subscription creation failed: {e}"
             )
-
-    @staticmethod
-    def handle_webhook_payment(
-        event_type: str, event_data: dict[str, Any], gateway: str = "stripe"
-    ) -> tuple[bool, str]:
-        """
-        Handle webhook payment events
-
-        This method is called by the webhook processor to update payment status.
-
-        Args:
-            event_type: Event type (e.g., 'payment_intent.succeeded')
-            event_data: Event payload
-            gateway: Payment gateway that sent the event
-
-        Returns:
-            (success, message) tuple
-        """
-        try:
-            logger.info(f"🔔 Processing {gateway} webhook: {event_type}")
-
-            if gateway == "stripe" and event_type.startswith("payment_intent."):
-                return PaymentService._handle_stripe_payment_intent(event_type, event_data)
-
-            # Add other gateway handlers here
-
-            return True, f"Unhandled webhook event: {event_type}"
-
-        except Exception as e:
-            logger.error(f"🔥 Error handling webhook payment: {e}")
-            return False, f"Webhook processing error: {e}"
-
-    @staticmethod
-    def _handle_stripe_payment_intent(event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
-        """Handle Stripe payment_intent webhook events"""
-        payment_intent = event_data.get("object", {})
-        payment_intent_id = payment_intent.get("id")
-
-        if not payment_intent_id:
-            return False, "Missing payment intent ID"
-
-        try:
-            payment = Payment.objects.get(gateway_txn_id=payment_intent_id)
-
-            if event_type == "payment_intent.succeeded":
-                # Payment succeeded - update status
-                payment.status = "succeeded"
-                payment.meta.update(
-                    {
-                        "stripe_payment_method": payment_intent.get("payment_method"),
-                        "stripe_amount_received": payment_intent.get("amount_received"),
-                        "succeeded_at": timezone.now().isoformat(),
-                    }
-                )
-                payment.save(update_fields=["status", "meta"])
-
-                logger.info(f"💰 Payment {payment.id} marked as succeeded")
-
-                log_security_event(
-                    "payment_succeeded",
-                    {
-                        "payment_id": str(payment.id),
-                        "amount_received": payment_intent.get("amount_received"),
-                        "gateway": "stripe",
-                        "critical_financial_operation": True,
-                    },
-                )
-
-                # Trigger order completion workflow
-                order_id = (payment.meta or {}).get("order_id")
-                if order_id:
-                    try:
-                        order = Order.objects.get(id=order_id)
-                        if order.status in ("pending", "processing"):
-                            order.status = "completed"
-                            order.save(update_fields=["status"])
-                            logger.info(f"✅ Order {order.order_number} completed after payment")
-                            # Send confirmation email
-                            EmailService.send_invoice_paid(payment.invoice) if payment.invoice else None
-                    except Order.DoesNotExist:
-                        logger.warning(f"⚠️ Order {order_id} not found for payment completion")
-
-                return True, f"Payment {payment.id} succeeded"
-
-            elif event_type == "payment_intent.payment_failed":
-                # Payment failed - update status
-                failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
-
-                payment.status = "failed"
-                payment.meta.update({"stripe_failure_reason": failure_reason, "failed_at": timezone.now().isoformat()})
-                payment.save(update_fields=["status", "meta"])
-
-                logger.warning(f"❌ Payment {payment.id} marked as failed: {failure_reason}")
-
-                log_security_event(
-                    "payment_failed",
-                    {
-                        "payment_id": str(payment.id),
-                        "failure_reason": failure_reason,
-                        "gateway": "stripe",
-                        "critical_financial_operation": True,
-                    },
-                )
-
-                # Trigger dunning process for the invoice
-                if payment.invoice:
-                    from apps.billing.tasks import (  # noqa: PLC0415
-                        start_dunning_process_async,
-                    )
-
-                    start_dunning_process_async(str(payment.invoice.id))
-                    logger.info(f"⚠️ [Dunning] Triggered for invoice {payment.invoice.number}")
-
-                return True, f"Payment {payment.id} failed: {failure_reason}"
-
-            return True, f"Handled payment_intent event: {event_type}"
-
-        except Payment.DoesNotExist:
-            logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {payment_intent_id}")
-            return True, f"Payment not found (external): {payment_intent_id}"
 
     @staticmethod
     def get_available_payment_methods(customer_id: str | None = None) -> list[dict[str, Any]]:

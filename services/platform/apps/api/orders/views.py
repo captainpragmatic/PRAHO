@@ -867,12 +867,16 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 },
             )
 
-            # Trigger service provisioning for each order item
-            provisioning_results = [
-                _provision_confirmed_order_item(item, customer, order)
+            # Collect provisionable items inside the atomic block, but dispatch outside
+            provisionable_items = [
+                item
                 for item in order.items.all()
                 if item.product.product_type in {"shared_hosting", "vps", "dedicated_server"}
             ]
+
+        # Trigger service provisioning AFTER the transaction commits
+        # to avoid dispatching work that references uncommitted data.
+        provisioning_results = [_provision_confirmed_order_item(item, customer, order) for item in provisionable_items]
 
         return Response(
             {
