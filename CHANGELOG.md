@@ -7,11 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Token identity endpoint** (`GET /api/users/token/me/`) — correct token-auth introspection endpoint; the existing `verify_token` at `/api/users/token/verify/` requires HMAC customer context (portal-only) and returns 401 for CLI/API consumers; the new endpoint uses `TokenAuthentication` only, returns `email`, `staff_role`, and `token_created`; 3 tests added
+- **ADR-0030**: documents full state of API token authentication, 8 explicit gaps (no expiry, plaintext storage, one-token-per-user, broken verify endpoint), and rationale for `token_info` gap-1 fix
+
 ### Fixed
 
 - fix(security): wire account lockout into `portal_login_api` (#53) — closes the same brute-force gap found in `obtain_token`; checks `is_account_locked()`, increments `failed_login_attempts` on failure, resets on success, uses PII-safe structured logging
   - 4 regression tests added in `PortalLoginAPILockoutTests`
   - `AUTHENTICATION.md` updated to document lockout enforcement across all credential endpoints
+- fix(security): harden 9 real vulnerabilities from security audit (confirmed by dual Claude+Codex adversarial review; 33 regression tests + 8 new security linter patterns)
+  - **Critical** — token revocation self-revocation pattern: `DELETE /api/users/token/revoke/` now uses `TokenAuthentication` + `request.auth`; no ownership check needed (#60)
+  - **Critical** — payment success webhook: HMAC-SHA256 + timestamp + 5-minute replay window using dedicated `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` (#49)
+  - **High** — `obtain_token` account lockout: wire `is_account_locked()` and `increment_failed_login_attempts()`; uniform 401 prevents user enumeration (#53)
+  - **High** — auth failure log masking: `_mask_email()` for PII and control-character sanitization to prevent log injection (#54)
+  - **High** — IP extraction: `request_ip.py` rewritten using `django-ipware` with `TRUSTED_PROXY_LIST`; Cloudflare-aware CF-Ray guard; all 4 extraction locations fixed in both platform and portal (#51, #69)
+  - **High** — rate limiting bypass: replace `os.environ RATELIMIT_ENABLE` with `settings.RATELIMIT_ENABLED` in both platform and portal middleware (#68)
+  - **High** — Terraform firewall: `firewall_ssh_sources` and `firewall_webmin_sources` default `[]` with validation block across all 5 provider modules (#41)
+  - **Medium** — insecure HTTP startup warning: loud `WARNING` when `PLATFORM_API_ALLOW_INSECURE_HTTP` is active in production settings (#52)
+  - **Nuanced** — HMAC exempt path check: uses `frozenset` exact match instead of `startswith` to eliminate future footgun (#61)
+  - **Nuanced** — `Payment.confirm_payment()`: adds `select_for_update`, unique constraint on `gateway_txn_id`, and row lock in `confirm_order` to prevent double-charge race (#50)
+  - **Bonus** — `PortalServiceHMACMiddleware` added to prod and staging middleware stacks (was missing entirely)
+- fix(security): harden HMAC webhook authentication — int timestamps replace floats; future timestamps rejected via `0 <= (now - ts) <= window` (prevents preplay); 64-char hex signature format pre-filter; per-process replay deduplication via `cache.add()`; startup validation for `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` in both platform and portal prod settings; 8 new webhook tests + 12 structural integration tests
+- fix(billing): migration 0017 — add `RunPython` step to convert `gateway_txn_id=""` → `NULL` before applying the unique constraint; PostgreSQL treats each NULL as distinct so multiple empty strings would fail the migration on production
+- fix(settings): rename `RATELIMIT_ENABLE` → `RATELIMIT_ENABLED` in `e2e.py`, `prod.py`, and `staging.py` to match the key read by middleware; E2E tests were silently not disabling rate limiting due to this mismatch
+- fix(billing): portal webhook signing in `_send_portal_webhook` — compute HMAC-SHA256 of `(ts + "." + body)` and send `X-Platform-Signature` + `X-Platform-Timestamp` headers; without these, every payment success notification was rejected with 401
+
+### Tests
+
+- 2 regression tests for token revocation: `test_revoke_token_post_rejected_with_405` (guards against silent reintroduction of POST pattern) and `test_revoke_token_uses_header_token_not_body` (proves body payload is ignored; revokes only the authenticated user's token)
+- 11 new platform unit tests (`test_api_users_security.py`), 8 new portal unit tests (`test_portal_security.py`), 14 new structural integration tests (`test_security_hardening.py`)
+- 8 new security scanner patterns in `security_scanner.py`
+
+### Docs
+
+- `AUTHENTICATION.md` updated: correct `obtain_token` response (removed stale `is_staff` field), fix revoke verb `POST → DELETE`, replace fictional portal JS token-auth code with accurate description of HMAC-signed `api_client` flow; consumer→method table covering all 4 auth paths
+- `AUTHENTICATION.md` dual HMAC architecture section added, `DEPLOYMENT.md` env var tables updated, `SECURITY_CONFIGURATION.md` and `ARCHITECTURE.md` updated with data-flow diagram
 
 ---
 
