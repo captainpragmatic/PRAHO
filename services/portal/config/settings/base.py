@@ -171,7 +171,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # 🔒 SECURITY: No fallback secrets in base config - must be set in environment
 # Production settings will enforce this with proper error messages
-SECRET_KEY = os.environ.get("SECRET_KEY")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 

@@ -29,7 +29,7 @@ on:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
-  SECRET_KEY: test-secret-key-for-integration
+  DJANGO_SECRET_KEY: test-secret-key-for-integration
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux

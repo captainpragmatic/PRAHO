@@ -23,7 +23,7 @@ from .base import *  # noqa: F403  # Django settings pattern
 # ===============================================================================
 
 # Validate critical secrets — fail hard if missing or insecure
-validate_production_secret_key()
+validate_production_secret_key(SECRET_KEY)
 
 _db_password = os.environ.get("DB_PASSWORD", "")
 if not _db_password or _db_password in {"changeme", "development_password", "password", "postgres"}:

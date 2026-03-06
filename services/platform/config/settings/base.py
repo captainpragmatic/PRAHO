@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from django.core.exceptions import ImproperlyConfigured
+
 # ===============================================================================
 # CORE DJANGO SETTINGS
 # ===============================================================================
@@ -409,13 +411,42 @@ if not SECRET_KEY:
     SECRET_KEY = "django-insecure-dev-key-only-change-in-production-or-tests"  # Not a real secret: fallback for development only  # noqa: S105  # Not a real secret: config key name
 
 
-# Validate SECRET_KEY security in production (checked in prod.py)
-def validate_production_secret_key() -> None:
-    """Validate SECRET_KEY meets production security requirements"""
-    if SECRET_KEY and SECRET_KEY.startswith("django-insecure-"):
-        raise ValueError(
-            "🔥 CRITICAL SECURITY ERROR: Cannot use insecure SECRET_KEY in production! "
-            "Generate a secure key: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
+# Validate SECRET_KEY security in production (checked in prod.py and staging.py)
+MIN_SECRET_KEY_LENGTH = 50
+
+
+def validate_production_secret_key(secret_key: str | None) -> None:
+    """Validate that SECRET_KEY is safe for production use."""
+    secret_key = secret_key.strip() if secret_key else ""
+
+    if not secret_key:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable is required")
+
+    if len(secret_key) < MIN_SECRET_KEY_LENGTH:
+        raise ImproperlyConfigured(
+            f"DJANGO_SECRET_KEY is too short ({len(secret_key)} chars). "
+            "Use at least 50 characters: openssl rand -base64 50"
+        )
+
+    insecure_prefixes = [
+        "django-insecure-",
+        "dev-secret-key-",
+        "dev-portal-key-",
+        "test-secret-key-",
+    ]
+    insecure_values = ["changeme", "secret", "password"]
+
+    key_lower = secret_key.lower()
+    for prefix in insecure_prefixes:
+        if key_lower.startswith(prefix):
+            raise ImproperlyConfigured(
+                f"DJANGO_SECRET_KEY starts with insecure prefix '{prefix}'. "
+                "Generate a secure key: openssl rand -base64 50"
+            )
+
+    if key_lower in insecure_values:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY is a well-known insecure value. Generate a secure key: openssl rand -base64 50"
         )
 
 

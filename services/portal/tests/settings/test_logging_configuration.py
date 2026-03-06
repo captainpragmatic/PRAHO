@@ -15,7 +15,7 @@ import pytest
 
 # Prod/staging settings require these env vars at import time.
 _PROD_ENV = {
-    "SECRET_KEY": "test-secret-key-for-logging-config-tests-only-not-real",
+    "DJANGO_SECRET_KEY": "logging-config-tests-only-key-xxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "PLATFORM_API_SECRET": "dGVzdC1zZWNyZXQtZm9yLWxvZ2dpbmctY29uZmlnLXRlc3Rz",
     "PLATFORM_API_ALLOW_INSECURE_HTTP": "true",
     "ALLOWED_HOSTS": "portal.pragmatichost.com",

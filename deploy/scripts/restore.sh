@@ -107,7 +107,7 @@ restore_backup() {
     sleep 15
 
     # Verify
-    if curl -sf http://localhost:8700/health/ > /dev/null; then
+    if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
         log_success "Restore completed successfully!"
     else
         log_warn "Services may not be fully healthy. Check with: docker compose logs"

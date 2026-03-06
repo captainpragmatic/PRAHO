@@ -261,7 +261,7 @@
       value=$(echo "$value" | xargs)
     done < "{{ env_file_path }}"
     # Check critical vars
-    for var in SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
+    for var in DJANGO_SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
       val=$(grep "^${var}=" "{{ env_file_path }}" | head -1 | cut -d'=' -f2-)
       if [ -z "$val" ]; then missing="$missing $var"; fi
     done
@@ -304,8 +304,7 @@
       DB_HOST: "{{ deployed_env.DB_HOST | default('localhost') }}"
       DB_PORT: "{{ deployed_env.DB_PORT | default('5432') }}"
       DB_SSLMODE: "{{ deployed_env.DB_SSLMODE | default('disable') }}"
-      DJANGO_SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
-      SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
       HMAC_SECRET: "{{ deployed_env.HMAC_SECRET | default('') }}"
       PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/static"
@@ -348,7 +347,7 @@
   environment:
     PYTHONPATH: "{{ project_root }}/src/services/portal"
     DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-    SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+    DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
     ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
     PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
     PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"

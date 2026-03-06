@@ -87,7 +87,7 @@ rollback_version() {
     sleep 30
 
     # Verify
-    if curl -sf http://localhost:8700/health/ > /dev/null; then
+    if curl -sf http://localhost:8700/api/users/health/ > /dev/null; then
         log_success "Rollback to ${VERSION} completed successfully!"
     else
         log_error "Services are not healthy. Check logs: docker compose logs"

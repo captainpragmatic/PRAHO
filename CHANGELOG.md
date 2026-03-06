@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+
+- **SECRET_KEY env var mismatch** (#19) — Standardized on `DJANGO_SECRET_KEY` as canonical env var name across portal/platform settings, Docker Compose, CI workflows, Ansible templates, and env examples
+- **DATABASE_URL vs DB_* mismatch** (#23) — Replaced unused `DATABASE_URL` with individual `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` vars in all compose files to match what Django actually reads
+- **Healthcheck URLs in deploy.sh** (#27) — Platform: `/health/` → `/api/users/health/`; Portal: `/health/` → `/status/`
+- **No resource limits in Docker Compose** (#38) — Added `deploy.resources` (CPU/memory limits and reservations) to all production compose files
+- **uv base image tag not pinned** (#43) — Pinned from `:latest` to `:0.8.13` in both Dockerfiles
+
+### Changed
+
+- **`validate_production_secret_key()`** now accepts `secret_key` as parameter, enforces 50-char minimum, strips whitespace, and has expanded blocklist (`django-insecure-*`, `dev-secret-key-*`, `dev-portal-key-*`, `test-secret-key-*`, `changeme`, `secret`, `password`)
+- **Portal `HMACPriceSealer`** no longer falls back to `"insecure-fallback-key"` — raises `ImproperlyConfigured` if `SECRET_KEY` is not set
+- **Docker Compose secret vars** changed from `:-` (weak default) to `:?` (required/fail-fast) in production files
+
+### Added
+
+- 14 test cases for secret key resolution and production validation (`test_secret_key_resolution.py`)
 
 ---
 
