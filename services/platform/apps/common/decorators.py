@@ -15,6 +15,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpRe
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -257,9 +258,7 @@ def rate_limit(
                 identifier = f"user {request.user.email}"
             else:
                 # Rate limit per IP address
-                client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
-                if not client_ip:
-                    client_ip = request.META.get("REMOTE_ADDR", "unknown")
+                client_ip = get_safe_client_ip(request)
                 rate_key = f"rate_limit_ip_{client_ip}_{view_func.__name__}"
                 identifier = f"IP {client_ip}"
 

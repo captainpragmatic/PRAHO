@@ -253,7 +253,11 @@ class RateLimitingSecurityTest(TestCase):
         # Enable rate limiting for these specific security tests
         from django.conf import settings
         cls._original_ratelimit_enable = getattr(settings, 'RATELIMIT_ENABLE', False)
+        cls._original_ratelimit_enabled = getattr(settings, 'RATELIMIT_ENABLED', False)
+        # RATELIMIT_ENABLE: controls django-ratelimit library decorators (@ratelimit)
+        # RATELIMIT_ENABLED: controls our custom middleware rate limiting
         settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_ENABLED = True
 
     @classmethod
     def tearDownClass(cls):
@@ -261,6 +265,7 @@ class RateLimitingSecurityTest(TestCase):
         # Restore original rate limiting setting after tests
         from django.conf import settings
         settings.RATELIMIT_ENABLE = cls._original_ratelimit_enable
+        settings.RATELIMIT_ENABLED = cls._original_ratelimit_enabled
 
     def setUp(self):
         self.customer = Customer.objects.create(

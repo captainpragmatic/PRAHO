@@ -36,11 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(settings): rename `RATELIMIT_ENABLE` → `RATELIMIT_ENABLED` in `e2e.py`, `prod.py`, and `staging.py` to match the key read by middleware; E2E tests were silently not disabling rate limiting due to this mismatch
 - fix(billing): portal webhook signing in `_send_portal_webhook` — compute HMAC-SHA256 of `(ts + "." + body)` and send `X-Platform-Signature` + `X-Platform-Timestamp` headers; without these, every payment success notification was rejected with 401
 
+- fix(security): `PortalServiceHMACMiddleware` — batch hardening (no new dependencies)
+  - **Removed `PortalServiceAuthMiddleware`** dead code — weak shared-secret auth with no replay protection; regression test `test_legacy_auth_middleware_removed` added to prevent re-introduction
+  - **Removed body timestamp cross-check** — redundant JSON parse that blocked non-JSON bodies; `body_hash` in the canonical string already cryptographically covers any payload timestamp; comment documents this invariant
+  - **Rate limiting moved after HMAC validation** — previously keyed on the unverified `HTTP_X_PORTAL_ID` header (attacker-controlled); now post-validation, keyed on `request._portal_id` (verified); prevents DoS quota exhaustion via forged portal IDs
+- fix(security): replace `SessionValidationThrottle(BaseThrottle)` with DRF's `ScopedRateThrottle` — custom implementation used non-atomic `cache.get()` + `cache.set()` TOCTOU pattern; replaced with `ScopedRateThrottle(scope="session_validation")` using `DEFAULT_THROTTLE_RATES`; zero custom cache logic; rate configurable in settings
+- fix(security): replace direct `REMOTE_ADDR` with `get_safe_client_ip()` at all remaining callsites — `REMOTE_ADDR` is always the immediate TCP peer (the proxy in production); audit logs, rate-limit keys, and security logs recorded the proxy IP instead of the real client; fixed in `audit/signals.py`, `api/customers/views.py`, `api/customers/serializers.py`, `api/users/views.py` (×2), `common/decorators.py` (platform + portal)
+- fix(security): add scanner pattern for direct `REMOTE_ADDR` access in `security_scanner.py` — pattern #9 flags `request.META.get("REMOTE_ADDR")` / `request.META["REMOTE_ADDR"]` outside `request_ip.py`; severity MEDIUM; OWASP A09:2021
+- fix(settings): `PLATFORM_TO_PORTAL_WEBHOOK_SECRET` in `portal/config/settings/staging.py` — changed from hard fail (`ValueError`) to optional (`WARNING` log); staging rarely tests the end-to-end payment confirmation flow; comment clarifies this is NOT the Stripe webhook secret — it signs Platform→Portal internal calls only
+
 ### Tests
 
 - 2 regression tests for token revocation: `test_revoke_token_post_rejected_with_405` (guards against silent reintroduction of POST pattern) and `test_revoke_token_uses_header_token_not_body` (proves body payload is ignored; revokes only the authenticated user's token)
 - 11 new platform unit tests (`test_api_users_security.py`), 8 new portal unit tests (`test_portal_security.py`), 14 new structural integration tests (`test_security_hardening.py`)
 - 8 new security scanner patterns in `security_scanner.py`
+- 7 HMAC middleware tests (`test_hmac_middleware.py`) — added `test_legacy_auth_middleware_removed` (regression guard against `PortalServiceAuthMiddleware` re-introduction), `test_non_json_body_passes_hmac_validation` (proves non-JSON passes after removing cross-check), `test_stale_timestamp_rejected`; fixed all test nonces to meet `HMAC_NONCE_MIN_LENGTH = 32`; fixed float timestamps → int; added `LOCMEM_TEST_CACHE` override to nonce-replay and rate-limit tests (default `DummyCache` silently no-ops `cache.add`/`cache.incr`)
 
 ### Docs
 

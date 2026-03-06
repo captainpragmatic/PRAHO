@@ -12,6 +12,7 @@ from django.db.models.signals import post_save, pre_delete
 from django.dispatch import Signal, receiver
 from django.http import HttpRequest
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import CustomerMembership, User, UserProfile
 
 from .services import AuditContext, AuditEventData, AuditService
@@ -75,11 +76,7 @@ def _get_audit_context_from_request(request: HttpRequest | None, user: User | No
     if not request:
         return AuditContext(user=user)
 
-    # Extract client IP
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    ip_address = (
-        x_forwarded_for.split(",")[0].strip() if x_forwarded_for else request.META.get("REMOTE_ADDR", "127.0.0.1")
-    )
+    ip_address = get_safe_client_ip(request)
 
     return AuditContext(
         user=user or getattr(request, "user", None),

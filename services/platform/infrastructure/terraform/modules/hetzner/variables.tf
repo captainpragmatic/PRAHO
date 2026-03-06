@@ -94,6 +94,11 @@ variable "firewall_ssh_sources" {
     condition     = length(var.firewall_ssh_sources) > 0
     error_message = "firewall_ssh_sources must contain at least one CIDR. Set your office/VPN IP range."
   }
+
+  validation {
+    condition     = !contains(var.firewall_ssh_sources, "0.0.0.0/0") && !contains(var.firewall_ssh_sources, "::/0")
+    error_message = "firewall_ssh_sources must not contain 0.0.0.0/0 or ::/0 (world-open). Use specific CIDRs for your office/VPN."
+  }
 }
 
 variable "firewall_webmin_sources" {

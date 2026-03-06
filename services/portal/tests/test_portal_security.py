@@ -302,8 +302,8 @@ class GetSafeClientIpTests(SimpleTestCase):
     def test_get_safe_client_ip_trusts_xff_from_trusted_proxy(self) -> None:
         """When REMOTE_ADDR is within TRUSTED_PROXY_LIST, X-Forwarded-For is trusted.
 
-        The implementation uses its own CIDR validation (_is_trusted_proxy) and extracts
-        the leftmost XFF entry when the direct connection comes from a trusted CIDR range.
+        The implementation uses rightmost-trusted-hop: it walks XFF from right to left,
+        skipping IPs in TRUSTED_PROXY_LIST, and returns the first non-trusted IP.
         """
         # 10.0.0.1 falls inside 10.0.0.0/8, so XFF should be trusted
         request = self._make_request(
@@ -349,3 +349,43 @@ class GetSafeClientIpTests(SimpleTestCase):
             "5.5.5.5",
             msg="CF-Connecting-IP must NOT be trusted when CF-Ray header is absent",
         )
+
+    @override_settings(TRUSTED_PROXY_LIST=["10.0.0.0/8"])
+    def test_get_safe_client_ip_rejects_attacker_injected_leftmost_xff(self) -> None:
+        """Attacker-injected leftmost XFF entry must NOT be returned.
+
+        When an attacker sends: X-Forwarded-For: <spoofed>, <real-client>
+        and the proxy appends the real client, a leftmost-trust parser would
+        return <spoofed>. The rightmost-trusted-hop model correctly returns <real-client>.
+        """
+        # Attacker injects "6.6.6.6" as leftmost; real client is "203.0.113.50"
+        request = self._make_request(
+            remote_addr="10.0.0.1",
+            HTTP_X_FORWARDED_FOR="6.6.6.6, 203.0.113.50",
+        )
+
+        result = get_safe_client_ip(cast(HttpRequest, request))
+
+        self.assertEqual(
+            result,
+            "203.0.113.50",
+            msg="Must return rightmost non-trusted IP, not attacker-injected leftmost",
+        )
+
+    @override_settings(TRUSTED_PROXY_LIST=["10.0.0.0/8", "172.16.0.0/12"])
+    def test_get_safe_client_ip_multi_hop_skips_all_trusted_proxies(self) -> None:
+        """Multi-hop XFF with multiple trusted proxies returns the real client.
+
+        Chain: client → LB (172.16.1.1) → app-proxy (10.0.0.5) → app
+        XFF: "198.51.100.42, 172.16.1.1"  (LB appends its own IP)
+        REMOTE_ADDR: 10.0.0.5
+        Both 172.16.1.1 and 10.0.0.5 are trusted; result must be 198.51.100.42.
+        """
+        request = self._make_request(
+            remote_addr="10.0.0.5",
+            HTTP_X_FORWARDED_FOR="198.51.100.42, 172.16.1.1",
+        )
+
+        result = get_safe_client_ip(cast(HttpRequest, request))
+
+        self.assertEqual(result, "198.51.100.42")

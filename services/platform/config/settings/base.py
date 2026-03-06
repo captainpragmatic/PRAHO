@@ -351,6 +351,7 @@ REST_FRAMEWORK = {
         "order_calculate": "30/min",  # Cart calculations (less expensive)
         "order_list": "100/min",  # Order listing (read operations)
         "product_catalog": "200/min",  # Product browsing (public-ish)
+        "session_validation": "60/min",  # Portal→platform session checks (per portal)
     },
 }
 
@@ -524,7 +525,11 @@ RATELIMIT_KEY = "apps.users.ratelimit_keys.user_or_ip"
 RATELIMIT_USE_CACHE = "default"
 
 # Enable rate limiting (can be disabled in development)
+# RATELIMIT_ENABLE: used by django-ratelimit library decorators
+# RATELIMIT_ENABLED: used by our custom middleware (PortalServiceHMACMiddleware, etc.)
+# Both must stay in sync — custom code should read RATELIMIT_ENABLED.
 RATELIMIT_ENABLE = True
+RATELIMIT_ENABLED = True
 
 # ===============================================================================
 # DJANGO-Q2 ASYNC TASK PROCESSING 🚀

@@ -56,12 +56,35 @@ if not PLATFORM_API_SECRET:
     )
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "20"))
 
+# PRAHO-internal webhook secret: Platform → Portal notification after a payment succeeds.
+# This is NOT the Stripe webhook secret — it signs platform-to-portal HTTP calls only.
+# Required only when testing the payment confirmation flow end-to-end in staging.
+# If unset, payment webhooks are silently rejected (401) without breaking other features.
+PLATFORM_TO_PORTAL_WEBHOOK_SECRET = os.environ.get("PLATFORM_TO_PORTAL_WEBHOOK_SECRET", "")
+if not PLATFORM_TO_PORTAL_WEBHOOK_SECRET:
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "PLATFORM_TO_PORTAL_WEBHOOK_SECRET is not set in staging. "
+        "Payment webhook notifications from Platform will be rejected (401). "
+        "Set it only if testing the payment confirmation flow end-to-end. "
+        'Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
 # Allow HTTP for internal Platform communication (native deploys use localhost)
 PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_HTTP", "False").lower() in {
     "1",
     "true",
     "yes",
 }
+if PLATFORM_API_ALLOW_INSECURE_HTTP:
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "SECURITY WARNING: PLATFORM_API_ALLOW_INSECURE_HTTP is ACTIVE in staging. "
+        "Ensure PLATFORM_API_BASE_URL=%s is on an internal/private network only.",
+        PLATFORM_API_BASE_URL,
+    )
 
 # Security settings (less strict than production for testing)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # Caddy terminates TLS

@@ -10,7 +10,6 @@ from typing import Any, cast
 
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.core.cache import cache
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
@@ -21,11 +20,11 @@ from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle, BaseThrottle
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 
 from apps.api.secure_auth import require_customer_authentication, require_user_authentication
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
-from apps.settings.services import SettingsService
 from apps.users.forms import UserRegistrationForm
 from apps.users.models import CustomerMembership, User, UserProfile
 from apps.users.services import SessionSecurityService
@@ -37,18 +36,6 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
 )
-
-# Rate limiting and security constants
-_DEFAULT_SESSION_VALIDATION_RATE_LIMIT = 60  # requests per minute
-SESSION_VALIDATION_RATE_LIMIT = _DEFAULT_SESSION_VALIDATION_RATE_LIMIT
-
-
-def get_session_validation_rate_limit() -> int:
-    """Get session validation rate limit from SettingsService (runtime)."""
-    return SettingsService.get_integer_setting(
-        "security.session_validation_rate_limit", _DEFAULT_SESSION_VALIDATION_RATE_LIMIT
-    )
-
 
 HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 
@@ -91,7 +78,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
         if not email or not password:
             return JsonResponse({"success": False, "error": "Email and password are required"}, status=400)
 
-        client_ip = request.META.get("REMOTE_ADDR", "unknown")
+        client_ip = get_safe_client_ip(request)
 
         # Authenticate user.
         # Timing: Argon2 hashing dominates (~100-200ms); DB writes add <5ms.
@@ -360,24 +347,16 @@ def verify_token(request: HttpRequest, customer: Customer) -> Response:
 # ===============================================================================
 
 
-class SessionValidationThrottle(BaseThrottle):
-    """Custom throttle for session validation - prevent brute force (60/min per portal)"""
+class SessionValidationThrottle(ScopedRateThrottle):
+    """DRF scoped throttle for session validation — rate defined in DEFAULT_THROTTLE_RATES["session_validation"]."""
+
+    scope = "session_validation"
 
     def allow_request(self, request: HttpRequest, view: Any) -> bool:
-        # Skip throttling when rate limiting is disabled (tests, dev with RATELIMIT_ENABLE=false)
+        # Skip throttling in test/dev environments (RATELIMIT_ENABLED=False)
         if not getattr(settings, "RATELIMIT_ENABLED", True):
             return True
-
-        portal_id = request.headers.get("X-Portal-Id", "unknown")
-        cache_key = f"session_validation_throttle:{portal_id}"
-
-        current_count = cache.get(cache_key, 0)
-        if current_count >= SESSION_VALIDATION_RATE_LIMIT:
-            logger.warning(f"🚨 [Security] Portal {portal_id} rate limited for session validation")
-            return False
-
-        cache.set(cache_key, current_count + 1, 60)
-        return True
+        return super().allow_request(request, view)
 
 
 @never_cache  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint

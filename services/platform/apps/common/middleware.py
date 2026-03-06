@@ -288,75 +288,6 @@ class GDPRComplianceMiddleware:
 
 
 # ===============================================================================
-# PORTAL SERVICE AUTHENTICATION MIDDLEWARE
-# ===============================================================================
-
-
-class PortalServiceAuthMiddleware:
-    """
-    🔐 Authentication middleware for portal service API requests.
-
-    Validates shared secret and sets up user context for API endpoints.
-    Only applies to /api/ endpoints.
-    """
-
-    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest) -> HttpResponse:
-        # Only process API requests
-        if request.path.startswith("/api/"):
-            # Check for service authentication header
-            service_auth = request.META.get("HTTP_X_SERVICE_AUTH")
-
-            if not service_auth:
-                return HttpResponse(
-                    json.dumps({"error": "Service authentication required"}),
-                    status=401,
-                    content_type="application/json",
-                )
-
-            # Validate shared secret
-            expected_secret = getattr(settings, "PLATFORM_API_SECRET", None)
-            if not expected_secret or service_auth != expected_secret:
-                logger.warning(f"🔥 [Portal Auth] Invalid service auth from {get_safe_client_ip(request)}")
-                return HttpResponse(
-                    json.dumps({"error": "Invalid service authentication"}), status=403, content_type="application/json"
-                )
-
-            # Extract user context from portal service
-            user_id = request.META.get("HTTP_X_USER_ID")
-            if user_id:
-                try:
-                    user_id = int(user_id)
-                    # Get user from database
-                    user = User.objects.get(id=user_id)
-                    # Set user context for API request (don't actually log them in)
-                    request.user = user
-                    request._portal_authenticated = True  # Mark as portal-authenticated
-
-                    logger.debug(f"✅ [Portal Auth] User context set for API request: {user.email}")
-
-                except (ValueError, User.DoesNotExist):
-                    logger.warning(f"🔥 [Portal Auth] Invalid user ID in API request: {user_id}")
-                    return HttpResponse(
-                        json.dumps({"error": "Invalid user context"}), status=400, content_type="application/json"
-                    )
-
-            # Log successful portal service authentication
-            logger.info(f"✅ [Portal Auth] API request authenticated from {get_safe_client_ip(request)}")
-
-        response = self.get_response(request)
-
-        # Add service identification header
-        if request.path.startswith("/api/"):
-            response["X-Service"] = "platform"
-            response["X-Portal-Auth"] = "verified" if hasattr(request, "_portal_authenticated") else "none"
-
-        return response
-
-
-# ===============================================================================
 # PORTAL SERVICE HMAC AUTHENTICATION MIDDLEWARE
 # ===============================================================================
 
@@ -494,10 +425,10 @@ class PortalServiceHMACMiddleware:
                         method,
                         normalized_path,
                         content_type_main,
-                        body_hash,
+                        body_hash,  # body_hash cryptographically covers any timestamp embedded in the body
                         portal_id,
                         nonce,
-                        timestamp,
+                        timestamp,  # authoritative timestamp; body hash makes a separate body check redundant
                     ]
                 )
 
@@ -508,16 +439,6 @@ class PortalServiceHMACMiddleware:
                 ).hexdigest()
                 if not hmac.compare_digest(signature, expected_signature_new):
                     error_msg = "HMAC signature verification failed"
-
-            # Enforce timestamp consistency between header and signed body
-            if not error_msg:
-                try:
-                    body_json = json.loads(request_body.decode("utf-8") or "{}")
-                    body_ts = body_json.get("timestamp")
-                    if body_ts is None or str(body_ts) != str(timestamp):
-                        error_msg = "Timestamp mismatch between body and headers"
-                except Exception:
-                    error_msg = "Invalid JSON body for timestamp validation"
 
             if not error_msg:
                 return True, ""
@@ -539,17 +460,11 @@ class PortalServiceHMACMiddleware:
                 logger.debug("🔓 [HMAC Auth] Skipping HMAC validation for auth endpoint: %s", request.path)
                 return self.get_response(request)
 
-            # Global rate limiting keyed by portal and IP
-            portal_id_for_rl = request.META.get("HTTP_X_PORTAL_ID", "unknown")
             client_ip = get_safe_client_ip(request)
             rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
-            if rate_limit_enabled and self._rate_limited(portal_id_for_rl, client_ip):
-                logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={portal_id_for_rl} ip={client_ip}")
-                return HttpResponse(
-                    json.dumps({"error": "Too Many Requests"}), status=429, content_type="application/json"
-                )
 
-            # Validate HMAC signature
+            # Validate HMAC signature first so rate limiting uses the verified portal_id,
+            # not an attacker-controlled header value.
             is_valid, error_msg = self._validate_hmac_signature(request)
 
             if not is_valid:
@@ -570,23 +485,24 @@ class PortalServiceHMACMiddleware:
                     )
                     return self.get_response(request)
 
-                logger.warning(f"🔥 [HMAC Auth] Authentication failed from {get_safe_client_ip(request)}: {error_msg}")
+                logger.warning(f"🔥 [HMAC Auth] Authentication failed from {client_ip}: {error_msg}")
                 return HttpResponse(
                     json.dumps({"error": "HMAC authentication failed"}), status=401, content_type="application/json"
                 )
 
-            # Mark as portal-authenticated after successful HMAC validation
+            # Mark as portal-authenticated after successful HMAC validation.
+            # Identity comes from signed body in API layer; X-User-Id header is ignored.
             request._portal_authenticated = True
-
-            # Identity now comes from signed body in API layer; ignore any X-User-Id header
-
-            # Mark portal ID for logging
             request._portal_id = request.META.get("HTTP_X_PORTAL_ID", "unknown")
 
-            # Log successful portal service authentication
-            logger.info(
-                f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {get_safe_client_ip(request)}"
-            )
+            # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
+            if rate_limit_enabled and self._rate_limited(request._portal_id, client_ip):
+                logger.warning(f"🚨 [HMAC Auth] Rate limit exceeded for portal={request._portal_id} ip={client_ip}")
+                return HttpResponse(
+                    json.dumps({"error": "Too Many Requests"}), status=429, content_type="application/json"
+                )
+
+            logger.info(f"✅ [HMAC Auth] API request authenticated from portal {request._portal_id} at {client_ip}")
 
         response = self.get_response(request)
 

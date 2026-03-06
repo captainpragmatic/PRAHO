@@ -496,6 +496,17 @@ class SecurityScanner:
                 "A05:2021-Security Misconfiguration",
                 "**/*.tf",
             ),
+            # 9. Direct REMOTE_ADDR access outside request_ip.py — use get_safe_client_ip()
+            # request_ip.py is the only legitimate consumer of REMOTE_ADDR; everywhere else
+            # should call get_safe_client_ip() to respect trusted proxy configuration.
+            (
+                r'META(?:\.get\(["\']|(?:\[["\']))REMOTE_ADDR',
+                "Direct REMOTE_ADDR access — use get_safe_client_ip() from apps.common.request_ip "
+                "to respect TRUSTED_PROXY_LIST / IPWARE_TRUSTED_PROXY_LIST configuration",
+                Severity.MEDIUM,
+                "A09:2021-Security Logging and Monitoring Failures",
+                "services/**/*.py",
+            ),
         ]
 
     def generate_finding_id(self) -> str:

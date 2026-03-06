@@ -30,5 +30,6 @@ server_image = "ubuntu-22.04"
 # platform_server_type = "cpx31"
 # portal_server_type = "cpx21"
 
-# Restrict SSH access to specific IPs (optional)
-# firewall_ssh_sources = ["1.2.3.4/32", "5.6.7.8/32"]
+# Restrict SSH access to specific IPs (REQUIRED — terraform plan will fail without this)
+# 0.0.0.0/0 and ::/0 are explicitly blocked. Use your office/VPN CIDR(s).
+firewall_ssh_sources = ["1.2.3.4/32", "5.6.7.8/32"]  # Replace with your actual IPs

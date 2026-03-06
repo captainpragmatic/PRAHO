@@ -106,15 +106,20 @@ class TestSecureIPDetection(TestCase):
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])
     def test_x_forwarded_for_chain(self):
-        """Test X-Forwarded-For header with multiple IPs (proxy chain)."""
+        """Test X-Forwarded-For header with multiple IPs (proxy chain).
+
+        Rightmost-trusted-hop: walk right-to-left, skip trusted IPs, return first untrusted.
+        Chain: 203.0.113.180 → 192.168.1.100 → 10.0.1.5 (trusted proxy, REMOTE_ADDR)
+        10.0.1.5 is trusted (skip), 192.168.1.100 is NOT trusted → return it.
+        """
         self.request.META = {
             'REMOTE_ADDR': '10.0.1.5',  # Trusted proxy
             'HTTP_X_FORWARDED_FOR': '203.0.113.180, 192.168.1.100, 10.0.1.5',
         }
 
         result = get_safe_client_ip(self.request)
-        # Should return first IP in chain (original client)
-        self.assertEqual(result, '203.0.113.180')
+        # Rightmost non-trusted IP in the chain
+        self.assertEqual(result, '192.168.1.100')
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])
     def test_x_real_ip_header(self):
@@ -138,14 +143,18 @@ class TestSecureIPDetection(TestCase):
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=['2001:db8::/32'])
     def test_ipv6_proxy_trust(self):
-        """Test IPv6 proxy trust configuration."""
+        """Test IPv6 proxy trust configuration.
+
+        Client IP must be outside the trusted proxy range to be returned.
+        2001:db8::/32 is the trusted range; client is on a different /32.
+        """
         self.request.META = {
             'REMOTE_ADDR': '2001:db8::5',  # Trusted IPv6 proxy
-            'HTTP_X_FORWARDED_FOR': '2001:db8:85a3::8a2e:370:7334',
+            'HTTP_X_FORWARDED_FOR': '2607:f8b0:4004:800::200e',  # Client outside trusted range
         }
 
         result = get_safe_client_ip(self.request)
-        self.assertEqual(result, '2001:db8:85a3::8a2e:370:7334')
+        self.assertEqual(result, '2607:f8b0:4004:800::200e')
 
     def test_header_parsing_exception_handling(self):
         """Test graceful handling of header parsing exceptions."""
@@ -338,12 +347,15 @@ class TestSecurityScenarios(TestCase):
 
     @override_settings(IPWARE_TRUSTED_PROXY_LIST=['10.0.0.0/8'])
     def test_proxy_chain_handling(self):
-        """Test proper handling of proxy chains."""
+        """Test proper handling of proxy chains.
+
+        Rightmost-trusted-hop: 10.0.1.200 trusted (skip), 192.168.1.50 NOT trusted → return.
+        """
         self.request.META = {
             'REMOTE_ADDR': '10.0.1.200',  # Final proxy (trusted)
             'HTTP_X_FORWARDED_FOR': '203.0.113.100, 192.168.1.50, 10.0.1.200',
         }
 
         ip = get_safe_client_ip(self.request)
-        # Should return the original client IP (first in chain)
-        self.assertEqual(ip, '203.0.113.100')
+        # Rightmost non-trusted IP in the chain
+        self.assertEqual(ip, '192.168.1.50')
