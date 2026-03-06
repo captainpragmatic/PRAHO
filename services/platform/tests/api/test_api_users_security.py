@@ -67,6 +67,46 @@ class TokenRevocationTests(TestCase):
         self.assertIn("message", data)
         self.assertEqual(data["message"], "Token revoked successfully")
 
+    def test_revoke_token_post_rejected_with_405(self) -> None:
+        """POST to revoke endpoint must return 405 — regression guard for the old verb.
+
+        Before #60, the endpoint accepted POST with a body token. Ensuring 405 here
+        prevents accidental reintroduction of the insecure pattern.
+        """
+        token = Token.objects.create(user=self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = self.client.post(self.url, data={"token": token.key}, format="json")
+
+        self.assertEqual(response.status_code, 405)
+        # Token must still exist — the POST must not have deleted anything
+        self.assertTrue(Token.objects.filter(user=self.user).exists())
+
+    def test_revoke_token_uses_header_token_not_body(self) -> None:
+        """Revocation must use request.auth (header token), ignoring any body payload.
+
+        A request authenticated as user_a that includes user_b's token key in the
+        body must only revoke user_a's token.
+        """
+        user_b = User.objects.create_user(
+            email="other@example.com",
+            password="StrongPass123!",
+            first_name="Other",
+            last_name="User",
+        )
+        token_a = Token.objects.create(user=self.user)
+        token_b = Token.objects.create(user=user_b)
+
+        # Authenticate as user_a but include user_b's key in the body
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token_a.key}")
+        response = self.client.delete(self.url, data={"token": token_b.key}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        # user_a's token is gone — the body was ignored
+        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        # user_b's token is untouched
+        self.assertTrue(Token.objects.filter(user=user_b).exists())
+
 
 # ===============================================================================
 # ACCOUNT LOCKOUT TESTS (#53)
