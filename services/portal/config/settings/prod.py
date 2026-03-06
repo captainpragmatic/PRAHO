@@ -49,7 +49,7 @@ if not PORTAL_DOMAIN:
 
 # Platform API configuration
 PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://platform:8700/api")
-PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
+PLATFORM_API_SECRET = (os.environ.get("PLATFORM_API_SECRET") or "").strip()
 # Escape hatch for controlled environments; keep secure-by-default behavior.
 PLATFORM_API_ALLOW_INSECURE_HTTP = os.environ.get("PLATFORM_API_ALLOW_INSECURE_HTTP", "False").lower() in {
     "1",
@@ -124,9 +124,9 @@ CACHES = {
     }
 }
 
-# Stateless portal: use cache-backed sessions (no database migration needed)
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
-SESSION_CACHE_ALIAS = "default"
+# Portal sessions: use Django's signed-cookie backend (no DB, no cache worker affinity)
+# Each cookie is self-contained and HMAC-signed with SECRET_KEY, so any worker can read it.
+SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
 
 # Production logging — structured JSON with request ID tracing
 LOGGING = {

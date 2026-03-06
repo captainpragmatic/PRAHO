@@ -3,6 +3,8 @@
 # PRAHO Platform — Docker Entrypoint
 # =============================================================================
 # Runs on every container start. All setup commands are idempotent.
+# Supports command override: if arguments are passed (e.g., from docker-compose
+# `command:`), they run instead of the default gunicorn.
 set -e
 
 echo "🚀 Running database migrations..."
@@ -16,6 +18,11 @@ python manage.py createcachetable 2>/dev/null || true
 
 echo "🎯 Setting up initial data..."
 python manage.py setup_initial_data
+
+if [ $# -gt 0 ]; then
+    # Command override (used by docker-compose.dev.yml to run runserver)
+    exec "$@"
+fi
 
 echo "✅ Starting Gunicorn..."
 exec gunicorn \

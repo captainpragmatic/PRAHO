@@ -50,6 +50,8 @@ services:
     environment:
       - DEBUG=1
       - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-dev_password_change_in_prod}@db:5432/praho_platform
+      - HMAC_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:-test-webhook-secret-do-not-use-in-prod}
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - PYTHONPATH=/app
