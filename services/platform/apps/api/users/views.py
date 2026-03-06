@@ -77,6 +77,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
     """
     Authentication endpoint for portal service.
     Validates user credentials and returns user data for session creation.
+
+    Rate limiting: No DRF throttle here — PortalServiceHMACMiddleware enforces
+    300 req/min per portal+IP before this view is reached.  Account lockout
+    (below) provides per-account brute-force protection on top of that.
     """
     try:
         # Parse request body
@@ -89,7 +93,10 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
 
         client_ip = request.META.get("REMOTE_ADDR", "unknown")
 
-        # Authenticate user
+        # Authenticate user.
+        # Timing: Argon2 hashing dominates (~100-200ms); DB writes add <5ms.
+        # HMAC middleware rate-limits at 300/min; Portal pads via
+        # PLATFORM_API_AUTH_MIN_DURATION_SECONDS.  Accepted risk.
         user = authenticate(request, username=email, password=password)
 
         if user is None:
@@ -214,7 +221,11 @@ def obtain_token(request: HttpRequest) -> Response:
 
     client_ip = request.META.get("REMOTE_ADDR", "unknown")
 
-    # Authenticate user
+    # Authenticate user.
+    # Timing note: authenticate() runs Argon2 hashing (~100-200ms) which dominates
+    # response time.  The DB writes for lockout increment/reset add <5ms variance.
+    # Combined with AuthThrottle (5/min), statistical timing analysis is impractical.
+    # Portal callers additionally pad via PLATFORM_API_AUTH_MIN_DURATION_SECONDS.
     user = authenticate(request, username=email, password=password)
 
     if user is None:
@@ -354,7 +365,7 @@ class SessionValidationThrottle(BaseThrottle):
 
     def allow_request(self, request: HttpRequest, view: Any) -> bool:
         # Skip throttling when rate limiting is disabled (tests, dev with RATELIMIT_ENABLE=false)
-        if not getattr(settings, "RATELIMIT_ENABLE", True):
+        if not getattr(settings, "RATELIMIT_ENABLED", True):
             return True
 
         portal_id = request.headers.get("X-Portal-Id", "unknown")

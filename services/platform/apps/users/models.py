@@ -228,12 +228,23 @@ class User(AbstractUser):
         return timezone.now() < self.account_locked_until
 
     def increment_failed_login_attempts(self) -> None:
-        """Increment failed login attempts and apply progressive lockout"""
+        """Increment failed login attempts and apply progressive lockout.
+
+        Uses F() expression for atomic increment to prevent lost updates
+        under concurrent requests.
+        """
         # Allow disabling lockout for development/testing
         if getattr(settings, "DISABLE_ACCOUNT_LOCKOUT", False):
             return  # Skip lockout logic completely when disabled
 
-        self.failed_login_attempts += 1
+        # Atomic increment — prevents lost updates under concurrent requests
+        from django.db.models import F  # noqa: PLC0415
+
+        type(self).objects.filter(pk=self.pk).update(
+            failed_login_attempts=F("failed_login_attempts") + 1,
+        )
+        # Refresh to get the actual DB value for lockout delay calculation
+        self.refresh_from_db(fields=["failed_login_attempts"])
 
         # Progressive lockout delays: 5min → 15min → 30min → 1hr → 2hr → 4hr
         lockout_delays = [5, 15, 30, 60, 120, 240]  # minutes
@@ -245,7 +256,7 @@ class User(AbstractUser):
             lockout_minutes = lockout_delays[self.failed_login_attempts - 1]
 
         self.account_locked_until = timezone.now() + timedelta(minutes=lockout_minutes)
-        self.save(update_fields=["failed_login_attempts", "account_locked_until"])
+        self.save(update_fields=["account_locked_until"])
 
     def reset_failed_login_attempts(self) -> None:
         """Reset failed login attempts and unlock account"""

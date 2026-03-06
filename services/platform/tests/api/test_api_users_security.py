@@ -16,7 +16,7 @@ from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from apps.common.middleware import AUTH_EXEMPT_EXACT_PATHS
+from apps.common.middleware import _is_auth_exempt
 
 User = get_user_model()
 
@@ -290,26 +290,27 @@ class HMACExemptPathsExactMatchTests(TestCase):
     def test_hmac_middleware_exempt_paths_exact_match(self) -> None:
         """Path that starts-with but is not an exact match must NOT be exempt."""
         extended_path = "/api/users/register/extra"
-        self.assertNotIn(
-            extended_path,
-            AUTH_EXEMPT_EXACT_PATHS,
+        self.assertFalse(
+            _is_auth_exempt(extended_path),
             msg=(
-                f"{extended_path!r} should NOT be in AUTH_EXEMPT_EXACT_PATHS. "
-                "The exempt set uses exact match to prevent bypass attacks."
+                f"{extended_path!r} should NOT be exempt. "
+                "The exempt check uses exact match (with trailing-slash normalization) to prevent bypass attacks."
             ),
         )
 
     def test_hmac_middleware_exempt_exact_path_is_present(self) -> None:
-        """The canonical exempt path /api/users/register/ must be in the frozenset."""
-        self.assertIn(
-            "/api/users/register/",
-            AUTH_EXEMPT_EXACT_PATHS,
-        )
+        """The canonical exempt path /api/users/register/ must be recognized as exempt."""
+        self.assertTrue(_is_auth_exempt("/api/users/register/"))
+
+    def test_hmac_middleware_exempt_path_without_trailing_slash(self) -> None:
+        """Exempt check normalizes trailing slashes — both forms must match."""
+        self.assertTrue(_is_auth_exempt("/api/users/register"))
+        self.assertTrue(_is_auth_exempt("/api/users/register/"))
 
     def test_hmac_middleware_non_api_path_not_in_exempt(self) -> None:
-        """Non-API paths should not appear in the HMAC exempt set (unrelated paths)."""
-        self.assertNotIn("/users/register/", AUTH_EXEMPT_EXACT_PATHS)
-        self.assertNotIn("/register/", AUTH_EXEMPT_EXACT_PATHS)
+        """Non-API paths should not be exempt from HMAC validation."""
+        self.assertFalse(_is_auth_exempt("/users/register/"))
+        self.assertFalse(_is_auth_exempt("/register/"))
 
 
 # ===============================================================================
@@ -396,3 +397,67 @@ class PortalLoginAPILockoutTests(TestCase):
         self.assertEqual(response.status_code, 401)
         data = response.json()
         self.assertEqual(data.get("error"), "Invalid email or password")
+
+    def test_portal_login_inactive_account_returns_401(self) -> None:
+        """Inactive account must return the same 401 as wrong credentials.
+
+        Attacker must not be able to distinguish inactive from locked or wrong password.
+        """
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        data = response.json()
+        self.assertEqual(data.get("error"), "Invalid email or password")
+
+    def test_portal_login_error_responses_identical(self) -> None:
+        """All failure modes must return byte-identical JSON bodies.
+
+        Prevents distinguishing account state via response body differences.
+        """
+        # Wrong password
+        resp_wrong = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "WRONG"},
+            format="json",
+        )
+
+        # Locked account
+        self.user.refresh_from_db()
+        self.user.account_locked_until = timezone.now() + timedelta(minutes=30)
+        self.user.failed_login_attempts = 1
+        self.user.save()
+        resp_locked = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password},
+            format="json",
+        )
+
+        # Inactive account
+        self.user.account_locked_until = None
+        self.user.failed_login_attempts = 0
+        self.user.is_active = False
+        self.user.save()
+        resp_inactive = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password},
+            format="json",
+        )
+
+        # Nonexistent email
+        resp_nouser = self.client.post(
+            self.url,
+            {"email": "ghost@example.com", "password": "anything"},
+            format="json",
+        )
+
+        # All must be identical status + body
+        bodies = {resp_wrong.content, resp_locked.content, resp_inactive.content, resp_nouser.content}
+        self.assertEqual(len(bodies), 1, f"Response bodies differ: {bodies}")
+        self.assertEqual(resp_wrong.status_code, 401)
