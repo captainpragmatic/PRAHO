@@ -24,12 +24,11 @@ from django.shortcuts import redirect
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.common.constants import HTTP_CLIENT_ERROR_THRESHOLD
+from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS, HTTP_CLIENT_ERROR_THRESHOLD
 from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
 
 # Security constants
-HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
 HMAC_NONCE_MIN_LENGTH = 32
 HMAC_NONCE_MAX_LENGTH = 256
 
@@ -292,6 +291,12 @@ class GDPRComplianceMiddleware:
 # ===============================================================================
 
 
+# Exempt paths: endpoints accessible WITHOUT HMAC authentication.
+# These are for truly public/unauthenticated external callers only.
+# The Portal's PlatformAPIClient always signs ALL requests with HMAC,
+# so portal calls never rely on this exempt list.
+# The startswith->exact-match change (commit 2577b41d) was intentional:
+# it prevents unintended sub-path exemptions (e.g., /api/users/password/reset/confirm/).
 # Exempt paths stored without trailing slash; matching normalizes both sides.
 _AUTH_EXEMPT_EXACT_PATHS_RAW: frozenset[str] = frozenset(
     {
@@ -372,9 +377,11 @@ class PortalServiceHMACMiddleware:
             request_body = b""
             if not error_msg:
                 try:
-                    request_time = int(timestamp)
+                    # int(float()) accepts both "123" and "123.456" for rolling-deploy safety
+                    request_time = int(float(timestamp))
                     current_time = int(time.time())
-                    if not (0 <= (current_time - request_time) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
+                    # Allow 2s forward skew for NTP jitter between portal and platform clocks.
+                    if not (-HMAC_NTP_SKEW_SECONDS <= (current_time - request_time) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
                         error_msg = "Request timestamp outside allowed window"
                 except ValueError:
                     error_msg = "Invalid timestamp format"
@@ -382,8 +389,8 @@ class PortalServiceHMACMiddleware:
             # Check for nonce replay using shared cache with TTL (scoped by portal)
             if not error_msg:
                 nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
-                # TTL matches timestamp window to mirror freshness guarantees
-                added = cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS)
+                # +30s buffer ensures nonces outlive their timestamp validity window
+                added = cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS + 30)
                 if not added:
                     error_msg = "Nonce already used (replay attack)"
 

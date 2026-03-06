@@ -377,11 +377,10 @@ class TestWebhookHMACValidation:
         middleware_path = PLATFORM_DIR / "apps" / "common" / "middleware.py"
         source = middleware_path.read_text()
 
-        assert "int(timestamp)" in source, (
-            "Platform HMAC middleware must parse timestamps with int() — not float()"
-        )
-        assert "float(timestamp)" not in source, (
-            "Platform HMAC middleware must NOT use float(timestamp)"
+        # int(float(timestamp)) is acceptable: handles both "123" and "123.456"
+        # during rolling deploys where portal may temporarily send float timestamps.
+        assert "int(timestamp)" in source or "int(float(timestamp))" in source, (
+            "Platform HMAC middleware must parse timestamps with int() or int(float())"
         )
         assert "abs(current_time" not in source, (
             "Platform HMAC middleware must NOT use abs() — must reject future timestamps"

@@ -286,9 +286,9 @@ class GetSafeClientIpTests(SimpleTestCase):
             request.META[key] = value
         return request
 
-    @override_settings(TRUSTED_PROXY_LIST=[])
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=[])
     def test_get_safe_client_ip_uses_remote_addr_without_proxy_config(self) -> None:
-        """With TRUSTED_PROXY_LIST=[], XFF header is ignored; REMOTE_ADDR is returned."""
+        """With IPWARE_TRUSTED_PROXY_LIST=[], XFF header is ignored; REMOTE_ADDR is returned."""
         request = self._make_request(
             remote_addr="203.0.113.10",
             HTTP_X_FORWARDED_FOR="10.0.0.1, 192.168.1.1",
@@ -298,12 +298,12 @@ class GetSafeClientIpTests(SimpleTestCase):
 
         self.assertEqual(result, "203.0.113.10")
 
-    @override_settings(TRUSTED_PROXY_LIST=["10.0.0.0/8"])
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=["10.0.0.0/8"])
     def test_get_safe_client_ip_trusts_xff_from_trusted_proxy(self) -> None:
-        """When REMOTE_ADDR is within TRUSTED_PROXY_LIST, X-Forwarded-For is trusted.
+        """When REMOTE_ADDR is within IPWARE_TRUSTED_PROXY_LIST, X-Forwarded-For is trusted.
 
         The implementation uses rightmost-trusted-hop: it walks XFF from right to left,
-        skipping IPs in TRUSTED_PROXY_LIST, and returns the first non-trusted IP.
+        skipping IPs in IPWARE_TRUSTED_PROXY_LIST, and returns the first non-trusted IP.
         """
         # 10.0.0.1 falls inside 10.0.0.0/8, so XFF should be trusted
         request = self._make_request(
@@ -315,7 +315,7 @@ class GetSafeClientIpTests(SimpleTestCase):
 
         self.assertEqual(result, "203.0.113.99")
 
-    @override_settings(TRUSTED_PROXY_LIST=[])
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=[])
     def test_get_safe_client_ip_ignores_cf_ip_without_cf_ray(self) -> None:
         """CF-Connecting-IP must be ignored when HTTP_CF_RAY is absent.
 
@@ -333,9 +333,9 @@ class GetSafeClientIpTests(SimpleTestCase):
         # Must return REMOTE_ADDR, not the spoofed CF-Connecting-IP
         self.assertEqual(result, "203.0.113.20")
 
-    @override_settings(TRUSTED_PROXY_LIST=["0.0.0.0/0"])
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=["0.0.0.0/0"])
     def test_get_safe_client_ip_ignores_cf_ip_without_cf_ray_even_with_proxy_list(self) -> None:
-        """Even with a broad TRUSTED_PROXY_LIST, CF-Connecting-IP requires CF-Ray to be trusted."""
+        """Even with a broad IPWARE_TRUSTED_PROXY_LIST, CF-Connecting-IP requires CF-Ray to be trusted."""
         request = self._make_request(
             remote_addr="10.0.0.1",
             HTTP_CF_CONNECTING_IP="5.5.5.5",
@@ -350,7 +350,7 @@ class GetSafeClientIpTests(SimpleTestCase):
             msg="CF-Connecting-IP must NOT be trusted when CF-Ray header is absent",
         )
 
-    @override_settings(TRUSTED_PROXY_LIST=["10.0.0.0/8"])
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=["10.0.0.0/8"])
     def test_get_safe_client_ip_rejects_attacker_injected_leftmost_xff(self) -> None:
         """Attacker-injected leftmost XFF entry must NOT be returned.
 
@@ -372,7 +372,7 @@ class GetSafeClientIpTests(SimpleTestCase):
             msg="Must return rightmost non-trusted IP, not attacker-injected leftmost",
         )
 
-    @override_settings(TRUSTED_PROXY_LIST=["10.0.0.0/8", "172.16.0.0/12"])
+    @override_settings(IPWARE_TRUSTED_PROXY_LIST=["10.0.0.0/8", "172.16.0.0/12"])
     def test_get_safe_client_ip_multi_hop_skips_all_trusted_proxies(self) -> None:
         """Multi-hop XFF with multiple trusted proxies returns the real client.
 

@@ -98,7 +98,18 @@ MAX_TICKET_REASSIGNMENTS: Final[int] = (
 # SECURITY & AUTHENTICATION 🔐
 # ===============================================================================
 
+# Maximum age (in seconds) of an HMAC-signed request before it is rejected.
+# Shared across middleware, secure_auth, and user views to avoid drift.
+HMAC_TIMESTAMP_WINDOW_SECONDS: int = 300
+
+# Forward skew tolerance (seconds) for NTP jitter between portal and platform clocks.
+# A small positive value allows requests whose timestamp is slightly in the future.
+HMAC_NTP_SKEW_SECONDS: int = 2
+
 # Account lockout policies
+# DEPRECATED: Lockout is now progressive (5->15->30->60->120->240 min) in User.increment_failed_login_attempts().
+# Threshold is configurable via settings.ACCOUNT_LOCKOUT_THRESHOLD (default=1).
+# These constants are retained only for backward compatibility with any external code.
 MAX_LOGIN_ATTEMPTS: Final[int] = 5  # DEPRECATED: use SettingsService.get_integer_setting("users.max_login_attempts")
 ACCOUNT_LOCKOUT_DURATION_MINUTES: Final[int] = (
     15  # DEPRECATED: use SettingsService.get_integer_setting("users.account_lockout_duration_minutes")

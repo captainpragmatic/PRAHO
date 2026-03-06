@@ -23,6 +23,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 
 from apps.api.secure_auth import require_customer_authentication, require_user_authentication
+from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
@@ -37,8 +38,6 @@ from .serializers import (
     PasswordResetRequestSerializer,
 )
 
-HMAC_TIMESTAMP_WINDOW_SECONDS = 300  # 5 minutes
-
 logger = logging.getLogger(__name__)
 
 
@@ -47,11 +46,11 @@ _EMAIL_MASK_LOCAL_VISIBLE_CHARS: int = 2
 
 def _mask_email(email: str) -> str:
     """Return a privacy-safe email string for logging. Sanitizes log injection chars."""
-    email = email.replace("\n", "").replace("\r", "").replace("\t", "")[:254]
+    email = email.replace("\n", "").replace("\r", "").replace("\t", "").replace("\0", "")[:254]
     if "@" not in email:
         return "[invalid-email]"
     local, domain = email.split("@", 1)
-    domain = domain.replace("\n", "").replace("\r", "")
+    # Domain is already sanitized — \n/\r stripped from full email above
     masked_local = (
         local[:_EMAIL_MASK_LOCAL_VISIBLE_CHARS] + "***" if len(local) > _EMAIL_MASK_LOCAL_VISIBLE_CHARS else "***"
     )
@@ -206,7 +205,7 @@ def obtain_token(request: HttpRequest) -> Response:
         logger.warning("🚨 [Auth] Token request missing email or password")
         return Response({"error": "Email and password are required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    client_ip = request.META.get("REMOTE_ADDR", "unknown")
+    client_ip = get_safe_client_ip(request)
 
     # Authenticate user.
     # Timing note: authenticate() runs Argon2 hashing (~100-200ms) which dominates
@@ -422,7 +421,8 @@ def validate_session_secure(request: HttpRequest) -> Response:
 
             # Basic timestamp freshness check (within 5 minutes)
             current_time = int(datetime.now(UTC).timestamp())
-            if not (0 <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
+            # Allow 2s forward skew for NTP jitter between portal and platform clocks.
+            if not (-HMAC_NTP_SKEW_SECONDS <= (current_time - request_timestamp) <= HMAC_TIMESTAMP_WINDOW_SECONDS):
                 logger.warning(f"🚨 [Security] Portal {portal_id} stale timestamp in context")
                 return _uniform_session_error(security_headers)
 

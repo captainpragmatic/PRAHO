@@ -154,6 +154,11 @@ LOGOUT_REDIRECT_URL = "/"
 # Password reset settings
 PASSWORD_RESET_TIMEOUT = 7200  # 2 hours in seconds
 
+# Account lockout threshold: number of failed attempts before progressive lockout kicks in.
+# Default 1 means lockout starts on the first failed attempt (most secure).
+# Increase to allow N free attempts before lockout delays apply.
+ACCOUNT_LOCKOUT_THRESHOLD = 1
+
 # ===============================================================================
 # INTERNATIONALIZATION & LOCALIZATION
 # ===============================================================================

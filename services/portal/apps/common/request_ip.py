@@ -4,12 +4,12 @@ Safe client IP extraction for the portal service.
 Cloudflare-aware: only trusts CF-Connecting-IP when CF-Ray header is present
 (CF-Ray is the Cloudflare request ID, always present on CF-proxied requests).
 
-When TRUSTED_PROXY_LIST is non-empty, only forwards headers from IPs that fall
+When IPWARE_TRUSTED_PROXY_LIST is non-empty, only forwards headers from IPs that fall
 within a configured CIDR range are trusted. Uses our own CIDR validation so that
 proxy trust is network-scoped rather than IP-prefix-matched.
 
 Configuration (in Django settings):
-    TRUSTED_PROXY_LIST: list[str] = []  # CIDR strings, e.g. ["10.0.0.0/8"]
+    IPWARE_TRUSTED_PROXY_LIST: list[str] = []  # CIDR strings, e.g. ["10.0.0.0/8"]
 """
 
 from __future__ import annotations
@@ -31,10 +31,10 @@ def get_safe_client_ip(request: HttpRequest) -> str:
     """
     Return the real client IP, only trusting forwarded headers from configured proxies.
 
-    Falls back to REMOTE_ADDR if TRUSTED_PROXY_LIST is empty.
+    Falls back to REMOTE_ADDR if IPWARE_TRUSTED_PROXY_LIST is empty.
     """
     remote_addr: str = request.META.get("REMOTE_ADDR", "0.0.0.0")
-    trusted_proxies: list[str] = getattr(settings, "TRUSTED_PROXY_LIST", [])
+    trusted_proxies: list[str] = getattr(settings, "IPWARE_TRUSTED_PROXY_LIST", [])
 
     # Cloudflare: only trust CF-Connecting-IP when CF-Ray header is also present.
     # CF-Ray is always set by Cloudflare — its absence means the request is not CF-proxied.
