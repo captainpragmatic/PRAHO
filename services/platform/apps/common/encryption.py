@@ -185,12 +185,15 @@ def decrypt_value(encrypted_value: str) -> str:
     """Decrypt an encrypted value.
 
     If the value is not encrypted (no 'aes:' prefix), returns it as-is.
+    Rejects legacy Fernet ciphertext to prevent silent data corruption.
 
     Raises:
         DecryptionError: If decryption of an encrypted value fails.
     """
     if not encrypted_value:
         return encrypted_value
+    if encrypted_value.startswith("gAAAAA"):
+        raise DecryptionError("Legacy Fernet-encrypted data detected — run data migration to clear stale ciphertext")
     if not is_encrypted(encrypted_value):
         return encrypted_value
     return decrypt_sensitive_data(encrypted_value)

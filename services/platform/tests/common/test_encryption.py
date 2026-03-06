@@ -94,8 +94,16 @@ class TestDecryptionErrors(SimpleTestCase):
         with self.assertRaises(DecryptionError):
             decrypt_sensitive_data(ENCRYPTED_PREFIX + "dG9vc2hvcnQ=")
 
+    def test_legacy_fernet_ciphertext_rejected(self) -> None:
+        """Fernet ciphertext must raise, not silently pass through as plaintext."""
+        fernet_ciphertext = "gAAAAABh1234fake-fernet-ciphertext-data"
+        with self.assertRaises(DecryptionError) as ctx:
+            decrypt_value(fernet_ciphertext)
+        self.assertIn("Legacy Fernet", str(ctx.exception))
+
     @override_settings(ENCRYPTION_KEY=ALT_KEY)
     def test_wrong_key_raises(self) -> None:
+        self.addCleanup(lambda: setattr(enc, "_cached_aesgcm", None))
         # Encrypt with TEST_KEY, then try to decrypt with ALT_KEY
         with override_settings(ENCRYPTION_KEY=TEST_KEY):
             # Reset cached AESGCM
@@ -122,6 +130,7 @@ class TestKeyValidation(SimpleTestCase):
 
     @override_settings(ENCRYPTION_KEY=None)
     def test_missing_key_raises(self) -> None:
+        self.addCleanup(lambda: setattr(enc, "_cached_aesgcm", None))
         enc._cached_aesgcm = None
         with patch.dict("os.environ", {}, clear=True), self.assertRaises(ImproperlyConfigured):
             get_encryption_key()

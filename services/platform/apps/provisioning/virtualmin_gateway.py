@@ -25,6 +25,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 
+from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
@@ -618,6 +619,13 @@ class VirtualminGateway:
                     return Ok((username, password))
 
             return Err("No valid credentials found in vault or server config")
+
+        except DecryptionError:
+            logger.error(
+                f"🔥 [Virtualmin Gateway] Credential decryption failed for {self.server.hostname}"
+                " — encryption key may have rotated"
+            )
+            return Err("Credential decryption failed — encryption key may have rotated")
 
         except Exception:
             # SECURITY: Don't expose exception details that could leak credential info

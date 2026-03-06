@@ -962,11 +962,14 @@ class EmailService:
     @staticmethod
     def _generate_unsubscribe_url(email: str, template_key: str) -> str:
         """Generate unsubscribe URL using opaque DB token (GDPR Art. 5 data minimization)."""
+        from django.urls import reverse  # noqa: PLC0415
+
         from apps.notifications.models import UnsubscribeToken  # noqa: PLC0415
 
         token = UnsubscribeToken.objects.create(email=email, template_key=template_key)
+        url_path = reverse("notifications:unsubscribe", kwargs={"token_id": token.id})
         base_url = getattr(settings, "COMPANY_WEBSITE", "https://pragmatichost.com")
-        return f"{base_url}/email/unsubscribe/{token.id}/"
+        return f"{base_url}{url_path}"
 
     @staticmethod
     def get_safe_email_preview(template_content: str, context: dict[str, Any]) -> str:

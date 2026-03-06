@@ -639,6 +639,9 @@ class HashChainManager:
     LOCK_KEY = "siem_hash_chain_lock"
 
     def __init__(self, secret_key: str | None = None):
+        # NOTE: Chain key changed from SECRET_KEY to HKDF-derived key in v0.25.0.
+        # Existing SIEM hash chain entries signed with the old key are unverifiable.
+        # This is an intentional reset — old chain integrity cannot be validated.
         if secret_key:
             self.secret_key = secret_key
         else:

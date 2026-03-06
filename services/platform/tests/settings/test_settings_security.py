@@ -322,11 +322,7 @@ class CachingSecurityTests(TestCase):
         value4 = SettingsService.get_setting("system.timeout")
         self.assertEqual(value4, 30)
 
-    def test_cache_status_excludes_sensitive_data(self):
-        """🔒 Test that cache status doesn't leak sensitive information"""
-        # This would be implementation-specific based on cache monitoring
-        # For now, we verify that sensitive settings aren't accidentally logged
-        self.assertTrue(True)  # Placeholder — cache monitoring test TBD
+    # NOTE: test_cache_status_excludes_sensitive_data removed — was a placeholder (assertTrue(True))
 
 
 class InputValidationSecurityTests(TestCase):

@@ -32,6 +32,7 @@ billing.RefundStatusHistory     # refund status change log
 integrations.WebhookDelivery    # append-only delivery attempt records
 integrations.WebhookEvent       # append-only inbound webhook records
 notifications.EmailLog          # append-only email delivery records
+notifications.UnsubscribeToken  # ephemeral GDPR unsubscribe tokens (short-lived, append-only)
 orders.OrderStatusHistory       # order status change log
 users.UserLoginLog              # security audit trail for login attempts
 

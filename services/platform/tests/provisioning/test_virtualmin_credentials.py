@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
+from apps.common.credential_vault import CredentialData, CredentialVault
 from apps.common.types import Err, Ok
 from apps.provisioning.models import Server
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway, get_virtualmin_config
@@ -191,3 +192,38 @@ class ConfigDictNoEnvCredentialsTest(TestCase):
     def test_config_dict_retains_pinned_cert(self):
         config = get_virtualmin_config()
         self.assertIn("pinned_cert_sha256", config)
+
+
+class CredentialVaultRBACTest(TestCase):
+    """Verify non-staff users are denied credential access."""
+
+    def test_credential_access_denied_for_non_staff_user(self):
+        """Non-staff, non-superuser must be denied credential access."""
+        from apps.users.models import User  # noqa: PLC0415
+
+        vault = CredentialVault()
+
+        # Store a credential
+        vault.store_credential(
+            CredentialData(
+                service_type="virtualmin",
+                service_identifier="rbac-test-server",
+                username="admin",
+                password="s3cret",
+            )
+        )
+
+        # Create a regular (non-staff, non-superuser) user
+        regular_user = User.objects.create_user(
+            email="regular@example.com",
+            password="testpass123",
+        )
+
+        result = vault.get_credential(
+            service_type="virtualmin",
+            service_identifier="rbac-test-server",
+            user=regular_user,
+            reason="test",
+        )
+        self.assertTrue(result.is_err())
+        self.assertIn("Access denied", result.unwrap_err())

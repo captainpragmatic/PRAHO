@@ -13,6 +13,7 @@ import requests
 from django.conf import settings
 from requests import Response
 
+from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import STRICT_EXTERNAL, safe_request
 
 from .models import Registrar
@@ -40,13 +41,20 @@ class SecureAPIClient:
     """🔒 Secure HTTP API client with retry logic and security features"""
 
     @staticmethod
-    def make_secure_request(
+    def make_secure_request(  # noqa: PLR0911
         registrar: Registrar, method: str, endpoint: str, data: dict[str, Any]
     ) -> tuple[bool, dict[str, Any]]:
         """🔒 Make secure HTTP API call with timeout and retry logic"""
         full_url = f"{registrar.api_endpoint.rstrip('/')}{endpoint}"
-        api_key, _api_secret = registrar.get_api_credentials()
-        api_secret_decrypted = registrar.get_decrypted_api_secret()
+
+        try:
+            api_key, _api_secret = registrar.get_api_credentials()
+            api_secret_decrypted = registrar.get_decrypted_api_secret()
+        except DecryptionError:
+            logger.error(
+                f"🔥 [API Client] Credential decryption failed for {registrar.name} — encryption key may have rotated"
+            )
+            return False, {"error": "Credential decryption failed"}
 
         headers = SecureAPIClient._build_headers(api_key, api_secret_decrypted)
         timeouts = get_api_timeouts()

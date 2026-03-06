@@ -148,7 +148,7 @@ def validate_email_subject(subject: str) -> None:
         raise ValidationError(_("Subject contains dangerous content"))
 
 
-def encrypt_sensitive_content(content: str, key: str | None = None) -> str:
+def encrypt_sensitive_content(content: str) -> str:
     """🔒 Encrypt sensitive content using AES-256-GCM encryption."""
     if not ENCRYPTION_AVAILABLE or not content:
         return content
@@ -160,7 +160,7 @@ def encrypt_sensitive_content(content: str, key: str | None = None) -> str:
         return content
 
 
-def decrypt_sensitive_content(encrypted_content: str, key: str | None = None) -> str:
+def decrypt_sensitive_content(encrypted_content: str) -> str:
     """🔒 Decrypt sensitive content using AES-256-GCM encryption."""
     if not ENCRYPTION_AVAILABLE or not encrypted_content:
         return encrypted_content

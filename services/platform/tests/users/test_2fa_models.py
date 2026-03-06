@@ -18,9 +18,7 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
-from apps.common.request_ip import get_safe_client_ip
 from apps.users.mfa import (
-    BackupCodeService,
     MFAService,
     TOTPService,
     WebAuthnCredential,
@@ -356,19 +354,6 @@ class EnhancedTOTPServiceTest(TestCase):
         # Should return None on error
         self.assertIsNone(qr_image)
 
-
-class EnhancedBackupCodeServiceTest(TestCase):
-    """Enhanced tests for BackupCodeService"""
-
-    def setUp(self) -> None:
-        """Set up test data"""
-        self.user = UserModel.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
-        )
-        self.backup_service = BackupCodeService()
 
 class EnhancedWebAuthnServiceTest(TestCase):
     """Enhanced tests for WebAuthnService"""

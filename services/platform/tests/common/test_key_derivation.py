@@ -7,11 +7,17 @@ from unittest.mock import patch
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 
-from apps.common.key_derivation import derive_key, get_key_hex
+from apps.common.key_derivation import VALID_DOMAINS, derive_key, get_key_hex
 
 
 class DeriveKeyTests(SimpleTestCase):
     """Tests for derive_key()."""
+
+    def setUp(self) -> None:
+        derive_key.cache_clear()
+
+    def tearDown(self) -> None:
+        derive_key.cache_clear()
 
     def test_returns_32_bytes(self) -> None:
         result = derive_key("mfa-backup")
@@ -28,16 +34,26 @@ class DeriveKeyTests(SimpleTestCase):
         key2 = derive_key("unsubscribe")
         self.assertNotEqual(key1, key2)
 
-    def test_unknown_domain_derives_from_secret_key(self) -> None:
-        result = derive_key("some-unknown-domain")
-        self.assertIsInstance(result, bytes)
-        self.assertEqual(len(result), 32)
+    def test_unknown_domain_raises_value_error(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            derive_key("some-unknown-domain")
+        self.assertIn("Unknown key derivation domain", str(ctx.exception))
+        self.assertIn("some-unknown-domain", str(ctx.exception))
 
-    def test_env_var_override_takes_precedence(self) -> None:
+    def test_valid_domains_frozenset(self) -> None:
+        self.assertIn("mfa-backup", VALID_DOMAINS)
+        self.assertIn("unsubscribe", VALID_DOMAINS)
+        self.assertIn("siem-hash-chain", VALID_DOMAINS)
+        self.assertIn("sensitive-data-hash", VALID_DOMAINS)
+
+    def test_env_var_override_uses_hkdf(self) -> None:
         env_value = "A" * 40  # 40 chars, well above minimum
         with patch.dict("os.environ", {"MFA_BACKUP_CODE_PEPPER": env_value}):
             result = derive_key("mfa-backup")
-            self.assertEqual(result, env_value.encode("utf-8")[:32])
+            self.assertIsInstance(result, bytes)
+            self.assertEqual(len(result), 32)
+            # HKDF output differs from raw truncation
+            self.assertNotEqual(result, env_value.encode("utf-8")[:32])
 
     def test_env_var_too_short_raises_improperly_configured(self) -> None:
         with patch.dict("os.environ", {"MFA_BACKUP_CODE_PEPPER": "tooshort"}):
@@ -49,6 +65,12 @@ class DeriveKeyTests(SimpleTestCase):
 
 class GetKeyHexTests(SimpleTestCase):
     """Tests for get_key_hex()."""
+
+    def setUp(self) -> None:
+        derive_key.cache_clear()
+
+    def tearDown(self) -> None:
+        derive_key.cache_clear()
 
     def test_returns_hex_string_of_64_chars(self) -> None:
         result = get_key_hex("mfa-backup")

@@ -25,7 +25,6 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.encryption import encrypt_sensitive_data
 from apps.settings.services import SettingsService
 
 from .models import TLD, Domain, DomainOrderItem, Registrar
@@ -569,8 +568,13 @@ class DomainOrderService:
                 total_price_cents=unit_price_cents * years,
                 whois_privacy=whois_privacy,
                 auto_renew=auto_renew,
-                epp_code=encrypt_sensitive_data(epp_code) if (action == "transfer" and epp_code) else "",
+                epp_code="",
             )
+
+            # Encrypt EPP code via model setter (single encryption boundary)
+            if action == "transfer" and epp_code:
+                order_item.set_encrypted_epp_code(epp_code)
+                order_item.save(update_fields=["epp_code"])
 
             logger.info(f"🛒 [Domain] Created order item: {action} {domain_name} for {years} years")
             return True, order_item
@@ -644,7 +648,7 @@ class DomainRegistrarGateway:
             "registrar_domain_id": f"DOM_{domain_name}_{timezone.now().timestamp()}",
             "expires_at": timezone.now() + timedelta(days=365 * years),
             "nameservers": registrar.default_nameservers or [],
-            "epp_code": encrypt_sensitive_data(f"EPP_{domain_name[:10].upper()}"),
+            "epp_code": f"EPP_{domain_name[:10].upper()}",
         }
 
     @staticmethod

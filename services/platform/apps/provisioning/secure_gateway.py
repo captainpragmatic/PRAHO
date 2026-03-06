@@ -16,6 +16,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 
+from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 from apps.common.validators import SecureInputValidator
 
@@ -173,6 +174,14 @@ class SecureServerGateway:
         try:
             # Calculate expected signature (decrypt AES-256-GCM encrypted secret)
             webhook_secret = server.get_decrypted_webhook_secret().encode("utf-8")
+        except DecryptionError:
+            logger.error(
+                f"🔥 [SecureGateway] Webhook secret decryption failed for {server.name}"
+                " — encryption key may have rotated"
+            )
+            return False
+
+        try:
             expected_signature = hmac.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
             # Compare signatures (timing-safe comparison)

@@ -136,8 +136,8 @@ class UnsubscribeURLGenerationTests(TestCase):
         url = EmailService._generate_unsubscribe_url(
             "user@example.com", "marketing"
         )
-        # URL should be like {base}/email/unsubscribe/{uuid}/
-        self.assertIn("/email/unsubscribe/", url)
+        # URL should contain the unsubscribe path with a UUID
+        self.assertIn("/unsubscribe/", url)
         # Should end with a UUID pattern
         parts = url.rstrip("/").split("/")
         token_id = parts[-1]

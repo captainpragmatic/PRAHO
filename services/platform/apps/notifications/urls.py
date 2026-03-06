@@ -39,5 +39,6 @@ urlpatterns = [
     # ===============================================================================
     # EMAIL UNSUBSCRIBE
     # ===============================================================================
-    path("unsubscribe/", webhooks.UnsubscribeView.as_view(), name="unsubscribe"),
+    path("unsubscribe/<uuid:token_id>/", webhooks.UnsubscribeView.as_view(), name="unsubscribe"),
+    path("unsubscribe/", webhooks.UnsubscribeView.as_view(), name="unsubscribe_legacy"),
 ]
