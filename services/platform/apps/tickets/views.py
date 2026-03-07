@@ -172,7 +172,7 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@rate_limit(key="user", rate="5/m", method="POST")
+@rate_limit(key="user", rate="8/m", method="POST")
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """+ Create new support ticket"""
     user = cast(User, request.user)  # Safe after @login_required
@@ -573,7 +573,7 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@rate_limit(key="user", rate="30/m", method="GET")
+@rate_limit(key="user", rate="45/m", method="GET")
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
     user = cast(User, request.user)  # Safe after @login_required

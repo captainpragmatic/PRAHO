@@ -111,6 +111,28 @@ def _get_cache_name() -> str:
     return getattr(settings, "RATE_LIMIT_CACHE", "default")
 
 
+def _log_rate_limit_audit(request: HttpRequest, endpoint: str, key_label: str, rate_str: str) -> None:
+    """Log a rate-limit violation to the security audit trail."""
+    try:
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import at module level
+            RateLimitEventData,
+            SecurityAuditService,
+        )
+
+        user = getattr(request, "user", None)
+        authed_user = user if getattr(user, "is_authenticated", False) else None
+        event_data = RateLimitEventData(
+            endpoint=endpoint,
+            ip_address=get_safe_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            rate_limit_key=key_label,
+            rate_limit_rate=rate_str,
+        )
+        SecurityAuditService.log_rate_limit_event(event_data=event_data, user=authed_user)
+    except Exception:
+        logger.exception("Failed to log rate limit audit event")
+
+
 def rate_limit(
     key: str | Callable[..., str] = "ip",
     rate: str = "100/m",
@@ -120,9 +142,9 @@ def rate_limit(
 ) -> Callable[..., Any]:
     """Decorator that rate-limits a view function.
 
-    Compatible with django-ratelimit's interface.  All current usages in the
-    codebase use ``block=False``, so the decorator only sets
-    ``request.limited = True`` when exceeded.
+    When the rate is exceeded, sets ``request.limited = True`` and logs the
+    event to the security audit trail via ``SecurityAuditService``.  With
+    ``block=True``, also short-circuits and returns HTTP 429.
 
     Args:
         key: How to identify the client (see module docstring).
@@ -146,6 +168,8 @@ def rate_limit(
 
             # Resolve the group name (default: module.function)
             resolved_group = group or f"{fn.__module__}.{fn.__qualname__}"
+
+            key_label = key if isinstance(key, str) else getattr(key, "__name__", "callable")
 
             try:
                 cache_key_id = _resolve_key(key, resolved_group, request)
@@ -172,6 +196,7 @@ def rate_limit(
                         max_requests,
                         window_seconds,
                     )
+                    _log_rate_limit_audit(request, resolved_group, key_label, rate)
                     if block:
                         return HttpResponse("Rate limit exceeded", status=429)
 

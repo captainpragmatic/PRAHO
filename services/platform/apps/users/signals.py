@@ -36,7 +36,14 @@ def create_user_profile(sender: type[User], instance: User, created: bool, **kwa
 
 @receiver(post_save, sender=User)
 def save_user_profile(sender: type[User], instance: User, **kwargs: Any) -> None:
-    """Save user profile when user is saved"""
+    """Save user profile when user is saved via a full save (no update_fields).
+
+    Skips cascade for targeted field updates (e.g. last_login_ip,
+    failed_login_attempts) to avoid phantom profile_updated audit events.
+    """
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None:
+        return
     if hasattr(instance, "profile"):
         instance.profile.save()
 

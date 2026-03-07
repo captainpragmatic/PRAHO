@@ -100,8 +100,8 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
     return bool(customer and order.customer_id == customer.id)
 
 
-@method_decorator(rate_limit(key="ip", rate="30/m", method="POST"), name="dispatch")
-@method_decorator(rate_limit(key="post:code", rate="10/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="ip", rate="45/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="post:code", rate="15/m", method="POST"), name="dispatch")
 class ValidateCouponView(View):
     """
     API endpoint for validating a coupon code.
@@ -224,8 +224,8 @@ class ValidateCouponView(View):
         )
 
 
-@method_decorator(rate_limit(key="ip", rate="20/m", method="POST"), name="dispatch")
-@method_decorator(rate_limit(key="post:code", rate="5/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="ip", rate="30/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="post:code", rate="8/m", method="POST"), name="dispatch")
 class ApplyCouponView(View):
     """
     API endpoint for applying a coupon to an order.
@@ -324,7 +324,7 @@ class ApplyCouponView(View):
             )
 
 
-@method_decorator(rate_limit(key="ip", rate="30/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="ip", rate="45/m", method="POST"), name="dispatch")
 class RemoveCouponView(View):
     """
     API endpoint for removing a coupon from an order.
@@ -458,8 +458,8 @@ class AvailableCouponsView(View):
 # ===============================================================================
 
 
-@method_decorator(rate_limit(key="ip", rate="30/m", method="POST"), name="dispatch")
-@method_decorator(rate_limit(key="post:code", rate="10/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="ip", rate="45/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="post:code", rate="15/m", method="POST"), name="dispatch")
 class ValidateGiftCardView(View):
     """
     API endpoint for validating a gift card.
@@ -513,8 +513,8 @@ class ValidateGiftCardView(View):
             )
 
 
-@method_decorator(rate_limit(key="ip", rate="20/m", method="POST"), name="dispatch")
-@method_decorator(rate_limit(key="post:code", rate="5/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="ip", rate="30/m", method="POST"), name="dispatch")
+@method_decorator(rate_limit(key="post:code", rate="8/m", method="POST"), name="dispatch")
 class RedeemGiftCardView(View):
     """API endpoint for redeeming a gift card."""
 

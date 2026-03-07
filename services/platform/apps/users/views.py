@@ -33,11 +33,10 @@ from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 
-from apps.audit.services import AuthenticationAuditService, LogoutEventData, RateLimitEventData, SecurityAuditService
+from apps.audit.services import AuthenticationAuditService, LogoutEventData
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
 from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
-from apps.common.validators import log_security_event
 
 from .forms import (
     LoginForm,
@@ -62,18 +61,7 @@ CustomUser = User
 def _handle_rate_limit(request: HttpRequest, form: LoginForm) -> HttpResponse | None:
     """Handle rate limit logic, return response if rate limited, None otherwise"""
     if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
-        # Log rate limit event to audit system
-        rate_limit_data = RateLimitEventData(
-            endpoint="users:login",
-            ip_address=get_safe_client_ip(request),
-            user_agent=request.META.get("HTTP_USER_AGENT", ""),
-            rate_limit_key="ip,email",
-            rate_limit_rate="10/m,5/m",
-        )
-        SecurityAuditService.log_rate_limit_event(
-            event_data=rate_limit_data,
-            user=None,  # User not authenticated yet
-        )
+        # Audit logging handled by @rate_limit decorator
         messages.error(request, _("Too many login attempts. Please wait and try again."))
         return render(request, "users/login.html", {"form": form}, status=429)
     return None
@@ -195,8 +183,8 @@ def _handle_failed_login(request: HttpRequest, user: User | None) -> None:
         )
 
 
-@rate_limit(key="ip", rate="10/m", method="POST")
-@rate_limit(key="post:email", rate="5/m", method="POST")
+@rate_limit(key="ip", rate="15/m", method="POST")
+@rate_limit(key="post:email", rate="8/m", method="POST")
 def login_view(request: HttpRequest) -> HttpResponse:
     """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:
@@ -276,8 +264,8 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 @method_decorator(
     [
-        rate_limit(key="ip", rate="5/h", method="POST"),  # 5 attempts per hour per IP
-        rate_limit(key="header:user-agent", rate="10/h", method="POST"),  # 10 per user agent
+        rate_limit(key="ip", rate="15/h", method="POST"),  # 15 attempts per hour per IP
+        rate_limit(key="header:user-agent", rate="30/h", method="POST"),  # 30 per user agent
     ],
     name="dispatch",
 )
@@ -323,7 +311,7 @@ class SecurePasswordResetDoneView(PasswordResetDoneView):
 
 @method_decorator(
     [
-        rate_limit(key="ip", rate="10/h", method="POST"),  # 10 password confirmations per hour per IP
+        rate_limit(key="ip", rate="25/h", method="POST"),  # 25 password confirmations per hour per IP
     ],
     name="dispatch",
 )
@@ -407,7 +395,7 @@ password_reset_complete_view = SecurePasswordResetCompleteView.as_view()
 
 @method_decorator(
     [
-        rate_limit(key="user", rate="10/h", method="POST"),  # 10 password changes per hour per user
+        rate_limit(key="user", rate="15/h", method="POST"),  # 15 password changes per hour per user
     ],
     name="dispatch",
 )
@@ -578,18 +566,7 @@ def mfa_setup_webauthn(request: HttpRequest) -> HttpResponse:
 def _handle_2fa_rate_limit(request: HttpRequest, user: User) -> HttpResponse | None:
     """Handle rate limiting for 2FA verification."""
     if getattr(request, "limited", False) and not getattr(settings, "TESTING", False):
-        # Log rate limit event to audit system
-        rate_limit_data = RateLimitEventData(
-            endpoint="users:mfa_verify",
-            ip_address=get_safe_client_ip(request),
-            user_agent=request.META.get("HTTP_USER_AGENT", ""),
-            rate_limit_key="ip",
-            rate_limit_rate="10/m",
-        )
-        SecurityAuditService.log_rate_limit_event(
-            event_data=rate_limit_data,
-            user=user,  # User is partially authenticated at this point
-        )
+        # Audit logging handled by @rate_limit decorator
         messages.error(request, _("Too many verification attempts. Please wait and try again."))
         return render(
             request,
@@ -627,7 +604,7 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
         messages.info(request, _("Backup code used. You have {count} codes remaining.").format(count=remaining_codes))
 
 
-@rate_limit(key="ip", rate="10/m", method="POST")
+@rate_limit(key="ip", rate="15/m", method="POST")
 def mfa_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get("pre_2fa_user_id")
@@ -932,8 +909,8 @@ def _uniform_response() -> JsonResponse:
 
 @require_http_methods(["POST"])
 # Soft rate limiting - degrades gracefully without blocking legitimate users
-@rate_limit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST")  # Short window
-@rate_limit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST")  # Long window
+@rate_limit(key="apps.users.ratelimit_keys.user_or_ip", rate="15/m", method="POST")  # Short window
+@rate_limit(key="apps.users.ratelimit_keys.user_or_ip", rate="150/h", method="POST")  # Long window
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """
     🔒 HARDENED EMAIL VALIDATION ENDPOINT
@@ -948,20 +925,7 @@ def api_check_email(request: HttpRequest) -> JsonResponse:
     NOTE: Actual email uniqueness is enforced server-side during registration.
     This endpoint provides UX feedback without revealing account existence.
     """
-    # Check if user hit rate limits (soft limiting - no 429 errors)
-    was_limited = getattr(request, "limited", False)
-
-    if was_limited:
-        # Log security event for monitoring
-        log_security_event(
-            "email_check_rate_limited",
-            {
-                "rate_limited": True,
-                "ip_address": get_safe_client_ip(request),
-                "user_authenticated": request.user.is_authenticated,
-            },
-            get_safe_client_ip(request),
-        )
+    # Audit logging for rate limit violations handled by @rate_limit decorator
 
     # Uniform timing delay prevents timing-based enumeration
     _sleep_uniform()
