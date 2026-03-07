@@ -19,7 +19,7 @@ check_service() {
     local NAME=$1
     local URL=$2
 
-    if curl -sf "${URL}/health/" > /dev/null 2>&1; then
+    if curl -sf "${URL}" > /dev/null 2>&1; then
         echo -e "${GREEN}[OK]${NC} ${NAME} is healthy"
         return 0
     else
@@ -68,8 +68,8 @@ check_container "praho_caddy" || EXIT_CODE=1
 
 echo ""
 echo "Services:"
-check_service "Platform" "$PLATFORM_URL" || EXIT_CODE=1
-check_service "Portal" "$PORTAL_URL" || EXIT_CODE=1
+check_service "Platform" "${PLATFORM_URL}/api/users/health/" || EXIT_CODE=1
+check_service "Portal" "${PORTAL_URL}/status/" || EXIT_CODE=1
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then

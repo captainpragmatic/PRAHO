@@ -23,10 +23,10 @@ on:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.dev
-  SECRET_KEY: test-secret-key-for-ci
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
   PLATFORM_API_URL: http://mock-platform:8000
   PLATFORM_API_KEY: test-api-key
-  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
   portal-test:
@@ -77,7 +77,7 @@ jobs:
       run: |
         cd services/portal
         echo "Running portal unit tests with coverage..."
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/pytest tests/ -v --tb=short --maxfail=10 --cov=apps --cov-report=xml:coverage-portal.xml --cov-report=term-missing
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pytest tests/ -v --tb=short --maxfail=10 --cov=apps --cov-report=xml:coverage-portal.xml --cov-report=term-missing
 
     - name: Ruff no-new-debt gate (portal)
       run: |
@@ -94,7 +94,7 @@ jobs:
           git fetch origin "${BASE_REF}" --depth=1 || true
         fi
         echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
-        ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py \
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py \
           --baseline-ref "$BASE_REF" \
           --path-prefix services/portal
 
@@ -102,7 +102,7 @@ jobs:
       run: |
         cd services/portal
         echo "Running linting for portal service..."
-        ${{ github.workspace }}/.venv/bin/ruff check apps/ || echo "Linting completed with issues"
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/ruff check apps/ || echo "Linting completed with issues"
 
     - name: Upload portal artifacts
       uses: actions/upload-artifact@v4

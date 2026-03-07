@@ -62,12 +62,12 @@
         that:
           - preflight_env.PORTAL_DOMAIN is defined and preflight_env.PORTAL_DOMAIN | length > 0
           - preflight_env.PLATFORM_DOMAIN is defined and preflight_env.PLATFORM_DOMAIN | length > 0
-          - preflight_env.SECRET_KEY is defined and preflight_env.SECRET_KEY | length > 0
+          - preflight_env.DJANGO_SECRET_KEY is defined and preflight_env.DJANGO_SECRET_KEY | length > 0
           - preflight_env.DB_PASSWORD is defined and preflight_env.DB_PASSWORD | length > 0
           - preflight_env.HMAC_SECRET is defined and preflight_env.HMAC_SECRET | length > 0
         fail_msg: >
           Missing required variables in {{ env_file_path }}.
-          Ensure PORTAL_DOMAIN, PLATFORM_DOMAIN, SECRET_KEY, DB_PASSWORD, and HMAC_SECRET are set.
+          Ensure PORTAL_DOMAIN, PLATFORM_DOMAIN, DJANGO_SECRET_KEY, DB_PASSWORD, and HMAC_SECRET are set.
 
     # -------------------------------------------------------------------
     # Deploy method + version resolution

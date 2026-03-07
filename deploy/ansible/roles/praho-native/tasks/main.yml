@@ -156,6 +156,8 @@
     rsync_opts:
       - "--exclude=.git"
       - "--exclude=.venv"
+      - "--exclude=.venv-darwin"
+      - "--exclude=.venv-linux"
       - "--exclude=__pycache__"
       - "--exclude=node_modules"
       - "--exclude=*.pyc"
@@ -212,9 +214,9 @@
   command: >
     /usr/local/bin/uv venv
     --python python{{ python_version }}
-    {{ project_root }}/.venv
+    {{ project_root }}/.venv-linux
   args:
-    creates: "{{ project_root }}/.venv/bin/python"
+    creates: "{{ project_root }}/.venv-linux/bin/python"
   become_user: "{{ project_user }}"
 
 - name: Install dependencies with uv
@@ -227,7 +229,7 @@
     chdir: "{{ project_root }}/src"
   become_user: "{{ project_user }}"
   environment:
-    UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv"
+    UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv-linux"
 
 # ---------------------------------------------------------------------------
 # 6. Environment file (.env as single source of truth)
@@ -259,7 +261,7 @@
       value=$(echo "$value" | xargs)
     done < "{{ env_file_path }}"
     # Check critical vars
-    for var in SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
+    for var in DJANGO_SECRET_KEY DB_PASSWORD HMAC_SECRET PORTAL_DOMAIN PLATFORM_DOMAIN; do
       val=$(grep "^${var}=" "{{ env_file_path }}" | head -1 | cut -d'=' -f2-)
       if [ -z "$val" ]; then missing="$missing $var"; fi
     done
@@ -302,8 +304,7 @@
       DB_HOST: "{{ deployed_env.DB_HOST | default('localhost') }}"
       DB_PORT: "{{ deployed_env.DB_PORT | default('5432') }}"
       DB_SSLMODE: "{{ deployed_env.DB_SSLMODE | default('disable') }}"
-      DJANGO_SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
-      SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
       HMAC_SECRET: "{{ deployed_env.HMAC_SECRET | default('') }}"
       PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/static"
@@ -314,7 +315,7 @@
 
 - name: Run database migrations
   command: >
-    {{ project_root }}/.venv/bin/python manage.py migrate --noinput
+    {{ project_root }}/.venv-linux/bin/python manage.py migrate --noinput
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
@@ -322,7 +323,7 @@
 
 - name: Create database cache table
   command: >
-    {{ project_root }}/.venv/bin/python manage.py createcachetable
+    {{ project_root }}/.venv-linux/bin/python manage.py createcachetable
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
@@ -331,7 +332,7 @@
 
 - name: Collect Platform static files
   command: >
-    {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
+    {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"
@@ -339,14 +340,14 @@
 
 - name: Collect Portal static files
   command: >
-    {{ project_root }}/.venv/bin/python manage.py collectstatic --noinput
+    {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
   args:
     chdir: "{{ project_root }}/src/services/portal"
   become_user: "{{ project_user }}"
   environment:
     PYTHONPATH: "{{ project_root }}/src/services/portal"
     DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
-    SECRET_KEY: "{{ deployed_env.SECRET_KEY }}"
+    DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
     ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},localhost,127.0.0.1"
     PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
     PLATFORM_API_BASE_URL: "http://localhost:{{ platform_port }}/api"
@@ -356,7 +357,7 @@
 
 - name: Set up initial data (categories, settings, tasks, templates, superuser)
   command: >
-    {{ project_root }}/.venv/bin/python manage.py setup_initial_data
+    {{ project_root }}/.venv-linux/bin/python manage.py setup_initial_data
   args:
     chdir: "{{ project_root }}/src/services/platform"
   become_user: "{{ project_user }}"

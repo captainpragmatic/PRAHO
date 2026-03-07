@@ -14,13 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structural CI test** (`tests/api/test_api_auth_coverage.py`) — scans all `/api/` URL patterns via Django URL resolver and fails if any view lacks an explicit auth decorator or `@public_api_endpoint` marker; walks DRF `@api_view` closure chains and CBV `permission_classes`
 - **Custom `@rate_limit` decorator** (`apps/common/rate_limiting.py`) — drop-in replacement for `django-ratelimit` using Django cache framework directly; supports `ip`, `user`, `post:<field>`, `header:<name>`, and dotted-path callable keys; 9 unit tests
 - **`configure_rate_limiting()` helper** (`config/settings/_rate_limiting.py`) — single source of truth for `RATE_LIMITING_ENABLED` setting with env var override
+- 14 test cases for secret key resolution and production validation (`test_secret_key_resolution.py`)
+
+### Fixed
+
+- **SECRET_KEY env var mismatch** (#19) — Standardized on `DJANGO_SECRET_KEY` as canonical env var name across portal/platform settings, Docker Compose, CI workflows, Ansible templates, and env examples
+- **DATABASE_URL vs DB_* mismatch** (#23) — Replaced unused `DATABASE_URL` with individual `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` vars in all compose files to match what Django actually reads
+- **Healthcheck URLs in deploy.sh** (#27) — Platform: `/health/` → `/api/users/health/`; Portal: `/health/` → `/status/`
+- **No resource limits in Docker Compose** (#38) — Added `deploy.resources` (CPU/memory limits and reservations) to all production compose files
+- **uv base image tag not pinned** (#43) — Pinned from `:latest` to `:0.8.13` in both Dockerfiles
 
 ### Changed
 
 - **API auth hardening**: all 11 intentionally public API endpoints now carry `@public_api_endpoint`; 3 middleware-only endpoints now have `@require_portal_authentication` as backup
-- **Rate limiting consolidation**: replaced all 20 `@ratelimit` (django-ratelimit) decorator usages across 5 view files with custom `@rate_limit`; restructured 3 CBV `except Ratelimited:` blocks to check `response.status_code == 429`
+- **Rate limiting consolidation**: replaced all 21 `@ratelimit` (django-ratelimit) decorator usages across 5 view files with custom `@rate_limit`; CBV dispatch methods now check `request.limited` instead of `response.status_code`
 - **Settings consolidation**: `RATELIMIT_ENABLE` + `RATELIMIT_ENABLED` → single `RATE_LIMITING_ENABLED` across all platform and portal settings files, Makefile, ADR-0014, integration tests
 - **Cache setting**: `RATELIMIT_USE_CACHE` → `RATE_LIMIT_CACHE` (read by custom decorator)
+- **`validate_production_secret_key()`** now accepts `secret_key` as parameter, enforces 50-char minimum, strips whitespace, and has expanded blocklist
+- **Portal `HMACPriceSealer`** no longer falls back to `"insecure-fallback-key"` — raises `ImproperlyConfigured` if `SECRET_KEY` is not set
+- **Docker Compose secret vars** changed from `:-` (weak default) to `:?` (required/fail-fast) in production files
 
 ### Removed
 

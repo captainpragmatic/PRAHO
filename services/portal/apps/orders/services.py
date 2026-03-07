@@ -34,7 +34,12 @@ class HMACPriceSealer:
     def _get_secret_key() -> str:
         from django.conf import settings  # noqa: PLC0415
 
-        return getattr(settings, "SECRET_KEY", "insecure-fallback-key")
+        secret_key = getattr(settings, "SECRET_KEY", None)
+        if not secret_key:
+            from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
+
+            raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set for price seal verification")
+        return secret_key
 
     @staticmethod
     def seal_price_data(price_data: dict[str, Any], client_ip: str = "127.0.0.1") -> dict[str, Any]:

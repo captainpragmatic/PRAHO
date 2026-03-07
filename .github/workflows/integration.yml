@@ -29,10 +29,10 @@ on:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
-  SECRET_KEY: test-secret-key-for-integration
+  DJANGO_SECRET_KEY: test-secret-key-for-integration
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
-  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
   error-handling-scan:
@@ -58,7 +58,7 @@ jobs:
     - name: Run error handling scanner (non-blocking)
       run: |
         echo "Running non-blocking error handling scanner..."
-        ${{ github.workspace }}/.venv/bin/python scripts/error_handling_scan.py --min-severity medium --exclude-tests --json > error-handling-scan.json || true
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/error_handling_scan.py --min-severity medium --exclude-tests --json > error-handling-scan.json || true
 
     - name: Upload error handling scan report
       if: always()
@@ -117,13 +117,13 @@ jobs:
           git fetch origin "${BASE_REF}" --depth=1 || true
         fi
         echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
-        ${{ github.workspace }}/.venv/bin/python scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
 
     - name: Set up platform database
       run: |
         cd services/platform
         echo "Setting up platform database..."
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python manage.py migrate --no-input
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py migrate --no-input
 
     - name: Run service isolation security tests
       run: |
@@ -132,7 +132,7 @@ jobs:
         # Test 1: Platform can access its models
         echo "Testing platform model access..."
         cd services/platform
-        PYTHONPATH=$(pwd) ${{ github.workspace }}/.venv/bin/python -c "
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -c "
         import os
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
         import django
@@ -144,7 +144,7 @@ jobs:
         # Test 2: Portal cannot access platform models
         echo "Testing portal model isolation..."
         cd ../../services/portal
-        ${{ github.workspace }}/.venv/bin/python -c "
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -c "
         try:
             from apps.billing.models import Invoice
             print('SECURITY BREACH: Portal can access platform models!')
@@ -156,7 +156,7 @@ jobs:
     - name: Run integration test suite
       run: |
         echo "Running integration tests..."
-        ${{ github.workspace }}/.venv/bin/pytest tests/integration/ -v --tb=short --maxfail=5 || echo "Integration tests completed"
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pytest tests/integration/ -v --tb=short --maxfail=5 || echo "Integration tests completed"
 
     - name: Upload integration test reports
       uses: actions/upload-artifact@v4
