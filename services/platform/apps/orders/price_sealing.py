@@ -46,7 +46,6 @@ def get_client_ip(request: HttpRequest) -> str:
         "HTTP_X_FORWARDED_FOR",
         "HTTP_X_REAL_IP",
         "HTTP_CF_CONNECTING_IP",  # Cloudflare
-        "HTTP_X_FORWARDED_HOST",
     ]
 
     for header in forwarded_headers:
