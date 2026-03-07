@@ -173,6 +173,25 @@ class Order(models.Model):
             # 🚀 Performance: Customer order history with status
             models.Index(fields=["customer", "status"]),
         )
+        # DB-level guards against negative financial values (#71)
+        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+            models.CheckConstraint(
+                condition=models.Q(subtotal_cents__gte=0),
+                name="order_subtotal_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="order_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(discount_cents__gte=0),
+                name="order_discount_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_cents__gte=0),
+                name="order_total_non_negative",
+            ),
+        )
 
     def __str__(self) -> str:
         return f"Order {self.order_number} - {self.customer_email}"
@@ -361,6 +380,25 @@ class OrderItem(models.Model):
             models.Index(fields=["provisioning_status", "-created_at"]),
             # 🚀 Performance: Product and order tracking
             models.Index(fields=["product", "provisioning_status"]),
+        )
+        # DB-level guards against negative financial values (#71)
+        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+            models.CheckConstraint(
+                condition=models.Q(unit_price_cents__gte=0),
+                name="orderitem_unit_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(setup_cents__gte=0),
+                name="orderitem_setup_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="orderitem_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(line_total_cents__gte=0),
+                name="orderitem_line_total_non_negative",
+            ),
         )
 
     def __str__(self) -> str:
