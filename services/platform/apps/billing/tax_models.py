@@ -5,7 +5,7 @@ EU VAT compliance with VIES validation and reverse charge support.
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -16,6 +16,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.tax_service import TaxService
+
+logger = logging.getLogger(__name__)
 
 # Date constants for tax rate validation
 JANUARY = 1  # First month of year
@@ -157,8 +159,18 @@ class TaxRule(models.Model):
 
 def _invalidate_tax_cache(sender: type, instance: object, **kwargs: object) -> None:
     """Invalidate TaxService cache when TaxRule is saved or deleted."""
-    with contextlib.suppress(Exception):  # Cache invalidation is best-effort
+    try:
         TaxService.invalidate_cache(instance.country_code)  # type: ignore[attr-defined]
+    except (OSError, ConnectionError, TimeoutError):
+        logger.warning(
+            "⚠️ [TaxCache] Cache invalidation failed for %s",
+            getattr(instance, "country_code", "unknown"),
+        )
+    except Exception:
+        logger.exception(
+            "🔥 [TaxCache] Unexpected error invalidating cache for %s",
+            getattr(instance, "country_code", "unknown"),
+        )
 
 
 models.signals.post_save.connect(_invalidate_tax_cache, sender=TaxRule)

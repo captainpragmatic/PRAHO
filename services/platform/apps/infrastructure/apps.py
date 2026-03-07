@@ -2,10 +2,10 @@
 Django app configuration for Infrastructure app
 """
 
-import contextlib
 import logging
 
 from django.apps import AppConfig
+from django.db import utils as db_utils
 
 logger = logging.getLogger(__name__)
 
@@ -90,5 +90,7 @@ class InfrastructureConfig(AppConfig):
 
         from .tasks import queue_sync_providers
 
-        with contextlib.suppress(Exception):  # Q cluster may not be running during migrations
+        try:
             queue_sync_providers()
+        except db_utils.DatabaseError:
+            logger.debug("Skipping provider sync — django_q tables not yet migrated")

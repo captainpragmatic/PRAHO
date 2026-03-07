@@ -67,7 +67,7 @@ class PriceSealingService:
                     "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
                     "Configure PRICE_SEALING_SECRET environment variable for production deployment."
                 )
-                return str(settings.SECRET_KEY)  # noqa: SECRET_KEY
+                return str(settings.SECRET_KEY)  # noqa: SECRET_KEY — fallback for dev
 
         # Validate secret key length for security
         if len(price_sealing_secret) < MIN_SECRET_LENGTH:

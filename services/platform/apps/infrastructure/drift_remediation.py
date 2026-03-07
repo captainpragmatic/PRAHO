@@ -9,7 +9,6 @@ Handles the remediation workflow for configuration drift:
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import socket
 from datetime import datetime, timedelta
@@ -236,10 +235,12 @@ class DriftRemediationService:
             else:
                 self._mark_rolled_back(request, f"Apply failed (rolled back): {apply_result.unwrap_err()}")
 
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_drift_rollback_triggered(
                     deployment, snapshot, InfrastructureAuditContext()
                 )
+            except Exception:
+                logger.warning("⚠️ [DriftRemediation] Failed to log audit for rollback after apply failure")
 
             return Err(apply_result.unwrap_err())
 
@@ -256,10 +257,12 @@ class DriftRemediationService:
             else:
                 self._mark_rolled_back(request, f"Health check failed (rolled back): {health_result.unwrap_err()}")
 
-            with contextlib.suppress(Exception):
+            try:
                 InfrastructureAuditService.log_drift_rollback_triggered(
                     deployment, snapshot, InfrastructureAuditContext()
                 )
+            except Exception:
+                logger.warning("⚠️ [DriftRemediation] Failed to log audit for rollback after health check failure")
 
             return Err(health_result.unwrap_err())
 

@@ -58,6 +58,14 @@ _PERIOD_SECONDS: dict[str, int] = {
     "d": 86400,
 }
 
+# Allowlist of modules permitted for dotted-path rate limit keys.
+# Defense-in-depth: prevents importlib.import_module on arbitrary paths.
+_ALLOWED_KEY_MODULES: frozenset[str] = frozenset(
+    {
+        "apps.users.ratelimit_keys",
+    }
+)
+
 
 def _parse_rate(rate_str: str) -> tuple[int, int]:
     """Parse a rate string like ``'5/m'`` into ``(count, window_seconds)``."""
@@ -89,17 +97,22 @@ def _resolve_key(key: str | Callable[..., str], group: str, request: HttpRequest
 
     if key.startswith("post:"):
         field = key[5:]
-        return f"post:{field}:{_hash_value(request.POST.get(field, ''))}"
+        return f"post:{field}:{_hash_value(request.POST.get(field, ''))}"  # nosemgrep: directly-returned-format-string — cache key construction, not HTTP response
 
     if key.startswith("header:"):
         header_name = key[7:]
         meta_key = f"HTTP_{header_name.upper().replace('-', '_')}"
-        return f"header:{header_name}:{_hash_value(request.META.get(meta_key, ''))}"
+        return f"header:{header_name}:{_hash_value(request.META.get(meta_key, ''))}"  # nosemgrep: directly-returned-format-string — cache key construction, not HTTP response
 
     # Dotted path — import and call as fn(group, request)
     if "." in key:
         module_path, func_name = key.rsplit(".", 1)
-        mod = importlib.import_module(module_path)
+        if module_path not in _ALLOWED_KEY_MODULES:
+            msg = f"Rate limit key module not in allowlist: {module_path!r}"
+            raise ValueError(msg)
+        mod = importlib.import_module(
+            module_path
+        )  # nosemgrep: non-literal-import — restricted to _ALLOWED_KEY_MODULES allowlist
         return cast(str, getattr(mod, func_name)(group, request))
 
     msg = f"Unsupported rate limit key: {key!r}"

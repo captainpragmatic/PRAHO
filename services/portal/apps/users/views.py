@@ -294,7 +294,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
-            except PlatformAPIError as e:  # noqa: rate-limit-aware  — custom form error with retry_after countdown
+            except PlatformAPIError as e:  # rate-limit-aware — custom form error with retry_after countdown
                 if getattr(e, "is_rate_limited", False):
                     retry_after = getattr(e, "retry_after", None) or 30
                     logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
@@ -636,7 +636,7 @@ def change_password_view(request: HttpRequest) -> HttpResponse:
                         )
                         messages.error(request, _("Error updating password. Please try again."))
 
-            except PlatformAPIError as e:  # noqa: rate-limit-aware  — custom warning with retry_after countdown
+            except PlatformAPIError as e:  # rate-limit-aware — custom warning with retry_after countdown
                 if getattr(e, "is_rate_limited", False):
                     retry_after = getattr(e, "retry_after", None) or 30
                     logger.warning(
@@ -753,7 +753,7 @@ def data_export_view(request: HttpRequest) -> HttpResponse:
             result = api_client.get_data_export_status(user_id)
             if result.get("success"):
                 exports = result.get("exports", [])
-    except PlatformAPIError:  # noqa: rate-limit-aware  — informational status fetch, graceful degradation
+    except PlatformAPIError:  # rate-limit-aware — informational status fetch, graceful degradation
         logger.warning("⚠️ [Portal Data Export] Could not fetch export status")
 
     context = {
@@ -799,7 +799,7 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
             if result.get("success"):
                 consent_history = result.get("consent_history", [])
                 cookie_consent_history = result.get("cookie_consent_history", [])
-    except PlatformAPIError:  # noqa: rate-limit-aware  — informational history fetch, graceful degradation
+    except PlatformAPIError:  # rate-limit-aware — informational history fetch, graceful degradation
         logger.warning("⚠️ [Portal Consent] Failed to fetch consent history from Platform")
 
     context = {

@@ -167,7 +167,7 @@ def decrypt_sensitive_content(encrypted_content: str) -> str:
     try:
         return str(decrypt_if_needed(encrypted_content))
     except Exception as e:
-        logger.debug(f"Decryption failed, returning original: {e}")
+        logger.warning("Decryption failed, returning original: %s", e)
         return encrypted_content
 
 
@@ -482,7 +482,7 @@ class EmailLog(models.Model):
         try:
             content = decrypt_if_needed(content)
         except Exception as e:  # pragma: no cover
-            logger.debug(f"Decryption failed, using original content: {e}")
+            logger.warning("Decryption failed, using original content: %s", e)
         preview = content[:CONTENT_PREVIEW_LENGTH]
         return preview + ("..." if len(content) > CONTENT_PREVIEW_LENGTH else "")
 
@@ -491,7 +491,8 @@ class EmailLog(models.Model):
         content = self.body_html or ""
         try:
             return str(decrypt_if_needed(content))
-        except Exception:  # pragma: no cover
+        except Exception as e:  # pragma: no cover
+            logger.warning("Decryption of body_html failed: %s", e)
             return content
 
     def get_decrypted_body_text(self) -> str:
@@ -499,7 +500,8 @@ class EmailLog(models.Model):
         content = self.body_text or ""
         try:
             return str(decrypt_if_needed(content))
-        except Exception:  # pragma: no cover
+        except Exception as e:  # pragma: no cover
+            logger.warning("Decryption of body_text failed: %s", e)
             return content
 
 

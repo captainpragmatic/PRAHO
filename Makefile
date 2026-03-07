@@ -507,6 +507,8 @@ lint-security:
 	fi
 	@echo "🔒 [Security] PRAHO architectural security scan..."
 	@$(VENV_DIR)/bin/python scripts/security_scanner.py services/ --min-severity HIGH || true
+	@echo "🔒 [Security] Error handling risk scan..."
+	@$(VENV_DIR)/bin/python scripts/error_handling_scan.py services/ --exclude-tests --min-severity high || true
 	@echo "✅ Security linting complete!"
 
 lint-credentials:

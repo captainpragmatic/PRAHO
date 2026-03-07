@@ -4,7 +4,6 @@ Infrastructure Views
 Staff interface for managing node deployments, providers, and configurations.
 """
 
-import contextlib
 import json
 import logging
 from datetime import datetime
@@ -20,7 +19,7 @@ if TYPE_CHECKING:
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db import models, transaction
+from django.db import DatabaseError, models, transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -305,11 +304,11 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
             )
 
             # Audit: deployment created
-            with contextlib.suppress(Exception):
-                if not request.user.is_authenticated:
-                    return redirect("infrastructure:deployment_list")
+            try:
                 audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
                 InfrastructureAuditService.log_deployment_created(deployment, audit_ctx)
+            except (DatabaseError, OSError):
+                logger.warning("⚠️ [Audit] Failed to log deployment creation for %s", deployment.hostname, exc_info=True)
 
             messages.success(
                 request,
@@ -1008,11 +1007,11 @@ def provider_create(request: HttpRequest) -> HttpResponse:
             return render(request, "infrastructure/provider_form.html", context)
 
         # Audit: provider created
-        with contextlib.suppress(Exception):
-            if not request.user.is_authenticated:
-                return redirect("infrastructure:provider_list")
+        try:
             audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
             InfrastructureAuditService.log_provider_created(provider, audit_ctx)
+        except (DatabaseError, OSError):
+            logger.warning("⚠️ [Audit] Failed to log provider creation for %s", provider.name, exc_info=True)
 
         messages.success(request, f"Provider '{provider.name}' created successfully.")
         return redirect("infrastructure:provider_list")
@@ -1072,11 +1071,11 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
             return render(request, "infrastructure/provider_form.html", context)
 
         # Audit: provider updated
-        with contextlib.suppress(Exception):
-            if not request.user.is_authenticated:
-                return redirect("infrastructure:provider_list")
+        try:
             audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
             InfrastructureAuditService.log_provider_updated(provider, old_values, audit_ctx)
+        except (DatabaseError, OSError):
+            logger.warning("⚠️ [Audit] Failed to log provider update for %s", provider.name, exc_info=True)
 
         messages.success(request, f"Provider '{provider.name}' updated successfully.")
         return redirect("infrastructure:provider_list")
@@ -1215,11 +1214,11 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
     region.save()
 
     # Audit: region toggled
-    with contextlib.suppress(Exception):
-        if not request.user.is_authenticated:
-            return redirect("infrastructure:region_list")
+    try:
         audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
         InfrastructureAuditService.log_region_toggled(region, audit_ctx)
+    except (DatabaseError, OSError):
+        logger.warning("⚠️ [Audit] Failed to log region toggle for %s", region.name, exc_info=True)
 
     action = "enabled" if region.is_active else "disabled"
     messages.success(request, f"Region '{region.name}' {action}.")

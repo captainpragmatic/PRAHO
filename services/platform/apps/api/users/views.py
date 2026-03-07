@@ -217,22 +217,22 @@ def obtain_token(request: HttpRequest) -> Response:
         with contextlib.suppress(User.DoesNotExist):
             failed_user = User.objects.get(email=email)
             failed_user.increment_failed_login_attempts()
-        logger.warning(
+        logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
             "[Auth] Failed token request — ip=%s", client_ip
-        )  # nosemgrep: python-logger-credential-disclosure
+        )
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     # Same generic error for locked/inactive — attacker cannot distinguish
     if user.is_account_locked():
-        logger.warning(
+        logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
             "[Auth] Token request for locked account — ip=%s", client_ip
-        )  # nosemgrep: python-logger-credential-disclosure
+        )
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     if not user.is_active:
-        logger.warning(
+        logger.warning(  # nosemgrep: python-logger-credential-disclosure — literal log message, no secrets
             "[Auth] Token request for inactive account — ip=%s", client_ip
-        )  # nosemgrep: python-logger-credential-disclosure
+        )
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     # Success: reset lockout counter
@@ -244,13 +244,13 @@ def obtain_token(request: HttpRequest) -> Response:
     token, created = Token.objects.get_or_create(user=user)
 
     if created:
-        logger.info(
+        logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
             "[Auth] New token created for user: %s", _mask_email(user.email)
-        )  # nosemgrep: python-logger-credential-disclosure
+        )
     else:
-        logger.info(
+        logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
             "[Auth] Existing token returned for user: %s", _mask_email(user.email)
-        )  # nosemgrep: python-logger-credential-disclosure
+        )
 
     return Response(
         {
