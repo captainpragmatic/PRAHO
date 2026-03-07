@@ -213,7 +213,7 @@ dev: build-css
 dev-e2e: check-env build-css
 	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@RATELIMIT_ENABLE=false $(MAKE) NORELOAD=1 dev-all
+	@RATE_LIMITING_ENABLED=false $(MAKE) NORELOAD=1 dev-all
 
 dev-e2e-bg: check-env build-css
 	@echo "🎭 [E2E Background] Starting services in background (no auto-reload)..."
@@ -224,9 +224,9 @@ dev-e2e-bg: check-env build-css
 	@-lsof -tiTCP:8701 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
 	@sleep 1
 	@echo "🏗️  Starting platform (port :8700) in background..."
-	@RATELIMIT_ENABLE=false sh -c '$(MAKE) NORELOAD=1 dev-platform 2>&1 | tee logs/platform_e2e.log' &
+	@RATE_LIMITING_ENABLED=false sh -c '$(MAKE) NORELOAD=1 dev-platform 2>&1 | tee logs/platform_e2e.log' &
 	@echo "🌐 Starting portal (port :8701) in background..."
-	@RATELIMIT_ENABLE=false sh -c '$(MAKE) NORELOAD=1 dev-portal 2>&1 | tee logs/portal_e2e.log' &
+	@RATE_LIMITING_ENABLED=false sh -c '$(MAKE) NORELOAD=1 dev-portal 2>&1 | tee logs/portal_e2e.log' &
 	@echo "⏳ Waiting for services to be ready..."
 	@for i in $$(seq 1 30); do \
 		platform=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8700/auth/login/ 2>/dev/null); \

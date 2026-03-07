@@ -489,7 +489,7 @@ class PortalServiceHMACMiddleware:
                 return self.get_response(request)
 
             client_ip = get_safe_client_ip(request)
-            rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+            rate_limit_enabled: bool = getattr(settings, "RATE_LIMITING_ENABLED", True)
 
             # Validate HMAC signature first so rate limiting uses the verified portal_id,
             # not an attacker-controlled header value.

@@ -78,7 +78,7 @@ RULES: list[dict] = [
         "message": "ignore_patterns suppresses real errors in E2E monitors. "
         "Fix the root cause in application code or test logic instead.",
         "fix_hint": "Remove ignore_patterns and fix the underlying issue. "
-        "If the error comes from rate limiting, use RATELIMIT_ENABLE=false. "
+        "If the error comes from rate limiting, use RATE_LIMITING_ENABLED=false. "
         "If from HMAC, check staff session fallback in middleware.",
     },
     {

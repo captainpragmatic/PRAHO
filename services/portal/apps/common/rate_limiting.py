@@ -58,8 +58,8 @@ class AuthenticationRateLimitMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with rate limiting for authentication endpoints"""
 
-        # Respect RATELIMIT_ENABLED setting (disabled during E2E testing)
-        rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+        # Respect RATE_LIMITING_ENABLED setting (disabled during E2E testing)
+        rate_limit_enabled: bool = getattr(settings, "RATE_LIMITING_ENABLED", True)
         if not rate_limit_enabled:
             return self.get_response(request)
 
@@ -286,8 +286,8 @@ class APIRateLimitMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Process request with general API rate limiting"""
 
-        # Respect RATELIMIT_ENABLED setting (disabled during E2E testing)
-        rate_limit_enabled: bool = getattr(settings, "RATELIMIT_ENABLED", True)
+        # Respect RATE_LIMITING_ENABLED setting (disabled during E2E testing)
+        rate_limit_enabled: bool = getattr(settings, "RATE_LIMITING_ENABLED", True)
         if not rate_limit_enabled:
             return self.get_response(request)
 

@@ -33,7 +33,7 @@ When a test encounters an error, the response must be one of:
 1. **Fix the application code** — the error is a real bug
 2. **Fix the test code** — the test assertion is wrong or the test setup is incomplete
 3. **Disable the system causing the error** — e.g., disable rate limiting via
-   `RATELIMIT_ENABLE=false` during E2E runs (not per-test, but system-wide)
+   `RATE_LIMITING_ENABLED=false` during E2E runs (not per-test, but system-wide)
 
 If suppression is truly unavoidable (e.g., a known upstream bug with an open issue), it
 requires:
@@ -61,7 +61,7 @@ requires:
 
 | Problem | Wrong Fix | Right Fix |
 |---------|-----------|-----------|
-| Rate limiting in E2E tests | `ignore_patterns=["429"]` | `RATELIMIT_ENABLE=false make dev` |
+| Rate limiting in E2E tests | `ignore_patterns=["429"]` | `RATE_LIMITING_ENABLED=false make dev` |
 | HMAC auth on browser fetch | `ignore_patterns=["401"]` | Staff session auth fallback in middleware |
 | Missing session data | `pytest.skip("broken")` | Populate session data in login flow |
 | Flaky login timing | `ignore_patterns=["timeout"]` | Add retry logic in `login_platform_user()` |
@@ -73,7 +73,7 @@ For system-level disabling (rate limiting, caching, etc.) during test runs:
 
 | Flag | Scope | How |
 |------|-------|-----|
-| `RATELIMIT_ENABLE=false` | All rate limiting | Set in environment before starting services |
+| `RATE_LIMITING_ENABLED=false` | All rate limiting | Set in environment before starting services |
 | `SESSION_ENGINE=db` | Session backend | Set in test settings to avoid cache-clear conflicts |
 
 These are **system-wide** toggles, not per-test suppressions. They are set once at the start

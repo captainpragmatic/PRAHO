@@ -321,9 +321,8 @@ CACHES["default"].update(
 # RATE LIMITING (Staging - Relaxed)
 # ===============================================================================
 
-RATELIMIT_ENABLE = True  # django-ratelimit library decorators (@ratelimit)
-RATELIMIT_ENABLED = True  # Custom middleware (PortalServiceHMACMiddleware, etc.)
-RATELIMIT_USE_CACHE = "default"
+configure_rate_limiting(globals(), enabled=True)
+RATE_LIMIT_CACHE = "default"
 
 # ===============================================================================
 # ROMANIAN COMPLIANCE (Staging)

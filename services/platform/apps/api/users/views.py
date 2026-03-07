@@ -360,8 +360,8 @@ class SessionValidationThrottle(ScopedRateThrottle):
     scope = "session_validation"
 
     def allow_request(self, request: HttpRequest, view: Any) -> bool:
-        # Skip throttling in test/dev environments (RATELIMIT_ENABLED=False)
-        if not getattr(settings, "RATELIMIT_ENABLED", True):
+        # Skip throttling in test/dev environments (RATE_LIMITING_ENABLED=False)
+        if not getattr(settings, "RATE_LIMITING_ENABLED", True):
             return True
         return super().allow_request(request, view)
 

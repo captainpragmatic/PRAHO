@@ -511,18 +511,13 @@ VIRTUALMIN_TIMEOUTS = {
 # RATE LIMITING CONFIGURATION 🔒
 # ===============================================================================
 
-# Rate limiting key function for intelligent user/IP-based limiting
-RATELIMIT_KEY = "apps.users.ratelimit_keys.user_or_ip"
-
 # Cache backend for rate limiting (uses database cache)
-RATELIMIT_USE_CACHE = "default"
+RATE_LIMIT_CACHE = "default"
 
-# Enable rate limiting (can be disabled in development)
-# RATELIMIT_ENABLE: used by django-ratelimit library decorators
-# RATELIMIT_ENABLED: used by our custom middleware (PortalServiceHMACMiddleware, etc.)
-# Both must stay in sync — custom code should read RATELIMIT_ENABLED.
-RATELIMIT_ENABLE = True
-RATELIMIT_ENABLED = True
+# Single source of truth for rate limiting — sets RATE_LIMITING_ENABLED
+from ._rate_limiting import configure_rate_limiting  # noqa: E402
+
+configure_rate_limiting(globals(), enabled=True)
 
 # ===============================================================================
 # DJANGO-Q2 ASYNC TASK PROCESSING 🚀

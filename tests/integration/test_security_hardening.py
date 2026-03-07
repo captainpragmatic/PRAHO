@@ -98,45 +98,44 @@ class TestRateLimitingConfiguration:
     @pytest.mark.integration
     @pytest.mark.security
     def test_rate_limit_enabled_read_from_django_settings(self):
-        """Middleware reads RATELIMIT_ENABLED from Django settings (not os.environ)."""
+        """Middleware reads RATE_LIMITING_ENABLED from Django settings (not os.environ)."""
         middleware_path = PLATFORM_DIR / "apps" / "common" / "middleware.py"
         source = middleware_path.read_text()
         # The setting must be fetched via getattr(settings, ...)
-        assert 'getattr(settings, "RATELIMIT_ENABLED"' in source or \
-               "getattr(settings, 'RATELIMIT_ENABLED'" in source, (
-            "RATELIMIT_ENABLED must be read from Django settings via getattr(settings, ...)"
+        assert 'getattr(settings, "RATE_LIMITING_ENABLED"' in source or \
+               "getattr(settings, 'RATE_LIMITING_ENABLED'" in source, (
+            "RATE_LIMITING_ENABLED must be read from Django settings via getattr(settings, ...)"
         )
 
     @pytest.mark.integration
     @pytest.mark.security
-    def test_ratelimit_enable_not_read_from_os_environ(self):
-        """RATELIMIT_ENABLE must NOT be read directly from os.environ in middleware."""
+    def test_rate_limiting_not_read_from_os_environ_in_middleware(self):
+        """RATE_LIMITING_ENABLED must NOT be read directly from os.environ in middleware."""
         middleware_path = PLATFORM_DIR / "apps" / "common" / "middleware.py"
         source = middleware_path.read_text()
-        # Check that os.environ is not used to read RATELIMIT_ENABLE(D) in middleware
-        matches = re.findall(r'os\.environ[^\n]*RATELIMIT_ENABLE', source)
+        # Check that os.environ is not used to read RATE_LIMITING_ENABLED in middleware
+        matches = re.findall(r'os\.environ[^\n]*RATE_LIMITING_ENABLED', source)
         assert len(matches) == 0, (
-            f"RATELIMIT_ENABLE must not be read from os.environ in middleware. "
+            f"RATE_LIMITING_ENABLED must not be read from os.environ in middleware. "
             f"Found: {matches}"
         )
 
     @pytest.mark.integration
     @pytest.mark.security
     def test_dev_e2e_disables_rate_limit_via_env_then_settings(self):
-        """The dev-e2e make target sets RATELIMIT_ENABLE env var — verify it maps
+        """The dev-e2e make target sets RATE_LIMITING_ENABLED env var — verify it maps
         through Django settings (not read ad-hoc from os.environ in middleware)."""
-        # The Makefile sets RATELIMIT_ENABLE=false for E2E runs.
+        # The Makefile sets RATE_LIMITING_ENABLED=false for E2E runs.
         # As long as middleware reads Django settings, this only works if the settings
-        # module picks up the env var and sets RATELIMIT_ENABLED accordingly.
-        # This test verifies the settings modules reference RATELIMIT_ENABLE consistently.
+        # module picks up the env var and sets RATE_LIMITING_ENABLED accordingly.
         dev_settings = PLATFORM_DIR / "config" / "settings" / "dev.py"
         if dev_settings.exists():
             source = dev_settings.read_text()
-            # If dev settings references RATELIMIT_ENABLED it should use env/settings pattern.
-            # This is a soft check — the key invariant is that middleware uses getattr(settings, ...).
-            if "RATELIMIT_ENABLED" in source:
-                assert "os.environ" in source or "env(" in source or "True" in source, (
-                    "RATELIMIT_ENABLED in dev settings should have a sane default"
+            # If dev settings references RATE_LIMITING_ENABLED it should use the
+            # configure_rate_limiting() helper or env/settings pattern.
+            if "RATE_LIMITING_ENABLED" in source:
+                assert "configure_rate_limiting" in source or "os.environ" in source or "True" in source, (
+                    "RATE_LIMITING_ENABLED in dev settings should use configure_rate_limiting()"
                 )
 
 

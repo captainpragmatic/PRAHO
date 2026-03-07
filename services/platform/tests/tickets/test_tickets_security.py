@@ -243,7 +243,7 @@ class TicketNumberSecurityTest(TestCase):
         self.assertNotEqual(ticket1.ticket_number, ticket2.ticket_number)
 
 
-@override_settings(CACHES=LOCMEM_TEST_CACHE, RATELIMIT_ENABLE=True, RATELIMIT_ENABLED=True)
+@override_settings(CACHES=LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
 class RateLimitingSecurityTest(TestCase):
     """🔒 Test rate limiting security on ticket operations — needs real cache for rate limit counters."""
 

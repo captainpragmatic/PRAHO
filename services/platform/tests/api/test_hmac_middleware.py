@@ -60,7 +60,9 @@ class PortalHMACTests(TestCase):
         method = "POST"
         raw_path = "/api/test/?b=2&a=1"
         portal_id = "portal-xyz"
-        nonce = self.nonce
+        # Use a unique nonce — self.nonce may be consumed by earlier tests
+        # that share the LocMemCache within this class.
+        nonce = "valid-sig-test-unique-nonce-1234"
         timestamp = str(ts)
 
         # Compute signature
@@ -175,7 +177,7 @@ class PortalHMACTests(TestCase):
         PLATFORM_API_SECRET="unit-test-secret",
         HMAC_RATE_LIMIT_WINDOW=60,
         HMAC_RATE_LIMIT_MAX_CALLS=2,
-        RATELIMIT_ENABLED=True,
+        RATE_LIMITING_ENABLED=True,
         CACHES=LOCMEM_TEST_CACHE,
     )
     def test_rate_limit_triggers(self):
