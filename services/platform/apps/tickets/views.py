@@ -20,8 +20,8 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django_ratelimit.decorators import ratelimit
 
+from apps.common.rate_limiting import rate_limit
 from apps.settings.services import SettingsService
 from apps.users.models import User
 
@@ -172,7 +172,7 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@ratelimit(key="user", rate="5/m", method="POST", block=False)
+@rate_limit(key="user", rate="5/m", method="POST")
 def ticket_create(request: HttpRequest) -> HttpResponse:
     """+ Create new support ticket"""
     user = cast(User, request.user)  # Safe after @login_required
@@ -573,7 +573,7 @@ def ticket_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@ratelimit(key="user", rate="30/m", method="GET", block=False)
+@rate_limit(key="user", rate="30/m", method="GET")
 def download_attachment(request: HttpRequest, attachment_id: int) -> HttpResponse:
     """📎 Download ticket attachment"""
     user = cast(User, request.user)  # Safe after @login_required

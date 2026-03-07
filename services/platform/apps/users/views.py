@@ -32,11 +32,10 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
-from django_ratelimit.decorators import ratelimit
-from django_ratelimit.exceptions import Ratelimited
 
 from apps.audit.services import AuthenticationAuditService, LogoutEventData, RateLimitEventData, SecurityAuditService
 from apps.common.constants import BACKUP_CODE_LENGTH, BACKUP_CODE_LOW_WARNING_THRESHOLD
+from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 
@@ -51,6 +50,9 @@ from .models import CustomerMembership, User, UserLoginLog, UserProfile
 from .services import SessionSecurityService
 
 logger = logging.getLogger(__name__)
+
+# HTTP status codes used in rate-limit dispatch checks
+_HTTP_429_TOO_MANY_REQUESTS = 429
 
 # Type alias for cleaner type hints
 CustomUser = User
@@ -196,8 +198,8 @@ def _handle_failed_login(request: HttpRequest, user: User | None) -> None:
         )
 
 
-@ratelimit(key="ip", rate="10/m", method="POST", block=False)
-@ratelimit(key="post:email", rate="5/m", method="POST", block=False)
+@rate_limit(key="ip", rate="10/m", method="POST")
+@rate_limit(key="post:email", rate="5/m", method="POST")
 def login_view(request: HttpRequest) -> HttpResponse:
     """Romanian-localized login view with account lockout protection"""
     if request.user.is_authenticated:
@@ -277,8 +279,8 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 @method_decorator(
     [
-        ratelimit(key="ip", rate="5/h", method="POST", block=True),  # 5 attempts per hour per IP
-        ratelimit(key="header:user-agent", rate="10/h", method="POST", block=True),  # 10 per user agent
+        rate_limit(key="ip", rate="5/h", method="POST", block=True),  # 5 attempts per hour per IP
+        rate_limit(key="header:user-agent", rate="10/h", method="POST", block=True),  # 10 per user agent
     ],
     name="dispatch",
 )
@@ -294,9 +296,8 @@ class SecurePasswordResetView(PasswordResetView):
         return _("Password reset for your account")
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        try:
-            return super().dispatch(request, *args, **kwargs)
-        except Ratelimited:
+        response = super().dispatch(request, *args, **kwargs)
+        if getattr(response, "status_code", 0) == _HTTP_429_TOO_MANY_REQUESTS:
             # Log rate limit exceeded
             UserLoginLog.objects.create(
                 user=None,
@@ -306,6 +307,7 @@ class SecurePasswordResetView(PasswordResetView):
             )
             messages.error(request, _("Too many password reset attempts. Please wait before trying again."))
             return render(request, self.template_name, {"form": self.get_form()})
+        return response
 
     def form_valid(self, form: Any) -> HttpResponse:
         # Log password reset attempt for audit trail
@@ -326,7 +328,7 @@ class SecurePasswordResetDoneView(PasswordResetDoneView):
 
 @method_decorator(
     [
-        ratelimit(key="ip", rate="10/h", method="POST", block=True),  # 10 password confirmations per hour per IP
+        rate_limit(key="ip", rate="10/h", method="POST", block=True),  # 10 password confirmations per hour per IP
     ],
     name="dispatch",
 )
@@ -337,10 +339,9 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
     success_url = reverse_lazy("users:password_reset_complete")
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        try:
-            return super().dispatch(request, *args, **kwargs)
-        except Ratelimited:
-            # Log rate limit exceeded
+        response = super().dispatch(request, *args, **kwargs)
+        if getattr(response, "status_code", 0) == _HTTP_429_TOO_MANY_REQUESTS:
+            # Rate limit exceeded — log and show user-friendly message
             UserLoginLog.objects.create(
                 user=None,
                 ip_address=get_safe_client_ip(request),
@@ -349,6 +350,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             )
             messages.error(request, _("Too many password confirmation attempts. Please wait before trying again."))
             return render(request, self.template_name, {"form": self.get_form(), "validlink": False})
+        return response
 
     def form_valid(self, form: Any) -> HttpResponse:
         # Log successful password reset for audit
@@ -412,7 +414,7 @@ password_reset_complete_view = SecurePasswordResetCompleteView.as_view()
 
 @method_decorator(
     [
-        ratelimit(key="user", rate="10/h", method="POST", block=True),  # 10 password changes per hour per user
+        rate_limit(key="user", rate="10/h", method="POST", block=True),  # 10 password changes per hour per user
     ],
     name="dispatch",
 )
@@ -423,10 +425,9 @@ class SecurePasswordChangeView(PasswordChangeView):
     success_url = reverse_lazy("users:user_profile")
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        try:
-            return super().dispatch(request, *args, **kwargs)
-        except Ratelimited:
-            # Log rate limit exceeded - only log if user is authenticated
+        response = super().dispatch(request, *args, **kwargs)
+        if getattr(response, "status_code", 0) == _HTTP_429_TOO_MANY_REQUESTS:
+            # Rate limit exceeded - only log if user is authenticated
             if request.user.is_authenticated:
                 UserLoginLog.objects.create(
                     user=request.user,
@@ -436,6 +437,7 @@ class SecurePasswordChangeView(PasswordChangeView):
                 )
             messages.error(request, _("Too many password change attempts. Please wait before trying again."))
             return render(request, self.template_name, {"form": self.get_form()})
+        return response
 
     def form_valid(self, form: Form) -> HttpResponse:
         # Log successful password change for audit - user is guaranteed to be authenticated due to LoginRequiredMixin
@@ -634,7 +636,7 @@ def _handle_backup_code_warnings(request: HttpRequest, user: User) -> None:
         messages.info(request, _("Backup code used. You have {count} codes remaining.").format(count=remaining_codes))
 
 
-@ratelimit(key="ip", rate="10/m", method="POST", block=False)
+@rate_limit(key="ip", rate="10/m", method="POST")
 def mfa_verify(request: HttpRequest) -> HttpResponse:
     """Verify 2FA token during login"""
     user_id = request.session.get("pre_2fa_user_id")
@@ -939,8 +941,8 @@ def _uniform_response() -> JsonResponse:
 
 @require_http_methods(["POST"])
 # Soft rate limiting - degrades gracefully without blocking legitimate users
-@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST", block=False)  # Short window
-@ratelimit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST", block=False)  # Long window
+@rate_limit(key="apps.users.ratelimit_keys.user_or_ip", rate="10/m", method="POST")  # Short window
+@rate_limit(key="apps.users.ratelimit_keys.user_or_ip", rate="100/h", method="POST")  # Long window
 def api_check_email(request: HttpRequest) -> JsonResponse:
     """
     🔒 HARDENED EMAIL VALIDATION ENDPOINT

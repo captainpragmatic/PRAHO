@@ -10,9 +10,9 @@ from django.utils.html import escape
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django_ratelimit.decorators import ratelimit
 
 from apps.audit.services import RateLimitEventData, SecurityAuditService
+from apps.common.rate_limiting import rate_limit
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
 
@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 @method_decorator(
     [
         csrf_exempt,
-        ratelimit(key="ip", rate="60/m", method="POST", block=False),  # 60 webhooks per minute per IP
-        ratelimit(key="ip", rate="1000/h", method="POST", block=False),  # 1000 webhooks per hour per IP
+        rate_limit(key="ip", rate="60/m", method="POST"),  # 60 webhooks per minute per IP
+        rate_limit(key="ip", rate="1000/h", method="POST"),  # 1000 webhooks per hour per IP
     ],
     name="dispatch",
 )
@@ -219,7 +219,7 @@ class PayPalWebhookView(WebhookView):
 # ===============================================================================
 
 
-@ratelimit(key="user", rate="30/m", method="GET", block=False)
+@rate_limit(key="user", rate="30/m", method="GET")
 def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
     if not request.user.is_staff:
@@ -336,7 +336,7 @@ def _check_webhook_retry_permissions(request: HttpRequest) -> JsonResponse | Non
 
 
 @require_http_methods(["POST"])
-@ratelimit(key="user", rate="10/m", method="POST", block=False)
+@rate_limit(key="user", rate="10/m", method="POST")
 def retry_webhook(request: HttpRequest, webhook_id: str | int) -> JsonResponse:
     """🔄 Manually retry a failed webhook using result pipeline"""
     # Check permissions and rate limits

@@ -22,8 +22,6 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 
 from django.urls import reverse
 from django.utils import timezone
-from django_ratelimit.exceptions import Ratelimited  # type: ignore[import-untyped]
-
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import (
