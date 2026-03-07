@@ -31,6 +31,7 @@ TEMPLATE_DEBUG = True
 
 # Disable account lockout for development and E2E testing
 DISABLE_ACCOUNT_LOCKOUT = True
+ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK = True
 
 # Note: ALLOWED_HOSTS configured in HTTPS security section below
 

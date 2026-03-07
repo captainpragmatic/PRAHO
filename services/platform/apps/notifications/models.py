@@ -16,6 +16,7 @@ import uuid
 from datetime import timedelta
 from typing import Any, ClassVar
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from django.db import models, transaction
@@ -28,6 +29,7 @@ from apps.common.encryption import decrypt_if_needed, encrypt_value, is_encrypte
 # Module-level logger and encryption flag (patched in tests)
 logger = logging.getLogger(__name__)
 ENCRYPTION_AVAILABLE = True
+ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING = "ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK"
 
 # Security constants
 _DEFAULT_MAX_TEMPLATE_SIZE = 100_000  # 100KB limit for templates
@@ -409,8 +411,16 @@ class EmailLog(models.Model):
                 if self.body_html and not is_encrypted(self.body_html):
                     self.body_html = encrypt_value(self.body_html) or self.body_html
             except Exception as e:  # pragma: no cover
-                # Fallback to storing as-is; upstream logging handles errors
-                logger.debug(f"Encryption failed, storing as-is: {e}")
+                allow_plaintext_fallback = bool(getattr(settings, ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING, False))
+                if allow_plaintext_fallback:
+                    logger.warning(
+                        f"EmailLog encryption failed; saving plaintext due to {ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING}=true: {e}"
+                    )
+                else:
+                    logger.error(
+                        f"EmailLog encryption failed; refusing to save plaintext. Enable {ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING} only in dev/test to bypass: {e}"
+                    )
+                    raise
         super().save(*args, **kwargs)
 
     def get_status_display_color(self) -> str:
