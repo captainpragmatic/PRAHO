@@ -357,3 +357,34 @@ def require_portal_service_authentication(view_func: Callable[..., Any]) -> Call
         return view_func(request, request_data, *args, **kwargs)
 
     return wrapper
+
+
+def require_portal_authentication(view_func: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Lightweight HMAC backup -- verifies middleware set _portal_authenticated.
+
+    Use on endpoints that don't need user_id/customer_id extraction but must
+    not be publicly accessible.  If HMAC middleware is misconfigured or bypassed,
+    requests are rejected with a uniform 403.
+    """
+
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
+        if not getattr(request, "_portal_authenticated", False):
+            logger.warning("🔥 [API Security] require_portal_authentication denied request to %s", request.path)
+            return JsonResponse({"error": "Access denied"}, status=403)
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+def public_api_endpoint(view_func: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Marker decorator: this endpoint is intentionally public (no auth required).
+
+    CI test ``tests.api.test_api_auth_coverage`` enforces that every API view
+    has either this marker or a secure auth decorator.  Adding this decorator
+    is a conscious assertion that the endpoint was reviewed and deemed safe
+    to expose without authentication.
+    """
+    view_func._is_public_api_endpoint = True  # type: ignore[attr-defined]  # marker for CI auth coverage test
+    return view_func

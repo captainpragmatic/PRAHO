@@ -243,7 +243,7 @@ class TicketNumberSecurityTest(TestCase):
         self.assertNotEqual(ticket1.ticket_number, ticket2.ticket_number)
 
 
-@override_settings(CACHES=LOCMEM_TEST_CACHE, RATELIMIT_ENABLE=True, RATELIMIT_ENABLED=True)
+@override_settings(CACHES=LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
 class RateLimitingSecurityTest(TestCase):
     """🔒 Test rate limiting security on ticket operations — needs real cache for rate limit counters."""
 
@@ -274,8 +274,8 @@ class RateLimitingSecurityTest(TestCase):
         """🔒 Ticket creation should be rate limited"""
         self.client.login(email="test@example.com", password="testpass123")
 
-        # Make requests up to the limit (5 per minute)
-        for i in range(5):
+        # Make requests up to the limit (8 per minute)
+        for i in range(8):
             response = self.client.post(reverse('tickets:create'), {
                 'customer_id': self.customer.id,
                 'subject': f'Test Ticket {i}',
@@ -321,8 +321,8 @@ class RateLimitingSecurityTest(TestCase):
 
         self.client.login(email="test@example.com", password="testpass123")
 
-        # Make requests up to the limit (30 per minute)
-        for i in range(30):
+        # Make requests up to the limit (45 per minute)
+        for _ in range(45):
             response = self.client.get(reverse('tickets:download_attachment', args=[attachment.id]))
             if response.status_code != 200:  # File might not exist, but shouldn't be rate limited
                 self.assertNotEqual(response.status_code, 429)

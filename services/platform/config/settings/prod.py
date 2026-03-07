@@ -307,7 +307,7 @@ else:
     )
 
 # Rate limiting cache alias
-RATELIMIT_USE_CACHE = "ratelimit" if REDIS_URL else "default"
+RATE_LIMIT_CACHE = "ratelimit" if REDIS_URL else "default"
 
 
 # ===============================================================================
@@ -328,8 +328,7 @@ STATIC_ROOT = Path(os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
 # RATE LIMITING (Production)
 # ===============================================================================
 
-RATELIMIT_ENABLE = True  # django-ratelimit library decorators (@ratelimit)
-RATELIMIT_ENABLED = True  # Custom middleware (PortalServiceHMACMiddleware, etc.)
+configure_rate_limiting(globals(), enabled=True)
 
 # ===============================================================================
 # OUTBOUND HTTP — INTERNAL SERVICE DOMAINS (Production)

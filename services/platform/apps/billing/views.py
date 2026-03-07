@@ -42,7 +42,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from apps.billing.config import get_invoice_payment_terms_days
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
-from apps.common.decorators import billing_staff_required, can_edit_proforma, rate_limit, staff_required
+from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_rate_limit, staff_required
 from apps.common.mixins import get_search_context
 from apps.common.tax_service import TaxService
 from apps.common.utils import json_error, json_success
@@ -218,7 +218,7 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
 
 
 @billing_staff_required
-@rate_limit(requests_per_minute=60, per_user=True)
+@staff_rate_limit(requests_per_minute=60, per_user=True)
 def billing_list(request: HttpRequest) -> HttpResponse:
     """
     🧾 Display combined list of proformas and invoices (Romanian business practice)

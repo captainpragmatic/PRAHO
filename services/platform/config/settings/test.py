@@ -170,8 +170,7 @@ ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
 TESTING = True
 
 # Ensure rate limiting is disabled in test environment to prevent race conditions
-RATELIMIT_ENABLE = False
-RATELIMIT_ENABLED = False
+configure_rate_limiting(globals(), enabled=False)
 
 # Disable DRF throttling in tests to prevent 429s from rapid API calls
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []

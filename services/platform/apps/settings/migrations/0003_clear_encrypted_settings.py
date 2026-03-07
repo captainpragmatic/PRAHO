@@ -8,13 +8,21 @@ from django.db import migrations
 
 
 def clear_encrypted_settings(apps, schema_editor):
-    """Clear value on sensitive SystemSettings."""
+    """Reset sensitive SystemSettings to their default_value.
+
+    The value column is NOT NULL, so we cannot set it to None.
+    Instead, copy default_value back into value so the old encrypted
+    data is discarded and the setting falls back to its default.
+    """
     SystemSetting = apps.get_model("settings", "SystemSetting")
-    updated = SystemSetting.objects.filter(is_sensitive=True).exclude(value__isnull=True).update(
-        value=None,
-    )
+    sensitive = SystemSetting.objects.filter(is_sensitive=True).exclude(value__isnull=True)
+    updated = 0
+    for setting in sensitive:
+        setting.value = setting.default_value
+        setting.save(update_fields=["value"])
+        updated += 1
     if updated:
-        print(f"\n  Cleared {updated} sensitive setting(s). Re-configure via admin.")
+        print(f"\n  Reset {updated} sensitive setting(s) to defaults. Re-configure via admin.")
 
 
 class Migration(migrations.Migration):

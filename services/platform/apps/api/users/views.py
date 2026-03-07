@@ -23,7 +23,12 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 
 from apps.api.core.throttling import AuthThrottle
-from apps.api.secure_auth import require_customer_authentication, require_user_authentication
+from apps.api.secure_auth import (
+    public_api_endpoint,
+    require_customer_authentication,
+    require_portal_authentication,
+    require_user_authentication,
+)
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.performance.rate_limiting import PortalHMACBurstThrottle, PortalHMACRateThrottle
 from apps.common.request_ip import get_safe_client_ip
@@ -61,6 +66,7 @@ def _mask_email(email: str) -> str:
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
+@require_portal_authentication
 def portal_login_api(request: HttpRequest) -> JsonResponse:
     """
     Authentication endpoint for portal service.
@@ -130,10 +136,9 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@public_api_endpoint
 def health_check(request: HttpRequest) -> Response:
-    """
-    Simple health check endpoint for API monitoring.
-    """
+    """Health check for load balancer probes -- intentionally public."""
     return Response({"status": "healthy", "service": "platform-api", "version": "1.0.0"})
 
 
@@ -170,10 +175,12 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
+@public_api_endpoint
 def obtain_token(request: HttpRequest) -> Response:
     """
-    🔐 Obtain authentication token for API access
+    🔐 Obtain authentication token for API access -- intentionally public.
 
+    Token auth requires email/password credentials, no HMAC needed.
     Used by portal service to authenticate with platform API.
 
     POST /api/users/token/
@@ -353,8 +360,8 @@ class SessionValidationThrottle(ScopedRateThrottle):
     scope = "session_validation"
 
     def allow_request(self, request: HttpRequest, view: Any) -> bool:
-        # Skip throttling in test/dev environments (RATELIMIT_ENABLED=False)
-        if not getattr(settings, "RATELIMIT_ENABLED", True):
+        # Skip throttling in test/dev environments (RATE_LIMITING_ENABLED=False)
+        if not getattr(settings, "RATE_LIMITING_ENABLED", True):
             return True
         return super().allow_request(request, view)
 
@@ -363,8 +370,9 @@ class SessionValidationThrottle(ScopedRateThrottle):
 @csrf_exempt
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware
-@permission_classes([AllowAny])  # HMAC authentication required
+@permission_classes([AllowAny])  # HMAC authentication via @require_portal_authentication below
 @throttle_classes([SessionValidationThrottle])
+@require_portal_authentication
 def validate_session_secure(request: HttpRequest) -> Response:
     """
     🔒 SECURE Session Validation - HMAC-Signed Context (No JWT)
@@ -680,9 +688,12 @@ def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
+@public_api_endpoint
 def password_reset_request_api(request: HttpRequest) -> Response:
     """
-    🔑 Request Password Reset
+    🔑 Request Password Reset -- intentionally public.
+
+    Anonymous users must be able to request password resets.
 
     POST /api/users/password/reset/
     {
@@ -722,9 +733,13 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
+@public_api_endpoint
 def password_reset_confirm_api(request: HttpRequest) -> Response:
     """
-    🔐 Confirm Password Reset
+    🔐 Confirm Password Reset -- intentionally public.
+
+    Token-validated endpoint; no HMAC needed since the reset token
+    itself proves possession of the email account.
 
     POST /api/users/password/reset/confirm/
     {
@@ -776,9 +791,12 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AnonRateThrottle])
+@public_api_endpoint
 def customer_registration_api(request: HttpRequest) -> Response:
     """
-    Customer registration API endpoint for Portal service.
+    Customer registration API endpoint for Portal service -- intentionally public.
+
+    New users register without existing auth; throttled by AnonRateThrottle.
     Creates new customer account with business information via Platform API.
     """
     try:

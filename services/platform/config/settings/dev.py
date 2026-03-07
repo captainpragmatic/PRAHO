@@ -121,18 +121,16 @@ if is_testing:
     }
 
     # Disable rate limiting during tests to prevent 403 errors from race conditions
-    RATELIMIT_ENABLE = False
-    RATELIMIT_ENABLED = False
+    configure_rate_limiting(globals(), enabled=False)
     # Disable DRF throttling in tests to prevent 429s from rapid API calls
     REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 else:
-    # Ensure rate limiting is enabled in development (but allow override)
-    RATELIMIT_ENABLE = os.environ.get("RATELIMIT_ENABLE", "true").lower() == "true"
-    RATELIMIT_ENABLED = RATELIMIT_ENABLE
+    # Ensure rate limiting is enabled in development (but allow override via env)
+    configure_rate_limiting(globals(), enabled=True)
 
-# When rate limiting is explicitly disabled (e.g. RATELIMIT_ENABLE=false make dev),
+# When rate limiting is explicitly disabled (e.g. RATE_LIMITING_ENABLED=false make dev),
 # also disable DRF throttling so E2E tests don't hit 429s.
-if not RATELIMIT_ENABLE:
+if not RATE_LIMITING_ENABLED:
     REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 
 # Webhook signing secret for platform→portal notifications (dev/test value)

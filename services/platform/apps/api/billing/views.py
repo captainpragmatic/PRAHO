@@ -11,7 +11,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.api.secure_auth import require_customer_authentication
+from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency, Invoice
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.billing.proforma_models import ProformaInvoice
@@ -324,13 +324,14 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@public_api_endpoint
 def currencies_api(request: HttpRequest) -> Response:
     """
-    💱 Currency List API
+    💱 Currency List API -- intentionally public.
+
+    Public reference data for invoice display formatting.
 
     GET /api/billing/currencies/
-
-    Returns active currencies for invoice display formatting.
 
     Response:
     {

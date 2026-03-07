@@ -12,7 +12,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.api.secure_auth import require_customer_authentication
+from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 from apps.tickets.services import TicketStatusService
@@ -572,10 +572,13 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
 
 
 @api_view(["GET"])
-@permission_classes([AllowAny])  # HMAC auth handled by middleware
+@permission_classes([AllowAny])
+@public_api_endpoint
 def support_categories_api(request: HttpRequest) -> Response:
     """
-    📂 Support Categories API
+    📂 Support Categories API -- intentionally public.
+
+    Public support category list for ticket creation forms.
 
     GET /api/tickets/categories/
 

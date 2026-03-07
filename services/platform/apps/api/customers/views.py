@@ -17,8 +17,7 @@ from rest_framework.views import APIView
 
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
-from apps.api.secure_auth import require_customer_authentication
-from apps.common.request_ip import get_safe_client_ip
+from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
@@ -170,7 +169,8 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
 
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware
-@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
+@permission_classes([AllowAny])  # HMAC auth via @require_portal_authentication below
+@require_portal_authentication
 def customer_create_api(request: HttpRequest) -> Response:
     """
     🏢 Customer Creation API (for existing users to create companies)
@@ -221,16 +221,7 @@ def customer_create_api(request: HttpRequest) -> Response:
     - Automatic owner membership creation
     """
     try:
-        # Require HMAC-authenticated portal request — staff browser sessions
-        # must not be able to act on arbitrary user_id from request body.
-        if not getattr(request, "_portal_authenticated", False):
-            logger.warning(
-                f"🔥 [API Security] customer_create_api called without HMAC auth from {get_safe_client_ip(request)}"
-            )
-            return Response(
-                {"success": False, "error": "HMAC authentication required"}, status=status.HTTP_401_UNAUTHORIZED
-            )
-
+        # HMAC authentication enforced by @require_portal_authentication decorator.
         # Validate the request data structure
         user_id = request.data.get("user_id")
         action = request.data.get("action")
@@ -283,9 +274,12 @@ def customer_create_api(request: HttpRequest) -> Response:
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
+@public_api_endpoint
 def customer_register_api(request: HttpRequest) -> Response:
     """
-    🔐 Customer Registration API
+    🔐 Customer Registration API -- intentionally public.
+
+    New customer registration; throttled by AuthThrottle.
 
     POST /api/customers/register/
 
