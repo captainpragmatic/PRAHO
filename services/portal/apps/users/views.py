@@ -4,6 +4,7 @@ Customer-facing login/logout with Platform API validation using Django sessions.
 """
 
 import logging
+import time
 
 from django.conf import settings
 from django.contrib import messages
@@ -247,10 +248,14 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                         memberships = _get_user_customer_memberships(request)
                         if memberships:
                             request.session["user_memberships"] = memberships
+                            request.session["user_memberships_fetched_at"] = time.time()
+                            # Seed active_customer_id so middleware doesn't re-fetch
+                            first_customer_id = memberships[0].get("customer_id")
+                            request.session["active_customer_id"] = first_customer_id
                             # If platform returned no primary customer (e.g. superuser without
                             # is_primary membership), fall back to the first accessible customer.
                             if not customer_id:
-                                customer_id = memberships[0].get("customer_id")
+                                customer_id = first_customer_id
                                 request.session["customer_id"] = customer_id
                                 logger.info(
                                     f"⚠️ [Portal Auth] No primary customer for {email}, "

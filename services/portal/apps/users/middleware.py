@@ -285,8 +285,8 @@ class PortalAuthenticationMiddleware:
 
         except Exception as e:
             logger.error(f"🔥 [Auth] Unexpected validation error for {customer_id}: {e}")
-            # Fail-open for unexpected errors too
-            return True
+            # Fail CLOSED for unexpected errors — ADR-0017: programming bugs must not grant access
+            return False
 
     def _is_session_age_valid(self, request: HttpRequest) -> bool:
         """
