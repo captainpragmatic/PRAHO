@@ -376,6 +376,18 @@ def check_https_security_configuration(app_configs: Any, **kwargs: Any) -> list[
         errors.extend(_check_hsts_configuration())
         errors.extend(_check_csrf_origins_configuration())
 
+        # Warn when SSL redirect is disabled in production (proxy deployment)
+        ssl_redirect = getattr(settings, "SECURE_SSL_REDIRECT", False)
+        if not ssl_redirect:
+            errors.append(
+                DjangoWarning(
+                    "SECURE_SSL_REDIRECT is disabled in production — "
+                    "ensure a TLS-terminating reverse proxy handles HTTPS redirection",
+                    hint="Set DJANGO_SECURE_SSL_REDIRECT=true if Django should enforce SSL redirects directly",
+                    id="security.W060",
+                )
+            )
+
         # Check ALLOWED_HOSTS configuration
         allowed_hosts = getattr(settings, "ALLOWED_HOSTS", [])
         if not allowed_hosts or allowed_hosts == ["*"]:

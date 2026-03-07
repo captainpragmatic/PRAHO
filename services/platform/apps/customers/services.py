@@ -341,6 +341,39 @@ class CustomerAnalyticsService:
 
         return min(100, score)
 
+    @staticmethod
+    def record_invoice_event(
+        customer: Any,
+        event_type: str,
+        invoice_amount_cents: int,
+        invoice_id: Any,
+    ) -> None:
+        """
+        Record an invoice event for customer analytics tracking.
+
+        Called from billing signals to track invoice lifecycle events
+        (e.g., paid, refunded) for customer payment pattern analysis.
+        """
+        from apps.audit.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AuditService,  # Circular: cross-app  # Deferred: avoids circular import
+        )
+
+        AuditService.log_simple_event(
+            event_type=f"invoice_{event_type}",
+            user=None,
+            content_object=customer,
+            description=f"Invoice event '{event_type}' for customer {customer.id} — {invoice_amount_cents} cents",
+            actor_type="system",
+            metadata={
+                "customer_id": str(customer.id),
+                "event_type": event_type,
+                "invoice_id": str(invoice_id),
+                "invoice_amount_cents": invoice_amount_cents,
+                "source_app": "billing",
+            },
+        )
+        logger.info(f"📊 [Analytics] Recorded invoice event '{event_type}' for customer {customer.id}")
+
 
 class CustomerStatsService:
     """Service for updating and managing customer statistics."""

@@ -247,6 +247,46 @@ class HTTPSSecurityConfigurationTest(TestCase):
             self.assertEqual(len(critical_warnings), 0)
 
 
+    def test_production_ssl_redirect_disabled_warning(self):
+        """Test W060 fires when SECURE_SSL_REDIRECT disabled in production."""
+        with override_settings(
+            DEBUG=False,
+            SECURE_SSL_REDIRECT=False,
+        ):
+            errors = check_https_security_configuration(None)
+            self.assertTrue(any(
+                'SECURE_SSL_REDIRECT is disabled in production' in str(error)
+                and error.id == 'security.W060'
+                for error in errors
+            ))
+
+    def test_development_ssl_redirect_disabled_no_w060(self):
+        """Test W060 does NOT fire in development mode — only production."""
+        with override_settings(
+            DEBUG=True,
+            SECURE_SSL_REDIRECT=False,
+        ):
+            errors = check_https_security_configuration(None)
+            w060_errors = [e for e in errors if hasattr(e, 'id') and e.id == 'security.W060']
+            self.assertEqual(len(w060_errors), 0)
+
+    def test_production_ssl_redirect_enabled_no_w060(self):
+        """Test W060 does NOT fire when SECURE_SSL_REDIRECT is True."""
+        with override_settings(
+            DEBUG=False,
+            SECURE_SSL_REDIRECT=True,
+            SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO', 'https'),
+            SESSION_COOKIE_SECURE=True,
+            CSRF_COOKIE_SECURE=True,
+            SECURE_HSTS_SECONDS=31536000,
+            ALLOWED_HOSTS=['app.pragmatichost.com'],
+            CSRF_TRUSTED_ORIGINS=['https://app.pragmatichost.com'],
+        ):
+            errors = check_https_security_configuration(None)
+            w060_errors = [e for e in errors if hasattr(e, 'id') and e.id == 'security.W060']
+            self.assertEqual(len(w060_errors), 0)
+
+
 class SessionSecurityConfigurationTest(TestCase):
     """Test session security configuration validation."""
 

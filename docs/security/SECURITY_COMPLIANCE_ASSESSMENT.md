@@ -127,7 +127,7 @@ form-action 'self'
 
 | Setting | Value |
 |---------|-------|
-| `SECURE_SSL_REDIRECT` | `True` |
+| `SECURE_SSL_REDIRECT` | `True` (default, env-configurable via `DJANGO_SECURE_SSL_REDIRECT`) |
 | `SESSION_COOKIE_SECURE` | `True` |
 | `CSRF_COOKIE_SECURE` | `True` |
 | `CSRF_COOKIE_HTTPONLY` | `True` (in `base.py`) |

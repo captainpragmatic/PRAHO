@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Missing `CustomerAnalyticsService.record_invoice_event`** — method called from `billing/signals.py` but never existed; `AttributeError` was silently swallowed by broad `except Exception`. Added implementation using `AuditService.log_simple_event` pattern.
+- **`SECURE_SSL_REDIRECT` hardcoded in prod/staging settings** (#30) — Replaced hardcoded `SECURE_SSL_REDIRECT = True` in all 4 prod/staging settings files with env-configurable `DJANGO_SECURE_SSL_REDIRECT` (default: `true`, secure-by-default). Strict boolean parsing with `.strip().lower()` and `ImproperlyConfigured` on invalid values. Logs warning when disabled. Added `security.W060` system check for disabled redirect in production. Updated 4 Docker Compose files, 3 Ansible templates, 2 `.env.example` files, and 3 docs to match.
 - **SECRET_KEY env var mismatch** (#19) — Standardized on `DJANGO_SECRET_KEY` as canonical env var name across portal/platform settings, Docker Compose, CI workflows, Ansible templates, and env examples
 - **DATABASE_URL vs DB_* mismatch** (#23) — Replaced unused `DATABASE_URL` with individual `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` vars in all compose files to match what Django actually reads
 - **Healthcheck URLs in deploy.sh** (#27) — Platform: `/health/` → `/api/users/health/`; Portal: `/health/` → `/status/`

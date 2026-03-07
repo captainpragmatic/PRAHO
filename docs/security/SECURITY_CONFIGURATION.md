@@ -100,7 +100,7 @@ Beyond the two AES-256-GCM encryption keys, PRAHO derives **domain-specific keys
 |---------|-------|-------|
 | Minimum TLS | TLS 1.2 | For compatibility |
 | Preferred TLS | TLS 1.3 | Modern security |
-| SSL Redirect | Enabled | All HTTP -> HTTPS |
+| SSL Redirect | Enabled (default) | Configurable via `DJANGO_SECURE_SSL_REDIRECT`. Set `false` behind TLS proxy. |
 
 ### Cipher Suites (TLS 1.2)
 

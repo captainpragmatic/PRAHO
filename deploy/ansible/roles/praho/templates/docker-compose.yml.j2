@@ -45,6 +45,7 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://{{ platform_domain }},https://{{ portal_domain }}
       - SERVICE_NAME=platform
       - HMAC_SECRET=${HMAC_SECRET}
+      - DJANGO_SECURE_SSL_REDIRECT=${DJANGO_SECURE_SSL_REDIRECT:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - static_files:/app/staticfiles
@@ -86,6 +87,7 @@ services:
       - ALLOWED_HOSTS={{ portal_domain }},localhost
       - CSRF_TRUSTED_ORIGINS=https://{{ portal_domain }}
       - SERVICE_NAME=portal
+      - DJANGO_SECURE_SSL_REDIRECT=${DJANGO_SECURE_SSL_REDIRECT:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - portal_static:/app/staticfiles

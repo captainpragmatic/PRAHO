@@ -32,6 +32,7 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
+      - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
     expose:
       - "8700"
@@ -69,6 +70,7 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
+      - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
     expose:
       - "8701"

@@ -29,6 +29,7 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,portal
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
     volumes:
       - portal_static:/app/staticfiles

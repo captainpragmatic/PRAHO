@@ -98,15 +98,27 @@ MIDDLEWARE = [
 # HTTPS ENFORCEMENT & SSL SETTINGS (Staging)
 # ===============================================================================
 
-# SSL/TLS Configuration - Only if staging has HTTPS
-# Set SECURE_SSL_REDIRECT = False if staging uses HTTP
+# SSL/TLS Configuration
+# Set DJANGO_SECURE_SSL_REDIRECT=false in env if staging uses HTTP
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_SSL_REDIRECT = True  # Set to False if staging is HTTP-only
+_ssl_redirect_raw = _os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "true").strip().lower()
+if _ssl_redirect_raw in {"1", "true", "yes"}:
+    SECURE_SSL_REDIRECT = True
+elif _ssl_redirect_raw in {"0", "false", "no"}:
+    SECURE_SSL_REDIRECT = False
+else:
+    raise _ImproperlyConfigured(f"DJANGO_SECURE_SSL_REDIRECT must be true/false/yes/no/1/0, got {_ssl_redirect_raw!r}")
+if not SECURE_SSL_REDIRECT:
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "⚠️ [Security] SECURE_SSL_REDIRECT disabled — verify upstream TLS proxy handles HTTPS redirection."
+    )
 SECURE_REDIRECT_EXEMPT = [r"^api/"]  # Allow internal API (incl. health checks) over HTTP from localhost
 
-# Cookie Security - Match production if staging has HTTPS
-SESSION_COOKIE_SECURE = True  # Set to False if staging is HTTP-only
-CSRF_COOKIE_SECURE = True  # Set to False if staging is HTTP-only
+# Cookie Security
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SAMESITE = "Lax"
 
 # ===============================================================================

@@ -99,7 +99,21 @@ except ImportError as e:
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # TLS terminated by reverse proxy
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_SSL_REDIRECT = True
+_ssl_redirect_raw = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "true").strip().lower()
+if _ssl_redirect_raw in {"1", "true", "yes"}:
+    SECURE_SSL_REDIRECT = True
+elif _ssl_redirect_raw in {"0", "false", "no"}:
+    SECURE_SSL_REDIRECT = False
+else:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(f"DJANGO_SECURE_SSL_REDIRECT must be true/false/yes/no/1/0, got {_ssl_redirect_raw!r}")
+if not SECURE_SSL_REDIRECT:
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "⚠️ [Security] SECURE_SSL_REDIRECT disabled — verify upstream TLS proxy handles HTTPS redirection."
+    )
 SECURE_REDIRECT_EXEMPT = [r"^status/$"]  # Allow health checks over HTTP from localhost
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True

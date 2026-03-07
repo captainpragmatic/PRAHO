@@ -147,7 +147,19 @@ MIDDLEWARE = [
 
 # SSL/TLS Configuration - Behind TLS-terminating load balancer
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_SSL_REDIRECT = True
+_ssl_redirect_raw = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "true").strip().lower()
+if _ssl_redirect_raw in {"1", "true", "yes"}:
+    SECURE_SSL_REDIRECT = True
+elif _ssl_redirect_raw in {"0", "false", "no"}:
+    SECURE_SSL_REDIRECT = False
+else:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(f"DJANGO_SECURE_SSL_REDIRECT must be true/false/yes/no/1/0, got {_ssl_redirect_raw!r}")
+if not SECURE_SSL_REDIRECT:
+    logging.getLogger(__name__).warning(
+        "⚠️ [Security] SECURE_SSL_REDIRECT disabled — verify upstream TLS proxy handles HTTPS redirection."
+    )
 SECURE_REDIRECT_EXEMPT = [r"^api/"]  # Allow internal API (incl. health checks) over HTTP from localhost
 
 # Cookie Security - Require HTTPS for all cookies

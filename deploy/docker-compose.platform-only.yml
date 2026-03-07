@@ -73,6 +73,7 @@ services:
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,platform
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
+      - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=platform
     volumes:
       - static_files:/app/staticfiles

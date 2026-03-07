@@ -49,7 +49,7 @@ env | grep -E "(DJANGO|SECRET|DATABASE|REDIS)" > .env.backup.$(date +%Y%m%d)
 - [ ] **Set CSRF_TRUSTED_ORIGINS**: `CSRF_TRUSTED_ORIGINS = ["https://app.pragmatichost.com"]`
 
 #### **Phase 2: SSL Redirect Testing**
-- [ ] **Test Without SSL Redirect**: First deploy with `SECURE_SSL_REDIRECT = False`
+- [ ] **Test Without SSL Redirect**: First deploy with `DJANGO_SECURE_SSL_REDIRECT=false`
 - [ ] **Verify HTTPS Works**: Test all major application flows over HTTPS
 - [ ] **Check Security Headers**: Verify security headers are present
 
@@ -66,7 +66,7 @@ python manage.py check --settings=config.settings.prod --deploy
 ```
 
 #### **Phase 3: Enable SSL Redirect**
-- [ ] **Enable SSL Redirect**: Set `SECURE_SSL_REDIRECT = True`
+- [ ] **Enable SSL Redirect**: Set `DJANGO_SECURE_SSL_REDIRECT=true`
 - [ ] **Test HTTP Redirects**: Verify HTTP requests redirect to HTTPS
 - [ ] **Verify No Redirect Loops**: Ensure proper `X-Forwarded-Proto` handling
 
@@ -105,7 +105,7 @@ curl -I https://app.pragmatichost.com/ | grep -i strict-transport-security
 
 #### **Local Development Verification**
 - [ ] **HTTP Configuration**: Ensure development uses HTTP properly
-- [ ] **No SSL Redirect**: Verify `SECURE_SSL_REDIRECT = False`
+- [ ] **No SSL Redirect**: Verify `DJANGO_SECURE_SSL_REDIRECT=false` (or dev settings default)
 - [ ] **Insecure Cookies**: Confirm `SESSION_COOKIE_SECURE = False`
 
 ---
@@ -190,7 +190,7 @@ If critical issues are discovered:
 #### **1. Immediate Rollback**
 ```bash
 # Disable SSL redirect immediately
-export SECURE_SSL_REDIRECT=False
+export DJANGO_SECURE_SSL_REDIRECT=false
 systemctl restart pragmatichost-app
 
 # Or deploy previous settings file
@@ -280,31 +280,20 @@ curl -X POST https://http-observatory.security.mozilla.org/api/v1/analyze?host=a
 
 ## **Environment Variables Reference**
 
-### **Production HTTPS Settings**
-```bash
-# Required for HTTPS security
-export SECURE_SSL_REDIRECT=True
-export SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https")
-export SESSION_COOKIE_SECURE=True
-export CSRF_COOKIE_SECURE=True
-export SECURE_HSTS_SECONDS=31536000
-export SECURE_HSTS_INCLUDE_SUBDOMAINS=True
-export SECURE_HSTS_PRELOAD=False
+### **Env-Configurable HTTPS Settings**
 
-# Domain configuration
+Only these settings are read from environment variables at runtime:
+
+```bash
+# SSL redirect (env-configurable, default: true)
+export DJANGO_SECURE_SSL_REDIRECT=false   # Set false behind TLS proxy (Caddy/Nginx)
+
+# Domain configuration (env-configurable)
 export ALLOWED_HOSTS="app.pragmatichost.com"
 export CSRF_TRUSTED_ORIGINS="https://app.pragmatichost.com"
 ```
 
-### **Staging HTTPS Settings**
-```bash
-# Staging-specific HTTPS config
-export SECURE_SSL_REDIRECT=True
-export SECURE_HSTS_SECONDS=3600  # Shorter duration
-export SECURE_HSTS_INCLUDE_SUBDOMAINS=False  # More flexible
-export ALLOWED_HOSTS="staging.pragmatichost.com"
-export CSRF_TRUSTED_ORIGINS="https://staging.pragmatichost.com"
-```
+All other HTTPS settings (`SECURE_PROXY_SSL_HEADER`, `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`, etc.) are hardcoded in the settings files and not read from environment variables.
 
 ---
 
