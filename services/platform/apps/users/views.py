@@ -51,9 +51,6 @@ from .services import SessionSecurityService
 
 logger = logging.getLogger(__name__)
 
-# HTTP status codes used in rate-limit dispatch checks
-_HTTP_429_TOO_MANY_REQUESTS = 429
-
 # Type alias for cleaner type hints
 CustomUser = User
 
@@ -279,8 +276,8 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 @method_decorator(
     [
-        rate_limit(key="ip", rate="5/h", method="POST", block=True),  # 5 attempts per hour per IP
-        rate_limit(key="header:user-agent", rate="10/h", method="POST", block=True),  # 10 per user agent
+        rate_limit(key="ip", rate="5/h", method="POST"),  # 5 attempts per hour per IP
+        rate_limit(key="header:user-agent", rate="10/h", method="POST"),  # 10 per user agent
     ],
     name="dispatch",
 )
@@ -296,9 +293,7 @@ class SecurePasswordResetView(PasswordResetView):
         return _("Password reset for your account")
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        response = super().dispatch(request, *args, **kwargs)
-        if getattr(response, "status_code", 0) == _HTTP_429_TOO_MANY_REQUESTS:
-            # Log rate limit exceeded
+        if getattr(request, "limited", False):
             UserLoginLog.objects.create(
                 user=None,
                 ip_address=get_safe_client_ip(request),
@@ -307,7 +302,7 @@ class SecurePasswordResetView(PasswordResetView):
             )
             messages.error(request, _("Too many password reset attempts. Please wait before trying again."))
             return render(request, self.template_name, {"form": self.get_form()})
-        return response
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form: Any) -> HttpResponse:
         # Log password reset attempt for audit trail
@@ -328,7 +323,7 @@ class SecurePasswordResetDoneView(PasswordResetDoneView):
 
 @method_decorator(
     [
-        rate_limit(key="ip", rate="10/h", method="POST", block=True),  # 10 password confirmations per hour per IP
+        rate_limit(key="ip", rate="10/h", method="POST"),  # 10 password confirmations per hour per IP
     ],
     name="dispatch",
 )
@@ -339,9 +334,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
     success_url = reverse_lazy("users:password_reset_complete")
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        response = super().dispatch(request, *args, **kwargs)
-        if getattr(response, "status_code", 0) == _HTTP_429_TOO_MANY_REQUESTS:
-            # Rate limit exceeded — log and show user-friendly message
+        if getattr(request, "limited", False):
             UserLoginLog.objects.create(
                 user=None,
                 ip_address=get_safe_client_ip(request),
@@ -350,7 +343,7 @@ class SecurePasswordResetConfirmView(PasswordResetConfirmView):
             )
             messages.error(request, _("Too many password confirmation attempts. Please wait before trying again."))
             return render(request, self.template_name, {"form": self.get_form(), "validlink": False})
-        return response
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form: Any) -> HttpResponse:
         # Log successful password reset for audit
@@ -414,7 +407,7 @@ password_reset_complete_view = SecurePasswordResetCompleteView.as_view()
 
 @method_decorator(
     [
-        rate_limit(key="user", rate="10/h", method="POST", block=True),  # 10 password changes per hour per user
+        rate_limit(key="user", rate="10/h", method="POST"),  # 10 password changes per hour per user
     ],
     name="dispatch",
 )
@@ -425,9 +418,7 @@ class SecurePasswordChangeView(PasswordChangeView):
     success_url = reverse_lazy("users:user_profile")
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        response = super().dispatch(request, *args, **kwargs)
-        if getattr(response, "status_code", 0) == _HTTP_429_TOO_MANY_REQUESTS:
-            # Rate limit exceeded - only log if user is authenticated
+        if getattr(request, "limited", False):
             if request.user.is_authenticated:
                 UserLoginLog.objects.create(
                     user=request.user,
@@ -437,7 +428,7 @@ class SecurePasswordChangeView(PasswordChangeView):
                 )
             messages.error(request, _("Too many password change attempts. Please wait before trying again."))
             return render(request, self.template_name, {"form": self.get_form()})
-        return response
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form: Form) -> HttpResponse:
         # Log successful password change for audit - user is guaranteed to be authenticated due to LoginRequiredMixin

@@ -371,7 +371,7 @@ def require_portal_authentication(view_func: Callable[..., Any]) -> Callable[...
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
         if not getattr(request, "_portal_authenticated", False):
             logger.warning("🔥 [API Security] require_portal_authentication denied request to %s", request.path)
-            return _uniform_error_response("Access denied", 403)
+            return JsonResponse({"error": "Access denied"}, status=403)
         return view_func(request, *args, **kwargs)
 
     return wrapper

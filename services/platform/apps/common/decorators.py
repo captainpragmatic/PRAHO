@@ -220,16 +220,13 @@ def can_access_admin_functions(user: User) -> bool:
     return user.is_superuser or getattr(user, "staff_role", "") in allowed_roles
 
 
-def rate_limit(
+def staff_rate_limit(
     requests_per_minute: int = 10, per_user: bool = True, block_anonymous: bool = True
 ) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
     """
-    🔒 Rate limiting decorator to prevent abuse of sensitive operations
+    🔒 Rate limiting decorator for staff/admin views (blocks anonymous users).
 
-    Protects against:
-    - DoS attacks through rapid requests
-    - Brute force attempts on form submissions
-    - Resource exhaustion from file uploads
+    For API/public views, use ``apps.common.rate_limiting.rate_limit`` instead.
 
     Args:
         requests_per_minute: Maximum requests allowed per minute (default: 10)
@@ -237,8 +234,8 @@ def rate_limit(
         block_anonymous: If True, blocks all anonymous users (default: True)
 
     Usage:
-        @rate_limit(5, per_user=True)  # 5 requests/minute per user
-        @rate_limit(20, per_user=False)  # 20 requests/minute per IP
+        @staff_rate_limit(5, per_user=True)  # 5 requests/minute per user
+        @staff_rate_limit(20, per_user=False)  # 20 requests/minute per IP
     """
 
     def decorator(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:

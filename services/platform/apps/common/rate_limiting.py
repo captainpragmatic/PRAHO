@@ -2,9 +2,9 @@
 
 Drop-in replacement for ``django_ratelimit.decorators.ratelimit`` that uses
 Django's cache framework directly instead of pulling in the django-ratelimit
-library.  All existing usages use ``block=False``, so this decorator only
-sets ``request.limited = True`` when the rate is exceeded — it never returns
-a 429 on its own.
+library.  With ``block=False`` (default), it sets ``request.limited = True``
+when the rate is exceeded but still calls the wrapped view.  With
+``block=True``, it short-circuits and returns an HTTP 429 response.
 
 Supported *key* types (matching django-ratelimit interface):
   - ``"ip"``           — client IP via ``get_safe_client_ip``
@@ -155,25 +155,25 @@ def rate_limit(
                     cache_key = f"rl:{hashlib.md5(cache_key.encode()).hexdigest()}"  # noqa: S324
 
                 cache = caches[_get_cache_name()]
-                current_count: int = cache.get(cache_key, 0)
 
-                if current_count >= max_requests:
+                # Atomic increment-first to avoid get/incr race under concurrency
+                try:
+                    new_count: int = cache.incr(cache_key)
+                except ValueError:
+                    # Key doesn't exist yet — atomically create it (or incr if another process won the race)
+                    new_count = 1 if cache.add(cache_key, 1, window_seconds) else cache.incr(cache_key)
+
+                if new_count > max_requests:
                     request.limited = True  # type: ignore[attr-defined]  # django-ratelimit compat
                     logger.debug(
                         "Rate limit exceeded: %s (%d/%d in %ds)",
                         cache_key,
-                        current_count,
+                        new_count,
                         max_requests,
                         window_seconds,
                     )
                     if block:
                         return HttpResponse("Rate limit exceeded", status=429)
-                else:
-                    try:
-                        cache.incr(cache_key)
-                    except ValueError:
-                        # Key doesn't exist yet — set it with the window as timeout
-                        cache.set(cache_key, 1, window_seconds)
 
             except Exception:
                 # Rate limiting should never break the view
