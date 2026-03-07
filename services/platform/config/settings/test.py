@@ -11,7 +11,6 @@ from .base import *
 
 DEBUG = False
 TEMPLATE_DEBUG = False
-ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK = True
 
 # ===============================================================================
 # DISABLE DEBUG TOOLBAR IN TESTS

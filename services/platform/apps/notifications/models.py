@@ -16,7 +16,6 @@ import uuid
 from datetime import timedelta
 from typing import Any, ClassVar
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from django.db import models, transaction
@@ -24,12 +23,11 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.constants import SUBJECT_PREVIEW_DISPLAY, SUBJECT_PREVIEW_LIMIT
-from apps.common.encryption import decrypt_if_needed, encrypt_value, is_encrypted
+from apps.common.encryption import EncryptionError, decrypt_if_needed, encrypt_value, is_encrypted
 
 # Module-level logger and encryption flag (patched in tests)
 logger = logging.getLogger(__name__)
 ENCRYPTION_AVAILABLE = True
-ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING = "ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK"
 
 # Security constants
 _DEFAULT_MAX_TEMPLATE_SIZE = 100_000  # 100KB limit for templates
@@ -158,7 +156,7 @@ def encrypt_sensitive_content(content: str) -> str:
         encrypted = encrypt_value(content)
         return encrypted if encrypted else content
     except Exception as e:
-        logger.debug(f"Encryption failed, returning original: {e}")
+        logger.warning("Encryption failed for sensitive content, returning original: %s", e)
         return content
 
 
@@ -325,6 +323,7 @@ class EmailLog(models.Model):
     subject = models.CharField(max_length=255, help_text=_("Actual email subject sent"))
     body_text = models.TextField(blank=True, help_text=_("Plain text version of email body"))
     body_html = models.TextField(blank=True, help_text=_("HTML version of email body"))
+    body_encrypted = models.BooleanField(default=True, help_text=_("Whether body fields are encrypted at rest"))
 
     # Delivery tracking
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -405,22 +404,35 @@ class EmailLog(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Encrypt body fields at rest when available."""
         if ENCRYPTION_AVAILABLE:
+            original_text, original_html = self.body_text, self.body_html
             try:
                 if self.body_text and not is_encrypted(self.body_text):
-                    self.body_text = encrypt_value(self.body_text) or self.body_text
+                    encrypted = encrypt_value(self.body_text)
+                    if encrypted is None:
+                        raise EncryptionError("encrypt_value returned None for non-None input")
+                    self.body_text = encrypted
                 if self.body_html and not is_encrypted(self.body_html):
-                    self.body_html = encrypt_value(self.body_html) or self.body_html
-            except Exception as e:  # pragma: no cover
-                allow_plaintext_fallback = bool(getattr(settings, ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING, False))
-                if allow_plaintext_fallback:
-                    logger.warning(
-                        f"EmailLog encryption failed; saving plaintext due to {ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING}=true: {e}"
-                    )
-                else:
-                    logger.error(
-                        f"EmailLog encryption failed; refusing to save plaintext. Enable {ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK_SETTING} only in dev/test to bypass: {e}"
-                    )
-                    raise
+                    encrypted = encrypt_value(self.body_html)
+                    if encrypted is None:
+                        raise EncryptionError("encrypt_value returned None for non-None input")
+                    self.body_html = encrypted
+                self.body_encrypted = True
+            except Exception as e:
+                # Restore both to prevent partial encryption (one encrypted, one plaintext)
+                self.body_text = original_text
+                self.body_html = original_html
+                self.body_encrypted = False
+                # Per ADR-0017: fail-open for infra failures with safeguards
+                logger.error("EmailLog encryption failed; saving with body_encrypted=False: %s", e)
+                logger.critical(
+                    "ENCRYPTION_FAILURE_ALERT: EmailLog body will contain plaintext. "
+                    "Run `manage.py reencrypt_email_logs` after resolving. to=%s subject=%s",
+                    self.to_addr,
+                    (self.subject or "")[:50],
+                )
+        else:
+            logger.warning("ENCRYPTION_AVAILABLE is False; EmailLog saved without encryption")
+            self.body_encrypted = False
         super().save(*args, **kwargs)
 
     def get_status_display_color(self) -> str:

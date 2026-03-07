@@ -163,6 +163,10 @@ class ErrorHandlingVisitor(ast.NodeVisitor):
                 message=f"`except {exc_text}` is broad and does not re-raise.",
             )
 
+        # Check for encryption operations silenced at DEBUG level
+        if is_broad and not has_raise and action == "log-and-swallow":
+            self._check_encryption_in_except(handler, exc_text)
+
     def _analyze_with_items(self, items: list[ast.withitem], line: int, col: int) -> None:
         for item in items:
             context_expr = item.context_expr
@@ -269,6 +273,29 @@ class ErrorHandlingVisitor(ast.NodeVisitor):
         if has_raise:
             return "raises"
         return "custom"
+
+    def _check_encryption_in_except(self, handler: ast.ExceptHandler, exc_text: str) -> None:
+        """Flag except handlers that swallow encryption errors at DEBUG level."""
+        handler_source = ast.dump(ast.Module(body=handler.body, type_ignores=[]))
+        if "encrypt" not in handler_source.lower():
+            return
+        # Check if the handler only logs at debug level
+        for stmt in handler.body:
+            if not isinstance(stmt, ast.Expr) or not isinstance(stmt.value, ast.Call):
+                continue
+            func = stmt.value.func
+            if isinstance(func, ast.Attribute) and func.attr == "debug":
+                self._add_issue(
+                    line=handler.lineno,
+                    col=handler.col_offset,
+                    severity="high",
+                    code="encrypt-swallow",
+                    message=(
+                        f"`except {exc_text}` swallows encryption failure at DEBUG level. "
+                        "Use WARNING or higher for encryption errors."
+                    ),
+                )
+                return
 
     def _is_logging_stmt(self, stmt: ast.stmt) -> bool:
         if not isinstance(stmt, ast.Expr) or not isinstance(stmt.value, ast.Call):

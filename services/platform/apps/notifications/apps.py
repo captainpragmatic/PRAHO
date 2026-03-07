@@ -7,9 +7,9 @@ class NotificationsConfig(AppConfig):
     verbose_name = "Notifications & Email Templates"
 
     def ready(self) -> None:
-        """Initialize notification signals when app is ready."""
+        """Initialize notification signals and system checks when app is ready."""
         # Import signals to register them
-        from . import signals
+        from . import checks, signals  # noqa: F401
 
         # Set up Anymail signal handlers for email tracking
         signals.setup_anymail_signals()

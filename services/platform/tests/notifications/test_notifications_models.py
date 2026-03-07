@@ -100,8 +100,9 @@ class EmailLogSecurityTests(TestCase):
 
         email_log.save()
 
-        # Should have called encryption
+        # Should have called encryption and marked as encrypted
         mock_encrypt.assert_called()
+        self.assertTrue(email_log.body_encrypted)
 
     def test_email_validation_on_clean(self):
         """🔒 Test that EmailLog validates fields on clean()"""
