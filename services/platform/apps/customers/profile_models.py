@@ -12,6 +12,7 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.cnp_validator import validate_cnp
 from apps.common.types import validate_romanian_cui
 
 from .customer_models import SoftDeleteModel
@@ -36,7 +37,7 @@ class CustomerTaxProfile(SoftDeleteModel):
         blank=True,
         verbose_name=_("CNP"),
         help_text=_("Cod Numeric Personal (13 cifre)"),
-        validators=[RegexValidator(r"^\d{13}$", _("CNP invalid (trebuie 13 cifre)"))],
+        validators=[validate_cnp],
     )
     cui = models.CharField(
         max_length=20,

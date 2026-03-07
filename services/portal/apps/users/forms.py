@@ -331,7 +331,7 @@ class CustomerRegistrationForm(forms.Form):
 
             # Basic CNP checksum validation (simplified)
             # Full validation would include birth date validation, county codes, etc.
-            if cnp[0] not in "1234567890":  # Valid century markers
+            if cnp[0] not in "123456789":  # Valid century markers (0 is invalid)
                 raise ValidationError(_("Invalid CNP format."))
 
         return cnp

@@ -20,7 +20,6 @@ T = TypeVar("T")
 
 # Romanian validation constants
 MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
-CNP_LENGTH = 13  # Romanian CNP (Personal Numeric Code) is exactly 13 digits
 
 
 class LoginForm(forms.Form):
@@ -614,10 +613,14 @@ class CustomerOnboardingRegistrationForm(UserCreationForm):
         return vat_number
 
     def clean_cnp(self) -> str:
-        """Validate CNP format (13 digits)."""
+        """Validate CNP with full semantic validation (checksum, birth date, county)."""
         cnp: str = (self.cleaned_data.get("cnp") or "").strip()
-        if cnp and not (cnp.isdigit() and len(cnp) == CNP_LENGTH):
-            raise ValidationError(_("CNP must be exactly 13 digits."))
+        if cnp:
+            from apps.common.cnp_validator import CNPValidator  # noqa: PLC0415  # Deferred: avoids circular import
+
+            result = CNPValidator.validate(cnp)
+            if not result.is_valid:
+                raise ValidationError(_(result.error_message))
         return cnp
 
     def clean_customer_type(self) -> str:

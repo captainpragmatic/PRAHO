@@ -305,6 +305,23 @@ class SecureInputValidator:
         return result.unwrap()
 
     @staticmethod
+    def validate_cnp_romanian(cnp: str) -> str:
+        """Romanian CNP (Cod Numeric Personal) validation with security checks."""
+        if not cnp:
+            return ""
+        if not isinstance(cnp, str):
+            raise ValidationError(_("Invalid input format"))
+        if len(cnp) > MAX_PHONE_LENGTH:  # Reuse existing size limit constant
+            raise ValidationError(_("Input too long"))
+        SecureInputValidator._check_malicious_patterns(cnp)
+        from apps.common.cnp_validator import CNPValidator  # noqa: PLC0415  # Deferred: avoids circular import
+
+        result = CNPValidator.validate(cnp.strip())
+        if not result.is_valid:
+            raise ValidationError(_(result.error_message))
+        return cnp.strip()
+
+    @staticmethod
     def validate_company_name(company_name: str) -> str:
         """Company name validation with business logic"""
         if not company_name or not isinstance(company_name, str):
