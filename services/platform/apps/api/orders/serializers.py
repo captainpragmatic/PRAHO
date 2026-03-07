@@ -10,8 +10,9 @@ from typing import Any
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apps.common.request_ip import get_safe_client_ip
 from apps.orders.models import Order, OrderItem
-from apps.orders.price_sealing import create_sealed_price_for_product_price, get_client_ip
+from apps.orders.price_sealing import create_sealed_price_for_product_price
 from apps.products.models import Product, ProductPrice
 
 
@@ -51,7 +52,7 @@ class ProductPriceSerializer(serializers.ModelSerializer):
                 logger.warning("🚨 [Sealing] No request context available for sealed price tokens")
                 return None
 
-            client_ip = get_client_ip(request)
+            client_ip = get_safe_client_ip(request)
 
             # Generate tokens for all billing periods
             tokens = {}

@@ -252,6 +252,18 @@ class SecurityScanner:
                 Severity.MEDIUM,
                 "A02:2021-Cryptographic Failures",
             ),
+            (
+                r"encrypt_value\([^)]+\)\s+or\s+",
+                "Fail-open encryption — truthiness fallback bypasses error handling",
+                Severity.HIGH,
+                "A02:2021-Cryptographic Failures",
+            ),
+            (
+                r"logger\.debug\(.*[Ee]ncrypt.*fail",
+                "Encryption failure logged at DEBUG — should be WARNING or higher",
+                Severity.MEDIUM,
+                "A09:2021-Security Logging and Monitoring Failures",
+            ),
         ]
 
         # Authentication failures
@@ -539,14 +551,13 @@ class SecurityScanner:
             # 10. Leftmost XFF trust — split(",")[0] on forwarded headers returns attacker-controlled IP.
             # Proxies append to XFF, so the leftmost entry is client-supplied.
             # Correct approach: rightmost-trusted-hop (walk right-to-left, skip trusted proxies).
-            # Only flag in request_ip.py / middleware where IP extraction actually happens.
             (
                 r'split\(\s*["\'],["\']\s*\)\s*\[\s*0\s*\]',
                 "Leftmost XFF trust — split(',')[0] returns attacker-controlled IP. "
                 "Use rightmost-trusted-hop: walk right-to-left, skip trusted proxy IPs",
                 Severity.HIGH,
                 "A01:2021-Broken Access Control",
-                "**/request_ip.py",
+                "services/**/*.py",
             ),
             # 11. Non-constant-time HMAC comparison — timing oracle for signature forgery.
             # Must use hmac.compare_digest() instead of == for signature verification.
@@ -577,6 +588,28 @@ class SecurityScanner:
                 Severity.MEDIUM,
                 "A04:2021-Insecure Design",
                 "**/migrations/*.py",
+            ),
+            # 14. Hand-rolled IP extraction — use get_safe_client_ip() from apps.common.request_ip.
+            # Any code that reads HTTP_X_REAL_IP or HTTP_CF_CONNECTING_IP is reinventing
+            # IP extraction. Pattern 4 already covers HTTP_X_FORWARDED_FOR; this catches the rest.
+            (
+                r"HTTP_X_REAL_IP|HTTP_CF_CONNECTING_IP",
+                "Direct proxy header access — use get_safe_client_ip() from apps.common.request_ip. "
+                "Hand-rolled IP extraction bypasses trusted proxy validation (OWASP A01, CWE-348)",
+                Severity.HIGH,
+                "A01:2021-Broken Access Control",
+                "services/**/*.py",
+            ),
+            # 15. Variable-based proxy header iteration — indirect META access pattern.
+            # Catches patterns like: for header in [...]: request.META.get(header)
+            # where the header list contains proxy IP headers.
+            (
+                r"forwarded_headers|proxy_headers|ip_headers",
+                "Proxy header list variable — verify this delegates to get_safe_client_ip() "
+                "and does not implement hand-rolled IP extraction (OWASP A01, CWE-348)",
+                Severity.MEDIUM,
+                "A01:2021-Broken Access Control",
+                "services/**/*.py",
             ),
         ]
 

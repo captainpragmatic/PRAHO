@@ -6,7 +6,6 @@ Cryptographically seal prices to prevent manipulation during the order flow.
 
 import hashlib
 import hmac
-import ipaddress
 import json
 import logging
 import time
@@ -15,7 +14,6 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ValidationError
-from django.http import HttpRequest
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
@@ -34,40 +32,6 @@ class PriceData(TypedDict):
     currency_code: str
     billing_period: str
     product_slug: str
-
-
-def get_client_ip(request: HttpRequest) -> str:
-    """
-    🔒 SECURITY: Safely extract client IP address for token binding.
-    Handles proxies and load balancers while preventing header spoofing.
-    """
-    # Check for forwarded IP headers (in order of preference)
-    forwarded_headers = [
-        "HTTP_X_FORWARDED_FOR",
-        "HTTP_X_REAL_IP",
-        "HTTP_CF_CONNECTING_IP",  # Cloudflare
-    ]
-
-    for header in forwarded_headers:
-        forwarded_ip: str | None = request.META.get(header)
-        if forwarded_ip:
-            # Take first IP if comma-separated list
-            ip = forwarded_ip.split(",")[0].strip()
-            if ip and ip != "unknown" and _is_valid_ip(ip):
-                return ip
-
-    # Fall back to direct connection IP
-    return str(request.META.get("REMOTE_ADDR", "0.0.0.0"))
-
-
-def _is_valid_ip(ip: str) -> bool:
-    """Basic IP address validation"""
-    try:
-        # Simple validation - just check it has correct format
-        ipaddress.ip_address(ip)
-        return True
-    except ValueError:
-        return False
 
 
 # Security constants
