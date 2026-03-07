@@ -255,6 +255,9 @@ class Customer(SoftDeleteModel):
         verbose_name=_("Manager cont"),
     )
 
+    # Extensible metadata (onboarding state, credit history, analytics cache)
+    meta = models.JSONField(default=dict, blank=True, verbose_name=_("Metadata"))
+
     # GDPR Compliance (simplified)
     data_processing_consent = models.BooleanField(default=False)
     marketing_consent = models.BooleanField(default=False)

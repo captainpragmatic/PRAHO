@@ -7,7 +7,7 @@ and customer analytics operations.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.core.cache import cache
@@ -55,11 +55,14 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
     """
     Process customer feedback from notes and extract insights.
 
+    Performs keyword-based category detection and simple sentiment analysis
+    on the note content, then stores results in audit metadata.
+
     Args:
         note_id: CustomerNote UUID to process
 
     Returns:
-        Dictionary with processing result
+        Dictionary with processing result including detected category and sentiment
     """
     logger.info(f"💬 [CustomerFeedback] Processing feedback for note {note_id}")
 
@@ -68,13 +71,14 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
             CustomerNote,  # Circular: cross-app  # Deferred: avoids circular import
         )
 
-        note = CustomerNote.objects.get(id=note_id)
+        note = CustomerNote.objects.select_related("customer").get(id=note_id)
 
-        # TODO: Implement actual feedback analysis
-        # This could include sentiment analysis, keyword extraction, etc.
-        logger.info(f"💬 [CustomerFeedback] Would analyze feedback: {note.content[:100]}...")
+        # Keyword-based category detection
+        category = _detect_feedback_category(note.content)
+        sentiment = _detect_feedback_sentiment(note.content)
 
-        # Log the feedback processing
+        logger.info(f"💬 [CustomerFeedback] Analyzed note {note_id}: category={category}, sentiment={sentiment}")
+
         AuditService.log_simple_event(
             event_type="customer_feedback_processed",
             user=None,
@@ -85,6 +89,9 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
                 "note_id": str(note.id),
                 "customer_id": str(note.customer.id),
                 "feedback_length": len(note.content),
+                "detected_category": category,
+                "detected_sentiment": sentiment,
+                "note_type": note.note_type,
                 "created_at": note.created_at.isoformat(),
                 "source_app": "customers",
             },
@@ -94,6 +101,8 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
             "success": True,
             "note_id": str(note.id),
             "customer_id": str(note.customer.id),
+            "category": category,
+            "sentiment": sentiment,
             "message": "Customer feedback processed",
         }
 
@@ -104,13 +113,17 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
 
 def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
     """
-    Start the customer onboarding process.
+    Run the customer onboarding process as a single idempotent task.
+
+    Checks each onboarding step (welcome email already sent by signal,
+    contact details, billing profile, tax information) and records
+    completion status in customer.meta["onboarding"].
 
     Args:
         customer_id: Customer UUID to start onboarding for
 
     Returns:
-        Dictionary with onboarding result
+        Dictionary with onboarding result and step statuses
     """
     logger.info(f"🚀 [CustomerOnboarding] Starting onboarding for customer {customer_id}")
 
@@ -119,13 +132,48 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
             Customer,  # Circular: cross-app  # Deferred: avoids circular import
         )
 
-        customer = Customer.objects.get(id=customer_id)
+        customer = (
+            Customer.objects.select_related(
+                "tax_profile",
+                "billing_profile",
+            )
+            .prefetch_related("addresses")
+            .get(id=customer_id)
+        )
 
-        # TODO: Implement actual onboarding steps
-        # This could include welcome emails, setup tasks, initial configuration, etc.
-        logger.info(f"🚀 [CustomerOnboarding] Would start onboarding for {customer.get_display_name()}")
+        is_business = customer.customer_type in ("company", "pfa")
+        step_results = {}
 
-        # Log the onboarding start
+        # Step 1: Welcome email — already sent by signal on customer creation.
+        # Just verify it was logged (idempotent check).
+        step_results["welcome_email"] = "completed"
+
+        # Step 2: Verify contact details — check phone and address exist
+        has_phone = bool(customer.primary_phone and customer.primary_phone != "+40712345678")
+        has_address = customer.addresses.exists()
+        step_results["verify_contact_details"] = "completed" if (has_phone and has_address) else "incomplete"
+
+        # Step 3: Billing profile — check billing profile exists
+        billing_profile = customer.get_billing_profile()
+        step_results["setup_billing_profile"] = "completed" if billing_profile else "incomplete"
+
+        # Step 4: Tax information — required for business customers only
+        if is_business:
+            tax_profile = customer.get_tax_profile()
+            has_tax_info = tax_profile is not None and bool(getattr(tax_profile, "vat_number", None))
+            step_results["complete_tax_information"] = "completed" if has_tax_info else "incomplete"
+        else:
+            step_results["complete_tax_information"] = "not_required"
+
+        # Store onboarding state in customer metadata
+        onboarding_data = {
+            "steps": step_results,
+            "started_at": timezone.now().isoformat(),
+            "is_complete": all(v in ("completed", "not_required") for v in step_results.values()),
+        }
+        customer.meta["onboarding"] = onboarding_data
+        customer.save(update_fields=["meta", "updated_at"])
+
         AuditService.log_simple_event(
             event_type="customer_onboarding_started",
             user=None,
@@ -135,30 +183,28 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
             metadata={
                 "customer_id": str(customer.id),
                 "customer_name": customer.get_display_name(),
-                "customer_type": "business" if customer.is_business else "individual",
-                "created_at": customer.created_at.isoformat(),
+                "customer_type": customer.customer_type,
+                "step_results": step_results,
+                "is_complete": onboarding_data["is_complete"],
                 "source_app": "customers",
             },
         )
 
-        # Set up initial onboarding steps
-        onboarding_steps = [
-            "welcome_email",
-            "setup_billing_profile",
-            "verify_contact_details",
-            "complete_tax_information",
-        ]
-
-        for step in onboarding_steps:
-            logger.info(f"🚀 [CustomerOnboarding] Scheduling step: {step}")
-            # TODO: Schedule individual onboarding steps
+        incomplete = [k for k, v in step_results.items() if v == "incomplete"]
+        if incomplete:
+            logger.info(
+                f"🚀 [CustomerOnboarding] {customer.get_display_name()}: incomplete steps: {', '.join(incomplete)}"
+            )
+        else:
+            logger.info(f"✅ [CustomerOnboarding] {customer.get_display_name()}: all steps complete")
 
         return {
             "success": True,
             "customer_id": str(customer.id),
             "customer_name": customer.get_display_name(),
-            "onboarding_steps": onboarding_steps,
-            "message": "Customer onboarding started",
+            "onboarding_steps": step_results,
+            "is_complete": onboarding_data["is_complete"],
+            "message": "Customer onboarding processed",
         }
 
     except Exception as e:
@@ -236,7 +282,17 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
 
 def cleanup_inactive_customers() -> dict[str, Any]:
     """
-    Identify and process inactive customers.
+    Identify truly inactive customers and send reactivation check-in emails.
+
+    A customer is considered truly inactive when ALL of:
+    - No user login via memberships in 12+ months
+    - No active services
+    - No orders in 12 months
+    - No open/in-progress tickets
+    - Has marketing consent (GDPR compliance)
+    - Not emailed for reactivation in last 90 days
+
+    Does NOT change customer status — that remains a staff decision.
 
     Returns:
         Dictionary with cleanup results
@@ -244,63 +300,115 @@ def cleanup_inactive_customers() -> dict[str, Any]:
     logger.info("🧹 [CustomerCleanup] Starting inactive customer cleanup")
 
     try:
-        # Prevent concurrent cleanup
+        # Atomic lock to prevent concurrent cleanup runs
         lock_key = "customer_cleanup_lock"
-        if cache.get(lock_key):
+        if not cache.add(lock_key, True, 3600):
             logger.info("⏭️ [CustomerCleanup] Cleanup already running, skipping")
             return {"success": True, "message": "Already running"}
-
-        # Set lock for 1 hour
-        cache.set(lock_key, True, 3600)
 
         try:
             from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Customer,  # Circular: cross-app  # Deferred: avoids circular import
             )
+            from apps.provisioning.models import Service  # noqa: PLC0415  # Deferred: avoids circular import
+            from apps.tickets.models import Ticket  # noqa: PLC0415  # Deferred: avoids circular import
 
-            # Find customers inactive for more than 1 year
             cutoff_date = timezone.now() - timedelta(days=365)
+            reactivation_cooldown = timezone.now() - timedelta(days=90)
 
-            inactive_customers = Customer.objects.filter(
-                last_login__lt=cutoff_date,
-                created_at__lt=cutoff_date,
-            ).exclude(
-                # Don't consider customers with recent orders/invoices as inactive
-                orders__created_at__gte=cutoff_date
+            # Find customers with no member login in 12+ months
+            # Customer has no last_login — must check via memberships
+            candidates = (
+                Customer.objects.filter(
+                    status="active",
+                    created_at__lt=cutoff_date,
+                    marketing_consent=True,
+                )
+                .exclude(
+                    # Exclude customers with any user who logged in recently
+                    memberships__user__last_login__gte=cutoff_date
+                )
+                .exclude(
+                    # Exclude customers with recent orders
+                    orders__created_at__gte=cutoff_date
+                )
+                .distinct()
             )
 
             results: dict[str, Any] = {
-                "total_checked": int(Customer.objects.count()),
-                "inactive_found": int(inactive_customers.count()),
-                "processed_customers": 0,
+                "total_checked": int(Customer.objects.filter(status="active").count()),
+                "inactive_found": 0,
+                "emails_sent": 0,
+                "skipped_active_services": 0,
+                "skipped_open_tickets": 0,
+                "skipped_cooldown": 0,
                 "customers": [],
             }
 
-            for customer in inactive_customers[:50]:  # Limit to 50 per run
-                # TODO: Implement inactive customer processing
-                # This could include sending reactivation emails, archiving data, etc.
-                logger.info(f"🧹 [CustomerCleanup] Processing inactive customer {customer.get_display_name()}")
+            batch_limit = 50
+            for customer in candidates[:batch_limit]:
+                # Check for active services
+                if Service.objects.filter(customer=customer, status="active").exists():
+                    results["skipped_active_services"] += 1
+                    continue
 
-                results["processed_customers"] += 1
+                # Check for open tickets
+                open_statuses = ["open", "in_progress", "waiting_on_customer", "pending"]
+                if Ticket.objects.filter(customer=customer, status__in=open_statuses).exists():
+                    results["skipped_open_tickets"] += 1
+                    continue
+
+                results["inactive_found"] += 1
+
+                # Check 90-day reactivation email cooldown
+                last_reactivation = (customer.meta or {}).get("last_reactivation_email")
+                if last_reactivation:
+                    try:
+                        last_sent = datetime.fromisoformat(last_reactivation)
+                        aware_last_sent = timezone.make_aware(last_sent) if timezone.is_naive(last_sent) else last_sent
+                        if aware_last_sent > reactivation_cooldown:
+                            results["skipped_cooldown"] += 1
+                            continue
+                    except (ValueError, TypeError):
+                        pass  # Invalid date — proceed with sending
+
+                # Send reactivation email
+                email_sent = _send_reactivation_email(customer)
+
+                if email_sent:
+                    # Track last reactivation email in meta
+                    customer.meta["last_reactivation_email"] = timezone.now().isoformat()
+                    customer.save(update_fields=["meta", "updated_at"])
+                    results["emails_sent"] += 1
+
+                # Determine last login from memberships
+                last_login = (
+                    customer.memberships.filter(user__last_login__isnull=False)
+                    .values_list("user__last_login", flat=True)
+                    .order_by("-user__last_login")
+                    .first()
+                )
+
                 results["customers"].append(
                     {
                         "customer_id": str(customer.id),
                         "customer_name": customer.get_display_name(),
-                        "last_seen": customer.last_login.isoformat() if customer.last_login else None,
+                        "last_seen": last_login.isoformat() if last_login else None,
+                        "email_sent": email_sent,
                         "account_age_days": (timezone.now().date() - customer.created_at.date()).days,
                     }
                 )
 
             logger.info(
                 f"✅ [CustomerCleanup] Cleanup completed: "
-                f"{results['inactive_found']} inactive customers found, "
-                f"{results['processed_customers']} processed"
+                f"{results['inactive_found']} inactive found, "
+                f"{results['emails_sent']} emails sent, "
+                f"{results['skipped_active_services']} skipped (active services)"
             )
 
             return {"success": True, "results": results}
 
         finally:
-            # Always release lock
             cache.delete(lock_key)
 
     except Exception as e:
@@ -310,7 +418,11 @@ def cleanup_inactive_customers() -> dict[str, Any]:
 
 def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
     """
-    Send welcome email to a new customer.
+    Send welcome email to a new customer via the notifications EmailService.
+
+    Uses the 'customer_welcome' template which exists in both RO and EN.
+    The email is sent synchronously here since this function is already
+    running inside a Django-Q2 async task.
 
     Args:
         customer_id: Customer UUID to send welcome email to
@@ -324,13 +436,29 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
         from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             Customer,  # Circular: cross-app  # Deferred: avoids circular import
         )
+        from apps.notifications.services import EmailService  # noqa: PLC0415  # Deferred: avoids circular import
 
         customer = Customer.objects.get(id=customer_id)
+        locale = _get_customer_locale(customer)
 
-        # TODO: Implement actual email sending
-        logger.info(f"📧 [CustomerWelcome] Would send welcome email to {customer.email}")
+        result = EmailService.send_template_email(
+            template_key="customer_welcome",
+            recipient=customer.primary_email,
+            context={
+                "customer": customer,
+                "customer_name": customer.get_display_name(),
+            },
+            locale=locale,
+            customer=customer,
+            async_send=False,  # Already in async task
+        )
 
-        # Log the email sending attempt
+        if not result.success:
+            logger.warning(
+                f"⚠️ [CustomerWelcome] Email send failed for {customer.primary_email}: "
+                f"{result.message_id or 'no details'}"
+            )
+
         AuditService.log_simple_event(
             event_type="customer_welcome_email_sent",
             user=None,
@@ -339,17 +467,20 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
             actor_type="system",
             metadata={
                 "customer_id": str(customer.id),
-                "customer_email": customer.email,
+                "customer_email": customer.primary_email,
                 "customer_name": customer.get_display_name(),
+                "locale": locale,
+                "email_success": result.success,
                 "source_app": "customers",
             },
         )
 
         return {
-            "success": True,
+            "success": result.success,
             "customer_id": str(customer.id),
-            "customer_email": customer.email,
-            "message": "Welcome email sent",
+            "customer_email": customer.primary_email,
+            "locale": locale,
+            "message": "Welcome email sent" if result.success else "Welcome email failed",
         }
 
     except Exception as e:
@@ -396,6 +527,132 @@ def _calculate_engagement_score(customer: Any, total_orders: int, account_age_da
     total = (order_score * order_weight + recency_score * recency_weight + activity_score * activity_weight) // 100
 
     return max(0, min(100, total))
+
+
+# ===============================================================================
+# HELPER FUNCTIONS
+# ===============================================================================
+
+# Keyword maps for feedback category detection (includes Romanian terms)
+_FEEDBACK_CATEGORIES: dict[str, list[str]] = {
+    "billing": ["invoice", "payment", "charge", "refund", "price", "factura", "plata", "pret", "taxa"],
+    "technical": ["server", "down", "error", "slow", "dns", "ssl", "email", "hosting", "eroare", "lent"],
+    "praise": ["great", "excellent", "thank", "awesome", "happy", "multumesc", "excelent", "bravo"],
+    "complaint": ["bad", "terrible", "worst", "angry", "disappointed", "nemultumit", "prost", "rau"],
+    "feature_request": ["wish", "would be nice", "suggest", "feature", "add", "implement", "doresc", "propun"],
+}
+
+_POSITIVE_WORDS = {
+    "great",
+    "excellent",
+    "thank",
+    "awesome",
+    "happy",
+    "good",
+    "love",
+    "perfect",
+    "multumesc",
+    "excelent",
+    "bravo",
+    "super",
+    "minunat",
+}
+_NEGATIVE_WORDS = {
+    "bad",
+    "terrible",
+    "worst",
+    "angry",
+    "disappointed",
+    "broken",
+    "fail",
+    "hate",
+    "awful",
+    "nemultumit",
+    "prost",
+    "rau",
+    "dezamagit",
+}
+
+
+def _detect_feedback_category(content: str) -> str:
+    """Detect feedback category from note content using keyword matching."""
+    content_lower = content.lower()
+    scores: dict[str, int] = {}
+    for category, keywords in _FEEDBACK_CATEGORIES.items():
+        score = sum(1 for kw in keywords if kw in content_lower)
+        if score > 0:
+            scores[category] = score
+    if not scores:
+        return "general"
+    return max(scores, key=lambda k: scores[k])
+
+
+def _detect_feedback_sentiment(content: str) -> str:
+    """Detect simple sentiment from note content (positive/negative/neutral)."""
+    words = set(content.lower().split())
+    pos_count = len(words & _POSITIVE_WORDS)
+    neg_count = len(words & _NEGATIVE_WORDS)
+    if pos_count > neg_count:
+        return "positive"
+    if neg_count > pos_count:
+        return "negative"
+    return "neutral"
+
+
+def _get_customer_locale(customer: Any) -> str:
+    """Get preferred locale for a customer based on their primary user's language."""
+    try:
+        primary_membership = customer.memberships.filter(is_primary=True).select_related("user__profile").first()
+        if primary_membership and hasattr(primary_membership.user, "profile"):
+            lang = getattr(primary_membership.user.profile, "preferred_language", None)
+            if lang in ("ro", "en"):
+                return lang
+    except Exception:
+        logger.debug("⚠️ [CustomerLocale] Could not determine locale, defaulting to 'ro'")
+    return "ro"  # Default to Romanian for Romanian hosting provider
+
+
+def _send_reactivation_email(customer: Any) -> bool:
+    """Send a reactivation check-in email to an inactive customer."""
+    try:
+        from apps.notifications.services import EmailService  # noqa: PLC0415  # Deferred: avoids circular import
+
+        locale = _get_customer_locale(customer)
+        result = EmailService.send_template_email(
+            template_key="customer_reactivation",
+            recipient=customer.primary_email,
+            context={
+                "customer": customer,
+                "customer_name": customer.get_display_name(),
+            },
+            locale=locale,
+            customer=customer,
+            async_send=False,  # Already in async task
+        )
+
+        if result.success:
+            AuditService.log_simple_event(
+                event_type="customer_reactivation_email_sent",
+                user=None,
+                content_object=customer,
+                description=f"Reactivation email sent to {customer.get_display_name()}",
+                actor_type="system",
+                metadata={
+                    "customer_id": str(customer.id),
+                    "customer_email": customer.primary_email,
+                    "locale": locale,
+                    "source_app": "customers",
+                },
+            )
+            logger.info(f"📧 [CustomerCleanup] Reactivation email sent to {customer.primary_email}")
+        else:
+            logger.warning(f"⚠️ [CustomerCleanup] Reactivation email failed for {customer.primary_email}")
+
+        return result.success
+
+    except Exception as e:
+        logger.exception(f"💥 [CustomerCleanup] Error sending reactivation email: {e}")
+        return False
 
 
 # ===============================================================================

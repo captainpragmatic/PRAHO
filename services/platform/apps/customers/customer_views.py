@@ -705,6 +705,10 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
     if not customers_qs.filter(id=customer_id).exists():
         return JsonResponse({"error": "Access denied"}, status=403)
 
-    # For now, return empty services list
-    # TODO: Implement actual service management
-    return JsonResponse([], safe=False)
+    # Return real services for this customer (used by ticket form dropdown)
+    services = list(
+        Service.objects.filter(customer_id=customer_id)
+        .values("id", "service_name", "status", "service_plan__name")
+        .order_by("service_name")
+    )
+    return JsonResponse(services, safe=False)
