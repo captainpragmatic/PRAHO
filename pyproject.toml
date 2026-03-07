@@ -210,9 +210,6 @@ platform = [
     "xmltodict>=0.13.0",
     "lxml>=4.9.0",
 
-    # Rate limiting (imported at module level in views)
-    "django-ratelimit>=4.1.0",
-
     # Utilities
     "python-slugify>=8.0.0",
     "bleach>=6.0.0",
@@ -603,7 +600,6 @@ module = [
     "weasyprint",
     "ipware.*",
     "boto3.*",
-    "django_ratelimit.*",
 ]
 ignore_missing_imports = true
 

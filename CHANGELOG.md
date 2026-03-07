@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **`@public_api_endpoint` marker decorator** (`apps/api/secure_auth.py`) — marks endpoints as intentionally unauthenticated; CI test enforces every API view has either this marker or an auth decorator
+- **`@require_portal_authentication` decorator** (`apps/api/secure_auth.py`) — lightweight HMAC backup that verifies `_portal_authenticated` flag; defense-in-depth for endpoints previously relying only on middleware
+- **Structural CI test** (`tests/api/test_api_auth_coverage.py`) — scans all `/api/` URL patterns via Django URL resolver and fails if any view lacks an explicit auth decorator or `@public_api_endpoint` marker; walks DRF `@api_view` closure chains and CBV `permission_classes`
+- **Custom `@rate_limit` decorator** (`apps/common/rate_limiting.py`) — drop-in replacement for `django-ratelimit` using Django cache framework directly; supports `ip`, `user`, `post:<field>`, `header:<name>`, and dotted-path callable keys; 9 unit tests
+- **`configure_rate_limiting()` helper** (`config/settings/_rate_limiting.py`) — single source of truth for `RATE_LIMITING_ENABLED` setting with env var override
+
+### Changed
+
+- **API auth hardening**: all 11 intentionally public API endpoints now carry `@public_api_endpoint`; 3 middleware-only endpoints now have `@require_portal_authentication` as backup
+- **Rate limiting consolidation**: replaced all 20 `@ratelimit` (django-ratelimit) decorator usages across 5 view files with custom `@rate_limit`; restructured 3 CBV `except Ratelimited:` blocks to check `response.status_code == 429`
+- **Settings consolidation**: `RATELIMIT_ENABLE` + `RATELIMIT_ENABLED` → single `RATE_LIMITING_ENABLED` across all platform and portal settings files, Makefile, ADR-0014, integration tests
+- **Cache setting**: `RATELIMIT_USE_CACHE` → `RATE_LIMIT_CACHE` (read by custom decorator)
+
+### Removed
+
+- **django-ratelimit** dependency (`django-ratelimit>=4.1.0`) — replaced by custom `@rate_limit` decorator; all imports, exception handling (`Ratelimited`), and mypy overrides removed
+- **`RATELIMIT_ENABLE`** setting (django-ratelimit library kill-switch) — superseded by `RATE_LIMITING_ENABLED`
+- **`RATELIMIT_KEY`** setting (django-ratelimit global default key) — each `@rate_limit` call specifies its own key
 
 ---
 
