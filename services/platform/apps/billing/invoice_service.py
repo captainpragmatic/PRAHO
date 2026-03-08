@@ -120,7 +120,7 @@ class BillingAnalyticsService:
                 from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update().get(id=customer.id)
+                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
                     locked.meta = locked.meta or {}
                     locked.meta["billing_metrics"] = metrics
                     locked.save(update_fields=["meta", "updated_at"])
@@ -191,6 +191,7 @@ class BillingAnalyticsService:
 
             # Get current LTV from customer metadata
             current_ltv = 0
+            current_ltv_locked = 0  # Initialised here; re-read from DB when meta is not None
             if hasattr(customer, "meta") and customer.meta:
                 current_ltv = customer.meta.get("lifetime_value_cents", 0)
 
@@ -201,7 +202,7 @@ class BillingAnalyticsService:
                 from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update().get(id=customer.id)
+                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
                     locked.meta = locked.meta or {}
                     # Re-read current LTV from locked row for accurate calculation
                     current_ltv_locked = locked.meta.get("lifetime_value_cents", 0)
@@ -212,7 +213,7 @@ class BillingAnalyticsService:
 
             adjustment_data = {
                 "customer_id": str(customer.id),
-                "previous_ltv_cents": current_ltv,
+                "previous_ltv_cents": current_ltv_locked,
                 "adjustment_cents": adjustment_amount_cents,
                 "new_ltv_cents": new_ltv,
                 "reason": adjustment_reason,

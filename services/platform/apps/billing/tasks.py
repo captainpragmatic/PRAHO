@@ -365,7 +365,9 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             vat_number=vat_number,
             defaults={
                 "country_code": "RO",
-                "full_vat_number": f"RO{cui_result.digits}" if not vat_number.startswith("RO") else vat_number,
+                "full_vat_number": f"RO{cui_result.digits}"
+                if cui_result.digits and not vat_number.startswith("RO")
+                else vat_number,
                 "is_valid": is_valid,
                 "validation_source": "manual",
                 "response_data": {"message": validation_msg},

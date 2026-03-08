@@ -124,6 +124,12 @@ def handle_customer_created_or_updated(
 def store_original_customer_values(sender: type[Customer], instance: Customer, **kwargs: Any) -> None:
     """Store original customer values for audit trail"""
     try:
+        # Short-circuit for meta-only updates (credit scores, stats, onboarding state)
+        # These internal cache values don't need audit trail comparison
+        update_fields = kwargs.get("update_fields")
+        if update_fields and set(update_fields).issubset({"meta", "updated_at"}):
+            return
+
         if instance.pk:
             try:
                 original = Customer.all_objects.get(pk=instance.pk)
@@ -888,19 +894,6 @@ def _verify_legal_address_compliance(address: CustomerAddress) -> None:
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Legal address compliance verification failed: {e}")
-
-
-def _ensure_single_default_payment_method(payment_method: CustomerPaymentMethod) -> None:
-    """Ensure only one default payment method per customer"""
-    try:
-        # Set all other payment methods to not default
-        payment_method_manager = cast(Any, CustomerPaymentMethod.objects)
-        payment_method_manager.filter(customer=payment_method.customer, is_default=True).exclude(
-            pk=payment_method.pk
-        ).update(is_default=False)
-
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Default payment method management failed: {e}")
 
 
 def _validate_stripe_payment_method(payment_method: CustomerPaymentMethod) -> None:

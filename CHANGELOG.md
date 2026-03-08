@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`str(e)` information leakage** (CWE-209) — replaced all 5 `return {"error": str(e)}` patterns in `customers/tasks.py` with generic `"Task failed, see server logs"` message; exception details now only in server logs via `logger.exception()`
+- **JSONField race condition** (CWE-362) — added `transaction.atomic()` + `select_for_update()` narrow locks around all `customer.meta` read-modify-write operations in `tasks.py`, `credit_service.py`, `services.py`, and `billing/invoice_service.py`; prevents lost updates from concurrent Django-Q2 tasks
+- **Stale-owner cache lock** — replaced `cache.add(key, True)` + unconditional `cache.delete()` in `cleanup_inactive_customers` with tokenized lock pattern (`uuid4` token, compare-and-delete in `finally`); prevents TTL-expired first worker from deleting second worker's lock
+- **`Customer.meta` type validation** — two-layer enforcement: app-level `save()` coerces `None` → `{}` and raises `ValueError` for non-dict; `clean()` raises `ValidationError` for form/admin; DB-level `CHECK (jsonb_typeof(meta) = 'object')` constraint (migration 0008)
+- **Fail-closed on corrupt cooldown dates** — `cleanup_inactive_customers` now skips send (instead of fail-open) when `last_reactivation_email` date is unparseable, preventing unlimited reactivation email spam
+- **New scanner rule: `exception-str-return`** (AST) — `error_handling_scan.py` detects `return {"error": str(e)}` inside except handlers; found 32 pre-existing instances in billing/
+- **New scanner rule: Unguarded JSONField write** (regex, scoped) — `security_scanner.py` flags `.meta[key] =` mutations in `**/tasks.py` as race condition risk
+- **New scanner rule: Information Leakage** (regex) — `security_scanner.py` detects `"error": str(var)` patterns exposing exception internals in return dicts
+
+### Changed
+
+- Engagement score weights from `SettingsService` now clamped to `[1, 100]` to prevent division-by-zero or negative scores from misconfigured settings
+- Ticket open statuses in `cleanup_inactive_customers` extracted to `_OPEN_TICKET_STATUSES` module constant (was inline list)
+- `security_scanner.py` `_matches_path_glob` now supports comma-separated globs for multi-file-type scoping
+
 ### Added
 
 - **Customer TODO stubs flushed** — all 6 placeholder implementations replaced with real business logic:
@@ -16,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `send_customer_welcome_email`: delegates to `EmailService.send_template_email` with bilingual support
   - `customer_services_api`: wired to provisioning `Service` model with filters, pagination, and stats
 - **Shared CUI validator** (`apps/common/cui_validator.py`) — extracted from inline regex to reusable `CUIValidator` class (pattern matches `CNPValidator`); accepts both `RO12345678` and `12345678` formats; used by customers and billing apps
+- **`@public_api_endpoint` marker decorator** (`apps/api/secure_auth.py`) — marks endpoints as intentionally unauthenticated; CI test enforces every API view has either this marker or an auth decorator
+- **`@require_portal_authentication` decorator** (`apps/api/secure_auth.py`) — lightweight HMAC backup that verifies `_portal_authenticated` flag; defense-in-depth for endpoints previously relying only on middleware
+- **Structural CI test** (`tests/api/test_api_auth_coverage.py`) — scans all `/api/` URL patterns via Django URL resolver and fails if any view lacks an explicit auth decorator or `@public_api_endpoint` marker; walks DRF `@api_view` closure chains and CBV `permission_classes`
+- **Custom `@rate_limit` decorator** (`apps/common/rate_limiting.py`) — drop-in replacement for `django-ratelimit` using Django cache framework directly; supports `ip`, `user`, `post:<field>`, `header:<name>`, and dotted-path callable keys; 9 unit tests
+- **`configure_rate_limiting()` helper** (`config/settings/_rate_limiting.py`) — single source of truth for `RATE_LIMITING_ENABLED` setting with env var override
+- 14 test cases for secret key resolution and production validation (`test_secret_key_resolution.py`)
 
 ### Fixed
 
@@ -35,16 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Duplicate default payment method signal** — removed redundant `_ensure_single_default_payment_method` call (already handled in model `save()`)
 - **`meta` dict access on None** — added `customer.meta = customer.meta or {}` guard before dict operations
 - **Manager declaration order** — `SoftDeleteManager` is now first (default manager) for correct admin/reverse FK behavior
-
-- **`@public_api_endpoint` marker decorator** (`apps/api/secure_auth.py`) — marks endpoints as intentionally unauthenticated; CI test enforces every API view has either this marker or an auth decorator
-- **`@require_portal_authentication` decorator** (`apps/api/secure_auth.py`) — lightweight HMAC backup that verifies `_portal_authenticated` flag; defense-in-depth for endpoints previously relying only on middleware
-- **Structural CI test** (`tests/api/test_api_auth_coverage.py`) — scans all `/api/` URL patterns via Django URL resolver and fails if any view lacks an explicit auth decorator or `@public_api_endpoint` marker; walks DRF `@api_view` closure chains and CBV `permission_classes`
-- **Custom `@rate_limit` decorator** (`apps/common/rate_limiting.py`) — drop-in replacement for `django-ratelimit` using Django cache framework directly; supports `ip`, `user`, `post:<field>`, `header:<name>`, and dotted-path callable keys; 9 unit tests
-- **`configure_rate_limiting()` helper** (`config/settings/_rate_limiting.py`) — single source of truth for `RATE_LIMITING_ENABLED` setting with env var override
-- 14 test cases for secret key resolution and production validation (`test_secret_key_resolution.py`)
-
-### Fixed
-
 - **Missing `CustomerAnalyticsService.record_invoice_event`** — method called from `billing/signals.py` but never existed; `AttributeError` was silently swallowed by broad `except Exception`. Added implementation using `AuditService.log_simple_event` pattern.
 - **`SECURE_SSL_REDIRECT` hardcoded in prod/staging settings** (#30) — Replaced hardcoded `SECURE_SSL_REDIRECT = True` in all 4 prod/staging settings files with env-configurable `DJANGO_SECURE_SSL_REDIRECT` (default: `true`, secure-by-default). Strict boolean parsing with `.strip().lower()` and `ImproperlyConfigured` on invalid values. Logs warning when disabled. Added `security.W060` system check for disabled redirect in production. Updated 4 Docker Compose files, 3 Ansible templates, 2 `.env.example` files, and 3 docs to match.
 - **SECRET_KEY env var mismatch** (#19) — Standardized on `DJANGO_SECRET_KEY` as canonical env var name across portal/platform settings, Docker Compose, CI workflows, Ansible templates, and env examples

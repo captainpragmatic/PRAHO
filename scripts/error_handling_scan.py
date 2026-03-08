@@ -94,6 +94,20 @@ class ErrorHandlingVisitor(ast.NodeVisitor):
         self._analyze_exit_calls(node)
         self.generic_visit(node)
 
+    def visit_Return(self, node: ast.Return) -> Any:
+        if self._inside_except_handler() and self._is_exception_str_return(node):
+            self._add_issue(
+                line=node.lineno,
+                col=node.col_offset,
+                severity="medium",
+                code="exception-str-return",
+                message=(
+                    '`return {"error": str(exc)}` leaks the exception message to callers '
+                    "and loses structured error context. Raise a typed exception or return a typed result instead."
+                ),
+            )
+        self.generic_visit(node)
+
     def visit_Raise(self, node: ast.Raise) -> Any:
         if self._is_system_exit_raise(node):
             self._add_issue(
@@ -174,11 +188,9 @@ class ErrorHandlingVisitor(ast.NodeVisitor):
                 continue
 
             callee = context_expr.func
-            is_suppress = False
-            if isinstance(callee, ast.Name) and callee.id == "suppress":
-                is_suppress = True
-            elif isinstance(callee, ast.Attribute) and callee.attr == "suppress":
-                is_suppress = True
+            is_suppress = (isinstance(callee, ast.Name) and callee.id == "suppress") or (
+                isinstance(callee, ast.Attribute) and callee.attr == "suppress"
+            )
 
             if not is_suppress:
                 continue
@@ -348,9 +360,40 @@ class ErrorHandlingVisitor(ast.NodeVisitor):
         return "high"
 
     def _inside_main_guard(self) -> bool:
-        for node in reversed(self._stack):
-            if isinstance(node, ast.If) and self._is_main_guard_test(node.test):
+        return any(isinstance(node, ast.If) and self._is_main_guard_test(node.test) for node in reversed(self._stack))
+
+    def _inside_except_handler(self) -> bool:
+        """Return True if the current node is nested inside an ExceptHandler."""
+        return any(isinstance(node, ast.ExceptHandler) for node in self._stack)
+
+    def _is_exception_str_return(self, node: ast.Return) -> bool:
+        """Return True for ``return {"error": str(<name>)}`` patterns.
+
+        Matches dict literals that have at least one key ``"error"`` whose value
+        is a call to the built-in ``str()`` with a single positional argument
+        that is a simple name (the exception variable, e.g. ``e``, ``exc``,
+        ``err``, ``exception``).
+        """
+        value = node.value
+        if not isinstance(value, ast.Dict):
+            return False
+
+        for key, val in zip(value.keys, value.values, strict=False):
+            # Key must be the string constant "error"
+            if not isinstance(key, ast.Constant) or key.value != "error":
+                continue
+            # Value must be a call: str(<name>)
+            if not isinstance(val, ast.Call):
+                continue
+            func = val.func
+            if not isinstance(func, ast.Name) or func.id != "str":
+                continue
+            # Exactly one positional arg, no kwargs
+            if len(val.args) != 1 or val.keywords:
+                continue
+            if isinstance(val.args[0], ast.Name):
                 return True
+
         return False
 
     def _is_main_guard_test(self, test: ast.AST) -> bool:

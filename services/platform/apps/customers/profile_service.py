@@ -97,13 +97,18 @@ class ProfileService:
         """Update tax profile with validation. Only allows safe fields."""
         safe_updates = {k: v for k, v in updates.items() if k in ProfileService.TAX_PROFILE_UPDATABLE_FIELDS}
 
-        # Set CUI first, then validate the NEW value (not the old one)
-        if "cui" in safe_updates:
-            tax_profile.cui = safe_updates.pop("cui")
-            if not tax_profile.validate_cui():
-                raise ValueError("Invalid CUI format")
+        changed_fields: list[str] = []
 
-        changed_fields = ["cui"] if "cui" in updates else []
+        if "cui" in safe_updates:
+            new_cui = safe_updates.pop("cui")
+            from apps.common.cui_validator import CUIValidator
+
+            result = CUIValidator.validate(new_cui)
+            if not result.is_valid:
+                raise ValueError(f"Invalid CUI format: {result.error_message}")
+            tax_profile.cui = new_cui
+            changed_fields.append("cui")
+
         for field, value in safe_updates.items():
             setattr(tax_profile, field, value)
             changed_fields.append(field)

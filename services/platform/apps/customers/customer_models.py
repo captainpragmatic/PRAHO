@@ -231,13 +231,15 @@ class Customer(SoftDeleteModel):
     # Primary Contact (from users via CustomerMembership)
     primary_email = models.EmailField(
         verbose_name=_("Email principal"),
-        default="contact@example.com",  # Temporary default for migration
+        blank=True,
+        default="",
     )
     primary_phone = models.CharField(
         max_length=20,
         validators=[RegexValidator(r"^(\+40|0)[0-9]{9,10}$", "Număr telefon invalid")],
         verbose_name=_("Telefon principal"),
-        default="+40712345678",  # Temporary default for migration
+        blank=True,
+        default="",
     )
 
     # Business Context
@@ -278,6 +280,17 @@ class Customer(SoftDeleteModel):
             models.Index(fields=["customer_type"]),
             models.Index(fields=["created_at"]),
             models.Index(fields=["deleted_at"]),  # For soft delete queries
+            # Partial indexes: SoftDeleteManager always filters deleted_at__isnull=True
+            models.Index(
+                fields=["status"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="customers_status_active_idx",
+            ),
+            models.Index(
+                fields=["customer_type"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="customers_type_active_idx",
+            ),
         )
 
     def __str__(self) -> str:
@@ -305,20 +318,20 @@ class Customer(SoftDeleteModel):
         return self.name
 
     def get_tax_profile(self) -> CustomerTaxProfile | None:
-        """Get customer tax profile"""
+        """Get customer tax profile (uses select_related cache when available)."""
         from .profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
-            return cast(CustomerTaxProfile, CustomerTaxProfile.objects.get(customer=self))
+            return self.tax_profile
         except CustomerTaxProfile.DoesNotExist:
             return None
 
     def get_billing_profile(self) -> CustomerBillingProfile | None:
-        """Get customer billing profile"""
+        """Get customer billing profile (uses select_related cache when available)."""
         from .profile_models import CustomerBillingProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
-            return cast(CustomerBillingProfile, CustomerBillingProfile.objects.get(customer=self))
+            return self.billing_profile
         except CustomerBillingProfile.DoesNotExist:
             return None
 

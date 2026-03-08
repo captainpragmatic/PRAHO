@@ -749,8 +749,9 @@ def test_customer_billing_proforma_detail_view(monitored_customer_page: Page) ->
     print(f"  ✅ Proforma heading displayed: {heading_text.strip()[:60]}")
 
     # Verify status banner — either valid (green) or expired (red)
-    valid_banner: Locator = page.locator(".bg-green-900")
-    expired_banner: Locator = page.locator(".bg-red-900")
+    # Portal uses {% alert %} component which outputs role="alert" with bg-green-50/bg-red-50
+    valid_banner: Locator = page.locator('[role="alert"].bg-green-50, [role="alert"].bg-green-950')
+    expired_banner: Locator = page.locator('[role="alert"].bg-red-50, [role="alert"].bg-red-950')
     has_status: bool = valid_banner.count() > 0 or expired_banner.count() > 0
     assert has_status, "Proforma should show either Valid or Expired status banner"
     if valid_banner.count() > 0:

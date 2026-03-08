@@ -21,6 +21,7 @@ from tests.e2e.helpers import (
     PLATFORM_BASE_URL,
     dismiss_cookie_consent,
     login_user_with_retry,
+    wait_for_alpine,
 )
 
 # All tests in this module need the banner visible (opt out of auto-dismiss)
@@ -29,7 +30,8 @@ pytestmark = pytest.mark.no_auto_dismiss
 
 def test_banner_shows_on_first_visit(page: Page) -> None:
     """Banner visible on first visit with 3 action buttons, essential toggle disabled."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
@@ -46,7 +48,8 @@ def test_banner_shows_on_first_visit(page: Page) -> None:
 
 def test_accept_all(page: Page) -> None:
     """Banner disappears after Accept All, doesn't reappear on refresh."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
@@ -67,7 +70,8 @@ def test_accept_all(page: Page) -> None:
 
 def test_essential_only(page: Page) -> None:
     """Essential Only sets only essential=true in cookie."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
@@ -82,7 +86,8 @@ def test_essential_only(page: Page) -> None:
 
 def test_custom_preferences(page: Page) -> None:
     """Customize panel, toggle individual categories, cookie reflects choices."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
@@ -109,11 +114,12 @@ def test_custom_preferences(page: Page) -> None:
 
 def test_persists_across_pages(page: Page) -> None:
     """Banner never reappears after acceptance."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     dismiss_cookie_consent(page)
 
-    # Navigate to another page
-    page.goto(f"{BASE_URL}/cookie-policy/")
+    # Navigate to a different page — banner should stay hidden
+    page.goto(f"{BASE_URL}/register/")
     page.wait_for_load_state('networkidle')
 
     banner = page.locator('#cookie-consent-banner')
@@ -122,7 +128,8 @@ def test_persists_across_pages(page: Page) -> None:
 
 def test_reopen_from_footer(page: Page) -> None:
     """Footer link reopens preferences."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     dismiss_cookie_consent(page)
 
     # Verify Cookie Preferences footer link exists
@@ -143,7 +150,8 @@ def test_withdrawal_is_easy(page: Page) -> None:
     Accept all → reopen → disable → save works (GDPR Art. 7(3)).
     Withdrawal must be as easy as giving consent.
     """
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
@@ -170,7 +178,8 @@ def test_withdrawal_is_easy(page: Page) -> None:
 
 def test_accessible(page: Page) -> None:
     """aria-labels present, banner has role=dialog."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 
@@ -209,7 +218,8 @@ def test_cookie_policy_page(page: Page) -> None:
 
 def test_server_recording(page: Page) -> None:
     """Accept All while intercepting network — Platform API returns success."""
-    page.goto(f"{BASE_URL}/login/")
+    page.goto(f"{BASE_URL}/cookie-policy/")
+    wait_for_alpine(page, '#cookie-consent-banner')
     banner = page.locator('#cookie-consent-banner')
     expect(banner).to_be_visible(timeout=5000)
 

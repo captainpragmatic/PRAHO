@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 # ModelAdmin import removed - Django admin disabled
@@ -25,6 +26,7 @@ from apps.common.constants import (
     DOMAIN_NAME_MAX_LENGTH,
     EMAIL_PARTS_COUNT,
 )
+from apps.common.cui_validator import CUIValidator
 
 if TYPE_CHECKING:
     pass
@@ -242,6 +244,28 @@ class RomanianVATNumber:
         return len(digits) >= CUI_MIN_LENGTH and len(digits) <= CUI_MAX_LENGTH
 
 
+class CurrencyCode(StrEnum):
+    """Supported currencies. StrEnum members ARE strings in Python 3.11+."""
+
+    RON = "RON"
+    EUR = "EUR"
+    USD = "USD"
+
+    @classmethod
+    def choices(cls) -> list[tuple[str, str]]:
+        """Django model field choices format."""
+        return [(c.value, c.value) for c in cls]
+
+    @classmethod
+    def is_supported(cls, code: str) -> bool:
+        """Return True if code is a supported currency code (case-insensitive)."""
+        try:
+            cls(code.upper())
+            return True
+        except ValueError:
+            return False
+
+
 @dataclass(frozen=True)
 class Money:
     """Money type with currency support"""
@@ -250,7 +274,7 @@ class Money:
     currency: str = "RON"
 
     def __post_init__(self) -> None:
-        if self.currency not in ["RON", "EUR", "USD"]:
+        if self.currency not in [c.value for c in CurrencyCode]:
             raise ValueError(f"Unsupported currency: {self.currency}")
 
     @classmethod
@@ -305,19 +329,13 @@ class CUI:
 
 
 def validate_romanian_cui(cui: str) -> Result[CUIString, str]:
-    """Validate Romanian CUI (company ID) - accepts only numeric format (no RO prefix)"""
-    # CUI should not have RO prefix (that's for VAT numbers)
-    if cui.startswith("RO"):
+    """Validate Romanian CUI (company ID) - accepts only numeric format (no RO prefix)."""
+    if cui.upper().startswith("RO"):
         return Err("CUI should not have RO prefix")
-
-    if not cui.isdigit():
-        return Err("CUI must contain only digits")
-
-    if len(cui) < CUI_MIN_LENGTH or len(cui) > CUI_MAX_LENGTH:
-        return Err("CUI must have 2-10 digits")
-
-    # Return the normalized format
-    return Ok(CUIString(cui))
+    result = CUIValidator.validate(cui)
+    if not result.is_valid:
+        return Err(result.error_message)
+    return Ok(CUIString(result.digits))
 
 
 def validate_email(email: str) -> Result[EmailAddress, str]:
@@ -478,7 +496,7 @@ TaxRate = float  # Tax rate as decimal: 0.21 for 21%
 DiscountRate = float  # Discount rate as decimal: 0.10 for 10%
 Amount = int  # Amount in cents/smallest currency unit
 AmountDecimal = float  # Amount as decimal value
-Currency = str  # Currency code: "RON", "EUR", "USD"
+Currency = str  # Legacy alias — prefer CurrencyCode enum for new code
 BankAccount = str  # Bank account number
 BankIBAN = str  # International Bank Account Number
 BankBIC = str  # Bank Identifier Code

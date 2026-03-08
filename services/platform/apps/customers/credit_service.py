@@ -37,7 +37,6 @@ _DEFAULT_CREDIT_ADJUSTMENTS = {
 
 # Module-level alias kept for backward compatibility
 BASE_CREDIT_SCORE = _DEFAULT_BASE_CREDIT_SCORE
-CREDIT_ADJUSTMENTS = _DEFAULT_CREDIT_ADJUSTMENTS
 
 
 def get_base_credit_score() -> int:
@@ -84,11 +83,11 @@ class CustomerCreditService:
         )
 
         try:
-            # Get current credit score
-            current_score = CustomerCreditService.calculate_credit_score(customer)
+            # Compute fallback score OUTSIDE the lock (may use stale cached data, but safe as fallback)
+            fallback_score = CustomerCreditService.calculate_credit_score(customer)
 
-            # Calculate score adjustment based on event type
-            adjustment = CREDIT_ADJUSTMENTS.get(event_type, 0)
+            # Calculate score adjustment based on event type — use runtime config, not stale alias
+            adjustment = get_credit_adjustments().get(event_type, 0)
 
             # Apply additional modifiers based on customer history
             if event_type == "positive_payment":
@@ -101,32 +100,39 @@ class CustomerCreditService:
                 elif consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_1:
                     adjustment += consecutive_bonus_6  # Bonus for 6+ consecutive on-time payments
 
-            # Calculate new score (clamped to valid range)
+            # Initialise to fallback values; will be overwritten inside the lock if meta is available
+            current_score = fallback_score
             new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + adjustment))
 
-            # Store credit event in customer metadata
-            credit_history = customer.meta.get("credit_history", []) if hasattr(customer, "meta") else []
-            credit_event = {
-                "event_type": event_type,
-                "event_date": event_date.isoformat(),
-                "score_before": current_score,
-                "score_after": new_score,
-                "adjustment": adjustment,
-                "recorded_at": timezone.now().isoformat(),
-            }
-            credit_history.append(credit_event)
-
-            # Keep only last 100 events
-            if len(credit_history) > MAX_CREDIT_HISTORY_EVENTS:
-                credit_history = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]
-
             if hasattr(customer, "meta"):
-                # Narrow lock: prevent lost updates from concurrent meta writers
+                # Narrow lock: prevent lost updates from concurrent meta writers.
+                # of=("self",) locks only the Customer row, not any joined tables.
                 from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update().get(id=customer.id)
-                    locked.meta = locked.meta or {}
+                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
+                    locked_meta = locked.meta or {}
+                    # Use stored score from locked row (authoritative), fall back to computed score
+                    current_score = locked_meta.get("credit_score", fallback_score)
+                    new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + adjustment))
+
+                    # Read credit_history from the locked row, not from the stale customer object
+                    credit_history = locked_meta.get("credit_history", [])
+                    credit_event = {
+                        "event_type": event_type,
+                        "event_date": event_date.isoformat(),
+                        "score_before": current_score,
+                        "score_after": new_score,
+                        "adjustment": adjustment,
+                        "recorded_at": timezone.now().isoformat(),
+                    }
+                    credit_history.append(credit_event)
+
+                    # Keep only last 100 events
+                    if len(credit_history) > MAX_CREDIT_HISTORY_EVENTS:
+                        credit_history = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]
+
+                    locked.meta = locked_meta
                     locked.meta["credit_history"] = credit_history
                     locked.meta["credit_score"] = new_score
                     locked.meta["credit_updated_at"] = timezone.now().isoformat()
@@ -185,31 +191,40 @@ class CustomerCreditService:
         )
 
         try:
-            current_score = CustomerCreditService.calculate_credit_score(customer)
+            # Compute fallback score OUTSIDE the lock (may use stale cached data, but safe as fallback)
+            fallback_score = CustomerCreditService.calculate_credit_score(customer)
 
-            # Get the original adjustment and reverse it
-            original_adjustment = CREDIT_ADJUSTMENTS.get(event_type, 0)
+            # Get the original adjustment and reverse it — use runtime config, not stale alias
+            original_adjustment = get_credit_adjustments().get(event_type, 0)
             reversion_adjustment = -original_adjustment
 
+            # Initialise to fallback values; will be overwritten inside the lock if meta is available
+            current_score = fallback_score
             new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + reversion_adjustment))
 
             # Record reversion in credit history (locked to prevent lost updates)
             if hasattr(customer, "meta"):
                 from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
-                reversion_event = {
-                    "event_type": f"revert_{event_type}",
-                    "original_event_date": event_date.isoformat(),
-                    "score_before": current_score,
-                    "score_after": new_score,
-                    "adjustment": reversion_adjustment,
-                    "recorded_at": timezone.now().isoformat(),
-                }
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update().get(id=customer.id)
-                    locked.meta = locked.meta or {}
-                    credit_history = locked.meta.get("credit_history", [])
+                    # of=("self",) locks only the Customer row, not any joined tables.
+                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
+                    locked_meta = locked.meta or {}
+                    # Use stored score from locked row (authoritative), fall back to computed score
+                    current_score = locked_meta.get("credit_score", fallback_score)
+                    new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + reversion_adjustment))
+
+                    reversion_event = {
+                        "event_type": f"revert_{event_type}",
+                        "original_event_date": event_date.isoformat(),
+                        "score_before": current_score,
+                        "score_after": new_score,
+                        "adjustment": reversion_adjustment,
+                        "recorded_at": timezone.now().isoformat(),
+                    }
+                    credit_history = locked_meta.get("credit_history", [])
                     credit_history.append(reversion_event)
+                    locked.meta = locked_meta
                     locked.meta["credit_history"] = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]  # Keep last 100
                     locked.meta["credit_score"] = new_score
                     locked.meta["credit_updated_at"] = timezone.now().isoformat()

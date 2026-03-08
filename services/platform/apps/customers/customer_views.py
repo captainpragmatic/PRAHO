@@ -192,6 +192,20 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     return render(request, "customers/detail.html", context)
 
 
+# --- Customer-creation workflow handlers ---
+# These three helpers (_handle_user_creation_for_customer, _handle_user_linking_for_customer,
+# _handle_skip_user_for_customer) are intentionally separate from the user-assignment workflow
+# handlers below (_handle_user_creation_action, _handle_user_linking_action, _handle_user_skip_action).
+#
+# Key differences that make unification awkward:
+#   - send_welcome source: result dict (bool, already coerced) vs. POST data (raw string, needs coercion)
+#   - is_primary flag: True for new customers (first owner), False for existing customers
+#   - Success messages: creation says "created and linked", assignment is role-aware
+#   - Skip messages: creation says "no user assigned", assignment says "skipped"
+# Merging would require a parameter-heavy _handle_user_workflow() that is harder to follow than
+# two focused sets of handlers.
+
+
 def _handle_user_creation_for_customer(
     request: HttpRequest, customer: Customer, form_data: dict[str, str], result: dict[str, str]
 ) -> None:
@@ -275,25 +289,8 @@ def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
 
         return redirect("customers:detail", customer_id=customer.pk)
 
-    except ValidationError as e:
-        # Known validation issues - safe to show some details
-        messages.error(request, _("❌ Please check your input: Invalid data provided"))
-        logger.warning(f"Customer creation validation error for user {request.user.id}: {e}")
-
-    except IntegrityError as e:
-        # Database constraint violations - generic message
-        messages.error(request, _("❌ This customer information conflicts with existing data"))
-        logger.error(f"Customer creation integrity error for user {request.user.id}: {e}")
-
-    except PermissionDenied as e:
-        # Authorization issues
-        messages.error(request, _("❌ You don't have permission to create customers"))
-        logger.warning(f"Unauthorized customer creation attempt by user {request.user.id}: {e}")
-
     except Exception as e:
-        # Unexpected errors - completely generic message
-        messages.error(request, _("❌ Unable to create customer. Please contact support if this continues"))
-        logger.exception(f"Unexpected error creating customer for user {request.user.id}: {e}")
+        _handle_secure_error(request, e, "customer_create", request.user.id)
 
     return _render_customer_form(request, form)
 
@@ -444,6 +441,10 @@ def _validate_customer_assign_access(request: HttpRequest, user: User, customer:
     return None
 
 
+# --- User-assignment workflow handlers (post-creation) ---
+# See the comment above the customer-creation handlers for why these are kept separate.
+
+
 def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict[str, str]) -> None:
     """Handle the 'create' action for user assignment."""
     send_welcome = bool(assignment_data.get("send_welcome_email", True))
@@ -547,27 +548,8 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
 
         return redirect("customers:detail", customer_id=customer.pk)
 
-    except ValidationError as e:
-        # Known validation issues - safe to show some details
-        messages.error(request, _("❌ Please check your input: Invalid user assignment data"))
-        logger.warning(f"User assignment validation error for customer {customer.id} by user {request.user.id}: {e}")
-
-    except IntegrityError as e:
-        # Database constraint violations - generic message
-        messages.error(request, _("❌ This user assignment conflicts with existing data"))
-        logger.error(f"User assignment integrity error for customer {customer.id} by user {request.user.id}: {e}")
-
-    except PermissionDenied as e:
-        # Authorization issues
-        messages.error(request, _("❌ You don't have permission to assign users to this customer"))
-        logger.warning(
-            f"Unauthorized user assignment attempt for customer {customer.id} by user {request.user.id}: {e}"
-        )
-
     except Exception as e:
-        # Unexpected errors - completely generic message
-        messages.error(request, _("❌ Unable to assign user. Please contact support if this continues"))
-        logger.exception(f"Unexpected error assigning user to customer {customer.id} by user {request.user.id}: {e}")
+        _handle_secure_error(request, e, "user_assignment", request.user.id)
 
     return _render_assignment_form(request, form, customer)
 
@@ -629,4 +611,4 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
         .values("id", "service_name", "status", "service_plan__name")
         .order_by("service_name")
     )
-    return JsonResponse(services, safe=False)
+    return JsonResponse({"results": services})

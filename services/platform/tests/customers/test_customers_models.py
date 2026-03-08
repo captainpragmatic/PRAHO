@@ -114,6 +114,27 @@ class CustomerModelTestCase(TestCase):
         self.assertIsNone(self.customer.deleted_at)
         self.assertIsNone(self.customer.deleted_by)
 
+    def test_primary_email_default_is_not_fake(self):
+        """Verify primary_email default is not the legacy fake placeholder."""
+        field_default = Customer._meta.get_field("primary_email").default
+        self.assertNotEqual(field_default, "contact@example.com")
+
+    def test_primary_phone_default_is_not_fake(self):
+        """Verify primary_phone default is not the legacy fake placeholder."""
+        field_default = Customer._meta.get_field("primary_phone").default
+        self.assertNotEqual(field_default, "+40712345678")
+
+    def test_customer_created_without_contact_fields_has_empty_strings(self):
+        """Customer created without explicit email/phone gets empty strings, not fake data."""
+        customer = Customer.objects.create(
+            name="No Contact Co",
+            customer_type="company",
+            data_processing_consent=True,
+            created_by=self.admin_user,
+        )
+        self.assertEqual(customer.primary_email, "")
+        self.assertEqual(customer.primary_phone, "")
+
 
 # ===============================================================================
 # CUSTOMER TAX PROFILE TESTS

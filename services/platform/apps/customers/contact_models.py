@@ -12,6 +12,8 @@ from django.db import transaction as db_transaction
 from django.db.models import Q, UniqueConstraint
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.fields import EncryptedJSONField
+
 from .customer_models import SoftDeleteModel, validate_bank_details
 
 
@@ -66,12 +68,19 @@ class CustomerAddress(SoftDeleteModel):
                 fields=["customer", "address_type"],
                 condition=Q(is_current=True),
                 name="unique_current_address_per_type",
+                violation_error_message=_("A current address of this type already exists for this customer."),
             ),
         ]
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["customer", "address_type"]),
             models.Index(fields=["customer", "is_current"]),
             models.Index(fields=["postal_code"]),
+            # Partial index: SoftDeleteManager always filters deleted_at__isnull=True
+            models.Index(
+                fields=["customer", "address_type"],
+                condition=Q(deleted_at__isnull=True),
+                name="addr_cust_type_active_idx",
+            ),
         )
 
     def __str__(self) -> str:
@@ -117,8 +126,8 @@ class CustomerPaymentMethod(SoftDeleteModel):
     is_default = models.BooleanField(default=False, verbose_name=_("Implicit"))
     is_active = models.BooleanField(default=True, verbose_name=_("Activ"))
 
-    # Bank Transfer Details (encrypted)
-    bank_details = models.JSONField(blank=True, null=True, verbose_name=_("Detalii bancare"))
+    # Bank Transfer Details (AES-256-GCM encrypted at rest)
+    bank_details = EncryptedJSONField(blank=True, null=True, verbose_name=_("Detalii bancare"))
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)

@@ -110,8 +110,6 @@ class TestSignupWorkflow(TestCase):
         customer = Customer.objects.create(
             name='Ion Popescu',
             customer_type='individual',
-            first_name='Ion',
-            last_name='Popescu',
             primary_email='ion.popescu@email.ro',
             primary_phone='+40722123456',
             data_processing_consent=True,

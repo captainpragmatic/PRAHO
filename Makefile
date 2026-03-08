@@ -525,6 +525,19 @@ lint-credentials:
 # DESIGN SYSTEM CHECKS 🎨  (Phase C.3, C.4, D.1)
 # ===============================================================================
 
+check-pysyntax:
+ifdef FILE
+	@echo "🐍 [Syntax] Checking: $(FILE)"
+	@$(VENV_DIR)/bin/python -c "import ast; ast.parse(open('$(FILE)').read())" && echo "✅ $(FILE) — valid syntax" || { echo "❌ $(FILE) — syntax error"; exit 1; }
+else
+	@echo "🐍 [Syntax] Checking Python syntax across all services..."
+	@errors=0; \
+	for f in $$(find services/platform services/portal -name '*.py' -not -path '*/migrations/*' -not -path '*/.venv*'); do \
+		$(VENV_DIR)/bin/python -c "import ast, sys; ast.parse(open('$$f').read())" 2>/dev/null || { echo "  ❌ $$f"; errors=$$((errors+1)); }; \
+	done; \
+	if [ $$errors -eq 0 ]; then echo "✅ All Python files have valid syntax!"; else echo "❌ $$errors file(s) with syntax errors"; exit 1; fi
+endif
+
 check-parity:
 	@echo "🔍 [Parity] Checking component parity: portal ↔ platform..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -598,11 +611,16 @@ audit-dark-mode-strict:
 
 
 type-check:
+ifdef FILE
+	@echo "🏷️ [Type Check] $(FILE)"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy $(FILE) --config-file=../../pyproject.toml --follow-imports=silent
+else
 	@echo "🏷️ [All Services] Comprehensive type checking..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 	@echo "🎉 All services type checking complete!"
+endif
 
 # ===============================================================================
 # PRE-COMMIT HOOKS 🔗

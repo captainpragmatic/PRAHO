@@ -21,6 +21,7 @@ MIN_SECRET_LENGTH
 # ── Romanian legal / RFC format constants ─────────────────────────────────────
 CUI_MIN_LENGTH
 CUI_MAX_LENGTH
+CUI_CONTROL_THRESHOLD
 EMAIL_PARTS_COUNT
 DOMAIN_NAME_MAX_LENGTH
 
@@ -126,6 +127,7 @@ provisioning.server_overload_threshold
 # ── Security (pending feature wiring) ────────────────────────────────────────
 security.registration_rate_limit_per_ip
 security.invitation_rate_limit_per_user
+security.session_validation_rate_limit
 
 # ── System (pending feature wiring) ──────────────────────────────────────────
 system.backup_retention_days

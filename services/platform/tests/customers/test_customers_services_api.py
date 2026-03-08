@@ -83,3 +83,13 @@ class CustomerServicesApiDataTests(TestCase):
         self.assertEqual(len(services), 1)
         self.assertEqual(services[0]["service_name"], "web.example.com")
         self.assertEqual(services[0]["service_plan__name"], "Basic Hosting")
+
+    def test_customer_views_services_api_no_longer_uses_safe_false(self):
+        """customer_services_api in customer_views.py must not use safe=False (F05)"""
+        source = inspect.getsource(customer_views.customer_services_api)
+        self.assertNotIn("safe=False", source)
+
+    def test_customer_views_services_api_returns_envelope_object(self):
+        """customer_services_api must return JSON object with 'results' key, not a bare array (F05)"""
+        source = inspect.getsource(customer_views.customer_services_api)
+        self.assertIn('"results"', source)

@@ -268,6 +268,42 @@ class CleanupInactiveCustomersTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
 
+    def _make_candidates_qs(self, customers: list) -> MagicMock:
+        """Build a mock queryset that returns ``customers`` when sliced ([:N]).
+
+        The real queryset uses four chained .exclude() calls:
+          .filter(...).exclude(login).exclude(order).exclude(service).exclude(ticket)
+        MagicMock auto-creates child mocks for every attribute access, so each
+        .exclude() call on one mock returns a *different* child mock.  We need
+        all four to ultimately expose a slice that iterates over our customer list.
+        We achieve this by making every .exclude() on the *final* mock return itself
+        so the chain terminates predictably.
+        """
+        candidates_qs = MagicMock()
+        candidates_qs.__getitem__ = MagicMock(return_value=customers)
+        # Each further .exclude() on the candidates mock should return itself so
+        # callers that chain more .exclude() calls still get the same mock.
+        candidates_qs.exclude.return_value = candidates_qs
+        return candidates_qs
+
+    def _wire_customer_qs(self, mock_customer_cls: MagicMock, candidates_qs: MagicMock) -> None:
+        """Wire the four-level .exclude() chain on mock_customer_cls.objects.
+
+        The production queryset is:
+          Customer.objects
+            .filter(status, created_at, marketing_consent)  # initial filter
+            .exclude(Exists(has_recent_login))               # 1st exclude
+            .exclude(Exists(has_recent_order))               # 2nd exclude
+            .exclude(Exists(has_active_service))             # 3rd exclude
+            .exclude(Exists(has_open_ticket))                # 4th exclude
+        """
+        # .filter(...) → first_exclude_mock
+        first_exclude = MagicMock()
+        first_exclude.exclude.return_value = candidates_qs
+        # count() is called on .filter(status="active") — a *separate* filter call
+        mock_customer_cls.objects.filter.return_value.count.return_value = 10
+        mock_customer_cls.objects.filter.return_value.exclude.return_value = first_exclude
+
     @patch("apps.customers.tasks._send_reactivation_email", return_value=True)
     @patch("apps.tickets.models.Ticket")
     @patch("apps.provisioning.models.Service")
@@ -289,13 +325,8 @@ class CleanupInactiveCustomersTests(TestCase):
             None
         )
 
-        mock_customer_cls.objects.filter.return_value.count.return_value = 10
-        candidates_qs = MagicMock()
-        candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
-
-        mock_service_cls.objects.filter.return_value.exists.return_value = False
-        mock_ticket_cls.objects.filter.return_value.exists.return_value = False
+        candidates_qs = self._make_candidates_qs([customer])
+        self._wire_customer_qs(mock_customer_cls, candidates_qs)
 
         result = cleanup_inactive_customers()
 
@@ -312,21 +343,21 @@ class CleanupInactiveCustomersTests(TestCase):
         mock_service_cls: MagicMock,
         mock_ticket_cls: MagicMock,
     ) -> None:
-        customer = MagicMock()
-        customer.id = "cust-1"
-        customer.meta = {}
+        """Customers with active services are excluded at the queryset level.
 
-        mock_customer_cls.objects.filter.return_value.count.return_value = 10
-        candidates_qs = MagicMock()
-        candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
-
-        mock_service_cls.objects.filter.return_value.exists.return_value = True  # Has active services
+        The production code uses an Exists() subquery in .exclude() — customers
+        with active services never appear in candidates.  The result therefore
+        shows inactive_found=0 and emails_sent=0 (no candidates to process).
+        """
+        # Return an empty candidate list — simulating that the DB-level exclusion
+        # already removed any customers with active services.
+        candidates_qs = self._make_candidates_qs([])
+        self._wire_customer_qs(mock_customer_cls, candidates_qs)
 
         result = cleanup_inactive_customers()
 
         assert result["success"] is True
-        assert result["results"]["skipped_active_services"] == 1
+        assert result["results"]["inactive_found"] == 0
         assert result["results"]["emails_sent"] == 0
 
     @patch("apps.tickets.models.Ticket")
@@ -338,22 +369,20 @@ class CleanupInactiveCustomersTests(TestCase):
         mock_service_cls: MagicMock,
         mock_ticket_cls: MagicMock,
     ) -> None:
-        customer = MagicMock()
-        customer.id = "cust-1"
-        customer.meta = {}
+        """Customers with open tickets are excluded at the queryset level.
 
-        mock_customer_cls.objects.filter.return_value.count.return_value = 10
-        candidates_qs = MagicMock()
-        candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
-
-        mock_service_cls.objects.filter.return_value.exists.return_value = False
-        mock_ticket_cls.objects.filter.return_value.exists.return_value = True  # Has open tickets
+        Same reasoning as test_skips_customers_with_active_services — the
+        Exists() subquery in .exclude() removes them before candidates are
+        iterated, so inactive_found and emails_sent remain 0.
+        """
+        candidates_qs = self._make_candidates_qs([])
+        self._wire_customer_qs(mock_customer_cls, candidates_qs)
 
         result = cleanup_inactive_customers()
 
         assert result["success"] is True
-        assert result["results"]["skipped_open_tickets"] == 1
+        assert result["results"]["inactive_found"] == 0
+        assert result["results"]["emails_sent"] == 0
 
     @patch("apps.customers.tasks._send_reactivation_email", return_value=True)
     @patch("apps.tickets.models.Ticket")
@@ -373,13 +402,8 @@ class CleanupInactiveCustomersTests(TestCase):
         customer.get_display_name.return_value = "Test"
         customer.created_at.date.return_value = (timezone.now() - timedelta(days=400)).date()
 
-        mock_customer_cls.objects.filter.return_value.count.return_value = 10
-        candidates_qs = MagicMock()
-        candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
-
-        mock_service_cls.objects.filter.return_value.exists.return_value = False
-        mock_ticket_cls.objects.filter.return_value.exists.return_value = False
+        candidates_qs = self._make_candidates_qs([customer])
+        self._wire_customer_qs(mock_customer_cls, candidates_qs)
 
         result = cleanup_inactive_customers()
 

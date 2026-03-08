@@ -451,7 +451,7 @@ class Command(BaseCommand):
                 <p>Pentru întrebări sau asistență, contactați-ne:</p>
                 <ul>
                     <li>📧 Email: support@pragmatichost.com</li>
-                    <li>📞 Telefon: +40 XXX XXX XXX</li>
+                    <li>📞 Telefon: {{support_phone}}</li>
                     <li>💬 Chat live din zona client</li>
                 </ul>
                 <p>Bun venit în familia PragmaticHost!</p>
@@ -482,7 +482,7 @@ class Command(BaseCommand):
                 <p>For questions or assistance, contact us:</p>
                 <ul>
                     <li>📧 Email: support@pragmatichost.com</li>
-                    <li>📞 Phone: +40 XXX XXX XXX</li>
+                    <li>📞 Phone: {{support_phone}}</li>
                     <li>💬 Live chat from client area</li>
                 </ul>
                 <p>Welcome to the PragmaticHost family!</p>
@@ -1279,7 +1279,7 @@ class Command(BaseCommand):
                 <p>Dacă aveți întrebări sau aveți nevoie de asistență, nu ezitați să ne contactați:</p>
                 <ul>
                     <li>Email: support@pragmatichost.com</li>
-                    <li>Telefon: +40 XXX XXX XXX</li>
+                    <li>Telefon: {{support_phone}}</li>
                 </ul>
                 <p>Cu stimă,<br/>Echipa PragmaticHost</p>
                 """,
@@ -1299,7 +1299,7 @@ class Command(BaseCommand):
                 <p>If you have any questions or need help, please don't hesitate to reach out:</p>
                 <ul>
                     <li>Email: support@pragmatichost.com</li>
-                    <li>Phone: +40 XXX XXX XXX</li>
+                    <li>Phone: {{support_phone}}</li>
                 </ul>
                 <p>Best regards,<br/>The PragmaticHost Team</p>
                 """,

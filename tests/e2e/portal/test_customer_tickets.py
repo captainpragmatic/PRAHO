@@ -184,7 +184,7 @@ def _verify_ticket_creation_result(page: Page, subject: str) -> bool:
     """Verify outcome after submitting the ticket creation form. Returns True on success."""
     if "/tickets/" in page.url and page.url != f"{BASE_URL}/tickets/create/":
         print("  ✅ Customer ticket creation succeeded - redirected away from create page")
-        success_message = page.get_by_role("alert").locator('div:has-text("created"), div:has-text("Ticket #")')
+        success_message = page.get_by_role("alert").locator('div:has-text("created"), div:has-text("Ticket #")').first
         if success_message.is_visible():
             print("  ✅ Success message displayed")
         else:

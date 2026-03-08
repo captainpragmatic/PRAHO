@@ -18,7 +18,8 @@ from rest_framework.views import APIView
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
-from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
+from apps.customers.contact_service import AddressData, ContactService
+from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
 
@@ -648,11 +649,13 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by @require_customer_authentication
+@permission_classes([AllowAny])  # HMAC auth via @require_customer_authentication below
 @throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
 def update_customer_billing_address(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
     request: Request, customer: Customer
-) -> Response:  # Complexity: customer processing  # Complexity: multi-step business logic
+) -> Response:
     """
     🏠 Update customer billing address during checkout validation failures.
 
@@ -704,41 +707,62 @@ def update_customer_billing_address(  # noqa: C901, PLR0912  # Complexity: multi
 
     validated_data = serializer.validated_data
 
+    # Resolve the acting user from the HMAC-signed body (user_id is validated by the decorator)
+    user_id = request.data.get("user_id")
+    try:
+        acting_user = User.objects.get(id=int(user_id), is_active=True)
+    except (User.DoesNotExist, TypeError, ValueError):
+        logger.error(f"🔥 [Billing Address API] Could not resolve user_id={user_id} for customer {customer.id}")
+        return Response(
+            {"success": False, "error": "Invalid request context"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     try:
         with transaction.atomic():
-            # Update customer basic info
+            # F02 fix: Build update_fields dynamically — only save fields actually provided.
+            # Unconditionally saving all 4 fields triggered unnecessary audit signals and
+            # could overwrite values with stale data from a prior serializer state.
+            customer_update_fields: list[str] = []
             if validated_data.get("company_name"):
                 customer.company_name = validated_data["company_name"]
+                customer_update_fields.append("company_name")
             if validated_data.get("contact_name"):
                 customer.name = validated_data["contact_name"]
+                customer_update_fields.append("name")
             if validated_data.get("email"):
                 customer.primary_email = validated_data["email"]
+                customer_update_fields.append("primary_email")
             if validated_data.get("phone"):
                 customer.primary_phone = validated_data["phone"]
+                customer_update_fields.append("primary_phone")
 
-            customer.save(update_fields=["company_name", "name", "primary_email", "primary_phone"])
+            if customer_update_fields:
+                # Include updated_at so the auto_now field is written to DB even with update_fields.
+                customer.save(update_fields=[*customer_update_fields, "updated_at"])
 
-            # Update or create customer address
-            address_fields = {
-                "address_line1": validated_data.get("address_line1", ""),
-                "address_line2": validated_data.get("address_line2", ""),
-                "city": validated_data.get("city", ""),
-                "county": validated_data.get("county", ""),
-                "postal_code": validated_data.get("postal_code", ""),
-                "country": validated_data.get("country", "România"),
-            }
+            # F03 fix: Use ContactService.create_address() for atomic versioning.
+            # The previous get_or_create + setattr loop bypassed version history and
+            # was vulnerable to UniqueConstraint races under concurrent writes.
+            address_line1 = validated_data.get("address_line1", "")
+            city = validated_data.get("city", "")
 
-            # Get existing address or create new one
-            address, created = CustomerAddress.objects.get_or_create(
-                customer=customer, address_type="primary", is_current=True, defaults=address_fields
-            )
-
-            # Update address if it already existed
-            if not created:
-                for field, value in address_fields.items():
-                    if value:  # Only update non-empty values
-                        setattr(address, field, value)
-                address.save()
+            if address_line1 and city:
+                address_data = AddressData(
+                    address_type="primary",
+                    address_line1=address_line1,
+                    city=city,
+                    county=validated_data.get("county", ""),
+                    postal_code=validated_data.get("postal_code", ""),
+                )
+                ContactService.create_address(
+                    customer=customer,
+                    user=acting_user,
+                    address_data=address_data,
+                    is_current=True,
+                    country=validated_data.get("country", "România"),
+                    address_line2=validated_data.get("address_line2", ""),
+                )
 
             # Update or create tax profile for Romanian compliance
             tax_fields = {}

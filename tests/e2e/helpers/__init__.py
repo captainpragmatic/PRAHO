@@ -16,6 +16,7 @@ from tests.e2e.helpers.auth import (
     _dismiss_cookie_consent,
     apply_storage_state,
     dismiss_cookie_consent,
+    wait_for_alpine,
     ensure_fresh_platform_session,
     ensure_fresh_session,
     get_test_user_credentials,
@@ -196,5 +197,6 @@ __all__ = [
     "verify_dashboard_functionality",
     "verify_navigation_completeness",
     "verify_role_based_content",
+    "wait_for_alpine",
     "wait_for_server_ready",
 ]

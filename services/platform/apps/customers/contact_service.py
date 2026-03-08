@@ -16,10 +16,8 @@ if TYPE_CHECKING:
 
     from apps.users.models import User
 
-    from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
     from .customer_models import Customer
 
-# Import at top level to fix PLC0415
 from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
 
 logger = logging.getLogger(__name__)
@@ -59,7 +57,7 @@ class ContactService:
             if kwargs.get("is_current", True):
                 CustomerAddress.objects.filter(  # type: ignore[misc]  # SoftDeleteManager
                     customer=customer, address_type=address_data.address_type, is_current=True
-                ).select_for_update().update(is_current=False)
+                ).select_for_update(of=("self",)).update(is_current=False)
 
                 # Get the next version number
                 last_version = (
@@ -155,12 +153,11 @@ class ContactService:
         if payment_method.customer_id != customer.id:
             raise ValueError("Payment method does not belong to this customer")
 
-        # Remove default from other methods
-        CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)  # type: ignore[misc]
-
-        # Set this method as default
-        payment_method.is_default = True
-        payment_method.save()
+        with transaction.atomic():
+            # Remove default from other methods and set the new one atomically
+            CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)  # type: ignore[misc]  # SoftDeleteManager return type not resolved by django-stubs
+            payment_method.is_default = True
+            payment_method.save(update_fields=["is_default", "updated_at"])
 
         logger.info(
             f"✅ [Contact] Set default payment method for customer: {customer.name}",

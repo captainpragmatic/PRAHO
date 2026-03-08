@@ -14,6 +14,7 @@ from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.types import CurrencyCode
 from apps.common.validators import SecureInputValidator
 from apps.users.models import CustomerMembership
 
@@ -626,7 +627,7 @@ class CustomerCreationForm(forms.Form):
         ),
     )
     preferred_currency = forms.ChoiceField(
-        choices=[("RON", "RON"), ("EUR", "EUR")],
+        choices=CurrencyCode.choices(),
         initial="RON",
         label=_("Preferred Currency"),
         widget=forms.Select(
@@ -931,7 +932,7 @@ class CustomerEditForm(forms.Form):
         ),
     )
     preferred_currency = forms.ChoiceField(
-        choices=[("RON", "RON"), ("EUR", "EUR")],
+        choices=CurrencyCode.choices(),
         initial="RON",
         label=_("Preferred Currency"),
         widget=forms.Select(

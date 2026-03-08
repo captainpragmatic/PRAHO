@@ -47,7 +47,7 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
                     CustomerAddress.objects.filter(  # type: ignore[misc]  # SoftDeleteManager
                         customer=customer, address_type=address_type, is_current=True
                     )
-                    .select_for_update()
+                    .select_for_update(of=("self",))
                     .first()
                 )
 

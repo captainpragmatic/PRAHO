@@ -13,6 +13,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.cnp_validator import validate_cnp
 from apps.common.cui_validator import CUIValidator, validate_cui
+from apps.common.types import CurrencyCode
 
 from .customer_models import SoftDeleteModel
 
@@ -103,7 +104,7 @@ class CustomerBillingProfile(SoftDeleteModel):
 
     # Currency Preferences
     preferred_currency = models.CharField(
-        max_length=3, choices=[("RON", "RON"), ("EUR", "EUR")], default="RON", verbose_name=_("Monedă preferată")
+        max_length=3, choices=CurrencyCode.choices(), default="RON", verbose_name=_("Monedă preferată")
     )
 
     # Billing Preferences

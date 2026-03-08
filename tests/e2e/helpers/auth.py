@@ -39,6 +39,24 @@ def _dismiss_cookie_consent(page: Page, base_url: str) -> None:
     }])
 
 
+def wait_for_alpine(page: Page, selector: str, timeout: int = 10000) -> None:
+    """Wait for Alpine.js to fully initialize a component and make it visible.
+
+    Alpine 3.x removes x-cloak early in processing, but init() runs asynchronously
+    after that. This waits for both x-cloak removal AND the element to have non-zero
+    dimensions (meaning x-show has evaluated to true).
+    """
+    page.wait_for_function(
+        """(selector) => {
+            const el = document.querySelector(selector);
+            if (!el) return false;
+            return !el.hasAttribute('x-cloak') && el.offsetHeight > 0;
+        }""",
+        arg=selector,
+        timeout=timeout,
+    )
+
+
 def dismiss_cookie_consent(page: Page) -> None:
     """
     Dismiss the cookie consent banner by clicking "Accept All".

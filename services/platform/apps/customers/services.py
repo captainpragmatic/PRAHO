@@ -41,6 +41,54 @@ SERVICES_HIGH_THRESHOLD = 3
 SERVICES_MEDIUM_THRESHOLD = 2
 
 
+def _get_orders_high_threshold() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_high_threshold", ORDERS_HIGH_THRESHOLD)
+
+
+def _get_orders_medium_threshold() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_medium_threshold", ORDERS_MEDIUM_THRESHOLD)
+
+
+def _get_orders_low_threshold() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.orders_low_threshold", ORDERS_LOW_THRESHOLD)
+
+
+def _get_payment_rate_excellent() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_excellent", PAYMENT_RATE_EXCELLENT)
+
+
+def _get_payment_rate_good() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_good", PAYMENT_RATE_GOOD)
+
+
+def _get_payment_rate_fair() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.payment_rate_fair", PAYMENT_RATE_FAIR)
+
+
+def _get_services_high_threshold() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.services_high_threshold", SERVICES_HIGH_THRESHOLD)
+
+
+def _get_services_medium_threshold() -> int:
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("customers.services_medium_threshold", SERVICES_MEDIUM_THRESHOLD)
+
+
 class CustomerAnalyticsService:
     """Service for customer analytics and metrics tracking."""
 
@@ -225,7 +273,10 @@ class CustomerAnalyticsService:
     def _calculate_engagement_score(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
         customer: Any, metrics: dict[str, Any]
     ) -> int:  # Complexity: customer processing  # Complexity: multi-step business logic
-        """Calculate customer engagement score (0-100)."""
+        """
+        Tier-based engagement scoring for synchronous customer metrics.
+        Uses threshold comparison (not weights). Max score is 100 (20+30+25+25).
+        """
         score = 0
 
         # Account age factor (max 20 points)
@@ -241,29 +292,29 @@ class CustomerAnalyticsService:
 
         # Order activity factor (max 30 points)
         total_orders = metrics.get("total_orders", 0)
-        if total_orders >= ORDERS_HIGH_THRESHOLD:
+        if total_orders >= _get_orders_high_threshold():
             score += 30
-        elif total_orders >= ORDERS_MEDIUM_THRESHOLD:
+        elif total_orders >= _get_orders_medium_threshold():
             score += 20
-        elif total_orders >= ORDERS_LOW_THRESHOLD:
+        elif total_orders >= _get_orders_low_threshold():
             score += 10
         elif total_orders >= 1:
             score += 5
 
         # Payment behavior factor (max 25 points)
         payment_rate = metrics.get("payment_rate", 100)
-        if payment_rate >= PAYMENT_RATE_EXCELLENT:
+        if payment_rate >= _get_payment_rate_excellent():
             score += 25
-        elif payment_rate >= PAYMENT_RATE_GOOD:
+        elif payment_rate >= _get_payment_rate_good():
             score += 15
-        elif payment_rate >= PAYMENT_RATE_FAIR:
+        elif payment_rate >= _get_payment_rate_fair():
             score += 5
 
         # Active services factor (max 25 points)
         active_services = metrics.get("active_services", 0)
-        if active_services >= SERVICES_HIGH_THRESHOLD:
+        if active_services >= _get_services_high_threshold():
             score += 25
-        elif active_services >= SERVICES_MEDIUM_THRESHOLD:
+        elif active_services >= _get_services_medium_threshold():
             score += 15
         elif active_services >= 1:
             score += 10
@@ -349,7 +400,7 @@ class CustomerStatsService:
                     "last_updated": timezone.now().isoformat(),
                 }
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update().get(id=customer_id)
+                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer_id)
                     locked.meta = locked.meta or {}
                     locked.meta["stats"] = stats_data
                     locked.save(update_fields=["meta", "updated_at"])

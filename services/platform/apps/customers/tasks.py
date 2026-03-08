@@ -13,7 +13,7 @@ from typing import Any
 
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Exists, OuterRef, Sum
 from django.utils import timezone
 from django_q.tasks import async_task
 
@@ -36,6 +36,12 @@ _RECENCY_THRESHOLD_LOW = 90
 
 # Ticket statuses considered "open" for inactive customer cleanup
 _OPEN_TICKET_STATUSES = ("open", "in_progress", "waiting_on_customer")
+
+# Named constants for cleanup task parameters (replaces magic numbers)
+_LOCK_TTL_SECONDS = 3600  # 1 hour — maximum lock duration for cleanup task
+_INACTIVE_THRESHOLD_DAYS = 365  # 12 months of inactivity
+_REACTIVATION_COOLDOWN_DAYS = 90  # Days between reactivation emails
+_CLEANUP_BATCH_LIMIT = 50  # Max customers to process per cleanup run
 
 
 def get_task_soft_time_limit() -> int:
@@ -154,8 +160,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
         step_results["welcome_email"] = "completed"
 
         # Step 2: Verify contact details — check phone and address exist
-        default_phone = Customer._meta.get_field("primary_phone").default
-        has_phone = bool(customer.primary_phone and customer.primary_phone != default_phone)
+        has_phone = bool(customer.primary_phone)
         has_address = customer.addresses.exists()
         step_results["verify_contact_details"] = "completed" if (has_phone and has_address) else "incomplete"
 
@@ -180,7 +185,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
         is_complete = all(v in ("completed", "not_required") for v in step_results.values())
         # Narrow lock: only the meta write to prevent lost updates from concurrent tasks
         with transaction.atomic():
-            customer_locked = Customer.objects.select_for_update().get(id=customer_id)
+            customer_locked = Customer.objects.select_for_update(of=("self",)).get(id=customer_id)
             customer_locked.meta = customer_locked.meta or {}
             existing_onboarding = customer_locked.meta.get("onboarding", {})
             customer_locked.meta["onboarding"] = {
@@ -210,11 +215,9 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
 
         incomplete = [k for k, v in step_results.items() if v == "incomplete"]
         if incomplete:
-            logger.info(
-                f"🚀 [CustomerOnboarding] {customer.get_display_name()}: incomplete steps: {', '.join(incomplete)}"
-            )
+            logger.info(f"🚀 [CustomerOnboarding] customer {customer.id}: incomplete steps: {', '.join(incomplete)}")
         else:
-            logger.info(f"✅ [CustomerOnboarding] {customer.get_display_name()}: all steps complete")
+            logger.info(f"✅ [CustomerOnboarding] customer {customer.id}: all steps complete")
 
         return {
             "success": True,
@@ -299,20 +302,13 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
 
 
 def _process_inactive_candidate(customer: Any, reactivation_cooldown: Any, results: dict[str, Any]) -> None:
-    """Process a single inactive customer candidate (extracted for complexity budget)."""
+    """Process a single inactive customer candidate (extracted for complexity budget).
+
+    Service and Ticket exclusions are handled in the queryset via Exists() subqueries,
+    so every candidate reaching this function is already confirmed to have no active
+    services and no open tickets.
+    """
     from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.provisioning.models import Service  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.tickets.models import Ticket  # noqa: PLC0415  # Deferred: avoids circular import
-
-    # Check for active services
-    if Service.objects.filter(customer=customer, status="active").exists():
-        results["skipped_active_services"] += 1
-        return
-
-    # Check for open tickets
-    if Ticket.objects.filter(customer=customer, status__in=_OPEN_TICKET_STATUSES).exists():
-        results["skipped_open_tickets"] += 1
-        return
 
     results["inactive_found"] += 1
 
@@ -340,7 +336,7 @@ def _process_inactive_candidate(customer: Any, reactivation_cooldown: Any, resul
     if email_sent:
         # Track last reactivation email in meta (locked to prevent lost updates)
         with transaction.atomic():
-            locked = Customer.objects.select_for_update().get(id=customer.id)
+            locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
             locked.meta = locked.meta or {}
             locked.meta["last_reactivation_email"] = timezone.now().isoformat()
             locked.save(update_fields=["meta", "updated_at"])
@@ -388,7 +384,7 @@ def cleanup_inactive_customers() -> dict[str, Any]:
         # Tokenized lock to prevent concurrent cleanup runs (prevents stale-owner unlock)
         lock_key = "customer_cleanup_lock"
         lock_token = str(uuid.uuid4())
-        if not cache.add(lock_key, lock_token, 3600):
+        if not cache.add(lock_key, lock_token, _LOCK_TTL_SECONDS):
             logger.info("⏭️ [CustomerCleanup] Cleanup already running, skipping")
             return {"success": True, "message": "Already running"}
 
@@ -396,17 +392,32 @@ def cleanup_inactive_customers() -> dict[str, Any]:
             from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Customer,  # Circular: cross-app  # Deferred: avoids circular import
             )
+            from apps.provisioning.models import Service  # noqa: PLC0415  # Deferred: avoids circular import
+            from apps.tickets.models import Ticket  # noqa: PLC0415  # Deferred: avoids circular import
 
-            cutoff_date = timezone.now() - timedelta(days=365)
-            reactivation_cooldown = timezone.now() - timedelta(days=90)
+            cutoff_date = timezone.now() - timedelta(days=_INACTIVE_THRESHOLD_DAYS)
+            reactivation_cooldown = timezone.now() - timedelta(days=_REACTIVATION_COOLDOWN_DAYS)
 
-            # Find customers with no member login in 12+ months
-            # Customer has no last_login — must check via memberships
-            # Subquery anti-joins: .exclude() on multi-valued relations uses
-            # LEFT OUTER JOIN which keeps rows where ANY related row doesn't match.
-            # Subquery ensures ALL related rows are checked correctly.
-            recently_active_ids = Customer.objects.filter(memberships__user__last_login__gte=cutoff_date).values("id")
-            recently_ordered_ids = Customer.objects.filter(orders__created_at__gte=cutoff_date).values("id")
+            # NULL-safe NOT EXISTS subqueries (replaces NOT IN which fails on NULLs).
+            # Exists() emits NOT EXISTS in SQL — safe when related rows may have NULL FKs.
+            has_recent_login = Customer.objects.filter(
+                id=OuterRef("id"),
+                memberships__user__last_login__gte=cutoff_date,
+            )
+            has_recent_order = Customer.objects.filter(
+                id=OuterRef("id"),
+                orders__created_at__gte=cutoff_date,
+            )
+
+            # Service/Ticket checks pushed into queryset to eliminate N+1 per candidate.
+            has_active_service = Service.objects.filter(
+                customer_id=OuterRef("id"),
+                status="active",
+            )
+            has_open_ticket = Ticket.objects.filter(
+                customer_id=OuterRef("id"),
+                status__in=_OPEN_TICKET_STATUSES,
+            )
 
             candidates = (
                 Customer.objects.filter(
@@ -414,8 +425,10 @@ def cleanup_inactive_customers() -> dict[str, Any]:
                     created_at__lt=cutoff_date,
                     marketing_consent=True,
                 )
-                .exclude(id__in=recently_active_ids)
-                .exclude(id__in=recently_ordered_ids)
+                .exclude(Exists(has_recent_login))
+                .exclude(Exists(has_recent_order))
+                .exclude(Exists(has_active_service))
+                .exclude(Exists(has_open_ticket))
             )
 
             results: dict[str, Any] = {
@@ -428,15 +441,13 @@ def cleanup_inactive_customers() -> dict[str, Any]:
                 "customers": [],
             }
 
-            batch_limit = 50
-            for customer in candidates[:batch_limit]:
+            for customer in candidates[:_CLEANUP_BATCH_LIMIT]:
                 _process_inactive_candidate(customer, reactivation_cooldown, results)
 
             logger.info(
                 f"✅ [CustomerCleanup] Cleanup completed: "
                 f"{results['inactive_found']} inactive found, "
-                f"{results['emails_sent']} emails sent, "
-                f"{results['skipped_active_services']} skipped (active services)"
+                f"{results['emails_sent']} emails sent"
             )
 
             return {"success": True, "results": results}
@@ -490,8 +501,7 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
 
         if not result.success:
             logger.warning(
-                f"⚠️ [CustomerWelcome] Email send failed for {customer.primary_email}: "
-                f"{result.message_id or 'no details'}"
+                f"⚠️ [CustomerWelcome] Email send failed for customer {customer.id}: {result.message_id or 'no details'}"
             )
 
         AuditService.log_simple_event(
@@ -524,7 +534,10 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
 
 
 def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
-    """Calculate customer engagement score (0-100) based on weighted factors."""
+    """
+    Weight-based engagement scoring for background analytics tasks.
+    Uses SettingsService weights (default 40/30/30). Denominator is always 100.
+    """
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
@@ -532,6 +545,13 @@ def _calculate_engagement_score(customer: Any, total_orders: int, account_age_da
     order_weight = max(1, min(100, SettingsService.get_integer_setting("customers.engagement_order_weight", 40)))
     recency_weight = max(1, min(100, SettingsService.get_integer_setting("customers.engagement_recency_weight", 30)))
     activity_weight = max(1, min(100, SettingsService.get_integer_setting("customers.engagement_activity_weight", 30)))
+
+    weight_sum = order_weight + recency_weight + activity_weight
+    if weight_sum != 100:  # noqa: PLR2004  # Expected sum of engagement weights
+        logger.warning(
+            f"⚠️ [Engagement] Weights sum to {weight_sum}, expected 100. "
+            "Results may be skewed. Check SettingsService configuration."
+        )
 
     # Order score: 0-100 based on order count (10+ orders = 100)
     order_score = min(total_orders * 10, 100)
@@ -612,9 +632,15 @@ _NEGATIVE_WORDS = {
 def _detect_feedback_category(content: str) -> str:
     """Detect feedback category from note content using keyword matching."""
     content_lower = content.lower()
+    words = {w.strip(".,!?;:'\"()[]{}") for w in content_lower.split()}
     scores: dict[str, int] = {}
     for category, keywords in _FEEDBACK_CATEGORIES.items():
-        score = sum(1 for kw in keywords if kw in content_lower)
+        score = 0
+        for kw in keywords:
+            if " " in kw:  # Multi-word phrases: substring match (e.g., "would be nice")
+                score += 1 if kw in content_lower else 0
+            else:  # Single words: word-boundary match
+                score += 1 if kw in words else 0
         if score > 0:
             scores[category] = score
     if not scores:
@@ -682,9 +708,9 @@ def _send_reactivation_email(customer: Any) -> bool:
                     "source_app": "customers",
                 },
             )
-            logger.info(f"📧 [CustomerCleanup] Reactivation email sent to {customer.primary_email}")
+            logger.info(f"📧 [CustomerCleanup] Reactivation email sent for customer {customer.id}")
         else:
-            logger.warning(f"⚠️ [CustomerCleanup] Reactivation email failed for {customer.primary_email}")
+            logger.warning(f"⚠️ [CustomerCleanup] Reactivation email failed for customer {customer.id}")
 
         return result.success
 
