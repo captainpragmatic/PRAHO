@@ -94,16 +94,10 @@ class CustomerTaxProfileTestCase(TestCase):
             vat_rate=Decimal('19.00')
         )
 
-        # Test VAT calculation - these methods may not exist yet
-        net_amount = Decimal('100.00')
-        expected_vat = Decimal('19.00')  # 19% VAT
-        expected_gross = Decimal('119.00')
-
-        # Only test if methods exist
-        if hasattr(tax_profile, 'calculate_vat'):
-            self.assertEqual(tax_profile.calculate_vat(net_amount), expected_vat)
-        if hasattr(tax_profile, 'calculate_gross_amount'):
-            self.assertEqual(tax_profile.calculate_gross_amount(net_amount), expected_gross)
+        # Test tax profile stores VAT rate correctly
+        self.assertEqual(tax_profile.vat_rate, Decimal('19.00'))
+        self.assertTrue(tax_profile.is_vat_payer)
+        self.assertTrue(tax_profile.validate_cui())
 
     def test_romanian_vat_requirements(self):
         """Test Romanian VAT registration requirements"""
@@ -114,11 +108,11 @@ class CustomerTaxProfileTestCase(TestCase):
             is_vat_payer=True
         )
 
-        # Test Romanian VAT requirements - these methods may not exist yet
-        if hasattr(tax_profile, 'is_romanian_entity'):
-            self.assertTrue(tax_profile.is_romanian_entity())
-        if hasattr(tax_profile, 'default_vat_rate'):
-            self.assertEqual(tax_profile.default_vat_rate(), Decimal('19.00'))
+        # Test Romanian VAT registration requirements
+        self.assertTrue(tax_profile.is_vat_payer)
+        self.assertEqual(tax_profile.cui, 'RO12345678')
+        self.assertEqual(tax_profile.vat_number, 'RO12345678')
+        self.assertTrue(tax_profile.validate_cui())
 
 
 class CustomerBillingProfileTestCase(TestCase):
@@ -162,9 +156,8 @@ class CustomerBillingProfileTestCase(TestCase):
         # Test credit limit
         self.assertEqual(billing_profile.credit_limit, Decimal('5000.00'))
 
-        # Test credit usage calculation (assuming method exists)
-        if hasattr(billing_profile, 'available_credit'):
-            self.assertIsInstance(billing_profile.available_credit, Decimal)
+        # Test credit limit is stored correctly
+        self.assertIsInstance(billing_profile.credit_limit, Decimal)
 
     def test_billing_contact_validation(self):
         """Test billing contact information validation"""
@@ -190,13 +183,8 @@ class CustomerBillingProfileTestCase(TestCase):
 
         self.assertEqual(billing_profile.payment_terms, 30)
 
-        # Test payment due date calculation if method exists
-        if hasattr(billing_profile, 'calculate_due_date'):
-            from django.utils import timezone
-            invoice_date = timezone.now().date()
-            due_date = billing_profile.calculate_due_date(invoice_date)
-            expected_due = invoice_date + timezone.timedelta(days=30)
-            self.assertEqual(due_date, expected_due)
+        # Test payment terms stored correctly
+        self.assertIsInstance(billing_profile.payment_terms, int)
 
     def test_billing_profile_str_representation(self):
         """Test string representation of billing profile"""

@@ -176,3 +176,6 @@ deploy/ansible/.env.*
 # QA session artifacts (logs, screenshots) are excluded; planning docs are tracked
 QA/logs/
 QA/screenshots/
+
+# Design/plan docs (internal, not tracked)
+docs/plans/

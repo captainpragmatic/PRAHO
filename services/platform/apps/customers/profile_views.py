@@ -9,7 +9,6 @@ import logging
 from typing import cast
 
 from django.contrib import messages
-from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -17,7 +16,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.decorators import staff_required
 from apps.users.models import User
 
-from .customer_models import Customer
+from .customer_service import CustomerService
 from .forms import CustomerBillingProfileForm, CustomerTaxProfileForm
 from .profile_models import CustomerBillingProfile, CustomerTaxProfile
 
@@ -31,14 +30,7 @@ def customer_tax_profile(request: HttpRequest, customer_id: int) -> HttpResponse
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Get or create tax profile
@@ -72,14 +64,7 @@ def customer_billing_profile(request: HttpRequest, customer_id: int) -> HttpResp
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     # Get or create billing profile

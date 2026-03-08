@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Customer TODO stubs flushed** — all 6 placeholder implementations replaced with real business logic:
+  - `process_customer_feedback`: keyword extraction + category tagging with sentiment analysis
+  - `start_customer_onboarding` / onboarding steps: multi-step orchestration (welcome email → billing setup → verification)
+  - `cleanup_inactive_customers`: GDPR-aware inactive customer processing with reactivation emails
+  - `send_customer_welcome_email`: delegates to `EmailService.send_template_email` with bilingual support
+  - `customer_services_api`: wired to provisioning `Service` model with filters, pagination, and stats
+- **Shared CUI validator** (`apps/common/cui_validator.py`) — extracted from inline regex to reusable `CUIValidator` class (pattern matches `CNPValidator`); accepts both `RO12345678` and `12345678` formats; used by customers and billing apps
+
+### Fixed
+
+- **Mass assignment vulnerability** (OWASP A04:2021) — added `UPDATABLE_FIELDS` frozensets to `CustomerService`, `ProfileService`; `update_customer()` and profile update methods now filter against allowlists and log rejected fields
+- **`User.objects.create()` bypassing password hashing** — changed to `create_user()` in `customer_create_user` view
+- **Missing role validation** — `customer_add_user` and `customer_create_user` now validate role against `CustomerMembership.CUSTOMER_ROLE_CHOICES`
+- **Missing ownership validation** — `set_default_payment_method` now verifies payment method belongs to the customer
+- **Address versioning race condition** — wrapped in `transaction.atomic()` + `select_for_update()` in both view and service layer
+- **Form save atomicity** — `CustomerCreationForm.save()` now wraps 4 object creations in `transaction.atomic()`
+- **Broken `unique_together` on addresses** — replaced with partial `UniqueConstraint(condition=Q(is_current=True))` for correct current-address uniqueness
+- **CUI validation always returning False** — `validate_cui()` on `CustomerTaxProfile` was passing RO-prefixed values to a validator that rejected RO prefix; now uses shared `CUIValidator` that handles both formats
+- **Credit scoring dead code** — `get_base_credit_score()` and `get_credit_adjustments()` were defined but never called; `calculate_credit_score()` now uses them instead of module constants
+- **`_get_consecutive_on_time_payments` not checking due dates** — was counting consecutive successful payments regardless of timing; now checks `invoice.due_at`
+- **Phantom order statuses** — removed references to non-existent `"delivered"` and `"fulfilled"` statuses from analytics queries
+- **USD currency option** — removed from billing profile form (model only allows RON/EUR)
+- **Soft-delete signal using filtered manager** — `store_original_customer_values` pre_save signal changed from `Customer.objects.get()` to `Customer.all_objects.get()` to handle soft-deleted record restore
+- **Duplicate default payment method signal** — removed redundant `_ensure_single_default_payment_method` call (already handled in model `save()`)
+- **`meta` dict access on None** — added `customer.meta = customer.meta or {}` guard before dict operations
+- **Manager declaration order** — `SoftDeleteManager` is now first (default manager) for correct admin/reverse FK behavior
+
 - **`@public_api_endpoint` marker decorator** (`apps/api/secure_auth.py`) — marks endpoints as intentionally unauthenticated; CI test enforces every API view has either this marker or an auth decorator
 - **`@require_portal_authentication` decorator** (`apps/api/secure_auth.py`) — lightweight HMAC backup that verifies `_portal_authenticated` flag; defense-in-depth for endpoints previously relying only on middleware
 - **Structural CI test** (`tests/api/test_api_auth_coverage.py`) — scans all `/api/` URL patterns via Django URL resolver and fails if any view lacks an explicit auth decorator or `@public_api_endpoint` marker; walks DRF `@api_view` closure chains and CBV `permission_classes`

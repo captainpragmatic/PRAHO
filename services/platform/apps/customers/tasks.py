@@ -7,10 +7,12 @@ and customer analytics operations.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 from django_q.tasks import async_task
@@ -31,6 +33,9 @@ TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 _RECENCY_THRESHOLD_HIGH = 7
 _RECENCY_THRESHOLD_MEDIUM = 30
 _RECENCY_THRESHOLD_LOW = 90
+
+# Ticket statuses considered "open" for inactive customer cleanup
+_OPEN_TICKET_STATUSES = ("open", "in_progress", "waiting_on_customer", "pending")
 
 
 def get_task_soft_time_limit() -> int:
@@ -108,7 +113,7 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"💥 [CustomerFeedback] Error processing feedback for note {note_id}: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Task failed, see server logs"}
 
 
 def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
@@ -171,8 +176,12 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
             "started_at": timezone.now().isoformat(),
             "is_complete": all(v in ("completed", "not_required") for v in step_results.values()),
         }
-        customer.meta["onboarding"] = onboarding_data
-        customer.save(update_fields=["meta", "updated_at"])
+        # Narrow lock: only the meta write to prevent lost updates from concurrent tasks
+        with transaction.atomic():
+            customer_locked = Customer.objects.select_for_update().get(id=customer_id)
+            customer_locked.meta = customer_locked.meta or {}
+            customer_locked.meta["onboarding"] = onboarding_data
+            customer_locked.save(update_fields=["meta", "updated_at"])
 
         AuditService.log_simple_event(
             event_type="customer_onboarding_started",
@@ -209,7 +218,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"💥 [CustomerOnboarding] Error starting onboarding for customer {customer_id}: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Task failed, see server logs"}
 
 
 def update_customer_analytics(customer_id: str) -> dict[str, Any]:
@@ -277,7 +286,74 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"💥 [CustomerAnalytics] Error updating analytics for customer {customer_id}: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Task failed, see server logs"}
+
+
+def _process_inactive_candidate(customer: Any, reactivation_cooldown: Any, results: dict[str, Any]) -> None:
+    """Process a single inactive customer candidate (extracted for complexity budget)."""
+    from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.provisioning.models import Service  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.tickets.models import Ticket  # noqa: PLC0415  # Deferred: avoids circular import
+
+    # Check for active services
+    if Service.objects.filter(customer=customer, status="active").exists():
+        results["skipped_active_services"] += 1
+        return
+
+    # Check for open tickets
+    if Ticket.objects.filter(customer=customer, status__in=_OPEN_TICKET_STATUSES).exists():
+        results["skipped_open_tickets"] += 1
+        return
+
+    results["inactive_found"] += 1
+
+    # Check 90-day reactivation email cooldown
+    last_reactivation = (customer.meta or {}).get("last_reactivation_email")
+    if last_reactivation:
+        try:
+            last_sent = datetime.fromisoformat(last_reactivation)
+            aware_last_sent = timezone.make_aware(last_sent) if timezone.is_naive(last_sent) else last_sent
+            if aware_last_sent > reactivation_cooldown:
+                results["skipped_cooldown"] += 1
+                return
+        except (ValueError, TypeError):
+            # Fail closed: skip send on corrupt dates to prevent email spam
+            logger.warning(
+                f"⚠️ [CustomerCleanup] Invalid reactivation date for customer "
+                f"{customer.id}, skipping send: {last_reactivation!r}"
+            )
+            results["skipped_cooldown"] += 1
+            return
+
+    # Send reactivation email
+    email_sent = _send_reactivation_email(customer)
+
+    if email_sent:
+        # Track last reactivation email in meta (locked to prevent lost updates)
+        with transaction.atomic():
+            locked = Customer.objects.select_for_update().get(id=customer.id)
+            locked.meta = locked.meta or {}
+            locked.meta["last_reactivation_email"] = timezone.now().isoformat()
+            locked.save(update_fields=["meta", "updated_at"])
+        results["emails_sent"] += 1
+
+    # Determine last login from memberships
+    last_login = (
+        customer.memberships.filter(user__last_login__isnull=False)
+        .values_list("user__last_login", flat=True)
+        .order_by("-user__last_login")
+        .first()
+    )
+
+    results["customers"].append(
+        {
+            "customer_id": str(customer.id),
+            "customer_name": customer.get_display_name(),
+            "last_seen": last_login.isoformat() if last_login else None,
+            "email_sent": email_sent,
+            "account_age_days": (timezone.now().date() - customer.created_at.date()).days,
+        }
+    )
 
 
 def cleanup_inactive_customers() -> dict[str, Any]:
@@ -300,9 +376,10 @@ def cleanup_inactive_customers() -> dict[str, Any]:
     logger.info("🧹 [CustomerCleanup] Starting inactive customer cleanup")
 
     try:
-        # Atomic lock to prevent concurrent cleanup runs
+        # Tokenized lock to prevent concurrent cleanup runs (prevents stale-owner unlock)
         lock_key = "customer_cleanup_lock"
-        if not cache.add(lock_key, True, 3600):
+        lock_token = str(uuid.uuid4())
+        if not cache.add(lock_key, lock_token, 3600):
             logger.info("⏭️ [CustomerCleanup] Cleanup already running, skipping")
             return {"success": True, "message": "Already running"}
 
@@ -310,8 +387,6 @@ def cleanup_inactive_customers() -> dict[str, Any]:
             from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Customer,  # Circular: cross-app  # Deferred: avoids circular import
             )
-            from apps.provisioning.models import Service  # noqa: PLC0415  # Deferred: avoids circular import
-            from apps.tickets.models import Ticket  # noqa: PLC0415  # Deferred: avoids circular import
 
             cutoff_date = timezone.now() - timedelta(days=365)
             reactivation_cooldown = timezone.now() - timedelta(days=90)
@@ -347,57 +422,7 @@ def cleanup_inactive_customers() -> dict[str, Any]:
 
             batch_limit = 50
             for customer in candidates[:batch_limit]:
-                # Check for active services
-                if Service.objects.filter(customer=customer, status="active").exists():
-                    results["skipped_active_services"] += 1
-                    continue
-
-                # Check for open tickets
-                open_statuses = ["open", "in_progress", "waiting_on_customer", "pending"]
-                if Ticket.objects.filter(customer=customer, status__in=open_statuses).exists():
-                    results["skipped_open_tickets"] += 1
-                    continue
-
-                results["inactive_found"] += 1
-
-                # Check 90-day reactivation email cooldown
-                last_reactivation = (customer.meta or {}).get("last_reactivation_email")
-                if last_reactivation:
-                    try:
-                        last_sent = datetime.fromisoformat(last_reactivation)
-                        aware_last_sent = timezone.make_aware(last_sent) if timezone.is_naive(last_sent) else last_sent
-                        if aware_last_sent > reactivation_cooldown:
-                            results["skipped_cooldown"] += 1
-                            continue
-                    except (ValueError, TypeError):
-                        pass  # Invalid date — proceed with sending
-
-                # Send reactivation email
-                email_sent = _send_reactivation_email(customer)
-
-                if email_sent:
-                    # Track last reactivation email in meta
-                    customer.meta["last_reactivation_email"] = timezone.now().isoformat()
-                    customer.save(update_fields=["meta", "updated_at"])
-                    results["emails_sent"] += 1
-
-                # Determine last login from memberships
-                last_login = (
-                    customer.memberships.filter(user__last_login__isnull=False)
-                    .values_list("user__last_login", flat=True)
-                    .order_by("-user__last_login")
-                    .first()
-                )
-
-                results["customers"].append(
-                    {
-                        "customer_id": str(customer.id),
-                        "customer_name": customer.get_display_name(),
-                        "last_seen": last_login.isoformat() if last_login else None,
-                        "email_sent": email_sent,
-                        "account_age_days": (timezone.now().date() - customer.created_at.date()).days,
-                    }
-                )
+                _process_inactive_candidate(customer, reactivation_cooldown, results)
 
             logger.info(
                 f"✅ [CustomerCleanup] Cleanup completed: "
@@ -409,11 +434,13 @@ def cleanup_inactive_customers() -> dict[str, Any]:
             return {"success": True, "results": results}
 
         finally:
-            cache.delete(lock_key)
+            # Only delete our own lock — prevent stale-owner unlock
+            if cache.get(lock_key) == lock_token:
+                cache.delete(lock_key)
 
     except Exception as e:
         logger.exception(f"💥 [CustomerCleanup] Error in customer cleanup: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Task failed, see server logs"}
 
 
 def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
@@ -485,7 +512,7 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"💥 [CustomerWelcome] Error sending welcome email to customer {customer_id}: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Task failed, see server logs"}
 
 
 def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
@@ -494,9 +521,9 @@ def _calculate_engagement_score(customer: Any, total_orders: int, account_age_da
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    order_weight = SettingsService.get_integer_setting("customers.engagement_order_weight", 40)
-    recency_weight = SettingsService.get_integer_setting("customers.engagement_recency_weight", 30)
-    activity_weight = SettingsService.get_integer_setting("customers.engagement_activity_weight", 30)
+    order_weight = max(1, min(100, SettingsService.get_integer_setting("customers.engagement_order_weight", 40)))
+    recency_weight = max(1, min(100, SettingsService.get_integer_setting("customers.engagement_recency_weight", 30)))
+    activity_weight = max(1, min(100, SettingsService.get_integer_setting("customers.engagement_activity_weight", 30)))
 
     # Order score: 0-100 based on order count (10+ orders = 100)
     order_score = min(total_orders * 10, 100)
@@ -662,24 +689,26 @@ def _send_reactivation_email(customer: Any) -> bool:
 
 def process_customer_feedback_async(note_id: str) -> str:
     """Queue customer feedback processing task."""
-    return async_task("apps.customers.tasks.process_customer_feedback", note_id, timeout=TASK_SOFT_TIME_LIMIT)
+    return async_task("apps.customers.tasks.process_customer_feedback", note_id, timeout=get_task_soft_time_limit())
 
 
 def start_customer_onboarding_async(customer_id: str) -> str:
     """Queue customer onboarding task."""
-    return async_task("apps.customers.tasks.start_customer_onboarding", customer_id, timeout=TASK_TIME_LIMIT)
+    return async_task("apps.customers.tasks.start_customer_onboarding", customer_id, timeout=get_task_time_limit())
 
 
 def update_customer_analytics_async(customer_id: str) -> str:
     """Queue customer analytics update task."""
-    return async_task("apps.customers.tasks.update_customer_analytics", customer_id, timeout=TASK_TIME_LIMIT)
+    return async_task("apps.customers.tasks.update_customer_analytics", customer_id, timeout=get_task_time_limit())
 
 
 def cleanup_inactive_customers_async() -> str:
     """Queue inactive customer cleanup task."""
-    return async_task("apps.customers.tasks.cleanup_inactive_customers", timeout=TASK_TIME_LIMIT)
+    return async_task("apps.customers.tasks.cleanup_inactive_customers", timeout=get_task_time_limit())
 
 
 def send_customer_welcome_email_async(customer_id: str) -> str:
     """Queue customer welcome email task."""
-    return async_task("apps.customers.tasks.send_customer_welcome_email", customer_id, timeout=TASK_SOFT_TIME_LIMIT)
+    return async_task(
+        "apps.customers.tasks.send_customer_welcome_email", customer_id, timeout=get_task_soft_time_limit()
+    )

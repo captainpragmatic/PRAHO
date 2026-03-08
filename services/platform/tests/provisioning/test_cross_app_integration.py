@@ -49,9 +49,9 @@ class BillingProvisioningIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create user and membership
@@ -181,9 +181,9 @@ class DomainsProvisioningIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create TLD and registrar
@@ -315,9 +315,9 @@ class ProvisioningAuditIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create service
@@ -509,9 +509,9 @@ class CustomerProvisioningIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create user and membership
@@ -605,9 +605,9 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         """Set up test data for performance testing"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create currency

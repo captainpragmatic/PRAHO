@@ -66,22 +66,50 @@ class ProfileService:
 
         return billing_profile  # type: ignore[return-value]
 
+    TAX_PROFILE_UPDATABLE_FIELDS = frozenset(
+        {
+            "cui",
+            "cnp",
+            "registration_number",
+            "is_vat_payer",
+            "vat_number",
+            "vat_rate",
+            "reverse_charge_eligible",
+        }
+    )
+
+    BILLING_PROFILE_UPDATABLE_FIELDS = frozenset(
+        {
+            "payment_terms",
+            "credit_limit",
+            "preferred_currency",
+            "invoice_delivery_method",
+            "auto_payment_enabled",
+        }
+    )
+
     @staticmethod
     def update_tax_profile(
         tax_profile: CustomerTaxProfile,
         user: User,
         **updates: Any,
     ) -> CustomerTaxProfile:
-        """Update tax profile with validation."""
-        # Validate CUI if provided
-        if updates.get("cui") and not tax_profile.validate_cui():
-            raise ValueError("Invalid CUI format")
+        """Update tax profile with validation. Only allows safe fields."""
+        safe_updates = {k: v for k, v in updates.items() if k in ProfileService.TAX_PROFILE_UPDATABLE_FIELDS}
 
-        for field, value in updates.items():
-            if hasattr(tax_profile, field):
-                setattr(tax_profile, field, value)
+        # Set CUI first, then validate the NEW value (not the old one)
+        if "cui" in safe_updates:
+            tax_profile.cui = safe_updates.pop("cui")
+            if not tax_profile.validate_cui():
+                raise ValueError("Invalid CUI format")
 
-        tax_profile.save()
+        changed_fields = ["cui"] if "cui" in updates else []
+        for field, value in safe_updates.items():
+            setattr(tax_profile, field, value)
+            changed_fields.append(field)
+
+        if changed_fields:
+            tax_profile.save(update_fields=[*changed_fields, "updated_at"])
 
         logger.info(
             f"📝 [Profile] Updated tax profile for customer: {tax_profile.customer.name}",
@@ -96,12 +124,16 @@ class ProfileService:
         user: User,
         **updates: Any,
     ) -> CustomerBillingProfile:
-        """Update billing profile."""
-        for field, value in updates.items():
-            if hasattr(billing_profile, field):
-                setattr(billing_profile, field, value)
+        """Update billing profile. Only allows safe fields."""
+        safe_updates = {k: v for k, v in updates.items() if k in ProfileService.BILLING_PROFILE_UPDATABLE_FIELDS}
 
-        billing_profile.save()
+        changed_fields = []
+        for field, value in safe_updates.items():
+            setattr(billing_profile, field, value)
+            changed_fields.append(field)
+
+        if changed_fields:
+            billing_profile.save(update_fields=[*changed_fields, "updated_at"])
 
         logger.info(
             f"📝 [Profile] Updated billing profile for customer: {billing_profile.customer.name}",

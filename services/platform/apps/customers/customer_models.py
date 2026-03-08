@@ -117,8 +117,8 @@ class SoftDeleteModel(models.Model):
         verbose_name=_("Șters de"),
     )
 
-    all_objects = models.Manager()  # Manager - All records including soft-deleted
-    objects = SoftDeleteManager()  # SoftDeleteManager - Only non-deleted records
+    objects = SoftDeleteManager()  # Default manager — only non-deleted records
+    all_objects = models.Manager()  # noqa: DJ012  # All records including soft-deleted
 
     class Meta:
         abstract = True
@@ -283,14 +283,20 @@ class Customer(SoftDeleteModel):
     def __str__(self) -> str:
         return self.get_display_name()
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Accept legacy kwargs without requiring DB columns in tests."""
-        # Swallow non-model identity kwargs that some tests pass
-        kwargs.pop("email", None)
-        kwargs.pop("first_name", None)
-        kwargs.pop("last_name", None)
-        kwargs.pop("fiscal_code", None)  # Legacy field from old Customer structure
-        super().__init__(*args, **kwargs)
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self.meta is None:
+            self.meta = {}
+        if not isinstance(self.meta, dict):
+            raise ValueError(f"Customer.meta must be a dict, got {type(self.meta).__name__}")
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if self.meta is not None and not isinstance(self.meta, dict):
+            raise ValidationError(
+                {"meta": "meta must be a JSON object (dict), not %(type)s"},
+                params={"type": type(self.meta).__name__},
+            )
 
     def get_display_name(self) -> str:
         """Get customer display name"""
