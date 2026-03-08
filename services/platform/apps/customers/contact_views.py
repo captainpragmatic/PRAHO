@@ -9,7 +9,7 @@ import logging
 from typing import cast
 
 from django.contrib import messages
-from django.db.models import QuerySet
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -18,7 +18,7 @@ from apps.common.decorators import staff_required
 from apps.users.models import User
 
 from .contact_models import CustomerAddress
-from .customer_models import Customer
+from .customer_service import CustomerService
 from .forms import CustomerAddressForm, CustomerNoteForm
 
 logger = logging.getLogger(__name__)
@@ -31,14 +31,7 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
@@ -47,18 +40,23 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
             address = form.save(commit=False)
             address.customer = customer
 
-            # Handle current address versioning
+            # Handle current address versioning atomically
             address_type = address.address_type
-            existing_current = CustomerAddress.objects.filter(  # type: ignore[misc]
-                customer=customer, address_type=address_type, is_current=True
-            ).first()
+            with transaction.atomic():
+                existing_current = (
+                    CustomerAddress.objects.filter(  # type: ignore[misc]  # SoftDeleteManager
+                        customer=customer, address_type=address_type, is_current=True
+                    )
+                    .select_for_update()
+                    .first()
+                )
 
-            if existing_current:
-                existing_current.is_current = False  # type: ignore[attr-defined]
-                existing_current.save()
-                address.version = existing_current.version + 1  # type: ignore[attr-defined]
+                if existing_current:
+                    existing_current.is_current = False  # type: ignore[attr-defined]  # narrowed by .first()
+                    existing_current.save()
+                    address.version = existing_current.version + 1  # type: ignore[attr-defined]  # narrowed by .first()
 
-            address.save()
+                address.save()
             messages.success(
                 request, _("✅ {address_type} address added").format(address_type=address.get_address_type_display())
             )
@@ -84,14 +82,7 @@ def customer_note_add(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":

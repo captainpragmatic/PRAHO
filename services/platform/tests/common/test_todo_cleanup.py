@@ -55,3 +55,11 @@ class StaleTodoCleanupTests(TestCase):
     def test_api_customers_views_no_todo(self):
         """api/customers/views.py: service management TODO removed"""
         self.assertNotIn("TODO", _read("apps/api/customers/views.py"))
+
+    def test_customers_tasks_no_todo(self):
+        """customers/tasks.py: all 5 task TODOs removed"""
+        self.assertNotIn("TODO", _read("apps/customers/tasks.py"))
+
+    def test_customers_views_no_todo(self):
+        """customers/customer_views.py: services API TODO removed"""
+        self.assertNotIn("TODO", _read("apps/customers/customer_views.py"))

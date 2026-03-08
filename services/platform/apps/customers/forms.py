@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
@@ -625,7 +626,7 @@ class CustomerCreationForm(forms.Form):
         ),
     )
     preferred_currency = forms.ChoiceField(
-        choices=[("RON", "RON"), ("EUR", "EUR"), ("USD", "USD")],
+        choices=[("RON", "RON"), ("EUR", "EUR")],
         initial="RON",
         label=_("Preferred Currency"),
         widget=forms.Select(
@@ -699,55 +700,56 @@ class CustomerCreationForm(forms.Form):
         return cleaned_data
 
     def save(self, user: User | None = None) -> dict[str, Any]:
-        """Create customer with all related profiles and handle user assignment"""
+        """Create customer with all related profiles and handle user assignment."""
         data = self.cleaned_data
 
         # Build customer name from first_name + last_name
         full_name = f"{data['first_name']} {data['last_name']}".strip()
 
-        # Create core customer
-        customer = Customer.objects.create(
-            name=full_name,
-            customer_type=data["customer_type"],
-            company_name=data.get("company_name", ""),
-            primary_email=data["email"],
-            primary_phone=data["phone"],
-            industry=data.get("industry", ""),
-            website=data.get("website", ""),
-            data_processing_consent=data["data_processing_consent"],
-            marketing_consent=data.get("marketing_consent", False),
-            created_by=user,
-        )
+        with transaction.atomic():
+            # Create core customer
+            customer = Customer.objects.create(
+                name=full_name,
+                customer_type=data["customer_type"],
+                company_name=data.get("company_name", ""),
+                primary_email=data["email"],
+                primary_phone=data["phone"],
+                industry=data.get("industry", ""),
+                website=data.get("website", ""),
+                data_processing_consent=data["data_processing_consent"],
+                marketing_consent=data.get("marketing_consent", False),
+                created_by=user,
+            )
 
-        # Create tax profile
-        CustomerTaxProfile.objects.create(
-            customer=customer,
-            cui=data.get("cui", ""),
-            is_vat_payer=data.get("is_vat_payer", False),
-            vat_number=data.get("vat_number", ""),
-            vat_rate=21.0 if data.get("is_vat_payer", False) else 0.0,
-        )
+            # Create tax profile
+            CustomerTaxProfile.objects.create(
+                customer=customer,
+                cui=data.get("cui", ""),
+                is_vat_payer=data.get("is_vat_payer", False),
+                vat_number=data.get("vat_number", ""),
+                vat_rate=21.0 if data.get("is_vat_payer", False) else 0.0,
+            )
 
-        # Create billing profile
-        CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=data["payment_terms"],
-            credit_limit=data["credit_limit"],
-            preferred_currency=data.get("preferred_currency", "RON"),
-        )
+            # Create billing profile
+            CustomerBillingProfile.objects.create(
+                customer=customer,
+                payment_terms=data["payment_terms"],
+                credit_limit=data["credit_limit"],
+                preferred_currency=data.get("preferred_currency", "RON"),
+            )
 
-        # Create primary address
-        CustomerAddress.objects.create(
-            customer=customer,
-            address_type="primary",
-            address_line1=data["address_line1"],
-            address_line2=data.get("address_line2", ""),
-            city=data["city"],
-            county=data["county"],
-            postal_code=data["postal_code"],
-            country="Romania",
-            is_current=True,
-        )
+            # Create primary address
+            CustomerAddress.objects.create(
+                customer=customer,
+                address_type="primary",
+                address_line1=data["address_line1"],
+                address_line2=data.get("address_line2", ""),
+                city=data["city"],
+                county=data["county"],
+                postal_code=data["postal_code"],
+                country="Romania",
+                is_current=True,
+            )
 
         # Return customer and user action data for view to handle
         return {
@@ -929,7 +931,7 @@ class CustomerEditForm(forms.Form):
         ),
     )
     preferred_currency = forms.ChoiceField(
-        choices=[("RON", "RON"), ("EUR", "EUR"), ("USD", "USD")],
+        choices=[("RON", "RON"), ("EUR", "EUR")],
         initial="RON",
         label=_("Preferred Currency"),
         widget=forms.Select(

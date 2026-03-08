@@ -8,12 +8,11 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import ClassVar
 
-from django.core.validators import RegexValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.cnp_validator import validate_cnp
-from apps.common.types import validate_romanian_cui
+from apps.common.cui_validator import CUIValidator, validate_cui
 
 from .customer_models import SoftDeleteModel
 
@@ -43,7 +42,7 @@ class CustomerTaxProfile(SoftDeleteModel):
         max_length=20,
         blank=True,
         verbose_name=_("CUI/CIF"),
-        validators=[RegexValidator(r"^RO\d{2,10}$", _("CUI invalid"))],
+        validators=[validate_cui],
     )
     registration_number = models.CharField(max_length=50, blank=True, verbose_name=_("Nr. registrul comerțului"))
 
@@ -75,11 +74,10 @@ class CustomerTaxProfile(SoftDeleteModel):
         )
 
     def validate_cui(self) -> bool:
-        """Validate Romanian CUI format"""
+        """Validate Romanian CUI format (accepts both 'RO12345678' and '12345678')."""
         if not self.cui:
             return True
-        result = validate_romanian_cui(self.cui)
-        return result.is_ok()
+        return CUIValidator.validate(self.cui).is_valid
 
 
 class CustomerBillingProfile(SoftDeleteModel):
@@ -133,11 +131,33 @@ class CustomerBillingProfile(SoftDeleteModel):
         verbose_name_plural = _("Customer Billing Profiles")
 
     def get_account_balance(self) -> Decimal:
-        """Get customer account balance"""
+        """Get customer outstanding balance in currency units (e.g. RON, not cents).
+
+        Uses global aggregate: max(0, total_invoiced - total_paid) across all issued/overdue
+        invoices. Cross-invoice overpayments offset other invoices' debt (intentional).
+        """
+        from django.db.models import Sum  # noqa: PLC0415  # Deferred: avoids circular import
+
         from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             Invoice,  # Cross-app import for balance calculation  # Circular: cross-app
+            Payment,
         )
 
-        invoices = Invoice.objects.filter(customer=self.customer)
-        total_due = sum(invoice.amount_due for invoice in invoices if invoice.status in ["pending", "overdue"])
-        return Decimal(str(total_due))
+        # Total invoiced for outstanding invoices (issued or overdue)
+        total_invoiced = (
+            Invoice.objects.filter(customer=self.customer, status__in=["issued", "overdue"]).aggregate(
+                total=Sum("total_cents")
+            )["total"]
+            or 0
+        )
+        # Total paid against those invoices
+        total_paid = (
+            Payment.objects.filter(
+                invoice__customer=self.customer,
+                invoice__status__in=["issued", "overdue"],
+                status__in=["succeeded", "partially_refunded"],
+            ).aggregate(total=Sum("amount_cents"))["total"]
+            or 0
+        )
+        balance_cents = max(0, total_invoiced - total_paid)
+        return Decimal(balance_cents) / 100

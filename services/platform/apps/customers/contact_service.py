@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from django.db import models
+from django.db import models, transaction
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -53,32 +53,33 @@ class ContactService:
 
     @staticmethod
     def create_address(customer: Customer, user: User, address_data: AddressData, **kwargs: Any) -> CustomerAddress:
-        """Create customer address with versioning support."""
-        # If creating a new current address of this type, mark existing ones as non-current
-        if kwargs.get("is_current", True):
-            CustomerAddress.objects.filter(  # type: ignore[misc]
-                customer=customer, address_type=address_data.address_type, is_current=True
-            ).update(is_current=False)
+        """Create customer address with versioning support (atomic)."""
+        with transaction.atomic():
+            # If creating a new current address of this type, mark existing ones as non-current
+            if kwargs.get("is_current", True):
+                CustomerAddress.objects.filter(  # type: ignore[misc]  # SoftDeleteManager
+                    customer=customer, address_type=address_data.address_type, is_current=True
+                ).select_for_update().update(is_current=False)
 
-            # Get the next version number
-            last_version = (
-                CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(  # type: ignore[misc]
-                    models.Max("version")
-                )["version__max"]
-                or 0
+                # Get the next version number
+                last_version = (
+                    CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(  # type: ignore[misc]  # SoftDeleteManager
+                        models.Max("version")
+                    )["version__max"]
+                    or 0
+                )
+
+                kwargs["version"] = last_version + 1
+
+            address = CustomerAddress.objects.create(  # type: ignore[misc]  # SoftDeleteManager
+                customer=customer,
+                address_type=address_data.address_type,
+                address_line1=address_data.address_line1,
+                city=address_data.city,
+                county=address_data.county,
+                postal_code=address_data.postal_code,
+                **kwargs,
             )
-
-            kwargs["version"] = last_version + 1
-
-        address = CustomerAddress.objects.create(  # type: ignore[misc]
-            customer=customer,
-            address_type=address_data.address_type,
-            address_line1=address_data.address_line1,
-            city=address_data.city,
-            county=address_data.county,
-            postal_code=address_data.postal_code,
-            **kwargs,
-        )
 
         logger.info(
             f"✅ [Contact] Created address for customer: {customer.name}",
@@ -151,6 +152,9 @@ class ContactService:
         customer: Customer, payment_method: CustomerPaymentMethod, user: User
     ) -> CustomerPaymentMethod:
         """Set a payment method as default for customer."""
+        if payment_method.customer_id != customer.id:
+            raise ValueError("Payment method does not belong to this customer")
+
         # Remove default from other methods
         CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)  # type: ignore[misc]
 

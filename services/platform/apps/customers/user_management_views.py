@@ -6,13 +6,13 @@ Handles user assignment, role changes, and access management.
 from typing import cast
 
 from django.contrib import messages
-from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.common.decorators import staff_required
+from apps.customers.customer_service import CustomerService
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
@@ -20,14 +20,7 @@ from apps.users.models import CustomerMembership, User
 def _get_accessible_customer(request: HttpRequest, customer_id: int) -> Customer:
     """Get customer with access control check."""
     user = cast(User, request.user)
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     return get_object_or_404(accessible_qs, id=customer_id)
 
 
@@ -40,6 +33,12 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
     if request.method == "POST":
         user_email = request.POST.get("user_email", "").strip()
         role = request.POST.get("role", "viewer")
+
+        # Validate role against allowed choices
+        valid_roles = [choice[0] for choice in CustomerMembership.CUSTOMER_ROLE_CHOICES]
+        if role not in valid_roles:
+            messages.error(request, _("Invalid role selected."))
+            return redirect("customers:detail", customer_id=customer.id)
 
         if not user_email:
             messages.error(request, _("Email address is required."))
@@ -91,13 +90,19 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
             messages.error(request, _("Email address is required."))
             return redirect("customers:detail", customer_id=customer.id)
 
+        # Validate role against allowed choices
+        valid_roles = [choice[0] for choice in CustomerMembership.CUSTOMER_ROLE_CHOICES]
+        if role not in valid_roles:
+            messages.error(request, _("Invalid role selected."))
+            return redirect("customers:detail", customer_id=customer.id)
+
         # Check if user already exists
         if User.objects.filter(email=email).exists():
             messages.error(request, _("User with email '{}' already exists.").format(email))
             return redirect("customers:detail", customer_id=customer.id)
 
-        # Create new user
-        user = User.objects.create(email=email, first_name=first_name, last_name=last_name, is_active=True)
+        # Create new user with proper password hashing
+        user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
 
         # Create membership
         CustomerMembership.objects.create(customer=customer, user=user, role=role)

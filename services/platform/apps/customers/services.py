@@ -9,7 +9,8 @@ import logging
 from decimal import Decimal
 from typing import Any, cast
 
-from django.db.models import Avg, Sum
+from django.db import transaction
+from django.db.models import Avg, Count, Q, Sum
 from django.utils import timezone
 
 # Core customer service
@@ -30,96 +31,14 @@ DAYS_YEAR = 365
 DAYS_HALF_YEAR = 180
 DAYS_QUARTER = 90
 DAYS_MONTH = 30
-_DEFAULT_ORDERS_HIGH_THRESHOLD = 10
-ORDERS_HIGH_THRESHOLD = _DEFAULT_ORDERS_HIGH_THRESHOLD
-_DEFAULT_ORDERS_MEDIUM_THRESHOLD = 5
-ORDERS_MEDIUM_THRESHOLD = _DEFAULT_ORDERS_MEDIUM_THRESHOLD
-_DEFAULT_ORDERS_LOW_THRESHOLD = 2
-ORDERS_LOW_THRESHOLD = _DEFAULT_ORDERS_LOW_THRESHOLD
-_DEFAULT_PAYMENT_RATE_EXCELLENT = 95
-PAYMENT_RATE_EXCELLENT = _DEFAULT_PAYMENT_RATE_EXCELLENT
-_DEFAULT_PAYMENT_RATE_GOOD = 80
-PAYMENT_RATE_GOOD = _DEFAULT_PAYMENT_RATE_GOOD
-_DEFAULT_PAYMENT_RATE_FAIR = 60
-PAYMENT_RATE_FAIR = _DEFAULT_PAYMENT_RATE_FAIR
-_DEFAULT_SERVICES_HIGH_THRESHOLD = 3
-SERVICES_HIGH_THRESHOLD = _DEFAULT_SERVICES_HIGH_THRESHOLD
-_DEFAULT_SERVICES_MEDIUM_THRESHOLD = 2
-SERVICES_MEDIUM_THRESHOLD = _DEFAULT_SERVICES_MEDIUM_THRESHOLD
-
-
-def get_orders_high_threshold() -> int:
-    """Get orders high threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.orders_high_threshold", _DEFAULT_ORDERS_HIGH_THRESHOLD)
-
-
-def get_orders_medium_threshold() -> int:
-    """Get orders medium threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.orders_medium_threshold", _DEFAULT_ORDERS_MEDIUM_THRESHOLD)
-
-
-def get_orders_low_threshold() -> int:
-    """Get orders low threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.orders_low_threshold", _DEFAULT_ORDERS_LOW_THRESHOLD)
-
-
-def get_payment_rate_excellent() -> int:
-    """Get payment rate excellent from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.payment_rate_excellent", _DEFAULT_PAYMENT_RATE_EXCELLENT)
-
-
-def get_payment_rate_good() -> int:
-    """Get payment rate good from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.payment_rate_good", _DEFAULT_PAYMENT_RATE_GOOD)
-
-
-def get_payment_rate_fair() -> int:
-    """Get payment rate fair from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.payment_rate_fair", _DEFAULT_PAYMENT_RATE_FAIR)
-
-
-def get_services_high_threshold() -> int:
-    """Get services high threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting("customers.services_high_threshold", _DEFAULT_SERVICES_HIGH_THRESHOLD)
-
-
-def get_services_medium_threshold() -> int:
-    """Get services medium threshold from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "customers.services_medium_threshold", _DEFAULT_SERVICES_MEDIUM_THRESHOLD
-    )
+ORDERS_HIGH_THRESHOLD = 10
+ORDERS_MEDIUM_THRESHOLD = 5
+ORDERS_LOW_THRESHOLD = 2
+PAYMENT_RATE_EXCELLENT = 95
+PAYMENT_RATE_GOOD = 80
+PAYMENT_RATE_FAIR = 60
+SERVICES_HIGH_THRESHOLD = 3
+SERVICES_MEDIUM_THRESHOLD = 2
 
 
 class CustomerAnalyticsService:
@@ -151,7 +70,7 @@ class CustomerAnalyticsService:
                 "customer_id": str(customer.id),
                 "customer_name": customer.get_display_name(),
                 "account_age_days": (timezone.now() - customer.created_at).days if customer.created_at else 0,
-                "customer_type": "business" if getattr(customer, "is_business", False) else "individual",
+                "customer_type": customer.customer_type,
             }
 
             # Order metrics
@@ -187,34 +106,34 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def _get_order_metrics(customer: Any) -> dict[str, Any]:
-        """Get order-related metrics for a customer."""
+        """Get order-related metrics for a customer (single aggregate query)."""
         try:
+            from django.db.models import Max  # noqa: PLC0415  # Deferred: avoids circular import
+
             from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Order,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            orders = Order.objects.filter(customer=customer)
+            stats = Order.objects.filter(customer=customer).aggregate(
+                total=Count("id"),
+                completed=Count("id", filter=Q(status="completed")),
+                cancelled=Count("id", filter=Q(status="cancelled")),
+                pending=Count("id", filter=Q(status__in=["pending", "processing"])),
+                avg_value=Avg("total_cents"),
+                last_date=Max("created_at"),
+            )
 
-            total_orders = orders.count()
-            completed_orders = orders.filter(status__in=["completed", "delivered", "fulfilled"]).count()
-            cancelled_orders = orders.filter(status="cancelled").count()
-            pending_orders = orders.filter(status__in=["pending", "processing"]).count()
-
-            # Average order value
-            avg_order_value = orders.aggregate(avg=Avg("total_cents"))["avg"] or 0
-
-            # Last order date
-            last_order = orders.order_by("-created_at").first()
-            last_order_date = last_order.created_at.isoformat() if last_order else None
+            total = stats["total"] or 0
+            completed = stats["completed"] or 0
 
             return {
-                "total_orders": total_orders,
-                "completed_orders": completed_orders,
-                "cancelled_orders": cancelled_orders,
-                "pending_orders": pending_orders,
-                "average_order_value": float(avg_order_value) / 100 if avg_order_value else 0,
-                "last_order_date": last_order_date,
-                "order_completion_rate": (completed_orders / total_orders * 100) if total_orders > 0 else 0,
+                "total_orders": total,
+                "completed_orders": completed,
+                "cancelled_orders": stats["cancelled"] or 0,
+                "pending_orders": stats["pending"] or 0,
+                "average_order_value": float(stats["avg_value"]) / 100 if stats["avg_value"] else 0,
+                "last_order_date": stats["last_date"].isoformat() if stats["last_date"] else None,
+                "order_completion_rate": (completed / total * 100) if total > 0 else 0,
             }
         except Exception as e:
             logger.warning(f"Failed to get order metrics: {e}")
@@ -230,29 +149,34 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def _get_billing_metrics(customer: Any) -> dict[str, Any]:
-        """Get billing-related metrics for a customer."""
+        """Get billing-related metrics for a customer (2 aggregate queries)."""
         try:
             from apps.billing.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
                 Invoice,
                 Payment,
             )
 
-            invoices = Invoice.objects.filter(customer=customer)
-            payments = Payment.objects.filter(invoice__customer=customer)
+            invoice_stats = Invoice.objects.filter(customer=customer).aggregate(
+                total_cents=Sum("total_cents"),
+                issued=Count("id", filter=Q(status="issued")),
+                overdue=Count("id", filter=Q(status="overdue")),
+            )
+            total_paid = (
+                Payment.objects.filter(invoice__customer=customer, status="succeeded").aggregate(
+                    total=Sum("amount_cents")
+                )["total"]
+                or 0
+            )
 
-            total_invoiced = invoices.aggregate(total=Sum("total_cents"))["total"] or 0
-            total_paid = payments.filter(status="succeeded").aggregate(total=Sum("amount_cents"))["total"] or 0
-
-            pending_invoices = invoices.filter(status="pending").count()
-            overdue_invoices = invoices.filter(status="overdue").count()
+            total_invoiced = invoice_stats["total_cents"] or 0
 
             return {
                 "total_invoiced": Decimal(total_invoiced) / 100,
                 "total_paid": Decimal(total_paid) / 100,
                 "total_revenue": Decimal(total_paid) / 100,
                 "outstanding_balance": Decimal(total_invoiced - total_paid) / 100,
-                "pending_invoices": pending_invoices,
-                "overdue_invoices": overdue_invoices,
+                "pending_invoices": invoice_stats["issued"] or 0,
+                "overdue_invoices": invoice_stats["overdue"] or 0,
                 "payment_rate": (total_paid / total_invoiced * 100) if total_invoiced > 0 else 100,
             }
         except Exception as e:
@@ -269,19 +193,24 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def _get_service_metrics(customer: Any) -> dict[str, Any]:
-        """Get service-related metrics for a customer."""
+        """Get service-related metrics for a customer (single aggregate query)."""
         try:
             from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Service,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            services = Service.objects.filter(customer=customer)
+            stats = Service.objects.filter(customer=customer).aggregate(
+                total=Count("id"),
+                active=Count("id", filter=Q(status="active")),
+                suspended=Count("id", filter=Q(status="suspended")),
+                pending=Count("id", filter=Q(status__in=["pending", "provisioning"])),
+            )
 
             return {
-                "total_services": services.count(),
-                "active_services": services.filter(status="active").count(),
-                "suspended_services": services.filter(status="suspended").count(),
-                "pending_services": services.filter(status__in=["pending", "provisioning"]).count(),
+                "total_services": stats["total"] or 0,
+                "active_services": stats["active"] or 0,
+                "suspended_services": stats["suspended"] or 0,
+                "pending_services": stats["pending"] or 0,
             }
         except Exception as e:
             logger.warning(f"Failed to get service metrics: {e}")
@@ -409,9 +338,9 @@ class CustomerStatsService:
             if "error" in metrics:
                 return {"success": False, "error": metrics["error"]}
 
-            # Store stats in customer metadata
+            # Store stats in customer metadata (locked to prevent lost updates)
             if hasattr(customer, "meta") and customer.meta is not None:
-                customer.meta["stats"] = {
+                stats_data = {
                     "total_orders": metrics.get("total_orders", 0),
                     "total_revenue": float(metrics.get("total_revenue", 0)),
                     "active_services": metrics.get("active_services", 0),
@@ -419,7 +348,11 @@ class CustomerStatsService:
                     "engagement_score": metrics.get("engagement_score", 0),
                     "last_updated": timezone.now().isoformat(),
                 }
-                customer.save(update_fields=["meta", "updated_at"])
+                with transaction.atomic():
+                    locked = Customer.objects.select_for_update().get(id=customer_id)
+                    locked.meta = locked.meta or {}
+                    locked.meta["stats"] = stats_data
+                    locked.save(update_fields=["meta", "updated_at"])
 
             AuditService.log_simple_event(
                 event_type="customer_stats_updated",

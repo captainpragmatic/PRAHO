@@ -126,7 +126,7 @@ def store_original_customer_values(sender: type[Customer], instance: Customer, *
     try:
         if instance.pk:
             try:
-                original = Customer.objects.get(pk=instance.pk)
+                original = Customer.all_objects.get(pk=instance.pk)
                 instance._original_customer_values = {
                     "status": original.status,
                     "customer_type": original.customer_type,
@@ -509,9 +509,7 @@ def handle_payment_method_changes(
             },
         )
 
-        # Default payment method management
-        if instance.is_default:
-            _ensure_single_default_payment_method(instance)
+        # Note: Default payment method deduplication handled in CustomerPaymentMethod.save()
 
         # Stripe integration validation
         if instance.method_type == "stripe_card" and instance.stripe_payment_method_id:

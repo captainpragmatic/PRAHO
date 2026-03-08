@@ -84,7 +84,7 @@ class UserManagementStaffRequiredTests(TestCase):
     def test_staff_can_access_add_user(self):
         """Staff user should be able to access add_user view."""
         self.client.force_login(self.staff_user)
-        with patch("apps.users.models.User.get_accessible_customers") as mock:
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
             mock.return_value = Customer.objects.filter(id=self.customer.id)
             url = reverse("customers:add_user", kwargs={"customer_id": self.customer.id})
             response = self.client.get(url)
@@ -113,7 +113,7 @@ class CustomerDeleteConfirmationTests(TestCase):
     def test_delete_requires_confirm_name(self):
         """POST without matching confirm_name should fail."""
         self.client.force_login(self.staff_user)
-        with patch("apps.users.models.User.get_accessible_customers") as mock:
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
             mock.return_value = Customer.objects.filter(id=self.customer.id)
             response = self.client.post(self.url, {"confirm_name": "Wrong Name"})
             self.assertEqual(response.status_code, 200)  # Re-renders form
@@ -123,7 +123,7 @@ class CustomerDeleteConfirmationTests(TestCase):
     def test_delete_with_correct_name_succeeds(self):
         """POST with matching confirm_name should soft-delete."""
         self.client.force_login(self.staff_user)
-        with patch("apps.users.models.User.get_accessible_customers") as mock:
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
             mock.return_value = Customer.objects.filter(id=self.customer.id)
             response = self.client.post(self.url, {"confirm_name": "Test Customer"})
             self.assertEqual(response.status_code, 302)

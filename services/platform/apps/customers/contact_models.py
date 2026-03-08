@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from django.db import models
+from django.db import transaction as db_transaction
+from django.db.models import Q, UniqueConstraint
 from django.utils.translation import gettext_lazy as _
 
 from .customer_models import SoftDeleteModel, validate_bank_details
@@ -59,7 +61,13 @@ class CustomerAddress(SoftDeleteModel):
         db_table = "customer_addresses"
         verbose_name = _("Customer Address")
         verbose_name_plural = _("Customer Addresses")
-        unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("customer", "address_type", "is_current"),)
+        constraints: ClassVar[list[UniqueConstraint]] = [
+            UniqueConstraint(
+                fields=["customer", "address_type"],
+                condition=Q(is_current=True),
+                name="unique_current_address_per_type",
+            ),
+        ]
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["customer", "address_type"]),
             models.Index(fields=["customer", "is_current"]),
@@ -129,17 +137,18 @@ class CustomerPaymentMethod(SoftDeleteModel):
         return f"{self.customer.get_display_name()} - {self.display_name}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save with bank details validation and default method logic"""
+        """Save with bank details validation and default method logic (atomic)."""
         self.full_clean()
 
-        # Handle default payment method logic
-        if self.is_default:
-            # Set all other payment methods for this customer to non-default
-            CustomerPaymentMethod.objects.filter(customer=self.customer, is_default=True).exclude(pk=self.pk).update(
-                is_default=False
-            )
+        with db_transaction.atomic():
+            # Handle default payment method logic
+            if self.is_default:
+                # Set all other payment methods for this customer to non-default
+                CustomerPaymentMethod.objects.filter(customer=self.customer, is_default=True).exclude(
+                    pk=self.pk
+                ).update(is_default=False)
 
-        super().save(*args, **kwargs)
+            super().save(*args, **kwargs)
 
     def clean(self) -> None:
         """🔒 Enhanced bank details validation for security and compliance"""

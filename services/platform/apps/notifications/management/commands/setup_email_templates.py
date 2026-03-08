@@ -1265,6 +1265,47 @@ class Command(BaseCommand):
                 "description": "Customer account deactivation notification",
                 "variables": {"customer_name": "Customer name"},
             },
+            # REACTIVATION TEMPLATES
+            {
+                "key": "customer_reactivation",
+                "locale": "ro",
+                "category": "engagement",
+                "subject": "Ne este dor de dumneavoastra! - PragmaticHost",
+                "body_html": """
+                <h2>Buna ziua {{customer_name}},</h2>
+                <p>Am observat ca nu v-ati conectat la contul PragmaticHost de ceva timp.</p>
+                <p>Dorim sa ne asiguram ca totul este in regula cu contul dumneavoastra
+                si ca nu aveti nevoie de ajutor.</p>
+                <p>Daca aveti intrebari sau aveti nevoie de asistenta, nu ezitati sa ne contactati:</p>
+                <ul>
+                    <li>Email: support@pragmatichost.com</li>
+                    <li>Telefon: +40 XXX XXX XXX</li>
+                </ul>
+                <p>Cu stima,<br/>Echipa PragmaticHost</p>
+                """,
+                "description": "Email de reactivare pentru clienti inactivi",
+                "variables": {"customer_name": "Numele clientului"},
+            },
+            {
+                "key": "customer_reactivation",
+                "locale": "en",
+                "category": "engagement",
+                "subject": "We miss you! - PragmaticHost",
+                "body_html": """
+                <h2>Hello {{customer_name}},</h2>
+                <p>We noticed you haven't logged into your PragmaticHost account in a while.</p>
+                <p>We wanted to check in and make sure everything is OK with your account
+                and that you don't need any assistance.</p>
+                <p>If you have any questions or need help, please don't hesitate to reach out:</p>
+                <ul>
+                    <li>Email: support@pragmatichost.com</li>
+                    <li>Phone: +40 XXX XXX XXX</li>
+                </ul>
+                <p>Best regards,<br/>The PragmaticHost Team</p>
+                """,
+                "description": "Reactivation check-in email for inactive customers",
+                "variables": {"customer_name": "Customer name"},
+            },
         ]
 
         created_count = 0

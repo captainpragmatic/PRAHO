@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.settings.services import SettingsService
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -123,10 +121,16 @@ class CustomerCreditService:
                 credit_history = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]
 
             if hasattr(customer, "meta"):
-                customer.meta["credit_history"] = credit_history
-                customer.meta["credit_score"] = new_score
-                customer.meta["credit_updated_at"] = timezone.now().isoformat()
-                customer.save(update_fields=["meta", "updated_at"])
+                # Narrow lock: prevent lost updates from concurrent meta writers
+                from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+
+                with transaction.atomic():
+                    locked = Customer.objects.select_for_update().get(id=customer.id)
+                    locked.meta = locked.meta or {}
+                    locked.meta["credit_history"] = credit_history
+                    locked.meta["credit_score"] = new_score
+                    locked.meta["credit_updated_at"] = timezone.now().isoformat()
+                    locked.save(update_fields=["meta", "updated_at"])
 
             # Log audit event
             AuditService.log_simple_event(
@@ -189,9 +193,10 @@ class CustomerCreditService:
 
             new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + reversion_adjustment))
 
-            # Record reversion in credit history
+            # Record reversion in credit history (locked to prevent lost updates)
             if hasattr(customer, "meta"):
-                credit_history = customer.meta.get("credit_history", [])
+                from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+
                 reversion_event = {
                     "event_type": f"revert_{event_type}",
                     "original_event_date": event_date.isoformat(),
@@ -200,11 +205,15 @@ class CustomerCreditService:
                     "adjustment": reversion_adjustment,
                     "recorded_at": timezone.now().isoformat(),
                 }
-                credit_history.append(reversion_event)
-                customer.meta["credit_history"] = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]  # Keep last 100
-                customer.meta["credit_score"] = new_score
-                customer.meta["credit_updated_at"] = timezone.now().isoformat()
-                customer.save(update_fields=["meta", "updated_at"])
+                with transaction.atomic():
+                    locked = Customer.objects.select_for_update().get(id=customer.id)
+                    locked.meta = locked.meta or {}
+                    credit_history = locked.meta.get("credit_history", [])
+                    credit_history.append(reversion_event)
+                    locked.meta["credit_history"] = credit_history[-MAX_CREDIT_HISTORY_EVENTS:]  # Keep last 100
+                    locked.meta["credit_score"] = new_score
+                    locked.meta["credit_updated_at"] = timezone.now().isoformat()
+                    locked.save(update_fields=["meta", "updated_at"])
 
             AuditService.log_simple_event(
                 event_type="credit_score_reverted",
@@ -272,14 +281,14 @@ class CustomerCreditService:
                     except (ValueError, TypeError):
                         pass
 
-            # Start with base score
-            score = BASE_CREDIT_SCORE
+            # Start with base score (from runtime config)
+            score = get_base_credit_score()
 
             # Factor 1: Account age (up to +50 points for 5+ years)
             if hasattr(customer, "created_at") and customer.created_at:
                 account_age_days = (timezone.now() - customer.created_at).days
                 account_age_years = account_age_days / 365
-                age_bonus = min(50, int(account_age_years * CREDIT_ADJUSTMENTS["account_age_bonus"]))
+                age_bonus = min(50, int(account_age_years * get_credit_adjustments()["account_age_bonus"]))
                 score += age_bonus
 
             # Factor 2: Payment history
@@ -309,7 +318,7 @@ class CustomerCreditService:
 
         except Exception as e:
             logger.error(f"🔥 [Credit] Failed to calculate credit score for {customer}: {e}")
-            return BASE_CREDIT_SCORE  # Return base score on error
+            return get_base_credit_score()  # Return base score on error
 
     @staticmethod
     def get_credit_rating(score: int) -> str:
@@ -327,48 +336,50 @@ class CustomerCreditService:
 
     @staticmethod
     def _get_payment_statistics(customer: Any) -> dict[str, int]:
-        """Get payment statistics for credit calculation."""
+        """Get payment statistics for credit calculation (single aggregate query)."""
         try:
+            from django.db.models import Count, F, Q  # noqa: PLC0415  # Deferred: avoids circular import
+
             from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Payment,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            payments = Payment.objects.filter(invoice__customer=customer)
-
-            total = payments.count()
-            successful = payments.filter(status="succeeded").count()
-            failed = payments.filter(status="failed").count()
-
-            # Calculate on-time payments (payments made before or on due date)
-            on_time = (
-                payments.filter(status="succeeded", created_at__lte=models.F("invoice__due_date")).count()
-                if hasattr(Payment, "invoice")
-                else successful
+            stats = Payment.objects.filter(invoice__customer=customer).aggregate(
+                total=Count("id"),
+                successful=Count("id", filter=Q(status="succeeded")),
+                failed=Count("id", filter=Q(status="failed")),
+                on_time=Count("id", filter=Q(status="succeeded", created_at__lte=F("invoice__due_at"))),
             )
 
             return {
-                "total_payments": total,
-                "successful_payments": successful,
-                "failed_payments": failed,
-                "on_time_payments": on_time,
+                "total_payments": stats["total"] or 0,
+                "successful_payments": stats["successful"] or 0,
+                "failed_payments": stats["failed"] or 0,
+                "on_time_payments": stats["on_time"] or 0,
             }
         except Exception:
             return {"total_payments": 0, "successful_payments": 0, "failed_payments": 0, "on_time_payments": 0}
 
     @staticmethod
     def _get_order_statistics(customer: Any) -> dict[str, int]:
-        """Get order statistics for credit calculation."""
+        """Get order statistics for credit calculation (single aggregate query)."""
         try:
+            from django.db.models import Count, Q  # noqa: PLC0415  # Deferred: avoids circular import
+
             from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                 Order,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            orders = Order.objects.filter(customer=customer)
+            stats = Order.objects.filter(customer=customer).aggregate(
+                total=Count("id"),
+                completed=Count("id", filter=Q(status="completed")),
+                cancelled=Count("id", filter=Q(status="cancelled")),
+            )
 
             return {
-                "total_orders": orders.count(),
-                "completed_orders": orders.filter(status__in=["completed", "delivered", "fulfilled"]).count(),
-                "cancelled_orders": orders.filter(status="cancelled").count(),
+                "total_orders": stats["total"] or 0,
+                "completed_orders": stats["completed"] or 0,
+                "cancelled_orders": stats["cancelled"] or 0,
             }
         except Exception:
             return {"total_orders": 0, "completed_orders": 0, "cancelled_orders": 0}
@@ -381,23 +392,23 @@ class CustomerCreditService:
                 Payment,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            # Get recent payments ordered by date
-            recent_payments = Payment.objects.filter(invoice__customer=customer).order_by("-created_at")[:20]
+            # Get recent payments ordered by date, with invoice due dates
+            recent_payments = (
+                Payment.objects.filter(invoice__customer=customer)
+                .select_related("invoice")
+                .order_by("-created_at")[:20]
+            )
 
             consecutive = 0
             for payment in recent_payments:
-                if payment.status == "succeeded":
+                invoice = payment.invoice
+                if invoice is None:
+                    break
+                if payment.status == "succeeded" and (invoice.due_at is None or payment.created_at <= invoice.due_at):
                     consecutive += 1
                 else:
-                    break  # Stop counting on first non-successful payment
+                    break  # Stop counting on first non-on-time payment
 
             return consecutive
         except Exception:
             return 0
-
-
-# Import models at module level for type checking
-try:
-    from django.db import models
-except ImportError:
-    models = None  # type: ignore[assignment]
