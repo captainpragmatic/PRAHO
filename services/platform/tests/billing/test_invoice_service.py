@@ -248,6 +248,7 @@ class UpdateCustomerMetricsTest(TestCase):
         with (
             patch("apps.billing.models.Invoice") as mock_inv,
             patch("apps.billing.models.Payment") as mock_pay,
+            patch("apps.customers.models.Customer") as mock_customer_cls,
         ):
             qs_mock = Mock()
             qs_mock.aggregate.return_value = {"total": 5000}
@@ -255,6 +256,8 @@ class UpdateCustomerMetricsTest(TestCase):
             qs_mock.filter.return_value.count.return_value = 1
             mock_inv.objects.filter.return_value = qs_mock
             mock_pay.objects.filter.return_value.aggregate.return_value = {"total": 3000}
+            # select_for_update().get() must return the same mock so meta is updated in place
+            mock_customer_cls.objects.select_for_update.return_value.get.return_value = mock_customer
 
             result = BillingAnalyticsService.update_customer_metrics(mock_customer, Mock())
 
@@ -362,14 +365,26 @@ class RecordInvoiceRefundTest(TestCase):
 # ===============================================================================
 
 
+def _patch_customer_db(customer: Mock) -> MagicMock:
+    """Return a started patch for apps.customers.models.Customer that routes
+    select_for_update().get() back to the given mock instance (no real DB hit)."""
+    patcher = patch("apps.customers.models.Customer")
+    mock_cls = patcher.start()
+    mock_cls.objects.select_for_update.return_value.get.return_value = customer
+    return patcher
+
+
 class AdjustCustomerLtvTest(TestCase):
     """adjust_customer_ltv — adjusts LTV in meta and logs."""
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_positive_adjustment_with_empty_meta(self, mock_log: MagicMock) -> None:
         customer = _make_mock_customer(meta={})
-
-        result = BillingAnalyticsService.adjust_customer_ltv(customer, 5000, "first purchase")
+        patcher = _patch_customer_db(customer)
+        try:
+            result = BillingAnalyticsService.adjust_customer_ltv(customer, 5000, "first purchase")
+        finally:
+            patcher.stop()
 
         self.assertTrue(result["success"])
         self.assertEqual(result["previous_ltv_cents"], 0)
@@ -380,8 +395,11 @@ class AdjustCustomerLtvTest(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_adjustment_from_existing_ltv(self, mock_log: MagicMock) -> None:
         customer = _make_mock_customer(meta={"lifetime_value_cents": 10000})
-
-        result = BillingAnalyticsService.adjust_customer_ltv(customer, 2000, "renewal")
+        patcher = _patch_customer_db(customer)
+        try:
+            result = BillingAnalyticsService.adjust_customer_ltv(customer, 2000, "renewal")
+        finally:
+            patcher.stop()
 
         self.assertTrue(result["success"])
         self.assertEqual(result["previous_ltv_cents"], 10000)
@@ -390,21 +408,28 @@ class AdjustCustomerLtvTest(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_negative_adjustment_reduces_ltv(self, mock_log: MagicMock) -> None:
         customer = _make_mock_customer(meta={"lifetime_value_cents": 8000})
-
-        result = BillingAnalyticsService.adjust_customer_ltv(customer, -3000, "refund")
+        patcher = _patch_customer_db(customer)
+        try:
+            result = BillingAnalyticsService.adjust_customer_ltv(customer, -3000, "refund")
+        finally:
+            patcher.stop()
 
         self.assertTrue(result["success"])
         self.assertEqual(result["new_ltv_cents"], 5000)
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_meta_is_updated_in_place(self, mock_log: MagicMock) -> None:
-        meta: dict[str, object] = {}
+        # Use a non-empty meta so `locked.meta or {}` doesn't replace it with a new dict.
+        meta: dict[str, object] = {"lifetime_value_cents": 0}
         customer = _make_mock_customer(meta=meta)
+        patcher = _patch_customer_db(customer)
+        try:
+            BillingAnalyticsService.adjust_customer_ltv(customer, 1500, "test")
+        finally:
+            patcher.stop()
 
-        BillingAnalyticsService.adjust_customer_ltv(customer, 1500, "test")
-
-        self.assertEqual(meta["lifetime_value_cents"], 1500)
-        self.assertIn("ltv_last_adjusted", meta)
+        self.assertEqual(customer.meta["lifetime_value_cents"], 1500)
+        self.assertIn("ltv_last_adjusted", customer.meta)
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_customer_with_none_meta_skips_save(self, mock_log: MagicMock) -> None:
@@ -420,17 +445,23 @@ class AdjustCustomerLtvTest(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_audit_log_called_with_customer_ltv_event(self, mock_log: MagicMock) -> None:
         customer = _make_mock_customer(meta={})
-
-        BillingAnalyticsService.adjust_customer_ltv(customer, 1000, "test")
+        patcher = _patch_customer_db(customer)
+        try:
+            BillingAnalyticsService.adjust_customer_ltv(customer, 1000, "test")
+        finally:
+            patcher.stop()
 
         event_types = [c.kwargs["event_type"] for c in mock_log.call_args_list]
         self.assertIn("customer_ltv_adjusted", event_types)
 
     def test_exception_returns_error_dict(self) -> None:
         customer = _make_mock_customer(meta={})
-
-        with patch("apps.audit.services.AuditService.log_simple_event", side_effect=Exception("ltv error")):
-            result = BillingAnalyticsService.adjust_customer_ltv(customer, 100, "boom")
+        patcher = _patch_customer_db(customer)
+        try:
+            with patch("apps.audit.services.AuditService.log_simple_event", side_effect=Exception("ltv error")):
+                result = BillingAnalyticsService.adjust_customer_ltv(customer, 100, "boom")
+        finally:
+            patcher.stop()
 
         self.assertFalse(result["success"])
         self.assertIn("ltv error", result["error"])

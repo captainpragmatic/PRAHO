@@ -178,13 +178,20 @@ class StartCustomerOnboardingTests(TestCase):
 
         return customer
 
+    def _patch_customer_cls(self, mock_customer_cls: MagicMock, customer: MagicMock) -> None:
+        """Wire up all Customer ORM mock chains needed by start_customer_onboarding."""
+        # Initial fetch: select_related(...).prefetch_related(...).get(...)
+        mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = customer
+        # Locked save: select_for_update().get(...)  — must return same mock so .meta is shared
+        mock_customer_cls.objects.select_for_update.return_value.get.return_value = customer
+        # Default phone value used for "incomplete phone" check
+        mock_customer_cls._meta.get_field.return_value.default = "+40712345678"
+
     @patch("apps.customers.tasks.AuditService")
     def test_all_steps_completed_individual(self, mock_audit: MagicMock) -> None:
         customer = self._make_customer()
         with patch("apps.customers.models.Customer") as mock_customer_cls:
-            mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = (
-                customer
-            )
+            self._patch_customer_cls(mock_customer_cls, customer)
             result = start_customer_onboarding("cust-123")
 
         assert result["success"] is True
@@ -197,9 +204,7 @@ class StartCustomerOnboardingTests(TestCase):
     def test_incomplete_contact_details(self, mock_audit: MagicMock) -> None:
         customer = self._make_customer(has_phone=False, has_address=False)
         with patch("apps.customers.models.Customer") as mock_customer_cls:
-            mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = (
-                customer
-            )
+            self._patch_customer_cls(mock_customer_cls, customer)
             result = start_customer_onboarding("cust-123")
 
         assert result["success"] is True
@@ -210,9 +215,7 @@ class StartCustomerOnboardingTests(TestCase):
     def test_missing_billing_profile(self, mock_audit: MagicMock) -> None:
         customer = self._make_customer(has_billing=False)
         with patch("apps.customers.models.Customer") as mock_customer_cls:
-            mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = (
-                customer
-            )
+            self._patch_customer_cls(mock_customer_cls, customer)
             result = start_customer_onboarding("cust-123")
 
         assert result["is_complete"] is False
@@ -222,9 +225,7 @@ class StartCustomerOnboardingTests(TestCase):
     def test_business_missing_tax_info(self, mock_audit: MagicMock) -> None:
         customer = self._make_customer(is_business=True, has_tax=False)
         with patch("apps.customers.models.Customer") as mock_customer_cls:
-            mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = (
-                customer
-            )
+            self._patch_customer_cls(mock_customer_cls, customer)
             result = start_customer_onboarding("cust-123")
 
         assert result["is_complete"] is False
@@ -235,9 +236,7 @@ class StartCustomerOnboardingTests(TestCase):
         customer = self._make_customer(is_business=False, has_tax=True)
         customer.customer_type = "pfa"
         with patch("apps.customers.models.Customer") as mock_customer_cls:
-            mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = (
-                customer
-            )
+            self._patch_customer_cls(mock_customer_cls, customer)
             result = start_customer_onboarding("cust-123")
 
         assert result["onboarding_steps"]["complete_tax_information"] == "completed"
@@ -255,9 +254,7 @@ class StartCustomerOnboardingTests(TestCase):
     def test_stores_onboarding_in_meta(self, mock_audit: MagicMock) -> None:
         customer = self._make_customer()
         with patch("apps.customers.models.Customer") as mock_customer_cls:
-            mock_customer_cls.objects.select_related.return_value.prefetch_related.return_value.get.return_value = (
-                customer
-            )
+            self._patch_customer_cls(mock_customer_cls, customer)
             start_customer_onboarding("cust-123")
 
         assert "onboarding" in customer.meta
@@ -295,9 +292,7 @@ class CleanupInactiveCustomersTests(TestCase):
         mock_customer_cls.objects.filter.return_value.count.return_value = 10
         candidates_qs = MagicMock()
         candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value.distinct.return_value = (
-            candidates_qs
-        )
+        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
 
         mock_service_cls.objects.filter.return_value.exists.return_value = False
         mock_ticket_cls.objects.filter.return_value.exists.return_value = False
@@ -324,9 +319,7 @@ class CleanupInactiveCustomersTests(TestCase):
         mock_customer_cls.objects.filter.return_value.count.return_value = 10
         candidates_qs = MagicMock()
         candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value.distinct.return_value = (
-            candidates_qs
-        )
+        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
 
         mock_service_cls.objects.filter.return_value.exists.return_value = True  # Has active services
 
@@ -352,9 +345,7 @@ class CleanupInactiveCustomersTests(TestCase):
         mock_customer_cls.objects.filter.return_value.count.return_value = 10
         candidates_qs = MagicMock()
         candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value.distinct.return_value = (
-            candidates_qs
-        )
+        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
 
         mock_service_cls.objects.filter.return_value.exists.return_value = False
         mock_ticket_cls.objects.filter.return_value.exists.return_value = True  # Has open tickets
@@ -385,9 +376,7 @@ class CleanupInactiveCustomersTests(TestCase):
         mock_customer_cls.objects.filter.return_value.count.return_value = 10
         candidates_qs = MagicMock()
         candidates_qs.__getitem__ = MagicMock(return_value=[customer])
-        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value.distinct.return_value = (
-            candidates_qs
-        )
+        mock_customer_cls.objects.filter.return_value.exclude.return_value.exclude.return_value = candidates_qs
 
         mock_service_cls.objects.filter.return_value.exists.return_value = False
         mock_ticket_cls.objects.filter.return_value.exists.return_value = False

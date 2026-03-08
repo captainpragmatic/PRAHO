@@ -1270,20 +1270,20 @@ class Command(BaseCommand):
                 "key": "customer_reactivation",
                 "locale": "ro",
                 "category": "engagement",
-                "subject": "Ne este dor de dumneavoastra! - PragmaticHost",
+                "subject": "Ne este dor de dumneavoastră! - PragmaticHost",
                 "body_html": """
-                <h2>Buna ziua {{customer_name}},</h2>
-                <p>Am observat ca nu v-ati conectat la contul PragmaticHost de ceva timp.</p>
-                <p>Dorim sa ne asiguram ca totul este in regula cu contul dumneavoastra
-                si ca nu aveti nevoie de ajutor.</p>
-                <p>Daca aveti intrebari sau aveti nevoie de asistenta, nu ezitati sa ne contactati:</p>
+                <h2>Bună ziua {{customer_name}},</h2>
+                <p>Am observat că nu v-ați conectat la contul PragmaticHost de ceva timp.</p>
+                <p>Dorim să ne asigurăm că totul este în regulă cu contul dumneavoastră
+                și că nu aveți nevoie de ajutor.</p>
+                <p>Dacă aveți întrebări sau aveți nevoie de asistență, nu ezitați să ne contactați:</p>
                 <ul>
                     <li>Email: support@pragmatichost.com</li>
                     <li>Telefon: +40 XXX XXX XXX</li>
                 </ul>
-                <p>Cu stima,<br/>Echipa PragmaticHost</p>
+                <p>Cu stimă,<br/>Echipa PragmaticHost</p>
                 """,
-                "description": "Email de reactivare pentru clienti inactivi",
+                "description": "Email de reactivare pentru clienți inactivi",
                 "variables": {"customer_name": "Numele clientului"},
             },
             {

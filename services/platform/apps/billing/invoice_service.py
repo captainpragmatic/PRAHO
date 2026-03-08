@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from xml.sax.saxutils import escape as xml_escape
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Sum
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -114,10 +115,15 @@ class BillingAnalyticsService:
                 "updated_at": timezone.now().isoformat(),
             }
 
-            # Update customer metadata if available
+            # Update customer metadata if available (locked to prevent lost updates)
             if hasattr(customer, "meta") and customer.meta is not None:
-                customer.meta["billing_metrics"] = metrics
-                customer.save(update_fields=["meta", "updated_at"])
+                from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+
+                with transaction.atomic():
+                    locked = Customer.objects.select_for_update().get(id=customer.id)
+                    locked.meta = locked.meta or {}
+                    locked.meta["billing_metrics"] = metrics
+                    locked.save(update_fields=["meta", "updated_at"])
 
             logger.info(f"📊 [Analytics] Updated customer metrics for {customer}")
             return {"success": True, **metrics}
@@ -190,11 +196,19 @@ class BillingAnalyticsService:
 
             new_ltv = current_ltv + adjustment_amount_cents
 
-            # Update customer metadata
+            # Update customer metadata (locked to prevent lost updates)
             if hasattr(customer, "meta") and customer.meta is not None:
-                customer.meta["lifetime_value_cents"] = new_ltv
-                customer.meta["ltv_last_adjusted"] = timezone.now().isoformat()
-                customer.save(update_fields=["meta", "updated_at"])
+                from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+
+                with transaction.atomic():
+                    locked = Customer.objects.select_for_update().get(id=customer.id)
+                    locked.meta = locked.meta or {}
+                    # Re-read current LTV from locked row for accurate calculation
+                    current_ltv_locked = locked.meta.get("lifetime_value_cents", 0)
+                    locked.meta["lifetime_value_cents"] = current_ltv_locked + adjustment_amount_cents
+                    locked.meta["ltv_last_adjusted"] = timezone.now().isoformat()
+                    locked.save(update_fields=["meta", "updated_at"])
+                    new_ltv = locked.meta["lifetime_value_cents"]
 
             adjustment_data = {
                 "customer_id": str(customer.id),

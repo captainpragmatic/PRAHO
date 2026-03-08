@@ -35,7 +35,7 @@ _RECENCY_THRESHOLD_MEDIUM = 30
 _RECENCY_THRESHOLD_LOW = 90
 
 # Ticket statuses considered "open" for inactive customer cleanup
-_OPEN_TICKET_STATUSES = ("open", "in_progress", "waiting_on_customer", "pending")
+_OPEN_TICKET_STATUSES = ("open", "in_progress", "waiting_on_customer")
 
 
 def get_task_soft_time_limit() -> int:
@@ -154,7 +154,8 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
         step_results["welcome_email"] = "completed"
 
         # Step 2: Verify contact details — check phone and address exist
-        has_phone = bool(customer.primary_phone and customer.primary_phone != "+40712345678")
+        default_phone = Customer._meta.get_field("primary_phone").default
+        has_phone = bool(customer.primary_phone and customer.primary_phone != default_phone)
         has_address = customer.addresses.exists()
         step_results["verify_contact_details"] = "completed" if (has_phone and has_address) else "incomplete"
 
@@ -165,22 +166,30 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
         # Step 4: Tax information — required for business customers only
         if is_business:
             tax_profile = customer.get_tax_profile()
-            has_tax_info = tax_profile is not None and bool(getattr(tax_profile, "vat_number", None))
+            if tax_profile is not None:
+                # CUI is primary identifier for companies/PFA; VAT number for VAT-registered
+                has_tax_info = bool(getattr(tax_profile, "cui", None) or getattr(tax_profile, "vat_number", None))
+            else:
+                has_tax_info = False
             step_results["complete_tax_information"] = "completed" if has_tax_info else "incomplete"
         else:
+            # Individuals: CNP is the tax identifier (optional for onboarding)
             step_results["complete_tax_information"] = "not_required"
 
         # Store onboarding state in customer metadata
-        onboarding_data = {
-            "steps": step_results,
-            "started_at": timezone.now().isoformat(),
-            "is_complete": all(v in ("completed", "not_required") for v in step_results.values()),
-        }
+        is_complete = all(v in ("completed", "not_required") for v in step_results.values())
         # Narrow lock: only the meta write to prevent lost updates from concurrent tasks
         with transaction.atomic():
             customer_locked = Customer.objects.select_for_update().get(id=customer_id)
             customer_locked.meta = customer_locked.meta or {}
-            customer_locked.meta["onboarding"] = onboarding_data
+            existing_onboarding = customer_locked.meta.get("onboarding", {})
+            customer_locked.meta["onboarding"] = {
+                "steps": step_results,
+                # Preserve original started_at on re-runs (idempotent)
+                "started_at": existing_onboarding.get("started_at", timezone.now().isoformat()),
+                "updated_at": timezone.now().isoformat(),
+                "is_complete": is_complete,
+            }
             customer_locked.save(update_fields=["meta", "updated_at"])
 
         AuditService.log_simple_event(
@@ -194,7 +203,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
                 "customer_name": customer.get_display_name(),
                 "customer_type": customer.customer_type,
                 "step_results": step_results,
-                "is_complete": onboarding_data["is_complete"],
+                "is_complete": is_complete,
                 "source_app": "customers",
             },
         )
@@ -212,7 +221,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
             "customer_id": str(customer.id),
             "customer_name": customer.get_display_name(),
             "onboarding_steps": step_results,
-            "is_complete": onboarding_data["is_complete"],
+            "is_complete": is_complete,
             "message": "Customer onboarding processed",
         }
 
@@ -393,21 +402,20 @@ def cleanup_inactive_customers() -> dict[str, Any]:
 
             # Find customers with no member login in 12+ months
             # Customer has no last_login — must check via memberships
+            # Subquery anti-joins: .exclude() on multi-valued relations uses
+            # LEFT OUTER JOIN which keeps rows where ANY related row doesn't match.
+            # Subquery ensures ALL related rows are checked correctly.
+            recently_active_ids = Customer.objects.filter(memberships__user__last_login__gte=cutoff_date).values("id")
+            recently_ordered_ids = Customer.objects.filter(orders__created_at__gte=cutoff_date).values("id")
+
             candidates = (
                 Customer.objects.filter(
                     status="active",
                     created_at__lt=cutoff_date,
                     marketing_consent=True,
                 )
-                .exclude(
-                    # Exclude customers with any user who logged in recently
-                    memberships__user__last_login__gte=cutoff_date
-                )
-                .exclude(
-                    # Exclude customers with recent orders
-                    orders__created_at__gte=cutoff_date
-                )
-                .distinct()
+                .exclude(id__in=recently_active_ids)
+                .exclude(id__in=recently_ordered_ids)
             )
 
             results: dict[str, Any] = {
@@ -487,10 +495,10 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
             )
 
         AuditService.log_simple_event(
-            event_type="customer_welcome_email_sent",
+            event_type="customer_welcome_email_sent" if result.success else "customer_welcome_email_failed",
             user=None,
             content_object=customer,
-            description=f"Welcome email sent to {customer.get_display_name()}",
+            description=f"Welcome email {'sent to' if result.success else 'failed for'} {customer.get_display_name()}",
             actor_type="system",
             metadata={
                 "customer_id": str(customer.id),
@@ -616,7 +624,8 @@ def _detect_feedback_category(content: str) -> str:
 
 def _detect_feedback_sentiment(content: str) -> str:
     """Detect simple sentiment from note content (positive/negative/neutral)."""
-    words = set(content.lower().split())
+    # Strip punctuation so "great!" matches "great", "terrible," matches "terrible"
+    words = {w.strip(".,!?;:'\"()[]{}") for w in content.lower().split()}
     pos_count = len(words & _POSITIVE_WORDS)
     neg_count = len(words & _NEGATIVE_WORDS)
     if pos_count > neg_count:
@@ -629,7 +638,9 @@ def _detect_feedback_sentiment(content: str) -> str:
 def _get_customer_locale(customer: Any) -> str:
     """Get preferred locale for a customer based on their primary user's language."""
     try:
-        primary_membership = customer.memberships.filter(is_primary=True).select_related("user__profile").first()
+        primary_membership = (
+            customer.memberships.filter(is_primary=True, is_active=True).select_related("user__profile").first()
+        )
         if primary_membership and hasattr(primary_membership.user, "profile"):
             lang = getattr(primary_membership.user.profile, "preferred_language", None)
             if lang in ("ro", "en"):
