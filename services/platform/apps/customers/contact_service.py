@@ -184,7 +184,7 @@ class ContactService:
 
         # Validate postal code format for Romania
         if (
-            address.country == "România"
+            address.country in ("România", "Romania")
             and address.postal_code
             and (not address.postal_code.isdigit() or len(address.postal_code) != ROMANIAN_POSTAL_CODE_LENGTH)
         ):

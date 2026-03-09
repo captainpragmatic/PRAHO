@@ -438,29 +438,35 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
             else None
         )
 
+        # Determine outcome
+        outcome = "skipped"
         if result and result.get("success"):
             payment_intent_id = result.get("payment_intent_id", "")
             confirm = PaymentService.confirm_payment(payment_intent_id, gateway="stripe")
             if confirm.get("success") and confirm.get("status") == "succeeded":
                 logger.info(f"💳 [AutoPay] Payment succeeded for invoice {invoice.number}")
                 invoice.update_status_from_payments()
+                outcome = "success"
             else:
                 logger.warning(f"⚠️ [AutoPay] Payment confirmation pending for invoice {invoice.number}")
+                outcome = "pending"
         else:
             logger.info(f"💳 [AutoPay] No order linked or payment failed for invoice {invoice.number}")
+            outcome = "failed"
 
-        # Log the auto-payment attempt
+        # Log with outcome
         AuditService.log_simple_event(
-            event_type="auto_payment_attempted",
+            event_type=f"auto_payment_{outcome}",
             user=None,
             content_object=invoice,
-            description=f"Auto-payment attempted for invoice {invoice.number}",
+            description=f"Auto-payment {outcome} for invoice {invoice.number}",
             actor_type="system",
             metadata={
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
                 "customer_id": str(invoice.customer.id),
                 "amount_cents": invoice.total_cents,
+                "outcome": outcome,
                 "source_app": "billing",
             },
         )

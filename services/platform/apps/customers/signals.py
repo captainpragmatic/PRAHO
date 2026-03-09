@@ -14,9 +14,10 @@ Includes:
 """
 
 import logging
-from typing import Any, cast
+from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -113,7 +114,7 @@ def handle_customer_created_or_updated(
                 _handle_marketing_consent_change(instance, old_marketing, instance.marketing_consent)
 
         # Romanian compliance verification for companies
-        if instance.customer_type == "company" and instance.company_name:
+        if instance.customer_type == Customer.CustomerType.COMPANY and instance.company_name:
             _verify_romanian_company_compliance(instance)
 
     except Exception as e:
@@ -267,6 +268,10 @@ def handle_tax_profile_changes(
 def store_original_tax_values(sender: type[CustomerTaxProfile], instance: CustomerTaxProfile, **kwargs: Any) -> None:
     """Store original tax profile values for comparison"""
     try:
+        update_fields = kwargs.get("update_fields")
+        if update_fields and set(update_fields).issubset({"updated_at"}):
+            return
+
         if instance.pk:
             try:
                 original = CustomerTaxProfile.objects.get(pk=instance.pk)
@@ -352,6 +357,10 @@ def store_original_billing_values(
 ) -> None:
     """Store original billing profile values for comparison"""
     try:
+        update_fields = kwargs.get("update_fields")
+        if update_fields and set(update_fields).issubset({"updated_at"}):
+            return
+
         if instance.pk:
             try:
                 original = CustomerBillingProfile.objects.get(pk=instance.pk)
@@ -424,7 +433,7 @@ def handle_address_changes(
             _ensure_single_current_address(instance)
 
         # Legal address compliance for Romanian companies
-        if instance.address_type == "legal" and instance.customer.customer_type == "company":
+        if instance.address_type == "legal" and instance.customer.customer_type == Customer.CustomerType.COMPANY:
             _verify_legal_address_compliance(instance)
 
         logger.info(
@@ -439,6 +448,10 @@ def handle_address_changes(
 def store_original_address_values(sender: type[CustomerAddress], instance: CustomerAddress, **kwargs: Any) -> None:
     """Store original address values for comparison"""
     try:
+        update_fields = kwargs.get("update_fields")
+        if update_fields and set(update_fields).issubset({"updated_at", "is_current"}):
+            return
+
         if instance.pk:
             try:
                 original = CustomerAddress.objects.get(pk=instance.pk)
@@ -535,6 +548,10 @@ def store_original_payment_values(
 ) -> None:
     """Store original payment method values for comparison"""
     try:
+        update_fields = kwargs.get("update_fields")
+        if update_fields and set(update_fields).issubset({"updated_at", "is_default", "is_active"}):
+            return
+
         if instance.pk:
             try:
                 original = CustomerPaymentMethod.objects.get(pk=instance.pk)
@@ -632,17 +649,17 @@ def handle_customer_note_changes(
 
 
 def _handle_new_customer_creation(customer: Customer) -> None:
-    """Handle new customer creation tasks"""
+    """Handle new customer creation tasks."""
     try:
         # Do not auto-create tax/billing profiles here.
         # Profiles are created explicitly by dedicated workflows (registration/forms/API/services)
         # and may legitimately be absent for newly created customers.
 
-        # Send welcome email
-        _send_customer_welcome_email(customer)
+        # Send welcome email after the transaction commits so the customer row is visible to the mailer.
+        transaction.on_commit(lambda inst=customer: _send_customer_welcome_email(inst))
 
-        # Trigger customer onboarding workflow
-        _trigger_customer_onboarding(customer)
+        # Trigger customer onboarding workflow after transaction commits.
+        transaction.on_commit(lambda inst=customer: _trigger_customer_onboarding(inst))
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] New customer creation handling failed: {e}")
@@ -665,11 +682,11 @@ def _handle_customer_status_change(customer: Customer, old_status: str, new_stat
         )
 
         # Handle specific status transitions
-        if new_status == "active" and old_status == "prospect":
+        if new_status == Customer.CustomerStatus.ACTIVE and old_status == Customer.CustomerStatus.PROSPECT:
             _handle_customer_activation(customer)
-        elif new_status == "suspended":
+        elif new_status == Customer.CustomerStatus.SUSPENDED:
             _handle_customer_suspension(customer, old_status)
-        elif new_status == "inactive" and old_status == "active":
+        elif new_status == Customer.CustomerStatus.INACTIVE and old_status == Customer.CustomerStatus.ACTIVE:
             _handle_customer_deactivation(customer)
 
     except Exception as e:
@@ -730,7 +747,7 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
 def _verify_romanian_company_compliance(customer: Customer) -> None:
     """Verify Romanian company compliance requirements"""
     try:
-        if customer.customer_type == "company":
+        if customer.customer_type == Customer.CustomerType.COMPANY:
             # Check if tax profile exists and has CUI
             tax_profile = customer.get_tax_profile()
             if not tax_profile or not tax_profile.cui:
@@ -775,12 +792,15 @@ def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
 
 
 def _trigger_vat_validation(tax_profile: CustomerTaxProfile) -> None:
-    """Trigger VAT number validation via VIES"""
+    """Queue VAT number validation via VIES after transaction commits."""
     try:
-        # Queue VAT validation task
         from django_q.tasks import async_task
 
-        async_task("apps.billing.tasks.validate_vat_number", str(tax_profile.id))
+        transaction.on_commit(
+            lambda tax_profile_id=str(tax_profile.id): async_task(
+                "apps.billing.tasks.validate_vat_number", tax_profile_id
+            )
+        )
         logger.info(f"🏛️ [Customer] VAT validation queued: {tax_profile.vat_number}")
     except ImportError:
         logger.info(f"🏛️ [Customer] Would validate VAT: {tax_profile.vat_number}")
@@ -826,7 +846,10 @@ def _handle_payment_terms_change(billing_profile: CustomerBillingProfile, old_te
         extended_terms_threshold = SettingsService.get_integer_setting(
             "billing.extended_payment_terms_threshold", _DEFAULT_EXTENDED_PAYMENT_TERMS_THRESHOLD
         )
-        if new_terms > extended_terms_threshold and billing_profile.customer.customer_type == "company":
+        if (
+            new_terms > extended_terms_threshold
+            and billing_profile.customer.customer_type == Customer.CustomerType.COMPANY
+        ):
             compliance_request = ComplianceEventRequest(
                 compliance_type="extended_payment_terms",
                 reference_id=f"customer_{billing_profile.customer.id}",
@@ -861,16 +884,16 @@ def _trigger_romanian_address_validation(address: CustomerAddress) -> None:
 
 
 def _ensure_single_current_address(address: CustomerAddress) -> None:
-    """Ensure only one current address per type per customer"""
+    """Ensure only one current address per type per customer."""
     try:
-        # Set all other addresses of same type to not current
-        address_manager = cast(Any, CustomerAddress.objects)
-        address_manager.filter(customer=address.customer, address_type=address.address_type, is_current=True).exclude(
-            pk=address.pk
-        ).update(is_current=False)
+        CustomerAddress.objects.filter(
+            customer=address.customer,
+            address_type=address.address_type,
+            is_current=True,
+        ).exclude(pk=address.pk).select_for_update().update(is_current=False)
 
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Address versioning failed: {e}")
+    except Exception:
+        logger.exception("🔥 [Customer Signal] Address versioning failed")
 
 
 def _verify_legal_address_compliance(address: CustomerAddress) -> None:
@@ -907,11 +930,11 @@ def _validate_stripe_payment_method(payment_method: CustomerPaymentMethod) -> No
 
 
 def _handle_important_note(note: CustomerNote) -> None:
-    """Handle important customer notes"""
+    """Handle important customer notes."""
     try:
-        # Send notification to account manager
+        # Send notification to account manager after transaction commits.
         if note.customer.assigned_account_manager:
-            _send_important_note_notification(note)
+            transaction.on_commit(lambda n=note: _send_important_note_notification(n))
 
         logger.info(f"🚨 [Customer] Important note created: {note.title}")
 
@@ -920,63 +943,58 @@ def _handle_important_note(note: CustomerNote) -> None:
 
 
 def _handle_feedback_note(note: CustomerNote) -> None:
-    """Handle customer feedback notes (complaints/compliments)"""
+    """Enqueue feedback processing task after transaction commits."""
     try:
-        feedback_type = note.note_type
+        from django_q.tasks import async_task
 
-        # Queue feedback processing
-        try:
-            from django_q.tasks import async_task
-
-            async_task("apps.customers.tasks.process_customer_feedback", str(note.id))
-        except (ImportError, AttributeError):
-            logger.info(
-                f"📝 [Customer] Would process feedback for {note.customer.get_display_name()} (task not available)"
-            )
-
-        logger.info(f"🗣️ [Customer] Customer {feedback_type} recorded: {note.title}")
-
+        transaction.on_commit(
+            lambda note_id=str(note.id): async_task("apps.customers.tasks.process_customer_feedback", note_id)
+        )
+        logger.info(f"🗣️ [Customer] Customer {note.note_type} recorded: {note.title}")
     except ImportError:
-        logger.info(f"🗣️ [Customer] Would process {note.note_type}: {note.title}")
+        logger.info(
+            "📝 [Customer] Feedback processing skipped (task runner not available)",
+            extra={"note_id": note.id, "customer_id": note.customer_id},
+        )
 
 
 def _handle_customer_activation(customer: Customer) -> None:
-    """Handle customer activation from prospect to active"""
+    """Handle customer activation from prospect to active."""
     try:
         logger.info(f"✅ [Customer] Customer activated: {customer.get_display_name()}")
 
-        # Send activation welcome email
-        _send_customer_activation_email(customer)
+        # Send activation welcome email after transaction commits.
+        transaction.on_commit(lambda inst=customer: _send_customer_activation_email(inst))
 
-        # Enable services if any were pending
-        _activate_customer_services(customer)
+        # Enable services if any were pending — after transaction commits so status is visible.
+        transaction.on_commit(lambda inst=customer: _activate_customer_services(inst))
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Customer activation failed: {e}")
 
 
 def _handle_customer_suspension(customer: Customer, old_status: str) -> None:
-    """Handle customer suspension"""
+    """Handle customer suspension."""
     try:
         logger.warning(f"⚠️ [Customer] Customer suspended: {customer.get_display_name()}")
 
-        # Suspend related services
-        _suspend_customer_services(customer)
+        # Suspend related services after transaction commits so status is visible.
+        transaction.on_commit(lambda inst=customer: _suspend_customer_services(inst))
 
-        # Send suspension notification
-        _send_customer_suspension_email(customer)
+        # Send suspension notification after transaction commits.
+        transaction.on_commit(lambda inst=customer: _send_customer_suspension_email(inst))
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Customer suspension failed: {e}")
 
 
 def _handle_customer_deactivation(customer: Customer) -> None:
-    """Handle customer deactivation"""
+    """Handle customer deactivation."""
     try:
         logger.info(f"💤 [Customer] Customer deactivated: {customer.get_display_name()}")
 
-        # Send deactivation notification
-        _send_customer_deactivation_email(customer)
+        # Send deactivation notification after transaction commits.
+        transaction.on_commit(lambda inst=customer: _send_customer_deactivation_email(inst))
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Customer deactivation failed: {e}")
@@ -1061,18 +1079,18 @@ def _send_important_note_notification(note: CustomerNote) -> None:
 
 
 def _trigger_customer_onboarding(customer: Customer) -> None:
-    """Trigger customer onboarding workflow"""
+    """Queue customer onboarding workflow after transaction commits."""
     try:
-        # Queue onboarding tasks
-        try:
-            from django_q.tasks import async_task
+        from django_q.tasks import async_task
 
-            async_task("apps.customers.tasks.start_customer_onboarding", str(customer.id))
-            logger.info(f"🚀 [Customer] Onboarding started: {customer.get_display_name()}")
-        except (ImportError, AttributeError):
-            logger.info(f"🚀 [Customer] Would start onboarding for {customer.get_display_name()} (task not available)")
-    except Exception:
-        logger.info(f"🚀 [Customer] Would start onboarding for: {customer.get_display_name()}")
+        transaction.on_commit(
+            lambda customer_id=str(customer.id): async_task(
+                "apps.customers.tasks.start_customer_onboarding", customer_id
+            )
+        )
+        logger.info(f"🚀 [Customer] Onboarding queued: {customer.get_display_name()}")
+    except ImportError:
+        logger.info(f"🚀 [Customer] Would start onboarding (task runner not available): {customer.get_display_name()}")
 
 
 def _activate_customer_services(customer: Customer) -> None:

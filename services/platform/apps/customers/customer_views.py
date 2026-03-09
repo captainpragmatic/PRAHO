@@ -87,15 +87,10 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     user = cast(User, request.user)  # Safe due to @login_required
     customers = CustomerService.get_accessible_customers(user)
 
-    # Search functionality - updated for new model structure
+    # Search functionality — delegates to canonical service method
     search_query = request.GET.get("search", "")
     if search_query:
-        customers = customers.filter(
-            Q(company_name__icontains=search_query)
-            | Q(name__icontains=search_query)
-            | Q(primary_email__icontains=search_query)
-            | Q(tax_profile__cui__icontains=search_query)  # Search in related tax profile
-        ).distinct()
+        customers = CustomerService.search_customers(search_query, user)
 
     # Expected queries: 3 (customers + tax profiles + addresses for display)
     customers = (
@@ -135,38 +130,45 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Get recent notes
     recent_notes = customer.notes.order_by("-created_at")[:5]
 
+    # Build base querysets once; each is evaluated exactly twice below (aggregate + slice).
+    services_qs = Service.objects.filter(customer=customer)
+    invoices_qs = Invoice.objects.filter(customer=customer)
+    tickets_qs = Ticket.objects.filter(customer=customer)
+
     # Get services for this customer (single aggregate query instead of 4 separate counts)
-    services = list(
-        Service.objects.filter(customer=customer).select_related("service_plan").order_by("-created_at")[:5]
-    )
-    services_summary = Service.objects.filter(customer=customer).aggregate(
+    services_summary = services_qs.aggregate(
         total=Count("id"),
         active=Count("id", filter=Q(status="active")),
         suspended=Count("id", filter=Q(status="suspended")),
         pending=Count("id", filter=Q(status="pending")),
     )
+    services = list(services_qs.select_related("service_plan").order_by("-created_at")[:5])
 
     # Get recent invoices (single aggregate query instead of 4 separate counts)
-    invoices = list(Invoice.objects.filter(customer=customer).order_by("-created_at")[:5])
-    invoices_summary = Invoice.objects.filter(customer=customer).aggregate(
+    invoices_summary = invoices_qs.aggregate(
         total=Count("id"),
         paid=Count("id", filter=Q(status="paid")),
         unpaid=Count("id", filter=Q(status__in=["issued", "overdue"])),
         draft=Count("id", filter=Q(status="draft")),
     )
+    invoices = list(invoices_qs.order_by("-created_at")[:5])
 
     # Get recent tickets (single aggregate query instead of 4 separate counts)
-    tickets = list(Ticket.objects.filter(customer=customer).order_by("-created_at")[:5])
-    tickets_summary = Ticket.objects.filter(customer=customer).aggregate(
+    tickets_summary = tickets_qs.aggregate(
         total=Count("id"),
         open=Count("id", filter=Q(status__in=["open", "in_progress"])),
         closed=Count("id", filter=Q(status="closed")),
         pending=Count("id", filter=Q(status="waiting_on_customer")),
     )
+    tickets = list(tickets_qs.order_by("-created_at")[:5])
 
-    # User management context for safeguards
-    total_users = customer.memberships.count()
-    owner_count = customer.memberships.filter(role="owner").count()
+    # User management context — single aggregate instead of two separate .count() queries
+    membership_stats = customer.memberships.aggregate(
+        total=Count("id"),
+        owners=Count("id", filter=Q(role="owner")),
+    )
+    total_users = membership_stats["total"]
+    owner_count = membership_stats["owners"]
 
     context = {
         "customer": customer,
@@ -414,12 +416,7 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"results": []})
 
     user = cast(User, request.user)  # Safe due to @login_required
-    customers = CustomerService.get_accessible_customers(user)
-
-    # Filter based on search query
-    customers = customers.filter(
-        Q(name__icontains=query) | Q(company_name__icontains=query) | Q(primary_email__icontains=query)
-    )[:10]
+    customers = CustomerService.search_customers(query, user)[:10]
 
     results = [
         {

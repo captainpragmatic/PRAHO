@@ -116,12 +116,13 @@ class CustomerService:
         if not query.strip():
             return accessible_customers
 
-        # Simple search across name, company_name, and email
+        # Search across name, company_name, email, and Romanian tax identifier (CUI)
         return accessible_customers.filter(
             models.Q(name__icontains=query)
             | models.Q(company_name__icontains=query)
             | models.Q(primary_email__icontains=query)
-        )
+            | models.Q(tax_profile__cui__icontains=query)
+        ).distinct()
 
     @staticmethod
     def get_customer_summary(customer: Customer) -> dict[str, Any]:

@@ -103,7 +103,7 @@ class ProfileService:
             new_cui = safe_updates.pop("cui")
             from apps.common.cui_validator import CUIValidator
 
-            result = CUIValidator.validate(new_cui)
+            result = CUIValidator.validate_strict(new_cui)
             if not result.is_valid:
                 raise ValueError(f"Invalid CUI format: {result.error_message}")
             tax_profile.cui = new_cui

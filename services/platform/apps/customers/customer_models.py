@@ -203,27 +203,26 @@ class Customer(SoftDeleteModel):
     - CustomerMembership: CASCADE (user access removed when customer deleted)
     """
 
-    # Customer Types aligned with PostgreSQL schema
-    CUSTOMER_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("individual", _("Individual")),
-        ("company", _("Company")),
-        ("pfa", _("PFA/SRL")),
-        ("ngo", _("NGO/Association")),
-    )
+    class CustomerType(models.TextChoices):
+        INDIVIDUAL = "individual", _("Individual")
+        COMPANY = "company", _("Company")
+        PFA = "pfa", _("PFA/SRL")
+        NGO = "ngo", _("NGO/Association")
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("active", _("Active")),
-        ("inactive", _("Inactive")),
-        ("suspended", _("Suspended")),
-        ("prospect", _("Prospect")),
-    )
+    class CustomerStatus(models.TextChoices):
+        ACTIVE = "active", _("Active")
+        INACTIVE = "inactive", _("Inactive")
+        SUSPENDED = "suspended", _("Suspended")
+        PROSPECT = "prospect", _("Prospect")
 
     # Core Identity Fields
     name = models.CharField(max_length=255, verbose_name=_("Nume"))
     customer_type = models.CharField(
-        max_length=20, choices=CUSTOMER_TYPE_CHOICES, default="individual", verbose_name=_("Tip client")
+        max_length=20, choices=CustomerType, default=CustomerType.INDIVIDUAL, verbose_name=_("Tip client")
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="prospect", verbose_name=_("Status"))
+    status = models.CharField(
+        max_length=20, choices=CustomerStatus, default=CustomerStatus.PROSPECT, verbose_name=_("Status")
+    )
 
     # Company Fields (when customer_type = 'company')
     company_name = models.CharField(max_length=255, blank=True, verbose_name=_("Nume companie"))
@@ -313,7 +312,7 @@ class Customer(SoftDeleteModel):
 
     def get_display_name(self) -> str:
         """Get customer display name"""
-        if self.customer_type == "company" and self.company_name:
+        if self.customer_type == Customer.CustomerType.COMPANY and self.company_name:
             return self.company_name
         return self.name
 

@@ -152,7 +152,7 @@ def start_customer_onboarding(customer_id: str) -> dict[str, Any]:
             .get(id=customer_id)
         )
 
-        is_business = customer.customer_type in ("company", "pfa")
+        is_business = customer.customer_type in (Customer.CustomerType.COMPANY, Customer.CustomerType.PFA)
         step_results = {}
 
         # Step 1: Welcome email — already sent by signal on customer creation.
@@ -421,7 +421,7 @@ def cleanup_inactive_customers() -> dict[str, Any]:
 
             candidates = (
                 Customer.objects.filter(
-                    status="active",
+                    status=Customer.CustomerStatus.ACTIVE,
                     created_at__lt=cutoff_date,
                     marketing_consent=True,
                 )
@@ -432,7 +432,7 @@ def cleanup_inactive_customers() -> dict[str, Any]:
             )
 
             results: dict[str, Any] = {
-                "total_checked": int(Customer.objects.filter(status="active").count()),
+                "total_checked": int(Customer.objects.filter(status=Customer.CustomerStatus.ACTIVE).count()),
                 "inactive_found": 0,
                 "emails_sent": 0,
                 "skipped_active_services": 0,

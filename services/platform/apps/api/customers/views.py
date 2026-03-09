@@ -653,7 +653,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @permission_classes([AllowAny])  # HMAC auth via @require_customer_authentication below
 @throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
-def update_customer_billing_address(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:
     """
@@ -744,25 +744,38 @@ def update_customer_billing_address(  # noqa: C901, PLR0912  # Complexity: multi
             # F03 fix: Use ContactService.create_address() for atomic versioning.
             # The previous get_or_create + setattr loop bypassed version history and
             # was vulnerable to UniqueConstraint races under concurrent writes.
-            address_line1 = validated_data.get("address_line1", "")
-            city = validated_data.get("city", "")
-
-            if address_line1 and city:
-                address_data = AddressData(
-                    address_type="primary",
-                    address_line1=address_line1,
-                    city=city,
-                    county=validated_data.get("county", ""),
-                    postal_code=validated_data.get("postal_code", ""),
-                )
-                ContactService.create_address(
-                    customer=customer,
-                    user=acting_user,
-                    address_data=address_data,
-                    is_current=True,
-                    country=validated_data.get("country", "România"),
-                    address_line2=validated_data.get("address_line2", ""),
-                )
+            address_fields = {
+                k: validated_data[k]
+                for k in ("address_line1", "city", "county", "postal_code", "country", "address_line2")
+                if k in validated_data
+            }
+            if address_fields:
+                # If core fields provided, create new versioned address
+                address_line1 = address_fields.get("address_line1", "")
+                city = address_fields.get("city", "")
+                if address_line1 and city:
+                    address_data = AddressData(
+                        address_type="primary",
+                        address_line1=address_line1,
+                        city=city,
+                        county=address_fields.get("county", ""),
+                        postal_code=address_fields.get("postal_code", ""),
+                    )
+                    ContactService.create_address(
+                        customer=customer,
+                        user=acting_user,
+                        address_data=address_data,
+                        is_current=True,
+                        country=address_fields.get("country", "România"),
+                        address_line2=address_fields.get("address_line2", ""),
+                    )
+                else:
+                    # Partial update — update existing primary address in place
+                    existing_addr = customer.get_primary_address()
+                    if existing_addr:
+                        for field, value in address_fields.items():
+                            setattr(existing_addr, field, value)
+                        existing_addr.save(update_fields=[*address_fields.keys(), "updated_at"])
 
             # Update or create tax profile for Romanian compliance
             tax_fields = {}

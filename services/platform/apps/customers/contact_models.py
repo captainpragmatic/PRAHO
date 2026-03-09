@@ -141,13 +141,25 @@ class CustomerPaymentMethod(SoftDeleteModel):
             models.Index(fields=["customer", "is_default"]),
             models.Index(fields=["stripe_customer_id"]),
         )
+        constraints: ClassVar[list[UniqueConstraint]] = [
+            UniqueConstraint(
+                fields=["customer"],
+                condition=Q(is_default=True),
+                name="unique_default_payment_per_cust",
+                violation_error_message=_("Only one default payment method per customer is allowed."),
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.customer.get_display_name()} - {self.display_name}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save with bank details validation and default method logic (atomic)."""
-        self.full_clean()
+        # Run field + model clean, but skip unique/constraint validation — the atomic
+        # block below clears other defaults before the INSERT/UPDATE, so the DB constraint
+        # (unique_default_payment_per_cust) is satisfied by the time the row is written.
+        self.clean_fields()
+        self.clean()
 
         with db_transaction.atomic():
             # Handle default payment method logic

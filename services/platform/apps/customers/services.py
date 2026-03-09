@@ -225,7 +225,7 @@ class CustomerAnalyticsService:
                 "outstanding_balance": Decimal(total_invoiced - total_paid) / 100,
                 "pending_invoices": invoice_stats["issued"] or 0,
                 "overdue_invoices": invoice_stats["overdue"] or 0,
-                "payment_rate": (total_paid / total_invoiced * 100) if total_invoiced > 0 else 100,
+                "payment_rate": round(total_paid / total_invoiced * 100) if total_invoiced > 0 else None,
             }
         except Exception as e:
             logger.warning(f"Failed to get billing metrics: {e}")
@@ -236,7 +236,7 @@ class CustomerAnalyticsService:
                 "outstanding_balance": Decimal("0"),
                 "pending_invoices": 0,
                 "overdue_invoices": 0,
-                "payment_rate": 100,
+                "payment_rate": None,
             }
 
     @staticmethod
@@ -302,8 +302,10 @@ class CustomerAnalyticsService:
             score += 5
 
         # Payment behavior factor (max 25 points)
-        payment_rate = metrics.get("payment_rate", 100)
-        if payment_rate >= _get_payment_rate_excellent():
+        payment_rate = metrics.get("payment_rate")
+        if payment_rate is None:
+            pass  # No payment history — skip payment factor
+        elif payment_rate >= _get_payment_rate_excellent():
             score += 25
         elif payment_rate >= _get_payment_rate_good():
             score += 15

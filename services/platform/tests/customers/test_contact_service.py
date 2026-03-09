@@ -12,6 +12,7 @@ import time
 from django.test import TestCase
 
 from apps.customers.contact_service import AddressData, ContactService
+from apps.customers.customer_service import CustomerService
 from tests.factories.core_factories import CustomerCreationRequest, create_admin_user, create_full_customer
 
 
@@ -188,3 +189,72 @@ class TestContactServiceCreateAddress(TestCase):
 
         addr_v1.refresh_from_db()
         self.assertFalse(addr_v1.is_current)
+
+
+class TestCustomerServiceSearch(TestCase):
+    """CustomerService.search_customers() — canonical search including CUI."""
+
+    def setUp(self) -> None:
+        self.user = _create_user()
+
+        # Customer with a tax profile containing a known CUI
+        self.customer_with_cui = create_full_customer(
+            CustomerCreationRequest(
+                name="Alpha Tech SRL",
+                company_name="Alpha Tech SRL",
+                primary_email=f"alpha_{int(time.time() * 1000)}@example.ro",
+                with_tax_profile=True,
+                with_billing_profile=False,
+                with_address=False,
+                cui="RO98765432",
+            )
+        )
+
+        # Customer without a tax profile — should not appear in CUI searches
+        self.customer_no_cui = create_full_customer(
+            CustomerCreationRequest(
+                name="Beta Services SRL",
+                company_name="Beta Services SRL",
+                primary_email=f"beta_{int(time.time() * 1000)}@example.ro",
+                with_tax_profile=False,
+                with_billing_profile=False,
+                with_address=False,
+            )
+        )
+
+    def test_search_by_full_cui_finds_customer(self) -> None:
+        """Full CUI match must return the customer with that tax profile."""
+        results = CustomerService.search_customers("RO98765432", self.user)
+        pks = list(results.values_list("pk", flat=True))
+        self.assertIn(self.customer_with_cui.pk, pks)
+
+    def test_search_by_partial_cui_finds_customer(self) -> None:
+        """Partial CUI prefix must still find the customer (icontains)."""
+        results = CustomerService.search_customers("RO9876", self.user)
+        pks = list(results.values_list("pk", flat=True))
+        self.assertIn(self.customer_with_cui.pk, pks)
+
+    def test_search_by_cui_excludes_unrelated_customers(self) -> None:
+        """A CUI search must not return customers whose CUI does not match."""
+        results = CustomerService.search_customers("RO98765432", self.user)
+        pks = list(results.values_list("pk", flat=True))
+        self.assertNotIn(self.customer_no_cui.pk, pks)
+
+    def test_search_no_duplicates_when_cui_matches(self) -> None:
+        """A customer matched via tax_profile__cui must appear exactly once (distinct)."""
+        results = CustomerService.search_customers("RO98765432", self.user)
+        pks = list(results.values_list("pk", flat=True))
+        self.assertEqual(pks.count(self.customer_with_cui.pk), 1)
+
+    def test_search_by_name_still_works(self) -> None:
+        """Name search must continue to work after adding CUI lookup."""
+        results = CustomerService.search_customers("Alpha Tech", self.user)
+        pks = list(results.values_list("pk", flat=True))
+        self.assertIn(self.customer_with_cui.pk, pks)
+
+    def test_empty_query_returns_all_accessible(self) -> None:
+        """Empty / whitespace-only query must return the full accessible queryset."""
+        results = CustomerService.search_customers("", self.user)
+        pks = list(results.values_list("pk", flat=True))
+        self.assertIn(self.customer_with_cui.pk, pks)
+        self.assertIn(self.customer_no_cui.pk, pks)
