@@ -175,7 +175,7 @@ check-env:
 
 RUNSERVER_FLAGS := $(if $(NORELOAD),--noreload,)
 
-dev-platform: check-env build-css
+dev-platform: check-env
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
@@ -185,15 +185,14 @@ dev-platform: check-env build-css
 	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --settings=config.settings.dev || echo "⚠️ Initial data setup skipped"
 	@echo "🔧 Loading dev sample data..."
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
-	@echo "🚀 Starting Django-Q2 workers in background..."
-	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 &
-	@QCLUSTER_PID=$$!; \
-	echo "📊 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
+	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 & \
+	QCLUSTER_PID=$$!; \
+	echo "🚀 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
 	echo "🌐 Starting platform server on :8700$(if $(NORELOAD), (no-reload),)..."; \
 	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
 	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev $(RUNSERVER_FLAGS)
 
-dev-portal: check-env build-css
+dev-portal: check-env
 	@echo "🌐 [Portal] Starting customer portal service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔒 NO PYTHONPATH - portal cannot import platform code"
@@ -208,10 +207,10 @@ dev-all: build-css
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
 
-dev: build-css
+dev:
 	@$(MAKE) dev-all
 
-dev-e2e: check-env build-css
+dev-e2e: check-env
 	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@RATE_LIMITING_ENABLED=false $(MAKE) NORELOAD=1 dev-all

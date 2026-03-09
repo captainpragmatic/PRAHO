@@ -4,9 +4,10 @@ Romanian hosting provider test data generation.
 """
 
 import contextlib
+import logging
 import random
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -154,6 +155,20 @@ class Command(BaseCommand):
                 "🚫 Sample data generation only works in DEBUG mode. This prevents accidental production usage."
             )
 
+        # Suppress noisy signal/audit/django-q INFO logging during fixture generation.
+        # Errors and warnings still surface. The audit trail is stored in DB regardless.
+        noisy_loggers = [logging.getLogger(name) for name in ("apps", "django-q")]
+        prev_levels = [lgr.level for lgr in noisy_loggers]
+        for lgr in noisy_loggers:
+            lgr.setLevel(logging.WARNING)
+
+        try:
+            self._generate(options)
+        finally:
+            for lgr, level in zip(noisy_loggers, prev_levels, strict=True):
+                lgr.setLevel(level)
+
+    def _generate(self, options: dict[str, Any]) -> None:
         fake = Faker("ro_RO")  # Romanian locale
         Faker.seed(42)  # Consistent data
 
@@ -1872,7 +1887,9 @@ class Command(BaseCommand):
             status = invoice_statuses[i % len(invoice_statuses)]
 
             # Logical dates: due_at = issued_at + payment_terms
-            issued_at = fake.date_between(start_date="-1y", end_date="today")
+            # Use timezone-aware datetimes for DateTimeFields
+            issued_date = fake.date_between(start_date="-1y", end_date="today")
+            issued_at = timezone.make_aware(datetime.combine(issued_date, datetime.min.time()))
             due_at = issued_at + timedelta(days=payment_terms_days)
 
             invoice_data: dict[str, Any] = {
@@ -1998,10 +2015,12 @@ class Command(BaseCommand):
             status = proforma_statuses[i % len(proforma_statuses)]
 
             # Logical valid_until: expired proformas must have past dates
+            # Use timezone-aware datetimes for DateTimeFields
             if status == "expired":
-                valid_until = fake.date_between(start_date="-60d", end_date="-1d")
+                valid_date = fake.date_between(start_date="-60d", end_date="-1d")
             else:
-                valid_until = fake.date_between(start_date="today", end_date="+30d")
+                valid_date = fake.date_between(start_date="today", end_date="+30d")
+            valid_until = timezone.make_aware(datetime.combine(valid_date, datetime.min.time()))
 
             proforma_data: dict[str, Any] = {
                 "customer": customer,
