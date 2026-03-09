@@ -7,7 +7,7 @@
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
 
   <!-- Breadcrumbs -->
-  {% include "orders/partials/order_breadcrumbs.html" with current_step="confirm" %}
+  {% step_progress order_steps current_step=current_step separator="arrow" %}
 
   <!-- Success Header -->
   <div class="text-center mb-8">

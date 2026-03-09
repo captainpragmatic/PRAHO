@@ -215,7 +215,7 @@ All colors defined once in `assets/css/input.css` and referenced via Tailwind co
 | `button.html` | 77 | ✅ ~20L | — | HTMX loading indicator styles |
 | `pagination.html` | 191 | — | — | Clean, HTMX-ready |
 | `modal.html` | 159 | — | ✅ ~35L | Open/close/escape handlers |
-| `step_navigation.html` | 122 | — | — | Horizontal/vertical/compact |
+| `step_progress.html` | 160 | — | — | Unified step/progress (replaces step_navigation + progress_indicator + order_breadcrumbs) |
 | `input.html` | 121 | — | ✅ ~7L | Password toggle only |
 | `alert.html` | 87 | — | — | Alpine.js dismissible |
 | `toast.html` | 83 | — | ✅ ~20L | Auto-dismiss (bypassed) |

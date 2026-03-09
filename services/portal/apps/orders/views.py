@@ -24,8 +24,10 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse_lazy
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _l
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
@@ -43,6 +45,13 @@ from .validators import OrderInputValidator
 
 logger = logging.getLogger(__name__)
 MINI_CART_MAX_ITEMS = 3
+
+ORDER_STEPS = [
+    {"label": _l("Product Selection"), "icon": "orders", "url": reverse_lazy("orders:catalog")},
+    {"label": _l("Cart Review"), "icon": "orders", "url": reverse_lazy("orders:cart_review")},
+    {"label": _l("Checkout"), "icon": "credit-card", "url": reverse_lazy("orders:checkout")},
+    {"label": _l("Confirmation"), "icon": "check"},
+]
 
 
 def _coerce_security_response(result: HttpResponse | object | None) -> HttpResponse | None:
@@ -421,7 +430,8 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
             "product_type_options": product_type_options,
             "cart_count": cart.get_item_count(),
             "cart_total_quantity": cart.get_total_quantity(),
-            "breadcrumb_current": "products",
+            "order_steps": ORDER_STEPS,
+            "current_step": 1,
         }
 
         logger.info(f"✅ [Catalog] Loaded {len(products)} products")
@@ -477,7 +487,8 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
             "product": product,
             "existing_item": existing_item,
             "cart_count": cart.get_item_count(),
-            "breadcrumb_current": "product_detail",
+            "order_steps": ORDER_STEPS,
+            "current_step": 1,
         }
 
         logger.info(f"✅ [Product] Loaded product details: {product_slug}")
@@ -758,7 +769,8 @@ def cart_review(request: HttpRequest) -> HttpResponse:
         "calculation": calculation_result,
         "calculation_error": calculation_error,
         "warnings": cart.get_warnings(),
-        "breadcrumb_current": "cart",
+        "order_steps": ORDER_STEPS,
+        "current_step": 2,
     }
 
     return render(request, "orders/cart_review.html", context)
@@ -896,7 +908,8 @@ def checkout(request: HttpRequest) -> HttpResponse:
         "warnings": cart.get_warnings(),
         "preflight": preflight_result,
         "can_submit": preflight_result.get("valid", False) if preflight_result else False,
-        "breadcrumb_current": "checkout",
+        "order_steps": ORDER_STEPS,
+        "current_step": 3,
     }
 
     return render(request, "orders/checkout.html", context)
@@ -999,7 +1012,8 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
             "payment_info": payment_info,
             "stripe_config": stripe_config,
             "bank_details": bank_details,
-            "breadcrumb_current": "confirm",
+            "order_steps": ORDER_STEPS,
+            "current_step": 4,
         }
 
         return render(request, "orders/order_confirmation.html", context)

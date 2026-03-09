@@ -59,12 +59,6 @@ dangerous_action_modal.html
 # pagination.html — portal has HTMX hx-boost attributes. Platform pending.
 pagination.html
 
-# progress_indicator.html — portal uses updated color tokens from epic.
-progress_indicator.html
-
-# step_navigation.html — portal has additional compact variant. Platform pending.
-step_navigation.html
-
 # table_enhanced.html — portal has updated empty state from B.1 primitives.
 table_enhanced.html
 
