@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.26.0] - 2026-03-09
+
 ### Security
 
 - **`str(e)` information leakage** (CWE-209) — replaced all 5 `return {"error": str(e)}` patterns in `customers/tasks.py` with generic `"Task failed, see server logs"` message; exception details now only in server logs via `logger.exception()`
@@ -82,6 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No DB-level constraints on financial fields** (#71) — Added non-negative `CheckConstraint`s on `Order` (`subtotal_cents`, `tax_cents`, `discount_cents`, `total_cents`) and `OrderItem` (`unit_price_cents`, `setup_cents`, `tax_cents`, `line_total_cents`); app-layer validators can be bypassed by direct ORM calls — DB constraints cannot
 - **EmailLog encryption fallback** (#72) — Replaced raise-or-swallow encryption with graceful degradation per ADR-0017: added `body_encrypted` field with backfill migration; `save()` never raises on encryption failure (snapshots originals, restores on error, marks `body_encrypted=False`, emits CRITICAL alert); removed `ALLOW_UNENCRYPTED_EMAIL_LOG_FALLBACK` setting; added deprecation system check (`notifications.W001`); hardened `reencrypt_email_logs` with optimistic locking and batch validation; 10 test cases
 - **Fail-open on unexpected exceptions** — Portal middleware `_perform_validation` changed `except Exception: return True` to `return False` per ADR-0017 — programming bugs must not grant access; `PlatformAPIError` (network failures) still fails open; login view now seeds `active_customer_id` in session after fetching memberships, eliminating a redundant API call on first authenticated request
+- **8 Semgrep findings resolved** — `hashlib` without `usedforsecurity=False`, raw `os.path.join` in templates, insecure `mark_safe` usage; 9 error handling violations fixed (bare `except`, missing `logger.exception`); 5 invalid `noqa` directives removed
+- **Domain audit signal crash** — fixed 4 wrong attribute names in `DomainsAuditService.log_domain_event`: `auto_renew_enabled` → `auto_renew`, `whois_privacy_enabled` → `whois_privacy`, `is_locked` → `locked`, `nameservers.all()` → `nameservers` (JSONField, not FK)
+- **Naive datetime warnings in fixtures** — `generate_sample_data` invoice/proforma dates now use `timezone.make_aware(datetime.combine(...))` instead of bare `fake.date_between()` which produces naive datetimes
+- **CI venv path mismatch** — aligned CI and deploy scripts with darwin/linux venv split (`.venv-darwin/` on macOS, `.venv-linux/` in CI)
+- **2 CI test failures** — resolved platform test suite failures from settings/import mismatches
+- **Fixture `swift` → `swift_code`** — `generate_sample_data` bank details key didn't match `validate_bank_details` allowlist, crashing `make fixtures`
+- **Double-signal in domain sync tests** — removed redundant explicit `sync_domain_to_virtualmin()` call (signal already fires on `domain.save()`); fixed reactivation test to set domain status in DB before change detection
 
 ### Changed
 
@@ -92,6 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`validate_production_secret_key()`** now accepts `secret_key` as parameter, enforces 50-char minimum, strips whitespace, and has expanded blocklist
 - **Portal `HMACPriceSealer`** no longer falls back to `"insecure-fallback-key"` — raises `ImproperlyConfigured` if `SECRET_KEY` is not set
 - **Docker Compose secret vars** changed from `:-` (weak default) to `:?` (required/fail-fast) in production files
+- **`make dev` CSS deduplication** — `dev-platform`/`dev-portal` no longer trigger `build-css` independently; parent targets (`dev`, `dev-e2e`, `dev-all`) build once
+- **Django-Q2 PID display fixed** — merged `qcluster &` and `$$!` into single shell line (each `@`-prefixed Makefile line runs in its own shell)
+- **Fixture loading noise suppressed** — `generate_sample_data` temporarily raises `apps`/`django-q` loggers to `WARNING` during fixture load; errors still surface; only runs in `DEBUG=True`
+- **Makefile targets renamed** — `type-check` → `check-types`; added `test-fast` (failfast + keepdb + parallel) and `lint-fix` (ruff --fix) targets
+- **`.gitguardian.yaml` added** — excludes test fixture files and test directories from secret scanning to prevent false positives on intentional test credentials
 
 ### Removed
 

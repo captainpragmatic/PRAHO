@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "praho-platform"
-version = "0.25.0"
+version = "0.26.0"
 description = "PRAHO Platform - PRAHO Really Automates Hosting Operations"
 authors = [
     {name = "PragmaticHost Development Team", email = "dev@pragmatichost.com"}
@@ -70,9 +70,9 @@ classifiers = [
 dependencies = [
     # Django framework
     "Django>=5.2,<5.3",
-    "django-environ>=0.11.0",
+    "django-environ>=0.12.0",
     # API framework
-    "djangorestframework>=3.14.0",
+    "djangorestframework>=3.16.0",
     # HTTP client
     "requests>=2.31.0",
     # Date/Time handling
@@ -140,7 +140,7 @@ dev = [
 # Production dependencies - server, monitoring, optimization
 prod = [
     # Production WSGI server
-    "gunicorn>=21.2.0",
+    "gunicorn>=25.0.0",
     "gevent>=23.7.0",
 
     # Production database optimizations
@@ -169,7 +169,7 @@ platform = [
 
     # Authentication & Security
     "cryptography>=46.0.5",  # CVE-2026-26007: SECT curve subgroup validation bypass
-    "django-allauth>=0.57.0",
+    "django-allauth>=65.0.0",  # v65+ required for SAML security fix (CVE-2026-27982)
     "pyotp>=2.9.0",
     "qrcode[pil]>=7.4.0",
     "argon2-cffi>=23.1.0",
@@ -188,7 +188,7 @@ platform = [
     "reportlab>=3.6.0",
 
     # Payments
-    "stripe>=6.0.0",
+    "stripe>=14.0.0",
 
     # Email
     "django-ses>=3.5.0",
@@ -221,7 +221,7 @@ platform = [
 # Portal-specific dependencies (minimal, no database)
 portal = [
     # Production server only - portal is lightweight
-    "gunicorn>=21.2.0",
+    "gunicorn>=25.0.0",
 
     # IP address detection (used in rate limiting middleware)
     "django-ipware>=7.0.0",
