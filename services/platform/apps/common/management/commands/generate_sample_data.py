@@ -18,7 +18,14 @@ from faker import Faker
 from apps.billing.invoice_models import InvoiceSequence
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine, TaxRule
 from apps.billing.proforma_models import ProformaSequence
-from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile
+from apps.customers.models import (
+    Customer,
+    CustomerAddress,
+    CustomerBillingProfile,
+    CustomerNote,
+    CustomerPaymentMethod,
+    CustomerTaxProfile,
+)
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product, ProductPrice
 from apps.provisioning.models import Server, Service, ServicePlan
@@ -99,6 +106,10 @@ class Command(BaseCommand):
         self.stdout.write(f"  ✓ Created guaranteed test customer #1: {test_customer.get_display_name()}")
         self.ensure_e2e_users(test_customer)
 
+        # Create deterministic permutation customers covering all choice combinations
+        permutation_customers = self._create_customer_permutations(fake, users)
+        customers.extend(permutation_customers)
+
         # Create remaining customers with comprehensive data
         remaining_customers = max(0, num_customers - 1)  # -1 because we already created the test customer
         if remaining_customers > 0:
@@ -115,30 +126,39 @@ class Command(BaseCommand):
         else:
             self.stdout.write("Only creating the guaranteed test customer.")
 
+        total_customers = len(customers)
         self.stdout.write(
             self.style.SUCCESS(
-                f"✅ Success! Generated: {num_customers} customers, {num_users} users, "
-                f"{num_customers * services_per_customer} services, "
-                f"{num_customers * orders_per_customer} orders, "
-                f"{num_customers * (invoices_per_customer + proformas_per_customer)} billing documents, "
-                f"{num_customers * tickets_per_customer} tickets"
+                f"✅ Success! Generated: {total_customers} customers "
+                f"(1 test + 8 permutation + {max(0, num_customers - 1)} random), "
+                f"{num_users} users, "
+                f"{total_customers * services_per_customer} services, "
+                f"{total_customers * orders_per_customer} orders, "
+                f"{total_customers * (invoices_per_customer + proformas_per_customer)} billing documents, "
+                f"{total_customers * tickets_per_customer} tickets"
             )
         )
 
-        # Print available login credentials
+        self._print_credentials()
+
+    def _print_credentials(self) -> None:
+        """Print available login credentials table."""
         self.stdout.write("")
         self.stdout.write("━" * 60)
         self.stdout.write(self.style.SUCCESS("  Available login credentials"))
         self.stdout.write("━" * 60)
-        self.stdout.write(f"  {'Role':<12} {'Email':<32} {'Password'}")
-        self.stdout.write(f"  {'─' * 12} {'─' * 32} {'─' * 12}")
-        self.stdout.write(f"  {'Admin':<12} {'admin@pragmatichost.com':<32} admin123")
-        self.stdout.write(f"  {'Support':<12} {'john@pragmatichost.com':<32} support123")
-        self.stdout.write(f"  {'Support':<12} {'jane@pragmatichost.com':<32} support123")
-        self.stdout.write(f"  {'Support':<12} {'mike@pragmatichost.com':<32} support123")
-        self.stdout.write(f"  {'Customer':<12} {'customer@pragmatichost.com':<32} testpass123")
-        self.stdout.write(f"  {'E2E Admin':<12} {'e2e-admin@test.local':<32} test123")
-        self.stdout.write(f"  {'E2E Customer':<12} {'e2e-customer@test.local':<32} test123")
+        self.stdout.write(f"  {'Role':<16} {'Email':<38} {'Password'}")
+        self.stdout.write(f"  {'─' * 16} {'─' * 38} {'─' * 12}")
+        self.stdout.write(f"  {'Admin':<16} {'admin@pragmatichost.com':<38} admin123")
+        self.stdout.write(f"  {'Support':<16} {'john@pragmatichost.com':<38} support123")
+        self.stdout.write(f"  {'Support':<16} {'jane@pragmatichost.com':<38} support123")
+        self.stdout.write(f"  {'Support':<16} {'mike@pragmatichost.com':<38} support123")
+        self.stdout.write(f"  {'Manager':<16} {'manager@pragmatichost.com':<38} manager123")
+        self.stdout.write(f"  {'Customer':<16} {'customer@pragmatichost.com':<38} testpass123")
+        self.stdout.write(f"  {'Multi-company':<16} {'multi-company@example.com':<38} testpass123")
+        self.stdout.write(f"  {'Suspended':<16} {'suspended@example.com':<38} testpass123")
+        self.stdout.write(f"  {'E2E Admin':<16} {'e2e-admin@test.local':<38} test123")
+        self.stdout.write(f"  {'E2E Customer':<16} {'e2e-customer@test.local':<38} test123")
         self.stdout.write("━" * 60)
         self.stdout.write("  Platform: http://localhost:8700")
         self.stdout.write("  Portal:   http://localhost:8701")
@@ -794,64 +814,128 @@ class Command(BaseCommand):
     ) -> Customer:
         """Create a customer with all related data: profiles, services, orders, invoices, tickets"""
 
-        # Decide if this is a company or individual
-        is_company = random.choice([True, False, True])  # 2/3 chance of company
+        # Round-robin over all 4 types and statuses so every variant appears
+        customer_types = ["individual", "company", "pfa", "ngo"]
+        statuses = ["active", "inactive", "suspended", "prospect"]
+        customer_type = customer_types[index % len(customer_types)]
+        status = statuses[index % len(statuses)]
 
-        if is_company:
-            customer_data = {
-                "customer_type": "company",
-                "name": f"{fake.first_name()} {fake.last_name()}",
-                "company_name": fake.company(),
-                "primary_email": fake.unique.email(),
-                "primary_phone": f"+40{fake.random_int(min=700000000, max=799999999)}",
-                "status": "active",
-            }
-        else:
-            customer_data = {
-                "customer_type": "individual",
-                "name": f"{fake.first_name()} {fake.last_name()}",
-                "primary_email": fake.unique.email(),
-                "primary_phone": f"+40{fake.random_int(min=700000000, max=799999999)}",
-                "status": "active",
-            }
+        # Build customer data
+        customer_data: dict[str, Any] = {
+            "customer_type": customer_type,
+            "name": f"{fake.first_name()} {fake.last_name()}",
+            "primary_email": fake.unique.email(),
+            "primary_phone": f"+40{fake.random_int(min=700000000, max=799999999)}",
+            "status": status,
+            "data_processing_consent": index % 3 != 0,  # ~67% have GDPR consent
+            "marketing_consent": index % 2 == 0,  # 50% have marketing consent
+        }
+
+        if customer_type in ("company", "pfa", "ngo"):
+            customer_data["company_name"] = fake.company()
 
         customer = Customer.objects.create(**customer_data)
 
-        # Create customer address
-        address = CustomerAddress.objects.create(
-            customer=customer,
-            address_type="billing",
-            address_line1=fake.street_address(),
-            city=fake.city(),
-            county=fake.city(),  # Use city as county
-            postal_code=fake.postcode(),
-            country="România",
-        )
+        self._create_random_customer_addresses(fake, customer, customer_type, index)
 
-        # Create tax profile for companies
-        if is_company:
+        # --- Tax profile ---
+        if customer_type in ("company", "pfa"):
             tax_number = f"RO{fake.random_int(min=10000000, max=99999999)}"
-            tax_profile = CustomerTaxProfile.objects.create(
+            reg_prefix = "J40" if customer_type == "company" else "F40"
+            CustomerTaxProfile.objects.create(
                 customer=customer,
                 cui=tax_number,
-                is_vat_payer=True,
+                is_vat_payer=customer_type == "company" or index % 2 == 0,
                 vat_number=tax_number,
-                reverse_charge_eligible=True,
+                registration_number=f"{reg_prefix}/{fake.random_int(min=100, max=9999)}/{fake.random_int(min=2015, max=2025)}",
+                reverse_charge_eligible=index % 3 == 0,
             )
+        elif customer_type == "individual":
+            # Some individuals have a CNP for tax purposes
+            if index % 2 == 0:
+                CustomerTaxProfile.objects.create(
+                    customer=customer,
+                    cnp=f"1{fake.random_int(min=800101, max=990101)}{fake.random_int(min=10, max=52)}{fake.random_int(min=100, max=999)}",
+                    is_vat_payer=False,
+                )
 
-        # Create billing profile
-        billing_profile = CustomerBillingProfile.objects.create(
-            customer=customer, payment_terms=30, preferred_currency="RON", invoice_delivery_method="email"
+        # --- Billing profile with variety ---
+        currencies = ["RON", "EUR"]
+        delivery_methods = ["email", "postal", "both"]
+        payment_terms_options = [15, 30, 45, 60]
+        CustomerBillingProfile.objects.create(
+            customer=customer,
+            payment_terms=payment_terms_options[index % len(payment_terms_options)],
+            preferred_currency=currencies[index % len(currencies)],
+            invoice_delivery_method=delivery_methods[index % len(delivery_methods)],
+            auto_payment_enabled=index % 4 == 0,
+            credit_limit=Decimal("5000.00") if customer_type == "company" else Decimal("0.00"),
         )
 
-        # Attach 1-3 users to this customer
-        customer_users = random.sample(users, random.randint(1, min(3, len(users))))
-        for user in customer_users:
+        # --- Payment methods ---
+        secondary_methods = ["bank_transfer", "cash", "other"]
+        # Default: Stripe card
+        CustomerPaymentMethod.objects.create(
+            customer=customer,
+            method_type="stripe_card",
+            display_name=f"Visa •••• {fake.random_int(min=1000, max=9999)}",
+            last_four=str(fake.random_int(min=1000, max=9999)),
+            stripe_customer_id=f"cus_{fake.hexify(text='^^^^^^^^^^^^^^')}",
+            stripe_payment_method_id=f"pm_{fake.hexify(text='^^^^^^^^^^^^^^')}",
+            is_default=True,
+            is_active=True,
+        )
+        # Secondary method (round-robin)
+        sec_method = secondary_methods[index % len(secondary_methods)]
+        sec_kwargs: dict[str, Any] = {
+            "customer": customer,
+            "method_type": sec_method,
+            "display_name": {"bank_transfer": "Transfer BT", "cash": "Numerar", "other": "PayPal"}[sec_method],
+            "is_default": False,
+            "is_active": index % 3 != 0,  # Some inactive
+        }
+        if sec_method == "bank_transfer":
+            sec_kwargs["bank_details"] = {
+                "iban": f"RO49AAAA1B31{fake.random_int(min=10000000, max=99999999)}",
+                "bank_name": random.choice(["Banca Transilvania", "BRD", "ING Bank", "BCR"]),
+                "swift": random.choice(["BTRLRO22", "BRDEROBU", "INGBROBU", "RNCBROBU"]),
+            }
+        CustomerPaymentMethod.objects.create(**sec_kwargs)
+
+        # --- Notes ---
+        admin_user = User.objects.filter(is_superuser=True).first()
+        note_types = ["general", "call", "email", "meeting", "complaint", "compliment"]
+        # 2 notes per customer, round-robin type
+        for n in range(2):
+            note_type = note_types[(index * 2 + n) % len(note_types)]
+            CustomerNote.objects.create(
+                customer=customer,
+                created_by=admin_user,
+                note_type=note_type,
+                title=f"{note_type.title()} note for {customer.get_display_name()}",
+                content=fake.text(max_nb_chars=300),
+                is_important=n == 0 and index % 2 == 0,
+                is_private=n == 1 and index % 3 == 0,
+            )
+
+        # --- Memberships with full role coverage ---
+        roles = ["owner", "billing", "tech", "viewer"]
+        contact_methods = ["email", "phone", "both"]
+        num_members = random.randint(1, min(3, len(users)))
+        customer_users = random.sample(users, num_members)
+        for u_idx, user in enumerate(customer_users):
+            role = roles[(index + u_idx) % len(roles)]
             CustomerMembership.objects.create(
                 user=user,
                 customer=customer,
-                role=random.choice(["owner", "billing", "tech"]),
-                is_primary=random.choice([True, False]),
+                role=role,
+                is_primary=u_idx == 0,
+                is_active=True,
+                notification_language="en" if (index + u_idx) % 3 == 0 else "ro",
+                preferred_contact_method=contact_methods[(index + u_idx) % len(contact_methods)],
+                email_billing=role in ("owner", "billing"),
+                email_technical=role in ("owner", "tech"),
+                email_marketing=customer.marketing_consent and role == "owner",
             )
 
         # Create related data
@@ -862,6 +946,550 @@ class Command(BaseCommand):
         self.create_customer_tickets(fake, customer, config.tickets_count)
 
         return customer
+
+    # ===============================================================================
+    # DETERMINISTIC PERMUTATION CUSTOMERS
+    # ===============================================================================
+
+    def _create_customer_permutations(self, fake: Faker, users: list[User]) -> list[Customer]:
+        """Create deterministic customers covering every choice/flag combination.
+
+        Generates 8 customers that collectively exercise:
+        - All 4 customer types (individual, company, pfa, ngo)
+        - All 4 statuses (active, inactive, suspended, prospect)
+        - All 4 address types with versioning
+        - All 4 payment method types
+        - All 6 note types
+        - All 4 membership roles
+        - Varied GDPR/marketing consent, billing profiles, notification prefs
+        - Multi-company users, multi-user companies, suspended users
+        """
+        self.stdout.write("Creating deterministic permutation customers...")
+        admin_user = User.objects.filter(is_superuser=True).first()
+        customers: list[Customer] = []
+
+        # ── Shared multi-company user: belongs to multiple customers ──
+        multi_co_user, _ = User.objects.get_or_create(
+            email="multi-company@example.com",
+            defaults={
+                "first_name": "Maria",
+                "last_name": "Ionescu",
+                "is_active": True,
+                "staff_role": "customer",
+            },
+        )
+        multi_co_user.set_password("testpass123")  # nosemgrep: unvalidated-password
+        multi_co_user.save()
+
+        # ── Suspended user: exists but cannot log in ──
+        suspended_user, _ = User.objects.get_or_create(
+            email="suspended@example.com",
+            defaults={
+                "first_name": "Andrei",
+                "last_name": "Popa",
+                "is_active": False,
+                "staff_role": "customer",
+            },
+        )
+        suspended_user.is_active = False
+        suspended_user.set_password("testpass123")  # nosemgrep: unvalidated-password
+        suspended_user.save()
+
+        # ── Inactive staff user: staff_role but disabled ──
+        inactive_staff, _ = User.objects.get_or_create(
+            email="inactive-staff@pragmatichost.com",
+            defaults={
+                "first_name": "Elena",
+                "last_name": "Vasile",
+                "is_active": False,
+                "is_staff": True,
+                "staff_role": "support",
+            },
+        )
+        inactive_staff.is_active = False
+        inactive_staff.set_password("support123")  # nosemgrep: unvalidated-password
+        inactive_staff.save()
+
+        # ── Manager user: assigned as account manager to some customers ──
+        manager_user, _ = User.objects.get_or_create(
+            email="manager@pragmatichost.com",
+            defaults={
+                "first_name": "Dragoș",
+                "last_name": "Marin",
+                "is_active": True,
+                "is_staff": True,
+                "staff_role": "manager",
+            },
+        )
+        manager_user.set_password("manager123")  # nosemgrep: unvalidated-password
+        manager_user.save()
+
+        # ── Permutation definitions ──
+        #   type, status, consent_gdpr, consent_marketing, has_account_manager
+        permutations: list[dict[str, Any]] = [
+            # 1: Active individual, full consent, CNP, RON, email delivery
+            {
+                "customer_type": "individual",
+                "name": "Alexandru Popescu",
+                "primary_email": "alexandru.popescu@example.com",
+                "primary_phone": "+40722100001",
+                "status": "active",
+                "data_processing_consent": True,
+                "marketing_consent": True,
+            },
+            # 2: Inactive company, GDPR only, CUI+VAT, EUR, postal delivery
+            {
+                "customer_type": "company",
+                "name": "Ion Marinescu",
+                "company_name": "TechSoft Solutions SRL",
+                "primary_email": "contact@techsoft-solutions.example.com",
+                "primary_phone": "+40722100002",
+                "status": "inactive",
+                "data_processing_consent": True,
+                "marketing_consent": False,
+            },
+            # 3: Suspended PFA, no consent, CUI, RON, both delivery
+            {
+                "customer_type": "pfa",
+                "name": "Cristina Dumitrescu",
+                "company_name": "Dumitrescu Cristina PFA",
+                "primary_email": "cristina.pfa@example.com",
+                "primary_phone": "+40722100003",
+                "status": "suspended",
+                "data_processing_consent": False,
+                "marketing_consent": False,
+            },
+            # 4: Prospect NGO, both consents, no tax profile, email delivery
+            {
+                "customer_type": "ngo",
+                "name": "Mihai Stancu",
+                "company_name": "Asociația Digital România",
+                "primary_email": "contact@digital-romania.example.com",
+                "primary_phone": "+40722100004",
+                "status": "prospect",
+                "data_processing_consent": True,
+                "marketing_consent": True,
+            },
+            # 5: Active company with account manager, full details, multi-user
+            {
+                "customer_type": "company",
+                "name": "Adriana Radu",
+                "company_name": "CloudHost Pro SRL",
+                "primary_email": "contact@cloudhost-pro.example.com",
+                "primary_phone": "+40722100005",
+                "status": "active",
+                "data_processing_consent": True,
+                "marketing_consent": True,
+                "assigned_account_manager": manager_user,
+            },
+            # 6: Active PFA, auto-payment, credit limit, EUR
+            {
+                "customer_type": "pfa",
+                "name": "Bogdan Tănase",
+                "company_name": "Tănase Bogdan PFA",
+                "primary_email": "bogdan.tanase@example.com",
+                "primary_phone": "+40722100006",
+                "status": "active",
+                "data_processing_consent": True,
+                "marketing_consent": True,
+            },
+            # 7: Inactive individual, minimal data, GDPR only
+            {
+                "customer_type": "individual",
+                "name": "Gabriela Stoica",
+                "primary_email": "gabriela.stoica@example.com",
+                "primary_phone": "+40722100007",
+                "status": "inactive",
+                "data_processing_consent": True,
+                "marketing_consent": False,
+            },
+            # 8: Active NGO with suspended user membership
+            {
+                "customer_type": "ngo",
+                "name": "Victor Moldovan",
+                "company_name": "Fundația Open Source România",
+                "primary_email": "contact@opensource-ro.example.com",
+                "primary_phone": "+40722100008",
+                "status": "active",
+                "data_processing_consent": True,
+                "marketing_consent": False,
+            },
+        ]
+
+        # Cities and counties for address variety
+        romanian_cities = [
+            ("București", "București"),
+            ("Cluj-Napoca", "Cluj"),
+            ("Timișoara", "Timiș"),
+            ("Iași", "Iași"),
+            ("Constanța", "Constanța"),
+            ("Brașov", "Brașov"),
+            ("Sibiu", "Sibiu"),
+            ("Oradea", "Bihor"),
+        ]
+
+        address_types = ["primary", "billing", "delivery", "legal"]
+        payment_method_types = ["stripe_card", "bank_transfer", "cash", "other"]
+        note_types = ["general", "call", "email", "meeting", "complaint", "compliment"]
+        membership_roles = ["owner", "billing", "tech", "viewer"]
+        currencies = ["RON", "EUR"]
+        delivery_methods = ["email", "postal", "both"]
+        contact_methods = ["email", "phone", "both"]
+
+        for idx, cust_data in enumerate(permutations):
+            city, county = romanian_cities[idx % len(romanian_cities)]
+
+            customer = Customer.objects.create(**cust_data)
+            customers.append(customer)
+            self.stdout.write(
+                f"  ✓ Permutation {idx + 1}/8: {customer.get_display_name()} "
+                f"[{customer.customer_type}/{customer.status}]"
+            )
+
+            self._perm_addresses(customer, idx, city, county)
+            self._perm_tax_profile(customer, idx)
+            self._perm_billing_profile(customer, idx, currencies, delivery_methods)
+            self._perm_payment_methods(customer, idx, payment_method_types)
+            self._perm_notes(fake, customer, idx, admin_user, note_types)
+            self._perm_memberships(
+                customer,
+                idx,
+                users,
+                multi_co_user,
+                suspended_user,
+                membership_roles,
+                contact_methods,
+            )
+
+        # ── Soft-delete one customer to test SoftDeleteManager ──
+        soft_del_customer = customers[6]  # Gabriela Stoica, inactive individual
+        soft_del_customer.soft_delete()
+        self.stdout.write(f"  ✓ Soft-deleted: {soft_del_customer.name} (tests SoftDeleteManager.with_deleted())")
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  ✅ Created {len(customers)} permutation customers "
+                f"(4 types x 4 statuses, all address/payment/note/role variants, "
+                f"1 soft-deleted, 1 suspended user, 1 multi-company user)"
+            )
+        )
+
+        return customers
+
+    def _perm_addresses(self, customer: Customer, idx: int, city: str, county: str) -> None:
+        """Create deterministic addresses for a permutation customer."""
+        # Historical billing address (version 1, superseded)
+        CustomerAddress.objects.create(
+            customer=customer,
+            address_type="billing",
+            address_line1=f"Str. Veche nr. {idx + 1}",
+            city=city,
+            county=county,
+            postal_code=f"{100000 + idx * 1111}",
+            country="România",
+            is_current=False,
+            is_validated=True,
+            version=1,
+        )
+        # Current billing address (version 2)
+        CustomerAddress.objects.create(
+            customer=customer,
+            address_type="billing",
+            address_line1=f"Bd. Unirii nr. {idx * 10 + 1}",
+            city=city,
+            county=county,
+            postal_code=f"{100000 + idx * 1111}",
+            country="România",
+            is_current=True,
+            is_validated=True,
+            version=2,
+        )
+        # Primary address
+        CustomerAddress.objects.create(
+            customer=customer,
+            address_type="primary",
+            address_line1=f"Str. Principală nr. {idx + 10}",
+            city=city,
+            county=county,
+            postal_code=f"{200000 + idx * 1111}",
+            country="România",
+            is_current=True,
+            is_validated=idx % 2 == 0,
+        )
+        # Delivery address (not for minimal customer #7)
+        if idx != 6:
+            CustomerAddress.objects.create(
+                customer=customer,
+                address_type="delivery",
+                address_line1=f"Str. Livrare nr. {idx + 20}",
+                city=city,
+                county=county,
+                postal_code=f"{300000 + idx * 1111}",
+                country="România",
+                is_current=True,
+            )
+        # Legal address for business types
+        if customer.customer_type in ("company", "pfa", "ngo"):
+            CustomerAddress.objects.create(
+                customer=customer,
+                address_type="legal",
+                address_line1=f"Str. Sediu Social nr. {idx + 30}",
+                address_line2=f"Et. {idx + 1}, Ap. {idx * 3 + 1}",
+                city=city,
+                county=county,
+                postal_code=f"{400000 + idx * 1111}",
+                country="România",
+                is_current=True,
+                is_validated=True,
+            )
+
+    def _perm_tax_profile(self, customer: Customer, idx: int) -> None:
+        """Create deterministic tax profile for a permutation customer."""
+        if customer.customer_type == "company":
+            cui_num = f"RO{30000000 + idx * 1111111}"
+            CustomerTaxProfile.objects.create(
+                customer=customer,
+                cui=cui_num,
+                is_vat_payer=True,
+                vat_number=cui_num,
+                registration_number=f"J40/{1000 + idx}/{2020 + idx}",
+                reverse_charge_eligible=idx % 2 == 0,
+            )
+        elif customer.customer_type == "pfa":
+            cui_num = f"RO{40000000 + idx * 1111111}"
+            CustomerTaxProfile.objects.create(
+                customer=customer,
+                cui=cui_num,
+                is_vat_payer=idx % 2 == 0,
+                vat_number=cui_num if idx % 2 == 0 else "",
+                registration_number=f"F40/{500 + idx}/{2021 + idx}",
+                reverse_charge_eligible=False,
+            )
+        elif customer.customer_type == "individual" and idx == 0:
+            CustomerTaxProfile.objects.create(
+                customer=customer,
+                cnp="1850101400001",
+                is_vat_payer=False,
+            )
+
+    def _perm_billing_profile(
+        self, customer: Customer, idx: int, currencies: list[str], delivery_methods: list[str]
+    ) -> None:
+        """Create deterministic billing profile for a permutation customer."""
+        CustomerBillingProfile.objects.create(
+            customer=customer,
+            payment_terms=[15, 30, 45, 60][idx % 4],
+            preferred_currency=currencies[idx % len(currencies)],
+            invoice_delivery_method=delivery_methods[idx % len(delivery_methods)],
+            auto_payment_enabled=idx in (5, 6),
+            credit_limit=Decimal("10000.00") if customer.customer_type == "company" else Decimal("0.00"),
+        )
+
+    def _perm_payment_methods(self, customer: Customer, idx: int, payment_method_types: list[str]) -> None:
+        """Create deterministic payment methods for a permutation customer."""
+        pm_type_1 = payment_method_types[idx % len(payment_method_types)]
+        pm_type_2 = payment_method_types[(idx + 1) % len(payment_method_types)]
+
+        for pm_idx, pm_type in enumerate([pm_type_1, pm_type_2]):
+            pm_kwargs: dict[str, Any] = {
+                "customer": customer,
+                "method_type": pm_type,
+                "is_default": pm_idx == 0,
+                "is_active": not (pm_idx == 1 and idx % 4 == 0),
+            }
+            if pm_type == "stripe_card":
+                last4 = str(1000 + idx * 100 + pm_idx)
+                pm_kwargs.update(
+                    {
+                        "display_name": f"Visa •••• {last4}",
+                        "last_four": last4,
+                        "stripe_customer_id": f"cus_perm{idx}{pm_idx}test",
+                        "stripe_payment_method_id": f"pm_perm{idx}{pm_idx}test",
+                    }
+                )
+            elif pm_type == "bank_transfer":
+                pm_kwargs.update(
+                    {
+                        "display_name": "Transfer BT",
+                        "bank_details": {
+                            "iban": f"RO49BTRL{10000000 + idx * 1000000:08d}",
+                            "bank_name": "Banca Transilvania",
+                            "swift": "BTRLRO22",
+                            "account_holder": customer.get_display_name(),
+                        },
+                    }
+                )
+            elif pm_type == "cash":
+                pm_kwargs["display_name"] = "Numerar la sediu"
+            else:
+                pm_kwargs["display_name"] = "PayPal"
+            CustomerPaymentMethod.objects.create(**pm_kwargs)
+
+    def _perm_notes(
+        self,
+        fake: Faker,
+        customer: Customer,
+        idx: int,
+        admin_user: User | None,
+        note_types: list[str],
+    ) -> None:
+        """Create deterministic notes for a permutation customer."""
+        note_titles = {
+            "general": "Observație generală",
+            "call": "Apel de follow-up",
+            "email": "Corespondență email",
+            "meeting": "Întâlnire client",
+            "complaint": "Reclamație serviciu",
+            "compliment": "Feedback pozitiv",
+        }
+        for n_idx in range(2):
+            n_type = note_types[(idx * 2 + n_idx) % len(note_types)]
+            CustomerNote.objects.create(
+                customer=customer,
+                created_by=admin_user,
+                note_type=n_type,
+                title=f"{note_titles[n_type]} — {customer.get_display_name()}",
+                content=fake.text(max_nb_chars=400),
+                is_important=n_idx == 0 and idx % 2 == 0,
+                is_private=n_idx == 1 and idx % 3 == 0,
+            )
+
+    def _perm_memberships(  # noqa: PLR0913
+        self,
+        customer: Customer,
+        idx: int,
+        users: list[User],
+        multi_co_user: User,
+        suspended_user: User,
+        membership_roles: list[str],
+        contact_methods: list[str],
+    ) -> None:
+        """Create deterministic memberships for a permutation customer."""
+        role = membership_roles[idx % len(membership_roles)]
+
+        # Multi-company user gets membership on customers 0, 2, 4
+        if idx % 2 == 0:
+            CustomerMembership.objects.create(
+                user=multi_co_user,
+                customer=customer,
+                role=role,
+                is_primary=idx == 0,
+                is_active=True,
+                notification_language="ro",
+                preferred_contact_method=contact_methods[idx % len(contact_methods)],
+                email_billing=role in ("owner", "billing"),
+                email_technical=role in ("owner", "tech"),
+                email_marketing=customer.marketing_consent,
+            )
+
+        # Suspended user gets membership on customer #8 (tests inactive user + active membership)
+        if idx == 7:
+            CustomerMembership.objects.create(
+                user=suspended_user,
+                customer=customer,
+                role="owner",
+                is_primary=True,
+                is_active=True,
+                notification_language="ro",
+            )
+
+        # Regular user memberships — multi-user company on customer #5 (CloudHost Pro)
+        if idx == 4:
+            available_users = [u for u in users[:4] if u.email != multi_co_user.email]
+            for u_idx, user in enumerate(available_users):
+                u_role = membership_roles[u_idx % len(membership_roles)]
+                CustomerMembership.objects.create(
+                    user=user,
+                    customer=customer,
+                    role=u_role,
+                    is_primary=u_idx == 0,
+                    is_active=True,
+                    notification_language="en" if u_idx % 3 == 0 else "ro",
+                    preferred_contact_method=contact_methods[u_idx % len(contact_methods)],
+                    email_billing=u_role in ("owner", "billing"),
+                    email_technical=u_role in ("owner", "tech"),
+                    email_marketing=u_role == "owner",
+                )
+        elif idx != 7 and idx % 2 != 0:
+            if users:
+                reg_user = users[idx % len(users)]
+                CustomerMembership.objects.create(
+                    user=reg_user,
+                    customer=customer,
+                    role=role,
+                    is_primary=True,
+                    is_active=True,
+                    notification_language="en" if idx % 3 == 0 else "ro",
+                    preferred_contact_method=contact_methods[idx % len(contact_methods)],
+                )
+
+    def _create_random_customer_addresses(
+        self, fake: Faker, customer: Customer, customer_type: str, index: int
+    ) -> None:
+        """Create randomised addresses for a generated customer."""
+        romanian_counties = ["București", "Cluj", "Timiș", "Iași", "Constanța", "Brașov"]
+        county = romanian_counties[index % len(romanian_counties)]
+
+        # Historical billing address (version 1, non-current) — demonstrates versioning
+        CustomerAddress.objects.create(
+            customer=customer,
+            address_type="billing",
+            address_line1=fake.street_address(),
+            city=fake.city(),
+            county=county,
+            postal_code=fake.postcode(),
+            country="România",
+            is_current=False,
+            version=1,
+        )
+        # Current billing address (version 2)
+        CustomerAddress.objects.create(
+            customer=customer,
+            address_type="billing",
+            address_line1=fake.street_address(),
+            city=fake.city(),
+            county=county,
+            postal_code=fake.postcode(),
+            country="România",
+            is_current=True,
+            is_validated=True,
+            version=2,
+        )
+        # Primary address
+        CustomerAddress.objects.create(
+            customer=customer,
+            address_type="primary",
+            address_line1=fake.street_address(),
+            city=fake.city(),
+            county=county,
+            postal_code=fake.postcode(),
+            country="România",
+            is_current=True,
+        )
+        # Legal address for business types
+        if customer_type in ("company", "pfa"):
+            CustomerAddress.objects.create(
+                customer=customer,
+                address_type="legal",
+                address_line1=f"Str. {fake.last_name()} nr. {fake.random_int(min=1, max=200)}",
+                city=fake.city(),
+                county=county,
+                postal_code=fake.postcode(),
+                country="România",
+                is_current=True,
+            )
+        # Delivery address for some
+        if index % 3 == 0:
+            CustomerAddress.objects.create(
+                customer=customer,
+                address_type="delivery",
+                address_line1=fake.street_address(),
+                city=fake.city(),
+                county=county,
+                postal_code=fake.postcode(),
+                country="România",
+                is_current=True,
+            )
 
     def create_customer_services(self, fake: Faker, customer: Customer, count: int) -> list[Service]:
         """Create services for a customer with diverse statuses"""
