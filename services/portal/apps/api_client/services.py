@@ -624,7 +624,7 @@ class PlatformAPIClient:
                 while (time.perf_counter() - start_time) < min_duration:
                     pass
 
-    def validate_session_secure(self, user_id: str, state_version: int = 1) -> dict[str, Any]:
+    def validate_session_secure(self, user_id: str) -> dict[str, Any]:
         """
         🔒 SECURE session validation using HMAC-signed context (No JWT, No ID enumeration)
 
@@ -633,7 +633,7 @@ class PlatformAPIClient:
         """
         # Create request body with user context
         current_timestamp = time.time()
-        request_data = {"user_id": user_id, "state_version": state_version, "timestamp": current_timestamp}
+        request_data = {"user_id": user_id, "timestamp": current_timestamp}
 
         # Do not swallow PlatformAPIError here.
         # Middleware owns policy decisions (fail-open vs fail-closed) based on error type.
