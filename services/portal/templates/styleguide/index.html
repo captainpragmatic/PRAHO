@@ -218,6 +218,64 @@
       </div>
     </section>
 
+    {# ── § Step Progress ───────────────────────────────────────────────── #}
+    <section id="step-progress">
+      <h2 class="text-lg font-semibold text-white mb-4">Step Progress</h2>
+      <div class="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-8">
+        <p class="text-xs text-slate-400">
+          Usage: <code class="text-green-400">{% verbatim %}{% step_progress steps current_step=2 separator="arrow" %}{% endverbatim %}</code>
+        </p>
+
+        <!-- Default with arrows + icons (order flow, step 2) -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">Default — Arrow separators with icons (step 2 of 4)</p>
+          {% step_progress step_progress_order_steps current_step=2 separator="arrow" %}
+        </div>
+
+        <!-- Default with lines (simple flow, step 1) -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">Default — Line separators with descriptions (step 1 of 3)</p>
+          {% step_progress step_progress_simple_steps current_step=1 %}
+        </div>
+
+        <!-- Compact variant -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">Compact variant (step 2 of 4)</p>
+          {% step_progress step_progress_order_steps current_step=2 variant="compact" separator="arrow" %}
+        </div>
+
+        <!-- Vertical variant -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">Vertical variant (step 2 of 3)</p>
+          {% step_progress step_progress_simple_steps current_step=2 variant="vertical" %}
+        </div>
+
+        <!-- Purple color scheme -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">Purple color scheme (step 2 of 3)</p>
+          {% step_progress step_progress_simple_steps current_step=2 color_scheme="purple" %}
+        </div>
+
+        <!-- Red color scheme -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">Red color scheme (step 2 of 3)</p>
+          {% step_progress step_progress_simple_steps current_step=2 color_scheme="red" %}
+        </div>
+
+        <!-- With back button -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">With back button (step 3 of 4)</p>
+          {% step_progress step_progress_order_steps current_step=3 separator="arrow" show_back_button=True %}
+        </div>
+
+        <!-- Completed state -->
+        <div>
+          <p class="text-xs text-slate-500 mb-3">All steps completed (step 4 of 4)</p>
+          {% step_progress step_progress_order_steps current_step=4 separator="arrow" %}
+        </div>
+      </div>
+    </section>
+
     {# ── § Cards ───────────────────────────────────────────────── #}
     <section id="cards">
       <h2 class="text-lg font-semibold text-white mb-4">Cards</h2>

@@ -9,7 +9,7 @@
   <div class="max-w-4xl w-full space-y-8">
 
     <!-- Step Navigation -->
-    {% include 'components/step_navigation.html' with steps=steps current_step=current_step show_back_button=False %}
+    {% step_progress steps current_step=current_step %}
 
     <!-- Header -->
     <div class="text-center">

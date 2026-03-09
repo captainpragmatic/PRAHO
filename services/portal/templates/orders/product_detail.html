@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-  {% include "orders/partials/order_breadcrumbs.html" with current_step="products" %}
+  {% step_progress order_steps current_step=current_step separator="arrow" %}
   {# Cart widget placeholder — required as hx-target for add_to_cart HTMX swap #}
   <div id="cart-widget" class="hidden"></div>
   {# Cart error notifications — HX-Retarget destination for 422 error responses #}

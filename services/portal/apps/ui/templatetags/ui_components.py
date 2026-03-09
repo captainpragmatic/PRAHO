@@ -1408,3 +1408,57 @@ def form_actions(  # noqa: PLR0913
         "align": align,
         "css_class": css_class,
     }
+
+
+@register.inclusion_tag("components/step_progress.html")
+def step_progress(  # noqa: PLR0913
+    steps: list[dict[str, Any]],
+    current_step: int,
+    *,
+    variant: str = "default",
+    color_scheme: str = "blue-green",
+    show_back_button: bool = False,
+    back_url: str | None = None,
+    separator: str = "line",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Unified step/progress navigation with WCAG accessibility.
+
+    Merges step_navigation, progress_indicator, and order_breadcrumbs into one
+    data-driven component with full accessibility (nav, ol/li, aria-current,
+    sr-only announcements, aria-live region).
+
+    Args:
+        steps: List of step dicts. Each has 'label' (required),
+               'description' (optional), 'url' (optional), 'icon' (optional).
+        current_step: 1-based index of the active step.
+        variant: Layout - 'default', 'compact', or 'vertical'.
+        color_scheme: Color theme - 'blue-green', 'purple', or 'red'.
+        show_back_button: Whether to show a back navigation button.
+        back_url: Explicit back URL. If None and show_back_button is True,
+                  derives from the previous step's url or falls back to history.back().
+        separator: Between steps - 'line' (horizontal bar) or 'arrow' (chevron icon).
+
+    Usage::
+
+        {% step_progress order_steps current_step=2 separator="arrow" %}
+        {% step_progress mfa_steps current_step=1 color_scheme="purple" show_back_button=True %}
+    """
+    # Derive back URL from previous step if not explicitly provided
+    derived_back_url = back_url
+    if show_back_button and not back_url and current_step > 1:
+        prev_step = steps[current_step - 2] if current_step - 1 < len(steps) else None
+        if prev_step and prev_step.get("url"):
+            derived_back_url = str(prev_step["url"])
+
+    return {
+        "steps": steps,
+        "current_step": current_step,
+        "total_steps": len(steps),
+        "variant": variant,
+        "color_scheme": color_scheme,
+        "show_back_button": show_back_button,
+        "back_url": derived_back_url,
+        "separator": separator,
+    }

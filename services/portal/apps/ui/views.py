@@ -88,6 +88,19 @@ TABLE_ROWS = [
     {"cells": [{"value": "Email Business"}, {"value": "Pro"}, {"value": "Pending"}, {"value": "19 RON"}]},
 ]
 
+STEP_PROGRESS_ORDER_STEPS = [
+    {"label": "Product Selection", "icon": "orders", "url": "#"},
+    {"label": "Cart Review", "icon": "orders", "url": "#"},
+    {"label": "Checkout", "icon": "credit-card", "url": "#"},
+    {"label": "Confirmation", "icon": "check"},
+]
+
+STEP_PROGRESS_SIMPLE_STEPS = [
+    {"label": "Choose Method", "description": "Select authentication method"},
+    {"label": "Set Up", "description": "Configure your authenticator"},
+    {"label": "Complete", "description": "Save backup codes"},
+]
+
 
 def _build_context() -> dict[str, object]:
     """Build the styleguide context with all component variants."""
@@ -101,6 +114,8 @@ def _build_context() -> dict[str, object]:
         "breadcrumb_items": BREADCRUMB_SAMPLES,
         "table_headers": TABLE_HEADERS,
         "table_rows": TABLE_ROWS,
+        "step_progress_order_steps": STEP_PROGRESS_ORDER_STEPS,
+        "step_progress_simple_steps": STEP_PROGRESS_SIMPLE_STEPS,
         # Section anchors for the sidebar nav
         "sections": [
             {"id": "colors", "label": "Colors & Typography"},
@@ -111,6 +126,7 @@ def _build_context() -> dict[str, object]:
             {"id": "status", "label": "Status Labels"},
             {"id": "stat-tiles", "label": "Stat Tiles"},
             {"id": "breadcrumbs", "label": "Breadcrumbs"},
+            {"id": "step-progress", "label": "Step Progress"},
             {"id": "cards", "label": "Cards"},
             {"id": "tables", "label": "Tables"},
             {"id": "forms", "label": "Forms"},

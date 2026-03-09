@@ -456,13 +456,17 @@ logger = logging.getLogger(__name__)
 
 # Define 2FA Setup Steps for Progress Indicator
 TWO_FACTOR_STEPS = [
-    {"label": _("Choose Method"), "description": _("Select authentication method"), "url": "users:mfa_setup"},
+    {
+        "label": _("Choose Method"),
+        "description": _("Select authentication method"),
+        "url": reverse_lazy("users:mfa_setup"),
+    },
     {
         "label": _("Set Up Method"),
         "description": _("Configure your authenticator"),
-        "url": "users:mfa_setup_totp",
+        "url": reverse_lazy("users:mfa_setup_totp"),
     },
-    {"label": _("Complete"), "description": _("Save backup codes"), "url": "users:mfa_backup_codes"},
+    {"label": _("Complete"), "description": _("Save backup codes"), "url": reverse_lazy("users:mfa_backup_codes")},
 ]
 
 

@@ -1,0 +1,243 @@
+{% comment %}
+===============================================================================
+UNIFIED STEP PROGRESS COMPONENT
+===============================================================================
+Merges step_navigation, progress_indicator, and order_breadcrumbs into one
+data-driven component with full WCAG accessibility.
+
+Registered as {% step_progress %} inclusion tag in ui_components.py.
+
+Args (passed via templatetag context):
+  steps           — list of dicts: {label, description?, url?, icon?}
+  current_step    — 1-based int of the active step
+  total_steps     — len(steps), computed by the tag
+  variant         — 'default' | 'compact' | 'vertical'
+  color_scheme    — 'blue-green' | 'purple' | 'red'
+  show_back_button— bool
+  back_url        — str | None (derived from previous step if not set)
+  separator       — 'line' | 'arrow'
+
+Accessibility features (from order_breadcrumbs):
+  - <nav> landmark with aria-label
+  - <ol role="list"> + <li role="listitem">
+  - aria-current="step" on the active item
+  - sr-only "(current step)" announcement
+  - aria-live polite region for dynamic updates
+  - Clickable completed steps rendered as <a> when step.url is set
+{% endcomment %}
+
+{% load i18n ui_components %}
+
+<nav aria-label="{% trans 'Progress steps' %}" class="{% if variant == 'compact' %}mb-4{% else %}mb-8{% endif %}">
+
+  {% if variant == 'vertical' %}
+  {# ─────────────────────────── VERTICAL VARIANT ─────────────────────────── #}
+  <div class="space-y-4">
+    {% for step in steps %}
+    {% if forloop.counter < current_step %}
+    {# Completed step #}
+    {% if step.url %}
+    <a href="{{ step.url }}" class="flex items-center text-sm text-slate-300 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 rounded p-1">
+    {% else %}
+    <div class="flex items-center text-sm text-white">
+    {% endif %}
+      <div class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold flex-shrink-0" aria-hidden="true">
+        {% icon "check" size="xs" css_class="text-white" %}
+      </div>
+      <div class="ml-3">
+        <div class="text-sm font-medium">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+        </div>
+        {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+      </div>
+    {% if step.url %}
+    </a>
+    {% else %}
+    </div>
+    {% endif %}
+
+    {% elif forloop.counter == current_step %}
+    {# Current step #}
+    <div class="flex items-center text-sm text-white" aria-current="step">
+      <div class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold ring-2 ring-offset-2 ring-offset-slate-900 {% if color_scheme == 'purple' %}ring-purple-300{% elif color_scheme == 'red' %}ring-red-300{% else %}ring-blue-300{% endif %} flex-shrink-0" aria-hidden="true">
+        {{ forloop.counter }}
+      </div>
+      <div class="ml-3">
+        <div class="text-sm font-medium">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+        </div>
+        {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+      </div>
+    </div>
+    <span class="sr-only">{% trans '(current step)' %}</span>
+
+    {% else %}
+    {# Future step #}
+    <div class="flex items-center text-sm text-slate-500">
+      <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center text-slate-500 font-bold flex-shrink-0" aria-hidden="true">
+        {{ forloop.counter }}
+      </div>
+      <div class="ml-3">
+        <div class="text-sm font-medium">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+        </div>
+        {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  {% elif variant == 'compact' %}
+  {# ─────────────────────────── COMPACT VARIANT ──────────────────────────── #}
+  {# Circles row, labels below #}
+  <div class="text-center">
+    <ol class="flex items-center justify-center overflow-x-auto p-1" role="list">
+      {% for step in steps %}
+      <li class="flex items-center flex-shrink-0" role="listitem">
+        {% if forloop.counter < current_step %}
+        {# Completed #}
+        {% if step.url %}
+        <a href="{{ step.url }}" class="focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-full" aria-label="{{ step.label }}">
+          <div class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold" aria-hidden="true">
+            {% icon "check" size="xs" css_class="text-white" %}
+          </div>
+        </a>
+        {% else %}
+        <div class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold" aria-hidden="true">
+          {% icon "check" size="xs" css_class="text-white" %}
+        </div>
+        {% endif %}
+
+        {% elif forloop.counter == current_step %}
+        {# Current #}
+        <div class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold ring-2 ring-offset-2 ring-offset-slate-900 {% if color_scheme == 'purple' %}ring-purple-300{% elif color_scheme == 'red' %}ring-red-300{% else %}ring-blue-300{% endif %}" aria-current="step" aria-hidden="true">
+          {{ forloop.counter }}
+        </div>
+
+        {% else %}
+        {# Future #}
+        <div class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center text-slate-500 font-bold" aria-hidden="true">
+          {{ forloop.counter }}
+        </div>
+        {% endif %}
+      </li>
+
+      {% if not forloop.last %}
+      <li aria-hidden="true">
+        {% if separator == 'arrow' %}
+        <span class="text-slate-500 mx-1">{% icon "chevron-right" size="sm" css_class="text-slate-500" %}</span>
+        {% else %}
+        <div class="w-8 md:w-12 h-0.5 mx-1 {% if forloop.counter < current_step %}{% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}{% else %}bg-slate-600{% endif %}"></div>
+        {% endif %}
+      </li>
+      {% endif %}
+      {% endfor %}
+    </ol>
+
+    {# Labels row below circles #}
+    <div class="flex items-start justify-center mt-2 overflow-x-auto">
+      {% for step in steps %}
+      <div class="flex-shrink-0 px-2 text-center" style="min-width: 4rem;">
+        <div class="text-xs {% if forloop.counter == current_step %}{% if color_scheme == 'purple' %}text-purple-400{% elif color_scheme == 'red' %}text-red-400{% else %}text-blue-400{% endif %} font-medium{% elif forloop.counter < current_step %}text-slate-300{% else %}text-slate-500{% endif %}">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+        </div>
+      </div>
+      {% if not forloop.last %}
+      <div class="flex-shrink-0" style="min-width: 2rem; visibility: hidden;" aria-hidden="true">&nbsp;</div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% if current_step > 0 %}<span class="sr-only">{% trans '(current step)' %}</span>{% endif %}
+  </div>
+
+  {% else %}
+  {# ─────────────────────────── DEFAULT VARIANT ──────────────────────────── #}
+  <ol class="flex items-center justify-center space-x-4 overflow-x-auto p-1" role="list">
+    {% for step in steps %}
+    <li class="flex items-center flex-shrink-0" role="listitem">
+
+      {% if forloop.counter < current_step %}
+      {# Completed step — clickable if url is provided #}
+      {% if step.url %}
+      <a href="{{ step.url }}" class="flex items-center text-sm hover:text-blue-300 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 rounded p-1">
+      {% else %}
+      <div class="flex items-center text-sm text-slate-300">
+      {% endif %}
+        <span class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold mr-3 shadow-lg flex-shrink-0" aria-hidden="true">
+          {% icon "check" size="xs" css_class="text-white" %}
+        </span>
+        <span class="text-slate-300">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+          {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+        </span>
+      {% if step.url %}
+      </a>
+      {% else %}
+      </div>
+      {% endif %}
+
+      {% elif forloop.counter == current_step %}
+      {# Current step #}
+      <div class="flex items-center text-sm" aria-current="step">
+        <span class="w-8 h-8 {% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %} rounded-full flex items-center justify-center text-white font-bold ring-2 ring-offset-2 ring-offset-slate-900 {% if color_scheme == 'purple' %}ring-purple-300{% elif color_scheme == 'red' %}ring-red-300{% else %}ring-blue-300{% endif %} mr-3 shadow-lg flex-shrink-0" aria-hidden="true">
+          {{ forloop.counter }}
+        </span>
+        <span class="{% if color_scheme == 'purple' %}text-purple-400{% elif color_scheme == 'red' %}text-red-400{% else %}text-blue-400{% endif %} font-medium">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+          {% if step.description %}<div class="text-xs opacity-75">{{ step.description }}</div>{% endif %}
+        </span>
+      </div>
+      <span class="sr-only">{% trans '(current step)' %}</span>
+
+      {% else %}
+      {# Future step #}
+      <div class="flex items-center text-sm">
+        <span class="w-8 h-8 bg-slate-600 rounded-full flex items-center justify-center text-slate-500 font-bold mr-3 shadow-lg flex-shrink-0" aria-hidden="true">
+          {{ forloop.counter }}
+        </span>
+        <span class="text-slate-500">
+          {% if step.icon %}{% icon step.icon size="sm" css_class="mr-1" %}{% endif %}{{ step.label }}
+        </span>
+      </div>
+      {% endif %}
+
+    </li>
+
+    {% if not forloop.last %}
+    {% if separator == 'arrow' %}
+    <li class="text-slate-500 flex-shrink-0" aria-hidden="true">{% icon "chevron-right" size="sm" css_class="text-slate-500" %}</li>
+    {% else %}
+    <li aria-hidden="true">
+      <div class="w-8 md:w-12 h-0.5 {% if forloop.counter < current_step %}{% if color_scheme == 'purple' %}bg-purple-600{% elif color_scheme == 'red' %}bg-red-600{% else %}bg-blue-600{% endif %}{% else %}bg-slate-600{% endif %}"></div>
+    </li>
+    {% endif %}
+    {% endif %}
+
+    {% endfor %}
+  </ol>
+  {% endif %}
+
+  {# ── Live region for dynamic step updates (WCAG) ── #}
+  <div aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+  {# ── Back button ── #}
+  {% if show_back_button and current_step > 1 %}
+  <div class="mt-6 flex justify-center">
+    {% if back_url %}
+    <a href="{{ back_url }}"
+       class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+      {% icon "chevron-left" size="sm" css_class="mr-2 -ml-1" %}
+      {% trans 'Back' %}
+    </a>
+    {% else %}
+    <button type="button" onclick="history.back()"
+            class="inline-flex items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+      {% icon "chevron-left" size="sm" css_class="mr-2 -ml-1" %}
+      {% trans 'Back' %}
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</nav>

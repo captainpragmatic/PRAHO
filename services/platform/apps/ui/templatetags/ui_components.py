@@ -729,6 +729,9 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     "server": "M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01",
     "mail": "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
     "arrow-left": "M10 19l-7-7m0 0l7-7m-7 7h18",
+    "arrow-right": "M14 5l7 7m0 0l-7 7m7-7H3",
+    "chevron-left": "M15 19l-7-7 7-7",
+    "chevron-right": "M9 5l7 7-7 7",
     "phone": "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z",
     "info": "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
     "ban": "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636",
@@ -935,3 +938,57 @@ def romanian_percentage(value: float, decimals: int = 1) -> str:
     percentage = value * 100
     formatted = f"{percentage:.{decimals}f}".replace(".", ",")
     return f"{formatted}%"
+
+
+@register.inclusion_tag("components/step_progress.html")
+def step_progress(  # noqa: PLR0913
+    steps: list[dict[str, Any]],
+    current_step: int,
+    *,
+    variant: str = "default",
+    color_scheme: str = "blue-green",
+    show_back_button: bool = False,
+    back_url: str | None = None,
+    separator: str = "line",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Unified step/progress navigation with WCAG accessibility.
+
+    Merges step_navigation, progress_indicator, and order_breadcrumbs into one
+    data-driven component with full accessibility (nav, ol/li, aria-current,
+    sr-only announcements, aria-live region).
+
+    Args:
+        steps: List of step dicts. Each has 'label' (required),
+               'description' (optional), 'url' (optional), 'icon' (optional).
+        current_step: 1-based index of the active step.
+        variant: Layout - 'default', 'compact', or 'vertical'.
+        color_scheme: Color theme - 'blue-green', 'purple', or 'red'.
+        show_back_button: Whether to show a back navigation button.
+        back_url: Explicit back URL. If None and show_back_button is True,
+                  derives from the previous step's url or falls back to history.back().
+        separator: Between steps - 'line' (horizontal bar) or 'arrow' (chevron icon).
+
+    Usage::
+
+        {% step_progress order_steps current_step=2 separator="arrow" %}
+        {% step_progress mfa_steps current_step=1 color_scheme="purple" show_back_button=True %}
+    """
+    # Derive back URL from previous step if not explicitly provided
+    derived_back_url = back_url
+    if show_back_button and not back_url and current_step > 1:
+        prev_step = steps[current_step - 2] if current_step - 1 < len(steps) else None
+        if prev_step and prev_step.get("url"):
+            derived_back_url = str(prev_step["url"])
+
+    return {
+        "steps": steps,
+        "current_step": current_step,
+        "total_steps": len(steps),
+        "variant": variant,
+        "color_scheme": color_scheme,
+        "show_back_button": show_back_button,
+        "back_url": derived_back_url,
+        "separator": separator,
+    }
