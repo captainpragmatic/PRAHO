@@ -8,6 +8,7 @@ These factories provide consistent, maintainable test data generation
 with proper relationships and realistic Romanian business data.
 """
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
@@ -317,6 +318,8 @@ def create_order(request: OrderCreationRequest | None = None) -> Order:
         customer=request.customer,
         status=request.status,
         currency=request.currency,
+        # Explicit UUID-based order number avoids TOCTOU race in parallel tests
+        order_number=f"ORD-TEST-{uuid.uuid4().hex[:12].upper()}",
     )
 
     for product, quantity in request.items:

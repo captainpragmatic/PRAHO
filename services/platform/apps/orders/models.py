@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from apps.provisioning.models import Service
 
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import IntegrityError, models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -197,10 +197,25 @@ class Order(models.Model):
         return f"Order {self.order_number} - {self.customer_email}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate order number before saving"""
+        """Auto-generate order number before saving, with retry on collision."""
         if not self.order_number:
             self.generate_order_number()
-        super().save(*args, **kwargs)
+        # Retry up to 3 times on order_number collision (parallel execution race)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                super().save(*args, **kwargs)
+                return
+            except IntegrityError as exc:
+                if "order_number" not in str(exc) or attempt >= max_retries - 1:
+                    raise
+                # Regenerate with collision-resistant suffix
+                logger.warning(
+                    "⚠️ [Order] order_number collision on attempt %d, regenerating",
+                    attempt + 1,
+                )
+                self.order_number = ""
+                self.generate_order_number()
 
     @property
     def subtotal(self) -> Decimal:
@@ -247,15 +262,31 @@ class Order(models.Model):
         return self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
 
     def generate_order_number(self) -> None:
-        """Generate a unique order number based on date and sequence"""
+        """Generate a unique order number based on date and sequence.
+
+        Uses MAX(order_number) instead of COUNT to avoid TOCTOU race conditions
+        in parallel execution. The retry in save() handles the remaining edge case
+        where two processes read the same MAX simultaneously.
+        """
         if not self.order_number:
             date_part = timezone.now().strftime("%Y%m%d")
-            # Get last order number for today
-            today_orders = Order.objects.filter(
-                created_at__date=timezone.now().date(), order_number__isnull=False
-            ).count()
-            sequence = str(today_orders + 1).zfill(6)
-            self.order_number = f"ORD-{date_part}-{sequence}"
+            prefix = f"ORD-{date_part}-"
+            # Use MAX to find the highest existing sequence (not count, which races)
+            latest = (
+                Order.objects.filter(order_number__startswith=prefix)
+                .order_by("-order_number")
+                .values_list("order_number", flat=True)
+                .first()
+            )
+            if latest:
+                try:
+                    last_seq = int(latest.split("-")[-1])
+                    next_seq = last_seq + 1
+                except (ValueError, IndexError):
+                    next_seq = 1
+            else:
+                next_seq = 1
+            self.order_number = f"{prefix}{next_seq:06d}"
 
     def calculate_totals(self) -> None:
         """

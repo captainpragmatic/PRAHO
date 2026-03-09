@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import models, transaction
+from django.db import NotSupportedError, models, transaction
 from django.utils import timezone
 
 from apps.billing.models import Currency
@@ -207,7 +207,12 @@ class OrderNumberingService:
     @staticmethod
     @transaction.atomic
     def generate_order_number(customer: Customer) -> str:
-        """Generate sequential order number for customer compliance"""
+        """Generate sequential order number for customer compliance.
+
+        Uses select_for_update() to serialize reads within the transaction,
+        preventing TOCTOU races where two processes read the same MAX and
+        generate duplicate numbers.
+        """
         from .models import Order  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
 
         current_year = timezone.now().year
@@ -215,12 +220,19 @@ class OrderNumberingService:
         customer_id = str(customer.pk).replace("-", "")[:8].upper()
         prefix = f"ORD-{current_year}-{customer_id}"
 
-        # Get the highest existing order number for this customer and year
-        latest_order = (
-            Order.objects.filter(customer=customer, order_number__startswith=prefix, created_at__year=current_year)
-            .order_by("-order_number")
-            .first()
-        )
+        # select_for_update() serializes concurrent reads within the transaction,
+        # preventing two processes from reading the same latest order number.
+        # Falls back to plain query on SQLite (no SELECT FOR UPDATE support).
+        qs = Order.objects.filter(
+            customer=customer,
+            order_number__startswith=prefix,
+            created_at__year=current_year,
+        ).order_by("-order_number")
+        try:
+            latest_order = qs.select_for_update().first()
+        except NotSupportedError:
+            # SQLite doesn't support SELECT FOR UPDATE — fall back to plain query
+            latest_order = qs.first()
 
         if latest_order and latest_order.order_number.startswith(prefix):
             # Extract sequence number and increment
