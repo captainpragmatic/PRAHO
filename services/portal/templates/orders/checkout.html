@@ -18,7 +18,7 @@
   <!-- Trust Signals -->
   {% include "orders/partials/trust_signals.html" %}
 
-  <div class="grid lg:grid-cols-3 gap-8">
+  <div class="grid lg:grid-cols-3 gap-8" x-data="{ paymentMethod: 'stripe' }">
 
     <!-- Order Form -->
     <div class="lg:col-span-2">
@@ -102,7 +102,7 @@
             <div class="grid gap-3">
               <!-- Credit/Debit Card -->
               <label class="relative flex items-start p-4 bg-slate-700/30 rounded-lg border-2 border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
-                <input type="radio" name="payment_method" value="stripe" class="mt-1 mr-3" checked>
+                <input type="radio" name="payment_method" value="stripe" class="mt-1 mr-3" checked @change="paymentMethod = 'stripe'">
                 <div class="flex-1">
                   <div class="flex items-center">
                     <span class="text-white font-medium">{% icon "credit-card" size="sm" css_class="text-white" %} {% trans "Credit/Debit Card" %}</span>
@@ -119,7 +119,7 @@
 
               <!-- Bank Transfer -->
               <label class="relative flex items-start p-4 bg-slate-700/30 rounded-lg border-2 border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
-                <input type="radio" name="payment_method" value="bank_transfer" class="mt-1 mr-3">
+                <input type="radio" name="payment_method" value="bank_transfer" class="mt-1 mr-3" @change="paymentMethod = 'bank_transfer'">
                 <div class="flex-1">
                   <div class="flex items-center">
                     <span class="text-white font-medium">{% icon "building" size="sm" css_class="text-white" %} {% trans "Bank Transfer" %}</span>
@@ -283,7 +283,124 @@
             </div>
           </div>
 
-          {# Next Steps section removed — shown only on order_confirmation.html after the order is created #}
+          <!-- Reactive Next Steps — driven by Alpine.js paymentMethod state -->
+          <div class="border-t border-slate-600 pt-4 mt-2">
+
+            <!-- Card Payment (Stripe) timeline -->
+            <div x-show="paymentMethod === 'stripe'"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 translate-y-1"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-150"
+                 x-transition:leave-start="opacity-100 translate-y-0"
+                 x-transition:leave-end="opacity-0 translate-y-1">
+              <h4 class="text-sm font-medium text-white mb-3">{% trans "What happens next?" %}</h4>
+              <ol class="relative space-y-0">
+                <!-- Step 1 -->
+                <li class="flex gap-3 pb-4 relative">
+                  <div class="flex flex-col items-center">
+                    <div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 z-10">
+                      <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                      </svg>
+                    </div>
+                    <div class="w-0.5 flex-1 bg-slate-600 mt-1"></div>
+                  </div>
+                  <div class="pt-0.5 pb-1">
+                    <p class="text-sm font-medium text-white">{% trans "Enter card details" %}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{% trans "Secure Stripe payment form" %}</p>
+                  </div>
+                </li>
+                <!-- Step 2 -->
+                <li class="flex gap-3 pb-4 relative">
+                  <div class="flex flex-col items-center">
+                    <div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 z-10">
+                      <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <div class="w-0.5 flex-1 bg-slate-600 mt-1"></div>
+                  </div>
+                  <div class="pt-0.5 pb-1">
+                    <p class="text-sm font-medium text-white">{% trans "Instant confirmation" %}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{% trans "Payment verified in seconds" %}</p>
+                  </div>
+                </li>
+                <!-- Step 3 -->
+                <li class="flex gap-3">
+                  <div class="flex flex-col items-center">
+                    <div class="w-7 h-7 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0">
+                      <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div class="pt-0.5">
+                    <p class="text-sm font-medium text-white">{% trans "Service activated immediately" %}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{% trans "Access details sent by email" %}</p>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Bank Transfer timeline -->
+            <div x-show="paymentMethod === 'bank_transfer'"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 translate-y-1"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-150"
+                 x-transition:leave-start="opacity-100 translate-y-0"
+                 x-transition:leave-end="opacity-0 translate-y-1">
+              <h4 class="text-sm font-medium text-white mb-3">{% trans "What happens next?" %}</h4>
+              <ol class="relative space-y-0">
+                <!-- Step 1 -->
+                <li class="flex gap-3 pb-4 relative">
+                  <div class="flex flex-col items-center">
+                    <div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 z-10">
+                      <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div class="w-0.5 flex-1 bg-slate-600 mt-1"></div>
+                  </div>
+                  <div class="pt-0.5 pb-1">
+                    <p class="text-sm font-medium text-white">{% trans "Order confirmed" %}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{% trans "Bank details sent to your email" %}</p>
+                  </div>
+                </li>
+                <!-- Step 2 -->
+                <li class="flex gap-3 pb-4 relative">
+                  <div class="flex flex-col items-center">
+                    <div class="w-7 h-7 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 z-10">
+                      <svg class="w-3.5 h-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                    </div>
+                    <div class="w-0.5 flex-1 bg-slate-600 mt-1"></div>
+                  </div>
+                  <div class="pt-0.5 pb-1">
+                    <p class="text-sm font-medium text-slate-300">{% trans "Transfer payment" %}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{% trans "Use the reference number provided" %}</p>
+                  </div>
+                </li>
+                <!-- Step 3 -->
+                <li class="flex gap-3">
+                  <div class="flex flex-col items-center">
+                    <div class="w-7 h-7 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0">
+                      <svg class="w-3.5 h-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div class="pt-0.5">
+                    <p class="text-sm font-medium text-slate-300">{% trans "Service activated within 24h" %}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">{% trans "After payment is received" %}</p>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+          </div>
         </div>
         {% else %}
         <!-- Error loading totals -->

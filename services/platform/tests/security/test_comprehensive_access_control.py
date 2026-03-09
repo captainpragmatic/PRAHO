@@ -110,6 +110,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='Test Hosting Service',
             domain='example.com',
             username='testuser123',

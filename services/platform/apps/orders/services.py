@@ -614,11 +614,12 @@ class OrderServiceCreationService:
                 service = Service.objects.create(
                     customer=order.customer,
                     service_plan=service_plan,
+                    currency=order.currency,
                     service_name=service_name,
                     domain=item.domain_name or "",
                     username=username,  # Temporary unique username
                     billing_cycle=billing_cycle,
-                    price=item.unit_price / 100,  # Convert from cents to decimal
+                    price=item.unit_price,  # Already converted from cents by property
                     status="pending",  # Key status - visible to customer
                     # Link to order for tracking
                     admin_notes=f"Created from order {order.order_number}",

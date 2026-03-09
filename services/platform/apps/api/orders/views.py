@@ -830,6 +830,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
         service = Service.objects.create(
             customer=customer,
             service_plan=item.product.default_service_plan,
+            currency=order.currency,
             status="pending",
             service_name=item.product_name,
             domain=item.domain_name or "",

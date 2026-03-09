@@ -1701,6 +1701,7 @@ class Command(BaseCommand):
             service_data: dict[str, Any] = {
                 "customer": customer,
                 "service_plan": plan,
+                "currency": self._get_ron_currency(),
                 "server": server,
                 "service_name": f"{plan.name} - {customer.get_display_name()} [{status.title()}]",
                 "domain": fake.domain_name(),

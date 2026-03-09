@@ -92,6 +92,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "requires_domain",
             "is_active",
             "prices",
+            "meta",
         )
 
 

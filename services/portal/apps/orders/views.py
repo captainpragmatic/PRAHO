@@ -30,11 +30,11 @@ from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 from apps.common.rate_limit_feedback import get_rate_limit_message, is_rate_limited_error
+from apps.common.request_ip import get_safe_client_ip
 
 from .security import OrderSecurityHardening
 from .services import (
     CartCalculationService,
-    CartRateLimiter,
     GDPRCompliantCartSession,
     HMACPriceSealer,
     OrderCreationService,
@@ -496,7 +496,7 @@ def product_detail(request: HttpRequest, product_slug: str) -> HttpResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, PLR0912
+def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint to add product to cart with validation.
     🔒 SECURITY: Enhanced with DoS hardening and uniform response timing.
@@ -518,16 +518,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
     if size_check:
         return size_check
 
-    # 🔒 SECURITY: Enhanced rate limiting with IP tracking
-    session_key = request.session.session_key
-    if not session_key:
-        # Force session creation if it doesn't exist yet
-        request.session.save()
-        session_key = request.session.session_key or ""
-
-    client_ip = CartRateLimiter.get_client_ip(request)
-    if not isinstance(client_ip, str) or not client_ip:
-        client_ip = request.META.get("REMOTE_ADDR", "127.0.0.1")
+    client_ip = get_safe_client_ip(request)
 
     # Optional HMAC seal validation for pre-sealed price submissions.
     price_seal_raw = request.POST.get("price_seal", "").strip()
@@ -541,10 +532,6 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
         if not HMACPriceSealer.verify_seal_metadata(sealed_data, client_ip):
             OrderSecurityHardening.uniform_response_delay()
             return JsonResponse({"error": _("Invalid price seal")}, status=401)
-
-    if not CartRateLimiter.check_rate_limit(session_key, client_ip):
-        OrderSecurityHardening.uniform_response_delay()  # Apply delay even on rate limit
-        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
 
     try:
         # Get form data
@@ -577,17 +564,15 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
             config=config,
         )
 
-        # 🔒 SECURITY: Record successful operation with IP tracking
-        CartRateLimiter.record_operation(session_key, client_ip)
-
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
 
         # Return updated cart widget
         cart_items = cart.get_items()
         if cart_items:
-            # Item was successfully added
-            return render(
+            # Item was successfully added — fire cartAdded event so Alpine auto-opens mini-cart
+            just_added_slug = product_slug
+            response = render(
                 request,
                 "orders/partials/cart_updated.html",
                 {
@@ -595,8 +580,11 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
                     "cart_total_quantity": cart.get_total_quantity(),
                     "success_message": _("Product added to cart successfully!"),
                     "product_name": cart_items[-1]["product_name"],  # Last added item
+                    "just_added_slug": just_added_slug,
                 },
             )
+            response["HX-Trigger"] = json.dumps({"cartAdded": {"slug": just_added_slug}})
+            return response
         else:
             # No item was added (likely due to pricing issues)
             return _cart_error_response(
@@ -631,7 +619,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, P
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
+def update_cart_item(request: HttpRequest) -> HttpResponse:
     """
     HTMX endpoint to update cart item quantity.
     """
@@ -654,17 +642,6 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     if suspicious_response:
         return suspicious_response
 
-    # 🔒 SECURITY: Enhanced rate limiting with IP tracking
-    session_key = request.session.session_key
-    if not session_key:
-        request.session.save()
-        session_key = request.session.session_key or ""
-
-    client_ip = CartRateLimiter.get_client_ip(request)
-    if not CartRateLimiter.check_rate_limit(session_key, client_ip):
-        OrderSecurityHardening.uniform_response_delay()
-        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
-
     try:
         product_slug = request.POST.get("product_slug", "").strip()
         billing_period = request.POST.get("billing_period", "monthly")
@@ -672,9 +649,6 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
         cart = GDPRCompliantCartSession(request.session)
         cart.update_item_quantity(product_slug, billing_period, quantity)
-
-        # 🔒 SECURITY: Record successful operation with IP tracking
-        CartRateLimiter.record_operation(session_key, client_ip)
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
@@ -698,7 +672,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
+def remove_from_cart(request: HttpRequest) -> HttpResponse:
     """
     HTMX endpoint to remove item from cart.
     """
@@ -721,26 +695,12 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     if suspicious_response:
         return suspicious_response
 
-    # 🔒 SECURITY: Enhanced rate limiting with IP tracking
-    session_key = request.session.session_key
-    if not session_key:
-        request.session.save()
-        session_key = request.session.session_key or ""
-
-    client_ip = CartRateLimiter.get_client_ip(request)
-    if not CartRateLimiter.check_rate_limit(session_key, client_ip):
-        OrderSecurityHardening.uniform_response_delay()
-        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
-
     try:
         product_slug = request.POST.get("product_slug", "").strip()
         billing_period = request.POST.get("billing_period", "monthly")
 
         cart = GDPRCompliantCartSession(request.session)
         cart.remove_item(product_slug, billing_period)
-
-        # 🔒 SECURITY: Record successful operation with IP tracking
-        CartRateLimiter.record_operation(session_key, client_ip)
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
@@ -811,28 +771,21 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
 
     # 🔒 SECURITY: Comprehensive DoS hardening checks
     cache_key = f"cart_totals_{request.session.session_key or 'anon'}"
-    cache_response = OrderSecurityHardening.fail_closed_on_cache_failure(cache_key, "calculate_totals_htmx")
+    cache_response = _coerce_security_response(
+        OrderSecurityHardening.fail_closed_on_cache_failure(cache_key, "calculate_totals_htmx")
+    )
     if cache_response:
         return cache_response
 
-    size_response = OrderSecurityHardening.validate_request_size(request, max_size_bytes=1024)  # 1KB limit
+    size_response = _coerce_security_response(
+        OrderSecurityHardening.validate_request_size(request, max_size_bytes=1024)  # 1KB limit
+    )
     if size_response:
         return size_response
 
-    suspicious_response = OrderSecurityHardening.check_suspicious_patterns(request)
+    suspicious_response = _coerce_security_response(OrderSecurityHardening.check_suspicious_patterns(request))
     if suspicious_response:
         return suspicious_response
-
-    # 🔒 SECURITY: Enhanced rate limiting with IP tracking
-    session_key = request.session.session_key
-    if not session_key:
-        request.session.save()
-        session_key = request.session.session_key or ""
-
-    client_ip = CartRateLimiter.get_client_ip(request)
-    if not CartRateLimiter.check_rate_limit(session_key, client_ip):
-        OrderSecurityHardening.uniform_response_delay()
-        return JsonResponse({"error": _("Too many operations. Please slow down.")}, status=429)
 
     try:
         cart = GDPRCompliantCartSession(request.session)
@@ -852,9 +805,6 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
         calculation_result = CartCalculationService.calculate_cart_totals(
             cart, str(customer_id or ""), int(user_id or 0)
         )
-
-        # 🔒 SECURITY: Record successful operation with IP tracking
-        CartRateLimiter.record_operation(session_key, client_ip)
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
@@ -1066,15 +1016,20 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
 def mini_cart_content(request: HttpRequest) -> HttpResponse:
     """
     HTMX endpoint for mini-cart widget content.
+
+    Accepts optional ``?just_added=<product_slug>`` query param so the template
+    can highlight the newly-added item with a green pulse animation.
     """
 
     cart = GDPRCompliantCartSession(request.session)
+    just_added_slug: str = request.GET.get("just_added", "")
 
     context = {
         "cart": cart,
         "cart_items": cart.get_items()[:MINI_CART_MAX_ITEMS],
         "total_items": cart.get_item_count(),
         "show_view_all": cart.get_item_count() > MINI_CART_MAX_ITEMS,
+        "just_added_slug": just_added_slug,
     }
 
     return render(request, "orders/partials/mini_cart_content.html", context)
@@ -1267,7 +1222,8 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
                 )
         else:
             return JsonResponse(
-                {"success": False, "error": f"Payment not completed. Status: {payment_status}"}, status=400
+                {"success": False, "error": "Payment has not been completed. Please try again or contact support."},
+                status=400,
             )
 
     except json.JSONDecodeError:

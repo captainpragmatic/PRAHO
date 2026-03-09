@@ -65,8 +65,8 @@ class OrderInputValidator:
             qty = int(quantity)
             if qty < 1:
                 raise ValidationError(_("Quantity must be at least 1"))
-            if qty > MAX_CONFIG_KEYS:
-                raise ValidationError(_("Quantity cannot exceed 50"))
+            if qty > MAX_QUANTITY:
+                raise ValidationError(_("Quantity cannot exceed %(max)s") % {"max": MAX_QUANTITY})
             return qty
         except (ValueError, TypeError):
             raise ValidationError(_("Invalid quantity")) from None

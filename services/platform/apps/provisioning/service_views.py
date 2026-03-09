@@ -14,6 +14,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 
+from apps.billing.models import Currency
 from apps.common.decorators import staff_required_strict
 from apps.customers.models import Customer
 from apps.users.models import User
@@ -140,9 +141,12 @@ def service_create(request: HttpRequest) -> HttpResponse:
                 username = f"{base_username}_{counter}"[:100]
                 counter += 1
 
+            # TODO: Add currency selection to service creation form for multi-currency support
+            ron_currency = Currency.objects.get(code="RON")
             service = Service.objects.create(
                 customer=customer,
                 service_plan=plan,
+                currency=ron_currency,
                 service_name=f"{plan.name} - {domain}",  # Generate service name
                 domain=domain,
                 username=username,
@@ -256,8 +260,11 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("❌ You do not have permission to activate this service."))
         return redirect("provisioning:services")
 
-    service.status = "active"
-    service.save()
+    if request.method == "POST":
+        service.status = "active"
+        service.save()
 
-    messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
-    return redirect("provisioning:service_detail", pk=pk)
+        messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
+        return redirect("provisioning:service_detail", pk=pk)
+
+    return render(request, "provisioning/service_activate.html", {"service": service})

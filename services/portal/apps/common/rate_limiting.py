@@ -278,6 +278,7 @@ class APIRateLimitMiddleware:
         "/billing/",
         "/tickets/",
         "/services/",
+        "/order/",
     ]
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):

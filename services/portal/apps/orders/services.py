@@ -260,12 +260,16 @@ class CartRateLimiter:
             client_ip: Client IP address for broader tracking
         """
         if session_key:
-            # Record session-based operation
+            # Record session-based operation (atomic increment)
             session_cache_key = f"cart_rate_limit:{session_key}"
-            session_count = cache.get(session_cache_key, 0)
-            cache.set(session_cache_key, session_count + 1, CartRateLimiter.TIME_WINDOW)
+            # cache.add() only sets if key doesn't exist (atomic init)
+            cache.add(session_cache_key, 0, CartRateLimiter.TIME_WINDOW)
+            try:
+                cache.incr(session_cache_key)
+            except ValueError:
+                cache.set(session_cache_key, 1, CartRateLimiter.TIME_WINDOW)
 
-        # 🔒 SECURITY: Record IP-based operations
+        # 🔒 SECURITY: Record IP-based operations (atomic increment)
         if client_ip:
             import hashlib  # noqa: PLC0415
 
@@ -273,13 +277,19 @@ class CartRateLimiter:
 
             # Record per-minute IP operation
             ip_minute_key = f"cart_ip_minute:{ip_hash}"
-            ip_minute_count = cache.get(ip_minute_key, 0)
-            cache.set(ip_minute_key, ip_minute_count + 1, CartRateLimiter.IP_TIME_WINDOW_MINUTE)
+            cache.add(ip_minute_key, 0, CartRateLimiter.IP_TIME_WINDOW_MINUTE)
+            try:
+                cache.incr(ip_minute_key)
+            except ValueError:
+                cache.set(ip_minute_key, 1, CartRateLimiter.IP_TIME_WINDOW_MINUTE)
 
             # Record per-hour IP operation
             ip_hour_key = f"cart_ip_hour:{ip_hash}"
-            ip_hour_count = cache.get(ip_hour_key, 0)
-            cache.set(ip_hour_key, ip_hour_count + 1, CartRateLimiter.IP_TIME_WINDOW_HOUR)
+            cache.add(ip_hour_key, 0, CartRateLimiter.IP_TIME_WINDOW_HOUR)
+            try:
+                cache.incr(ip_hour_key)
+            except ValueError:
+                cache.set(ip_hour_key, 1, CartRateLimiter.IP_TIME_WINDOW_HOUR)
 
     @staticmethod
     def get_client_ip(request: HttpRequest) -> str:

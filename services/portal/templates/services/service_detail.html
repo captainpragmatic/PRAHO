@@ -135,12 +135,8 @@
         {% trans 'Age' as st3_label %}
         {% if service.service_age_days != None %}
           {% with days=service.service_age_days %}
-            {% if days == 1 %}
-              {% trans "1 day" as st3_age_val %}
-            {% else %}
-              {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
-              {% blocktrans with count=days asvar st3_age_val %}{{ count }} days{% endblocktrans %}
-            {% endif %}
+            {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+            {% blocktrans count days=days asvar st3_age_val %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
             {% stat_tile st3_label st3_age_val icon="clock" variant="info" %}
           {% endwith %}
         {% else %}
@@ -226,7 +222,10 @@
                       <span class="text-slate-400">{% trans "Uptime" %}</span>
                       <span class="text-white">
                         {% if service.service_age_days != None %}
-                          {{ service.service_age_days }} {% trans "days" %}
+                          {% with days=service.service_age_days %}
+                            {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+                            {% blocktrans count days=days %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
+                          {% endwith %}
                         {% else %}
                           <span class="text-slate-500">{% trans "Calculating..." %}</span>
                         {% endif %}
@@ -714,7 +713,10 @@
                       <span class="text-slate-400">{% trans "Service Age" %}</span>
                       <span class="text-white">
                         {% if service.service_age_days != None %}
-                          {{ service.service_age_days }} {% trans "days" %}
+                          {% with days=service.service_age_days %}
+                            {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+                            {% blocktrans count days=days %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
+                          {% endwith %}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>
                         {% endif %}

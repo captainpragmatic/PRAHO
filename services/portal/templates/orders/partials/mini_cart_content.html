@@ -21,7 +21,10 @@
   <!-- Cart Items Preview -->
   <div class="px-4 py-3 space-y-3 max-h-64 overflow-y-auto">
     {% for item in cart_items %}
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between rounded-lg transition-colors duration-200{% if just_added_slug and item.product_slug == just_added_slug %} bg-green-900/30{% endif %}"
+         {% if just_added_slug and item.product_slug == just_added_slug %}data-just-added="true"{% endif %}
+         x-data="{}"
+         {% if just_added_slug and item.product_slug == just_added_slug %}x-init="setTimeout(() => { $el.classList.remove('bg-green-900/30'); }, 2000)"{% endif %}>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-white truncate">
           {{ item.product_name }}
@@ -36,14 +39,7 @@
       </div>
 
       <!-- Remove Item Button -->
-      <button hx-post="{% url 'orders:remove_from_cart' %}"
-              hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}'
-              hx-target="#cart-widget"
-              hx-swap="outerHTML"
-              hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));"
-              hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}"
-              class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1"
-              aria-label="{% trans 'Remove from cart' %}">
+      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-widget" hx-swap="outerHTML" hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
         {% icon "x" size="sm" %}
       </button>
     </div>
@@ -64,7 +60,7 @@
       {% icon "search" size="sm" css_class="mr-1" %} {% trans "View full cart" %}
     </a>
     <a href="{% url 'orders:checkout' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-      {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Finish order" %}
+      {% icon "credit-card" size="sm" css_class="mr-1" %} {% trans "Checkout now" %}
     </a>
   </div>
 
