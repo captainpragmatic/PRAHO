@@ -62,8 +62,8 @@ repos:
         require_serial: true
 
       # Only check modified Python files for performance
-      - id: type-check-modified
-        name: "Type Check Modified Files"
+      - id: check-types-modified
+        name: "Checking type issues on modified files"
         entry: uv run python
         args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
