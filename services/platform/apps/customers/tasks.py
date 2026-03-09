@@ -38,7 +38,7 @@ _RECENCY_THRESHOLD_LOW = 90
 _OPEN_TICKET_STATUSES = ("open", "in_progress", "waiting_on_customer")
 
 # Named constants for cleanup task parameters (replaces magic numbers)
-_LOCK_TTL_SECONDS = 3600  # 1 hour — maximum lock duration for cleanup task
+_LOCK_TTL_SECONDS = 14400  # Lock TTL must exceed worst-case task duration. Reactivation email cooldown provides per-customer safety net.
 _INACTIVE_THRESHOLD_DAYS = 365  # 12 months of inactivity
 _REACTIVATION_COOLDOWN_DAYS = 90  # Days between reactivation emails
 _CLEANUP_BATCH_LIMIT = 50  # Max customers to process per cleanup run
@@ -83,6 +83,16 @@ def process_customer_feedback(note_id: str) -> dict[str, Any]:
         )
 
         note = CustomerNote.objects.select_related("customer").get(id=note_id)
+
+        # Idempotency: check if this feedback was already processed
+        from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: avoids circular import
+
+        if AuditEvent.objects.filter(
+            action="customer_feedback_processed",
+            metadata__note_id=str(note_id),
+        ).exists():
+            logger.info(f"⏭️ [Feedback] Already processed note {note_id}, skipping")
+            return {"success": True, "message": "Already processed", "skipped": True}
 
         # Keyword-based category detection
         category = _detect_feedback_category(note.content)
@@ -435,8 +445,6 @@ def cleanup_inactive_customers() -> dict[str, Any]:
                 "total_checked": int(Customer.objects.filter(status="active").count()),
                 "inactive_found": 0,
                 "emails_sent": 0,
-                "skipped_active_services": 0,
-                "skipped_open_tickets": 0,
                 "skipped_cooldown": 0,
                 "customers": [],
             }
@@ -485,6 +493,15 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
         from apps.notifications.services import EmailService  # noqa: PLC0415  # Deferred: avoids circular import
 
         customer = Customer.objects.get(id=customer_id)
+
+        if not customer.primary_email:
+            logger.warning(f"⚠️ [CustomerWelcome] No email for customer {customer_id}, skipping")
+            return {"success": False, "error": "No email address"}
+
+        if customer.meta.get("welcome_email_sent_at"):
+            logger.info(f"⏭️ [CustomerWelcome] Already sent for customer {customer_id}, skipping")
+            return {"success": True, "message": "Welcome email already sent", "skipped": True}
+
         locale = _get_customer_locale(customer)
 
         result = EmailService.send_template_email(
@@ -519,6 +536,12 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
                 "source_app": "customers",
             },
         )
+
+        if result.success:
+            with transaction.atomic():
+                locked = Customer.objects.select_for_update().get(id=customer_id)
+                locked.meta["welcome_email_sent_at"] = timezone.now().isoformat()
+                locked.save(update_fields=["meta"])
 
         return {
             "success": result.success,
@@ -678,6 +701,10 @@ def _get_customer_locale(customer: Any) -> str:
 
 def _send_reactivation_email(customer: Any) -> bool:
     """Send a reactivation check-in email to an inactive customer."""
+    if not customer.primary_email:
+        logger.warning(f"⚠️ [Reactivation] No email for customer {customer.id}, skipping")
+        return False
+
     try:
         from apps.notifications.services import EmailService  # noqa: PLC0415  # Deferred: avoids circular import
 

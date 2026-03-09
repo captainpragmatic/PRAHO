@@ -623,6 +623,10 @@ class SecurityScanner:
             # 16. Unguarded JSONField meta write — race condition risk in async tasks.
             # Flags .meta[key] = or .meta = {/var assignments in task files where
             # concurrent Django-Q2 workers may overwrite each other's changes.
+            # NOTE: This regex intentionally over-matches for defense-in-depth — it is
+            # better to flag a safe write than to miss a dangerous one. If the write is
+            # already guarded (select_for_update inside transaction.atomic), add an inline
+            # suppression comment: # nosec: locked-meta-write
             (
                 r"\.meta\s*\[.+\]\s*=|\.meta\s*=\s*(\{|[a-z])",
                 "Unguarded JSONField write — .meta mutation without select_for_update() "

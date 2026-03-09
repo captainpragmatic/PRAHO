@@ -6,13 +6,14 @@ Romanian hosting provider test data generation.
 import contextlib
 import random
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.db import transaction
 from django.utils import timezone
 from faker import Faker
 
@@ -57,13 +58,32 @@ class SampleDataConfig:
     tickets_count: int
 
 
+_ROMANIAN_COUNTIES: list[str] = ["București", "Cluj", "Timiș", "Iași", "Constanța", "Brașov"]
+
+_ROMANIAN_CITIES: list[tuple[str, str]] = [
+    ("București", "București"),
+    ("Cluj-Napoca", "Cluj"),
+    ("Timișoara", "Timiș"),
+    ("Iași", "Iași"),
+    ("Constanța", "Constanța"),
+    ("Brașov", "Brașov"),
+    ("Sibiu", "Sibiu"),
+    ("Oradea", "Bihor"),
+]
+
+
 def _cycle(items: list[Any], index: int) -> Any:
     """Round-robin select from a list by index. DRY helper for the ubiquitous items[i % len(items)] pattern."""
+    if not items:
+        raise ValueError("_cycle() requires a non-empty list")
     return items[index % len(items)]
 
 
 class Command(BaseCommand):
     help = "Generate sample data for Romanian hosting provider"
+
+    # NOTE: Django's objects.create() does NOT call full_clean() or clean().
+    # All generated field values must manually satisfy model validators and DB constraints.
 
     def _get_admin_user(self) -> "User | None":
         """Cached admin user lookup — used by 6+ methods."""
@@ -83,7 +103,7 @@ class Command(BaseCommand):
             self._ro_tax_rule, _ = TaxRule.objects.get_or_create(
                 country_code="RO",
                 tax_type="vat",
-                valid_from=timezone.now().date(),
+                valid_from=date(2025, 8, 1),
                 defaults={
                     "rate": Decimal("0.21"),
                     "applies_to_b2b": True,
@@ -499,124 +519,6 @@ class Command(BaseCommand):
 
         return created_categories
 
-    def create_customers(self, fake: Faker, count: int) -> list[Customer]:
-        self.stdout.write(f"Creez {count} clienți...")
-        customers = []
-
-        # Romanian counties
-        counties = [
-            "București",
-            "Cluj",
-            "Timiș",
-            "Iași",
-            "Constanța",
-            "Brașov",
-            "Galați",
-            "Craiova",
-            "Ploiești",
-            "Oradea",
-        ]
-
-        for i in range(count):
-            customer_type = random.choice(["individual", "company", "pfa"])
-
-            customer_data = {
-                "customer_type": customer_type,
-                "status": random.choice(["active", "prospect"]),
-                "name": fake.name(),
-                "email": fake.email(),
-                "phone": f"+40.7{random.randint(10, 99)}.{random.randint(100, 999)}.{random.randint(100, 999)}",
-                "address_line1": fake.street_address(),
-                "city": fake.city(),
-                "county": random.choice(counties),
-                "postal_code": f"{random.randint(100000, 999999)}",
-                "country": "România",
-                "payment_terms": random.choice([15, 30, 45]),
-                "data_processing_consent": True,
-                "marketing_consent": random.choice([True, False]),
-            }
-
-            if customer_type in ["company", "pfa"]:
-                customer_data.update(
-                    {
-                        "company_name": fake.company(),
-                        "cui": f"RO{random.randint(1000000, 99999999)}",
-                        "is_vat_payer": True,
-                        "industry": random.choice(
-                            ["IT & Software", "E-commerce", "Servicii", "Producție", "Consultanță", "Media"]
-                        ),
-                    }
-                )
-
-            customer = Customer.objects.create(**customer_data)
-            customers.append(customer)
-
-            if i % 10 == 0:
-                self.stdout.write(f"  ✓ Creat {i + 1}/{count} clienți")
-
-        return customers
-
-    def create_services(self, fake: Faker, customers: list[Customer], count: int) -> None:
-        self.stdout.write(f"Creez {count} servicii...")
-
-        plans = list(ServicePlan.objects.all())
-        servers = list(Server.objects.all())
-
-        for i in range(count):
-            customer = random.choice(customers)
-            plan = random.choice(plans)
-            server = random.choice(servers) if servers else None
-
-            status = random.choice(["active", "pending", "suspended"])
-            activated = timezone.now() - timedelta(days=random.randint(30, 365)) if status == "active" else None
-            service_data = {
-                "customer": customer,
-                "service_plan": plan,
-                "server": server,
-                "service_name": f"{plan.name} - {customer.name}",
-                "domain": f"{fake.domain_name()}",
-                "username": f"user{random.randint(1000, 9999)}",
-                "billing_cycle": random.choice(["monthly", "annual"]),
-                "price": plan.price_monthly,
-                "status": status,
-                "auto_renew": random.choice([True, False]),
-                "activated_at": activated,
-                "expires_at": timezone.now() + timedelta(days=random.randint(30, 365)) if activated else None,
-            }
-
-            service = Service.objects.create(**service_data)
-
-            if i % 20 == 0:
-                self.stdout.write(f"  ✓ Creat {i + 1}/{count} servicii")
-
-    def create_tickets(self, fake: Faker, customers: list[Customer], count: int) -> None:
-        self.stdout.write(f"Creez {count} tickete...")
-
-        categories = list(SupportCategory.objects.all())
-        support_users = list(User.objects.filter(role="support"))
-
-        for i in range(count):
-            customer = random.choice(customers)
-            category = random.choice(categories)
-            assigned_to = random.choice(support_users) if random.choice([True, False]) else None
-
-            ticket_data = {
-                "title": fake.sentence(nb_words=6),
-                "description": fake.text(max_nb_chars=500),
-                "customer": customer,
-                "contact_email": customer.primary_email,
-                "category": category,
-                "priority": random.choice(["low", "normal", "high"]),
-                "status": random.choice(["open", "in_progress", "waiting_on_customer", "closed"]),
-                "source": random.choice(["web", "email", "phone"]),
-                "assigned_to": assigned_to,
-            }
-
-            ticket = Ticket.objects.create(**ticket_data)
-
-            if i % 50 == 0:
-                self.stdout.write(f"  ✓ Creat {i + 1}/{count} tickete")
-
     # ===============================================================================
     # COMPREHENSIVE DATA GENERATION METHODS
     # ===============================================================================
@@ -659,7 +561,7 @@ class Command(BaseCommand):
         # Delete users
         User.objects.filter(email__contains="@example.").delete()
 
-        print("✓ Cleaned existing sample data")
+        self.stdout.write("✓ Cleaned existing sample data")
 
         # Create essential billing components
         self.create_billing_essentials()
@@ -674,13 +576,13 @@ class Command(BaseCommand):
             code="RON", defaults={"name": "Romanian Leu", "symbol": "RON", "decimals": 2}
         )
         if created:
-            print("✓ Created RON currency")
+            self.stdout.write("✓ Created RON currency")
 
         # Create Romanian VAT tax rule
         _, created = TaxRule.objects.get_or_create(
             country_code="RO",
             tax_type="vat",
-            valid_from=timezone.now().date(),
+            valid_from=date(2025, 8, 1),
             defaults={
                 "rate": Decimal("0.21"),  # 21% VAT for Romania (Aug 2025)
                 "applies_to_b2b": True,
@@ -691,11 +593,11 @@ class Command(BaseCommand):
             },
         )
         if created:
-            print("✓ Created Romanian VAT tax rule")
+            self.stdout.write("✓ Created Romanian VAT tax rule")
 
         # Create FX rates (EUR/RON, USD/RON, EUR/USD)
         self._create_fx_rates()
-        print("✓ Created FX rates")
+        self.stdout.write("✓ Created FX rates")
 
     def create_products_from_service_plans(self) -> None:
         """Create Product objects and ProductPrice objects based on existing ServicePlans with new pricing model"""
@@ -707,7 +609,7 @@ class Command(BaseCommand):
         except Currency.DoesNotExist:
             # Create RON currency if it doesn't exist
             ron_currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="RON", is_active=True)
-            print("✓ Created RON currency")
+            self.stdout.write("✓ Created RON currency")
 
         # Map ServicePlan types to Product types
         type_mapping = {
@@ -772,8 +674,8 @@ class Command(BaseCommand):
             if price_created:
                 prices_created += 1
 
-        print(f"✓ Created/verified {service_plans.count()} products from service plans")
-        print(f"✓ Created {products_created} new products, {prices_created} new product prices")
+        self.stdout.write(f"✓ Created/verified {service_plans.count()} products from service plans")
+        self.stdout.write(f"✓ Created {products_created} new products, {prices_created} new product prices")
 
     def create_users(self, fake: Faker, count: int) -> list[User]:
         """Create users that will be attached to customers"""
@@ -1029,19 +931,20 @@ class Command(BaseCommand):
         subscriptions_count: int = 3,
     ) -> None:
         """Create all related data for a customer: services, orders, invoices, payments, etc."""
-        self.create_customer_services(fake, customer, services_count)
-        orders = self.create_customer_orders(fake, customer, orders_count)
-        invoices = self.create_customer_invoices(fake, customer, orders, invoices_count)
-        self.create_customer_proformas(fake, customer, orders, proformas_count)
-        tickets = self.create_customer_tickets(fake, customer, tickets_count)
-        self.create_ticket_comments(fake, tickets)
-        self.create_ticket_worklogs(fake, tickets)
-        payments = self.create_customer_payments(fake, customer, invoices)
-        self.create_customer_credit_entries(fake, customer, payments)
-        self.create_customer_subscriptions(fake, customer, subscriptions_count)
-        self.create_customer_refunds(fake, customer, orders, invoices, payments)
-        self.create_customer_domains(fake, customer, domains_count)
-        self.create_customer_email_preference(customer, index)
+        with transaction.atomic():
+            self.create_customer_services(fake, customer, services_count)
+            orders = self.create_customer_orders(fake, customer, orders_count)
+            invoices = self.create_customer_invoices(fake, customer, orders, invoices_count)
+            self.create_customer_proformas(fake, customer, orders, proformas_count)
+            tickets = self.create_customer_tickets(fake, customer, tickets_count)
+            self.create_ticket_comments(fake, tickets)
+            self.create_ticket_worklogs(fake, tickets)
+            payments = self.create_customer_payments(fake, customer, invoices)
+            self.create_customer_credit_entries(fake, customer, payments)
+            self.create_customer_subscriptions(fake, customer, subscriptions_count)
+            self.create_customer_refunds(fake, customer, orders, invoices, payments)
+            self.create_customer_domains(fake, customer, domains_count)
+            self.create_customer_email_preference(customer, index)
 
     def create_customer_with_data(
         self, fake: Faker, index: int, users: list[User], config: SampleDataConfig
@@ -1096,10 +999,17 @@ class Command(BaseCommand):
             )
         elif customer_type == "individual":
             # All individuals get a CNP for invoice/tax purposes
+            # Romanian CNP: S(1) + YY(2) + MM(2) + DD(2) + CC(2) + NNN(3) + C(1) = 13 digits
             century = 1 if index % 2 == 0 else 2
+            yy = fake.random_int(min=60, max=99)
+            mm = fake.random_int(min=1, max=12)
+            dd = fake.random_int(min=1, max=28)
+            cc = fake.random_int(min=1, max=52)
+            nnn = fake.random_int(min=1, max=999)
+            check = index % 10
             CustomerTaxProfile.objects.create(
                 customer=customer,
-                cnp=f"{century}{fake.random_int(min=800101, max=990101)}{fake.random_int(min=10, max=52)}{fake.random_int(min=100, max=999)}",
+                cnp=f"{century}{yy:02d}{mm:02d}{dd:02d}{cc:02d}{nnn:03d}{check}",
                 is_vat_payer=False,
             )
 
@@ -1228,6 +1138,7 @@ class Command(BaseCommand):
                 "staff_role": "customer",
             },
         )
+        # Intentional: reset password on re-runs for idempotent fixture state
         multi_co_user.set_password("testpass123")  # nosemgrep: unvalidated-password
         multi_co_user.save()
 
@@ -1242,6 +1153,7 @@ class Command(BaseCommand):
             },
         )
         suspended_user.is_active = False
+        # Intentional: reset password on re-runs for idempotent fixture state
         suspended_user.set_password("testpass123")  # nosemgrep: unvalidated-password
         suspended_user.save()
 
@@ -1257,6 +1169,7 @@ class Command(BaseCommand):
             },
         )
         inactive_staff.is_active = False
+        # Intentional: reset password on re-runs for idempotent fixture state
         inactive_staff.set_password("support123")  # nosemgrep: unvalidated-password
         inactive_staff.save()
 
@@ -1271,6 +1184,7 @@ class Command(BaseCommand):
                 "staff_role": "manager",
             },
         )
+        # Intentional: reset password on re-runs for idempotent fixture state
         manager_user.set_password("manager123")  # nosemgrep: unvalidated-password
         manager_user.save()
 
@@ -1366,18 +1280,6 @@ class Command(BaseCommand):
             },
         ]
 
-        # Cities and counties for address variety
-        romanian_cities = [
-            ("București", "București"),
-            ("Cluj-Napoca", "Cluj"),
-            ("Timișoara", "Timiș"),
-            ("Iași", "Iași"),
-            ("Constanța", "Constanța"),
-            ("Brașov", "Brașov"),
-            ("Sibiu", "Sibiu"),
-            ("Oradea", "Bihor"),
-        ]
-
         address_types = ["primary", "billing", "delivery", "legal"]
         payment_method_types = ["stripe_card", "bank_transfer", "cash", "other"]
         note_types = ["general", "call", "email", "meeting", "complaint", "compliment"]
@@ -1387,7 +1289,7 @@ class Command(BaseCommand):
         contact_methods = ["email", "phone", "both"]
 
         for idx, cust_data in enumerate(permutations):
-            city, county = romanian_cities[idx % len(romanian_cities)]
+            city, county = _ROMANIAN_CITIES[idx % len(_ROMANIAN_CITIES)]
 
             customer = Customer.objects.create(**cust_data)
             customers.append(customer)
@@ -1533,11 +1435,12 @@ class Command(BaseCommand):
         elif customer.customer_type == "individual":
             # All individuals get a CNP for tax/invoice purposes
             # Vary century digit (1=male, 2=female) and birth year
+            # Romanian CNP: S(1) + YY(2) + MM(2) + DD(2) + CC(2) + NNN(3) + C(1) = 13 digits
             century_digit = 1 if idx % 2 == 0 else 2
             birth_year = 85 + idx * 3
             CustomerTaxProfile.objects.create(
                 customer=customer,
-                cnp=f"{century_digit}{birth_year:02d}0101400{idx:03d}1",
+                cnp=f"{century_digit}{birth_year:02d}0101{40 + idx:02d}{idx:03d}1",
                 is_vat_payer=False,
             )
 
@@ -1696,8 +1599,7 @@ class Command(BaseCommand):
         self, fake: Faker, customer: Customer, customer_type: str, index: int
     ) -> None:
         """Create randomised addresses for a generated customer."""
-        romanian_counties = ["București", "Cluj", "Timiș", "Iași", "Constanța", "Brașov"]
-        county = romanian_counties[index % len(romanian_counties)]
+        county = _ROMANIAN_COUNTIES[index % len(_ROMANIAN_COUNTIES)]
 
         # Historical billing address (version 1, non-current) — demonstrates versioning
         CustomerAddress.objects.create(
@@ -2016,6 +1918,17 @@ class Command(BaseCommand):
 
         return invoices
 
+    def _split_amount_across_lines(self, total_cents: int, num_lines: int, tax_rate: Decimal) -> list[tuple[int, int]]:
+        """Split total_cents across num_lines, returning (line_amount_cents, line_total_cents) tuples."""
+        base_amount = total_cents // num_lines
+        remainder = total_cents - (base_amount * num_lines)
+        result = []
+        for i in range(num_lines):
+            line_amount = base_amount + (1 if i < remainder else 0)
+            line_total = line_amount + int(line_amount * tax_rate)
+            result.append((line_amount, line_total))
+        return result
+
     def _create_invoice_lines(
         self, fake: Faker, invoice: Invoice, index: int, base_amount_cents: int, services: list[Service]
     ) -> None:
@@ -2027,15 +1940,10 @@ class Command(BaseCommand):
             f"Consultanță tehnică — {fake.month_name()} {fake.year()}",
         ]
         num_lines = 1 if index % 3 == 0 else (2 if index % 3 == 1 else 3)
-        remaining_cents = base_amount_cents
+        tax_rate = Decimal("0.2100")
+        line_splits = self._split_amount_across_lines(base_amount_cents, num_lines, tax_rate)
 
-        for line_idx in range(num_lines):
-            if line_idx == num_lines - 1:
-                line_amount_cents = remaining_cents
-            else:
-                line_amount_cents = remaining_cents // (num_lines - line_idx)
-                remaining_cents -= line_amount_cents
-
+        for line_idx, (line_amount_cents, line_total_cents) in enumerate(line_splits):
             linked_service = services[line_idx % len(services)] if services and line_idx == 0 else None
 
             InvoiceLine.objects.create(
@@ -2044,8 +1952,8 @@ class Command(BaseCommand):
                 description=_cycle(line_descriptions, line_idx),
                 quantity=Decimal("1.000"),
                 unit_price_cents=line_amount_cents,
-                tax_rate=Decimal("0.2100"),
-                line_total_cents=line_amount_cents,
+                tax_rate=tax_rate,
+                line_total_cents=line_total_cents,
                 service=linked_service,
             )
 
@@ -2124,15 +2032,10 @@ class Command(BaseCommand):
 
             # Add proforma lines — 1-2 items
             num_lines = 1 if i % 2 == 0 else 2
-            remaining_cents = base_amount_cents
+            tax_rate = Decimal("0.2100")
+            line_splits = self._split_amount_across_lines(base_amount_cents, num_lines, tax_rate)
 
-            for line_idx in range(num_lines):
-                if line_idx == num_lines - 1:
-                    line_amount_cents = remaining_cents
-                else:
-                    line_amount_cents = remaining_cents // 2
-                    remaining_cents -= line_amount_cents
-
+            for line_idx, (line_amount_cents, line_total_cents) in enumerate(line_splits):
                 linked_service = services[line_idx % len(services)] if services and line_idx == 0 else None
                 line_kind = "service" if line_idx == 0 else "setup"
                 line_desc = (
@@ -2147,8 +2050,8 @@ class Command(BaseCommand):
                     description=line_desc,
                     quantity=Decimal("1.000"),
                     unit_price_cents=line_amount_cents,
-                    tax_rate=Decimal("0.2100"),
-                    line_total_cents=line_amount_cents,
+                    tax_rate=tax_rate,
+                    line_total_cents=line_total_cents,
                     service=linked_service,
                 )
 
@@ -2972,7 +2875,7 @@ class Command(BaseCommand):
         """Create 8-10 webhook events covering all statuses and sources."""
         self.stdout.write("Creating webhook events...")
 
-        events = [
+        events: list[dict[str, Any]] = [
             {
                 "source": "stripe",
                 "event_id": "evt_test_payment_succeeded_001",
@@ -3053,8 +2956,9 @@ class Command(BaseCommand):
         ]
 
         for evt in events:
-            source = evt.pop("source")
-            event_id = evt.pop("event_id")
-            WebhookEvent.objects.get_or_create(source=source, event_id=event_id, defaults=evt)
+            evt_copy: dict[str, Any] = {**evt}
+            source = evt_copy.pop("source")
+            event_id = evt_copy.pop("event_id")
+            WebhookEvent.objects.get_or_create(source=source, event_id=event_id, defaults=evt_copy)
 
         self.stdout.write(f"  ✓ Webhook events: {WebhookEvent.objects.count()}")

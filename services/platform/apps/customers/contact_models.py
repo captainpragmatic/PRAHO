@@ -66,7 +66,7 @@ class CustomerAddress(SoftDeleteModel):
         constraints: ClassVar[list[UniqueConstraint]] = [
             UniqueConstraint(
                 fields=["customer", "address_type"],
-                condition=Q(is_current=True),
+                condition=Q(is_current=True, deleted_at__isnull=True),
                 name="unique_current_address_per_type",
                 violation_error_message=_("A current address of this type already exists for this customer."),
             ),
@@ -144,7 +144,7 @@ class CustomerPaymentMethod(SoftDeleteModel):
         constraints: ClassVar[list[UniqueConstraint]] = [
             UniqueConstraint(
                 fields=["customer"],
-                condition=Q(is_default=True),
+                condition=Q(is_default=True, deleted_at__isnull=True),
                 name="unique_default_payment_per_cust",
                 violation_error_message=_("Only one default payment method per customer is allowed."),
             ),
@@ -160,6 +160,11 @@ class CustomerPaymentMethod(SoftDeleteModel):
                 CustomerPaymentMethod.objects.filter(customer=self.customer, is_default=True).exclude(
                     pk=self.pk
                 ).update(is_default=False)
+            # WORKAROUND: Django's save() does not call full_clean() by default.
+            # For bank_details (financial data), we enforce validation here as
+            # defense-in-depth.
+            # See: https://docs.djangoproject.com/en/5.2/ref/models/instances/#validating-objects
+            self.full_clean()
             super().save(*args, **kwargs)
 
     def clean(self) -> None:

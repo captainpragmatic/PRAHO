@@ -62,7 +62,9 @@ make lint
 
 ```bash
 # Manual type checking
-make check-types-modified
+# Note: check-types-modified is a pre-commit hook, not a make target — it runs automatically on git commit.
+# To run type checking manually, use:
+make check-types
 .venv/bin/python scripts/check_types_modified.py --verbose
 ```
 
@@ -170,7 +172,9 @@ git commit -m "feat(users): add email validation"
 ### Working with Type Safety
 ```bash
 # Check type issues before committing
-make check-types-modified
+# Note: check-types-modified (pre-commit hook, not a make target) runs automatically on git commit.
+# To invoke manually: .venv/bin/python scripts/check_types_modified.py --verbose
+make check-types  # Full type check via make target
 
 # Generate type coverage report
 make type-coverage
@@ -241,8 +245,8 @@ make install-pre-commit
 .venv/bin/pre-commit run --verbose
 
 # Skip slow hooks temporarily
+# Note: check-types-modified is a pre-commit hook, not a make target
 SKIP=check-types-modified git commit -m "message"
-```
 
 #### Large File Changes
 ```bash

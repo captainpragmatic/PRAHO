@@ -602,7 +602,8 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
     if not customers_qs.filter(id=customer_id).exists():
         return JsonResponse({"error": "Access denied"}, status=403)
 
-    # Return real services for this customer (used by ticket form dropdown)
+    # Response contract: {"results": [{"id": ..., "service_name": ..., "status": ..., "service_plan__name": ...}, ...]}
+    # Consumers (e.g. ticket form dropdown JS) must use the "results" key — not a bare array.
     services = list(
         Service.objects.filter(customer_id=customer_id)
         .values("id", "service_name", "status", "service_plan__name")

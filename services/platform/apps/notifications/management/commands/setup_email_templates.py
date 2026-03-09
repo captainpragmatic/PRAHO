@@ -458,7 +458,11 @@ class Command(BaseCommand):
                 <p>Echipa PragmaticHost</p>
                 """,
                 "description": "Email de bun venit pentru clienți noi",
-                "variables": {"customer_name": "Numele clientului", "client_area_url": "URL zona client"},
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "client_area_url": "URL zona client",
+                    "support_phone": "Număr telefon suport",
+                },
             },
             {
                 "key": "customer_welcome",
@@ -489,7 +493,11 @@ class Command(BaseCommand):
                 <p>PragmaticHost Team</p>
                 """,
                 "description": "Welcome email for new customers",
-                "variables": {"customer_name": "Customer name", "client_area_url": "Client area URL"},
+                "variables": {
+                    "customer_name": "Customer name",
+                    "client_area_url": "Client area URL",
+                    "support_phone": "Support phone number",
+                },
             },
             # ===============================================================================
             # PAYMENT TEMPLATES
@@ -1284,7 +1292,7 @@ class Command(BaseCommand):
                 <p>Cu stimă,<br/>Echipa PragmaticHost</p>
                 """,
                 "description": "Email de reactivare pentru clienți inactivi",
-                "variables": {"customer_name": "Numele clientului"},
+                "variables": {"customer_name": "Numele clientului", "support_phone": "Număr telefon suport"},
             },
             {
                 "key": "customer_reactivation",
@@ -1304,7 +1312,7 @@ class Command(BaseCommand):
                 <p>Best regards,<br/>The PragmaticHost Team</p>
                 """,
                 "description": "Reactivation check-in email for inactive customers",
-                "variables": {"customer_name": "Customer name"},
+                "variables": {"customer_name": "Customer name", "support_phone": "Support phone number"},
             },
         ]
 

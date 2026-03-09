@@ -306,6 +306,8 @@ class Customer(SoftDeleteModel):
         if self.meta is None:
             self.meta = {}
         if not isinstance(self.meta, dict):
+            # ValueError (not ValidationError): non-dict meta is a programming error, not user input.
+            # Django convention: ValidationError belongs in clean(), ValueError signals caller bug.
             raise ValueError(f"Customer.meta must be a dict, got {type(self.meta).__name__}")
         super().save(*args, **kwargs)
 

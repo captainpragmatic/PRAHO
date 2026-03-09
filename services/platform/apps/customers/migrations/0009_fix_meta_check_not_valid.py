@@ -43,6 +43,8 @@ def reverse_migration(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    atomic = False  # VALIDATE CONSTRAINT requires running outside a transaction block
+
     dependencies = [
         ("customers", "0008_customer_meta_check_constraint"),
     ]

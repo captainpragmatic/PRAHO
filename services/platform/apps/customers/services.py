@@ -225,7 +225,7 @@ class CustomerAnalyticsService:
                 "outstanding_balance": Decimal(total_invoiced - total_paid) / 100,
                 "pending_invoices": invoice_stats["issued"] or 0,
                 "overdue_invoices": invoice_stats["overdue"] or 0,
-                "payment_rate": round(total_paid / total_invoiced * 100) if total_invoiced > 0 else None,
+                "payment_rate": round(total_paid / total_invoiced * 100) if total_invoiced > 0 else None,  # int | None
             }
         except Exception as e:
             logger.warning(f"Failed to get billing metrics: {e}")

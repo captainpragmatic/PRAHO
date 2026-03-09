@@ -886,11 +886,12 @@ def _trigger_romanian_address_validation(address: CustomerAddress) -> None:
 def _ensure_single_current_address(address: CustomerAddress) -> None:
     """Ensure only one current address per type per customer."""
     try:
+        # Django signals have no guaranteed transaction context. A single .update() is atomic SQL — no row lock needed.
         CustomerAddress.objects.filter(
             customer=address.customer,
             address_type=address.address_type,
             is_current=True,
-        ).exclude(pk=address.pk).select_for_update().update(is_current=False)
+        ).exclude(pk=address.pk).update(is_current=False)
 
     except Exception:
         logger.exception("🔥 [Customer Signal] Address versioning failed")
@@ -1083,11 +1084,8 @@ def _trigger_customer_onboarding(customer: Customer) -> None:
     try:
         from django_q.tasks import async_task
 
-        transaction.on_commit(
-            lambda customer_id=str(customer.id): async_task(
-                "apps.customers.tasks.start_customer_onboarding", customer_id
-            )
-        )
+        # Called via transaction.on_commit() from _handle_new_customer_creation — already deferred.
+        async_task("apps.customers.tasks.start_customer_onboarding", str(customer.id))
         logger.info(f"🚀 [Customer] Onboarding queued: {customer.get_display_name()}")
     except ImportError:
         logger.info(f"🚀 [Customer] Would start onboarding (task runner not available): {customer.get_display_name()}")

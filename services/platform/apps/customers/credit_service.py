@@ -47,7 +47,9 @@ def get_base_credit_score() -> int:
 def get_credit_adjustments() -> dict[str, int]:
     """Get credit score adjustments from SettingsService (runtime)."""
     val = SettingsService.get_setting("customers.credit_adjustments", _DEFAULT_CREDIT_ADJUSTMENTS)
-    return val if isinstance(val, dict) else _DEFAULT_CREDIT_ADJUSTMENTS
+    if isinstance(val, dict) and all(isinstance(v, (int, float)) for v in val.values()):
+        return val
+    return _DEFAULT_CREDIT_ADJUSTMENTS
 
 
 CONSECUTIVE_PAYMENTS_TIER_2 = 12
@@ -303,7 +305,7 @@ class CustomerCreditService:
             if hasattr(customer, "created_at") and customer.created_at:
                 account_age_days = (timezone.now() - customer.created_at).days
                 account_age_years = account_age_days / 365
-                age_bonus = min(50, int(account_age_years * get_credit_adjustments()["account_age_bonus"]))
+                age_bonus = min(50, int(account_age_years * get_credit_adjustments().get("account_age_bonus", 5)))
                 score += age_bonus
 
             # Factor 2: Payment history

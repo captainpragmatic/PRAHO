@@ -8,11 +8,14 @@ Uses the existing encryption infrastructure in apps.common.encryption.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from django.db import models
 
 from apps.common.encryption import ENCRYPTED_PREFIX, decrypt_sensitive_data, encrypt_sensitive_data
+
+logger = logging.getLogger(__name__)
 
 
 class EncryptedJSONField(models.JSONField):
@@ -53,8 +56,16 @@ class EncryptedJSONField(models.JSONField):
             return None
         # Encrypted data: parent returns a Python string "aes:..."
         if isinstance(result, str) and result.startswith(ENCRYPTED_PREFIX):
-            decrypted_json = decrypt_sensitive_data(result)
-            return json.loads(decrypted_json)
+            try:
+                decrypted = decrypt_sensitive_data(result)
+                return json.loads(decrypted)
+            except Exception:
+                logger.error(
+                    "Failed to decrypt EncryptedJSONField value (possible key rotation or data corruption). "
+                    "Returning None.",
+                    exc_info=True,
+                )
+                return None
         # Legacy unencrypted data: parent already returned a dict
         return result
 

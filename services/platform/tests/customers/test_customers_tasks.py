@@ -127,8 +127,12 @@ class ProcessCustomerFeedbackTests(TestCase):
         mock_note.customer.name = "Test Customer"
         mock_note.created_at.isoformat.return_value = "2026-03-07T00:00:00"
 
-        with patch("apps.customers.models.CustomerNote") as mock_note_cls:
+        with (
+            patch("apps.customers.models.CustomerNote") as mock_note_cls,
+            patch("apps.audit.models.AuditEvent") as mock_audit_event,
+        ):
             mock_note_cls.objects.select_related.return_value.get.return_value = mock_note
+            mock_audit_event.objects.filter.return_value.exists.return_value = False
             result = process_customer_feedback("note-123")
 
         assert result["success"] is True
@@ -163,7 +167,7 @@ class StartCustomerOnboardingTests(TestCase):
         customer = MagicMock()
         customer.id = "cust-123"
         customer.customer_type = "company" if is_business else "individual"
-        customer.primary_phone = "+40712345679" if has_phone else "+40712345678"  # Default = incomplete
+        customer.primary_phone = "+40712345679" if has_phone else ""  # Empty string = incomplete (no phone)
         customer.get_display_name.return_value = "Test Customer"
         customer.meta = {}
         customer.addresses.exists.return_value = has_address
@@ -203,6 +207,18 @@ class StartCustomerOnboardingTests(TestCase):
     @patch("apps.customers.tasks.AuditService")
     def test_incomplete_contact_details(self, mock_audit: MagicMock) -> None:
         customer = self._make_customer(has_phone=False, has_address=False)
+        with patch("apps.customers.models.Customer") as mock_customer_cls:
+            self._patch_customer_cls(mock_customer_cls, customer)
+            result = start_customer_onboarding("cust-123")
+
+        assert result["success"] is True
+        assert result["is_complete"] is False
+        assert result["onboarding_steps"]["verify_contact_details"] == "incomplete"
+
+    @patch("apps.customers.tasks.AuditService")
+    def test_incomplete_phone_only(self, mock_audit: MagicMock) -> None:
+        """Phone-only incompleteness: has address but no phone — contact step must fail."""
+        customer = self._make_customer(has_phone=False, has_address=True)
         with patch("apps.customers.models.Customer") as mock_customer_cls:
             self._patch_customer_cls(mock_customer_cls, customer)
             result = start_customer_onboarding("cust-123")
@@ -349,6 +365,8 @@ class CleanupInactiveCustomersTests(TestCase):
         with active services never appear in candidates.  The result therefore
         shows inactive_found=0 and emails_sent=0 (no candidates to process).
         """
+        # NOTE: This tests the processing loop with empty candidates.
+        # DB-level exclusion (Exists subqueries) is tested in integration tests.
         # Return an empty candidate list — simulating that the DB-level exclusion
         # already removed any customers with active services.
         candidates_qs = self._make_candidates_qs([])
@@ -375,6 +393,8 @@ class CleanupInactiveCustomersTests(TestCase):
         Exists() subquery in .exclude() removes them before candidates are
         iterated, so inactive_found and emails_sent remain 0.
         """
+        # NOTE: This tests the processing loop with empty candidates.
+        # DB-level exclusion (Exists subqueries) is tested in integration tests.
         candidates_qs = self._make_candidates_qs([])
         self._wire_customer_qs(mock_customer_cls, candidates_qs)
 
@@ -436,6 +456,7 @@ class SendCustomerWelcomeEmailTests(TestCase):
         customer = MagicMock()
         customer.id = "cust-123"
         customer.primary_email = "test@example.com"
+        customer.meta = {}  # Empty meta — no prior welcome email sent
         customer.get_display_name.return_value = "Test Customer"
         mock_customer_cls.objects.get.return_value = customer
 
@@ -468,6 +489,7 @@ class SendCustomerWelcomeEmailTests(TestCase):
         customer = MagicMock()
         customer.id = "cust-123"
         customer.primary_email = "test@example.com"
+        customer.meta = {}  # Empty meta — no prior welcome email sent
         customer.get_display_name.return_value = "Test Customer"
         mock_customer_cls.objects.get.return_value = customer
 
