@@ -505,7 +505,7 @@ document.addEventListener('DOMContentLoaded', function() {
       showSuccess();
 
       // Call backend to confirm payment and create service
-      const response = await fetch('/order/confirm-payment/', {
+      const response = await fetch('{% url "orders:confirm_payment" %}', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -523,7 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (data.success) {
         // Redirect to success page or dashboard
         setTimeout(() => {
-          window.location.href = '/order/';
+          window.location.href = '{% url "orders:catalog" %}';
         }, 2000);
       } else {
         // Backend confirmation failed — error shown to user via showError()

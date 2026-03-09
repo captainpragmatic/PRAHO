@@ -619,7 +619,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def update_cart_item(request: HttpRequest) -> HttpResponse:
+def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint to update cart item quantity.
     """
@@ -645,7 +645,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:
     try:
         product_slug = request.POST.get("product_slug", "").strip()
         billing_period = request.POST.get("billing_period", "monthly")
-        quantity = int(request.POST.get("quantity", 1))
+        quantity = OrderInputValidator.validate_quantity(int(request.POST.get("quantity", 1)))
 
         cart = GDPRCompliantCartSession(request.session)
         cart.update_item_quantity(product_slug, billing_period, quantity)
@@ -665,6 +665,8 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:
 
     except ValidationError as e:
         return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": str(e)})
+    except (ValueError, InvalidOperation):
+        return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": _("Invalid quantity value.")})
     except Exception as e:
         logger.error(f"🔥 [Cart] Error updating cart item: {e}")
         return _cart_error_response(request, "orders/partials/cart_empty.html", {"error": _("Error updating cart.")})
@@ -1162,6 +1164,12 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
         if not payment_intent_id or not order_id:
             return JsonResponse({"success": False, "error": "Missing payment_intent_id or order_id"}, status=400)
 
+        # Validate order_id format (must be a valid UUID)
+        try:
+            uuid.UUID(str(order_id))
+        except (ValueError, AttributeError):
+            return JsonResponse({"success": False, "error": "Invalid order identifier"}, status=400)
+
         # Get customer context
         customer_id = getattr(request, "customer_id", None) or request.session.get("active_customer_id")
         user_id = getattr(request, "user_id", None) or request.session.get("user_id")
@@ -1176,7 +1184,7 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
 
         # Call the billing/confirm-payment endpoint
         payment_result = api_client.post_billing(
-            "confirm-payment/", {"payment_intent_id": payment_intent_id, "gateway": gateway}, user_id=user_id
+            "confirm-payment/", {"payment_intent_id": payment_intent_id, "gateway": gateway}, user_id=int(user_id)
         )
 
         if not payment_result.get("success"):
@@ -1194,7 +1202,7 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
             order_update_result = api_client.post(
                 f"orders/{order_id}/confirm/",
                 {"payment_intent_id": payment_intent_id, "payment_status": payment_status, "customer_id": customer_id},
-                user_id=user_id,
+                user_id=int(user_id),
             )
 
             if order_update_result.get("success"):

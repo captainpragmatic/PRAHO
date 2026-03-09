@@ -103,7 +103,12 @@ def create_test_service_plan(**kwargs) -> ServicePlan:
 # ===============================================================================
 
 class ServiceActivationServiceTestCase(TestCase):
-    """Test ServiceActivationService methods and business logic"""
+    """Test ServiceActivationService methods and business logic
+
+    NOTE: Current tests verify logging because service methods are placeholder
+    implementations. Expand to assert DB state changes once real provisioning
+    logic is implemented (e.g., Service.status transitions).
+    """
 
     def setUp(self):
         """Set up test data"""

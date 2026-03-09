@@ -219,7 +219,7 @@ class OrderNumberingService:
         # select_for_update() acquires a row lock to prevent concurrent reads
         # of the same latest order number (race condition fix — S4).
         latest_order = (
-            Order.objects.select_for_update()
+            Order.objects.select_for_update(of=("self",))
             .filter(customer=customer, order_number__startswith=prefix, created_at__year=current_year)
             .order_by("-order_number")
             .first()

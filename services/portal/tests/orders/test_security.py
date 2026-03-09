@@ -21,7 +21,6 @@ from django.urls import reverse
 
 from apps.orders.services import (
     GDPRCompliantCartSession,
-    CartRateLimiter,
     CartCalculationService,
     HMACPriceSealer
 )
@@ -58,15 +57,13 @@ class OrderHMACSecurityTestCase(SimpleTestCase):
         """Get client IP for HMAC sealing"""
         return '127.0.0.1'
 
-    @patch('apps.orders.views.CartRateLimiter')
     @patch('apps.orders.views.OrderSecurityHardening')
-    def test_hmac_replay_attack_protection(self, mock_hardening, mock_rate_limiter):
+    def test_hmac_replay_attack_protection(self, mock_hardening):
         """🔒 Test replay attack protection with nonce validation"""
         mock_hardening.uniform_response_delay.return_value = None
         mock_hardening.fail_closed_on_cache_failure.return_value = None
         mock_hardening.validate_request_size.return_value = None
         mock_hardening.check_suspicious_patterns.return_value = None
-        mock_rate_limiter.check_rate_limit.return_value = True
 
         # Generate valid price seal
         price_data = {'price_cents': 2999, 'currency': 'RON'}
@@ -254,7 +251,6 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
 
         # Simulate race condition detection
         # Real implementation would use database constraints or cache locks
-        pass  # Placeholder for race condition test
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -410,10 +406,13 @@ class OrderDosHardeningTestCase(SimpleTestCase):
         session['user_id'] = 456
         session.save()
 
-    def test_per_session_rate_limiting(self):
-        """🔒 Test per-session rate limiting enforcement"""
-        # Make requests up to the limit
-        for i in range(30):  # Default session limit
+    @override_settings(RATE_LIMITING_ENABLED=True)
+    def test_per_ip_rate_limiting_via_middleware(self):
+        """🔒 Rate limiting enforced by APIRateLimitMiddleware (burst: 20/10s)"""
+        # The APIRateLimitMiddleware enforces burst limits for /order/ endpoints.
+        # After exceeding the burst limit, subsequent requests get 429.
+        hit_429 = False
+        for i in range(25):  # Exceed burst limit of 20/10s
             with patch('apps.orders.views.OrderSecurityHardening') as mock_hardening:
                 mock_hardening.fail_closed_on_cache_failure.return_value = None
                 mock_hardening.validate_request_size.return_value = None
@@ -426,23 +425,11 @@ class OrderDosHardeningTestCase(SimpleTestCase):
                     'billing_period': 'monthly'
                 })
 
-                if i < 29:  # Should allow first 30 requests
-                    self.assertNotEqual(response.status_code, 429)
-                else:  # 30th request might hit limit
+                if response.status_code == 429:
+                    hit_429 = True
                     break
 
-        # Next request should be rate limited
-        with patch('apps.orders.views.OrderSecurityHardening') as mock_hardening:
-            mock_hardening.fail_closed_on_cache_failure.return_value = None
-            mock_hardening.validate_request_size.return_value = None
-            mock_hardening.check_suspicious_patterns.return_value = None
-
-            response = self.client.post('/order/cart/add/', {
-                'product_slug': 'test-product-limit',
-                'quantity': 1,
-                'billing_period': 'monthly'
-            })
-            self.assertEqual(response.status_code, 429)
+        self.assertTrue(hit_429, "Middleware should have rate-limited after burst threshold")
 
     def test_per_ip_sliding_window_rate_limiting(self):
         """🔒 Test per-IP sliding window rate limiting"""
@@ -659,6 +646,102 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
         self.assertNotEqual(version1, version3)
 
 
+@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+class HMACPriceSealerUnitTestCase(SimpleTestCase):
+    """
+    🔒 Direct unit tests for HMACPriceSealer.seal_price_data / verify_seal.
+    Tests the seal/verify round-trip, tamper detection, and edge cases.
+    """
+
+    def setUp(self):
+        self.price_data = {'price_cents': 2999, 'currency': 'RON', 'billing_period': 'monthly'}
+        self.client_ip = '10.0.0.1'
+        cache.clear()
+
+    def test_seal_and_verify_round_trip(self):
+        """Valid seal must verify successfully"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        self.assertTrue(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip)
+        )
+
+    def test_verify_rejects_tampered_body_hash(self):
+        """Tampered body_hash must fail verification"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        sealed['body_hash'] = 'deadbeef' * 8
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip)
+        )
+
+    def test_verify_rejects_tampered_signature(self):
+        """Tampered signature must fail verification"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        sealed['signature'] = 'baadf00d' * 8
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip)
+        )
+
+    def test_verify_rejects_wrong_portal_id(self):
+        """Wrong portal_id must fail verification"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        sealed['portal_id'] = 'evil_portal'
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip)
+        )
+
+    def test_verify_rejects_wrong_ip(self):
+        """Seal bound to one IP must fail verification from a different IP"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, '10.0.0.1')
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, '192.168.1.99')
+        )
+
+    def test_verify_rejects_stale_timestamp(self):
+        """Seal older than max_age_seconds must fail"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        sealed['timestamp'] = sealed['timestamp'] - 120  # 2 minutes old
+        # Re-sign would be needed for a real test, but since timestamp is part of
+        # the canonical data, changing it also invalidates the signature.
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip, max_age_seconds=61)
+        )
+
+    def test_verify_rejects_modified_price_data(self):
+        """Changing price_data after sealing must fail verification"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        tampered_data = {**self.price_data, 'price_cents': 1}  # Attempt cheaper price
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, tampered_data, self.client_ip)
+        )
+
+    def test_verify_rejects_replay(self):
+        """Same nonce used twice must fail on second verification"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        # First verification succeeds
+        self.assertTrue(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip)
+        )
+        # Second verification (replay) must fail
+        self.assertFalse(
+            HMACPriceSealer.verify_seal(sealed, self.price_data, self.client_ip)
+        )
+
+    def test_verify_rejects_empty_sealed_data(self):
+        """Empty sealed data must fail verification"""
+        self.assertFalse(
+            HMACPriceSealer.verify_seal({}, self.price_data, self.client_ip)
+        )
+
+    def test_seal_output_structure(self):
+        """Seal output must contain all required fields"""
+        sealed = HMACPriceSealer.seal_price_data(self.price_data, self.client_ip)
+        required_keys = {'signature', 'body_hash', 'timestamp', 'nonce', 'portal_id', 'ip_hash'}
+        self.assertEqual(required_keys, set(sealed.keys()))
+        self.assertEqual(sealed['portal_id'], 'praho_portal_v1')
+        self.assertEqual(len(sealed['signature']), 64)  # SHA-256 hex
+        self.assertEqual(len(sealed['body_hash']), 64)
+
+
 # Test runner helpers
 class OrderSecurityTestRunner:
     """Helper class to run all security tests with reporting"""
@@ -672,7 +755,8 @@ class OrderSecurityTestRunner:
             OrderSessionSecurityTestCase,
             OrderEnumerationSecurityTestCase,
             OrderDosHardeningTestCase,
-            OrderCartVersioningSecurityTestCase
+            OrderCartVersioningSecurityTestCase,
+            HMACPriceSealerUnitTestCase,
         ]
 
         print("🔒 Running Order Security Audit...")

@@ -142,7 +142,9 @@ def service_create(request: HttpRequest) -> HttpResponse:
                 counter += 1
 
             # TODO: Add currency selection to service creation form for multi-currency support
-            ron_currency = Currency.objects.get(code="RON")
+            ron_currency, _created = Currency.objects.get_or_create(
+                code="RON", defaults={"symbol": "lei", "decimals": 2}
+            )
             service = Service.objects.create(
                 customer=customer,
                 service_plan=plan,

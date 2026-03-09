@@ -22,9 +22,7 @@
   <div class="px-4 py-3 space-y-3 max-h-64 overflow-y-auto">
     {% for item in cart_items %}
     <div class="flex items-center justify-between rounded-lg transition-colors duration-200{% if just_added_slug and item.product_slug == just_added_slug %} bg-green-900/30{% endif %}"
-         {% if just_added_slug and item.product_slug == just_added_slug %}data-just-added="true"{% endif %}
-         x-data="{}"
-         {% if just_added_slug and item.product_slug == just_added_slug %}x-init="setTimeout(() => { $el.classList.remove('bg-green-900/30'); }, 2000)"{% endif %}>
+         {% if just_added_slug and item.product_slug == just_added_slug %}data-just-added="true" x-data="{}" x-init="setTimeout(() => { $el.classList.remove('bg-green-900/30'); }, 2000)"{% endif %}>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-white truncate">
           {{ item.product_name }}

@@ -113,13 +113,13 @@ class HMACPriceSealer:
         # Verify body hash
         canonical_body = json.dumps(price_data, sort_keys=True, separators=(",", ":"))
         expected_body_hash = hashlib.sha256(canonical_body.encode("utf-8")).hexdigest()
-        if sealed_data.get("body_hash") != expected_body_hash:
+        if not hmac_mod.compare_digest(sealed_data.get("body_hash", ""), expected_body_hash):
             logger.warning("🔒 [HMAC] Body hash mismatch")
             return False
 
         # Verify IP binding
         expected_ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
-        if sealed_data.get("ip_hash") != expected_ip_hash:
+        if not hmac_mod.compare_digest(sealed_data.get("ip_hash", ""), expected_ip_hash):
             logger.warning("🔒 [HMAC] IP binding mismatch")
             return False
 
@@ -172,7 +172,7 @@ class HMACPriceSealer:
             return False
 
         expected_ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
-        if sealed_data.get("ip_hash") != expected_ip_hash:
+        if not hmac_mod.compare_digest(sealed_data.get("ip_hash", ""), expected_ip_hash):
             return False
 
         body_hash = str(sealed_data.get("body_hash", ""))
