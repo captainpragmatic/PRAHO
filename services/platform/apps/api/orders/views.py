@@ -200,9 +200,13 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
                     continue
 
                 # Build order item data (include setup fee for accurate totals)
+                # Include product_slug + billing_period as stable identifiers so callers
+                # can map per-item totals deterministically (not by list index).
                 order_items.append(
                     {
                         "product_id": product.id,
+                        "product_slug": product.slug,
+                        "billing_period": item_data.get("billing_period", "monthly"),
                         "quantity": item_data["quantity"],
                         "unit_price_cents": int(product_price.effective_monthly_price_cents),
                         "setup_cents": int(product_price.setup_cents),
@@ -264,6 +268,8 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
             "items": [
                 {
                     "product_name": item["description"],
+                    "product_slug": item["product_slug"],
+                    "billing_period": item["billing_period"],
                     "quantity": item["quantity"],
                     "unit_price_cents": item["unit_price_cents"],
                     "setup_cents": item["setup_cents"],

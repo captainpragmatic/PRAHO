@@ -13,9 +13,10 @@ import logging
 import time as _time_module
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import quote as _url_quote
 
 from django.conf import settings
 from django.contrib import messages
@@ -104,7 +105,8 @@ def require_customer_authentication(view_func: Callable[..., Any]) -> Any:
 
         if not customer_id or not user_id:
             messages.error(request, _("To place an order, you must be authenticated."))
-            return redirect("/login/?next=" + request.get_full_path())
+            # POST-only endpoints — redirect to checkout after login, not back to the POST path.
+            return redirect("/login/?next=" + _url_quote("/order/checkout/", safe="/"))
 
         return view_func(request, *args, **kwargs)
 
@@ -168,7 +170,8 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
 
     if not customer_id or not user_id:
         messages.error(request, _("To place an order, you must be authenticated."))
-        return redirect("/login/?next=" + request.get_full_path())
+        # POST-only endpoint — redirect to checkout after login, not back to the POST path.
+        return redirect("/login/?next=" + _url_quote("/order/checkout/", safe="/"))
 
     # Validate cart version to prevent stale mutations
     cart_version = request.POST.get("cart_version", "")
@@ -216,9 +219,13 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
     and redirects to confirmation.
     """
     try:
-        # Deterministic idempotency key fallback — prevents double-click duplicates
+        # Idempotency key fallback — includes session key + timestamp to prevent
+        # same-cart collisions across separate checkout attempts.
         if not ctx.idempotency_key:
-            ctx.idempotency_key = hashlib.sha256(f"{ctx.customer_id}:{ctx.cart_version}".encode()).hexdigest()[:64]
+            session_key = (getattr(request, "session", None) and request.session.session_key) or ""
+            ctx.idempotency_key = hashlib.sha256(
+                f"{ctx.customer_id}:{ctx.cart_version}:{session_key}:{_time_module.time():.0f}".encode()
+            ).hexdigest()[:64]
 
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
 
@@ -280,9 +287,9 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         order_number = order_data.get("order_number")
         order_status = order_data.get("status", "draft")
 
-        # Create Stripe PaymentIntent for non-bank-transfer pending orders
+        # Create Stripe PaymentIntent only for explicit stripe payment method
         payment_intent_result = None
-        if order_status == "pending" and ctx.payment_method != "bank_transfer":
+        if order_status == "pending" and ctx.payment_method == "stripe":
             order_total = order_data.get("total", "0")
             order_currency = order_data.get("currency_code", "RON")
             total_cents = _parse_total_cents(str(order_total))
@@ -311,7 +318,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                                 "created_via": "portal_checkout",
                             },
                         },
-                        user_id=int(ctx.user_id or 0),
+                        user_id=int(ctx.user_id) if ctx.user_id and str(ctx.user_id).isdigit() else 0,
                     )
 
                     if payment_intent_result and payment_intent_result.get("success"):
@@ -973,7 +980,7 @@ def _parse_order_timestamp(order_data: dict[str, Any]) -> None:
         with contextlib.suppress(ValueError, TypeError):
             parsed_dt = datetime.fromisoformat(created_at_str)
             if parsed_dt.tzinfo is None:
-                parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+                parsed_dt = parsed_dt.replace(tzinfo=UTC)
             order_data["created_at"] = parsed_dt
 
 

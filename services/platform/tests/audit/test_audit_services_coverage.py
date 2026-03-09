@@ -1352,11 +1352,15 @@ class TestProductsAuditService(TestCase):
         price.billing_period = "monthly"
         price.amount_cents = 5000
         price.amount = Decimal("50.00")
+        price.monthly_price_cents = 5000
+        price.monthly_price = Decimal("50.00")
         price.setup_cents = 0
         price.setup_fee = Decimal("0.00")
         price.is_active = True
         price.promo_price_cents = None
         price.discount_percent = Decimal("0.00")
+        price.semiannual_discount_percent = Decimal("0.00")
+        price.annual_discount_percent = Decimal("0.00")
 
         event = ProductsAuditService.log_product_pricing_changed(
             price, "price_created", {}
@@ -1373,11 +1377,15 @@ class TestProductsAuditService(TestCase):
         price.billing_period = "monthly"
         price.amount_cents = 6000
         price.amount = Decimal("60.00")
+        price.monthly_price_cents = 6000
+        price.monthly_price = Decimal("60.00")
         price.setup_cents = 0
         price.setup_fee = Decimal("0.00")
         price.is_active = True
         price.promo_price_cents = None
         price.discount_percent = Decimal("0.00")
+        price.semiannual_discount_percent = Decimal("0.00")
+        price.annual_discount_percent = Decimal("0.00")
 
         changes = {
             "price_changed": {
@@ -1397,11 +1405,15 @@ class TestProductsAuditService(TestCase):
         price.billing_period = "monthly"
         price.amount_cents = 5000
         price.amount = Decimal("50.00")
+        price.monthly_price_cents = 5000
+        price.monthly_price = Decimal("50.00")
         price.setup_cents = 0
         price.setup_fee = Decimal("0.00")
         price.is_active = True
         price.promo_price_cents = None
         price.discount_percent = Decimal("0.00")
+        price.semiannual_discount_percent = Decimal("0.00")
+        price.annual_discount_percent = Decimal("0.00")
 
         changes = {"status_changed": {"from": "active", "to": "inactive"}}
         event = ProductsAuditService.log_product_pricing_changed(price, "price_updated", changes)
