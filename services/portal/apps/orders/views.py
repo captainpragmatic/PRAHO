@@ -1150,7 +1150,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
+def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912
     """
     Confirm payment and trigger service creation.
     Called after successful Stripe payment from frontend.
@@ -1176,6 +1176,9 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911
 
         if not customer_id:
             return JsonResponse({"success": False, "error": "Customer authentication required"}, status=401)
+
+        if not user_id:
+            return JsonResponse({"success": False, "error": "User authentication required"}, status=401)
 
         logger.info(f"💳 Confirming payment {payment_intent_id} for order {order_id}")
 

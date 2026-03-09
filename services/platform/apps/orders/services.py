@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from apps.billing.models import Currency
@@ -90,6 +90,7 @@ class OrderCreateData:
     currency: str = "RON"
     notes: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
+    idempotency_key: str = ""
 
 
 @dataclass
@@ -318,13 +319,14 @@ class OrderService:
             # Get currency instance (Currency already imported at top)
             currency_instance = Currency.objects.get(code=data.currency)
 
-            # Create order
+            # Create order (idempotency_key set atomically to prevent race conditions)
             order = Order.objects.create(
                 order_number=order_number,
                 customer=data.customer,
                 currency=currency_instance,
                 notes=data.notes,
                 meta=data.meta,
+                idempotency_key=data.idempotency_key,
                 # Customer snapshot fields
                 customer_email=data.customer.primary_email,
                 customer_name=data.customer.name,
@@ -444,6 +446,10 @@ class OrderService:
 
             return Ok(order)
 
+        except IntegrityError:
+            # Let IntegrityError propagate — idempotency race conditions must be
+            # handled at the view level where the existing order can be returned.
+            raise
         except Exception as e:
             logger.exception(f"Failed to create order: {e}")
             return Err(f"Failed to create order: {e!s}")

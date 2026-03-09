@@ -503,6 +503,11 @@ class PortalServiceHMACMiddleware:
                 # Restricted to an explicit allowlist to prevent broad bypass.
                 staff_session_allowed_prefixes = [
                     "/api/customers/",  # Ticket form: fetch customer services
+                    "/billing/invoices/",  # Staff billing UI: invoice list & detail
+                    "/billing/proformas/",  # Staff billing UI: proforma management
+                    "/billing/payments/",  # Staff billing UI: payment list
+                    "/billing/reports/",  # Staff billing UI: billing reports
+                    "/billing/e-factura/",  # Staff billing UI: e-Factura dashboard
                 ]
                 if (
                     getattr(request, "user", None)

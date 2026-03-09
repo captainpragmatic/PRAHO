@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 # Constants
 ISO_COUNTRY_CODE_LENGTH = 2
 IDEMPOTENCY_KEY_MIN_LENGTH = 16
-IDEMPOTENCY_KEY_MAX_LENGTH = 128
+IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
 
 # 🔒 SECURITY: Custom throttle classes for order endpoints
@@ -511,7 +511,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 
     if len(idempotency_key) < IDEMPOTENCY_KEY_MIN_LENGTH or len(idempotency_key) > IDEMPOTENCY_KEY_MAX_LENGTH:
         return Response(
-            {"error": "Idempotency key must be between 16-128 characters"}, status=status.HTTP_400_BAD_REQUEST
+            {"error": "Idempotency key must be between 16-64 characters"}, status=status.HTTP_400_BAD_REQUEST
         )
 
     # 🔒 SECURITY: Check for existing order with this idempotency key
@@ -676,10 +676,28 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             currency=validated_data["currency"],
             notes=validated_data.get("notes", ""),
             meta=validated_data.get("meta", {}),
+            idempotency_key=idempotency_key,
         )
 
-        # Create order using platform service
-        result = OrderService.create_order(order_create_data)
+        # Create order using platform service (idempotency_key set atomically in create_order)
+        try:
+            result = OrderService.create_order(order_create_data)
+        except IntegrityError:
+            # 🔒 SECURITY: Race condition — concurrent request already created an order
+            # with this idempotency key. Return the existing order instead of failing.
+            existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
+            if existing:
+                logger.info(f"🔄 [API] Idempotency race resolved: returning existing order {existing.order_number}")
+                serializer = OrderDetailSerializer(existing)
+                # Re-warm cache for future lookups
+                cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
+                cache.set(cache_key, str(existing.id), timeout=3600)
+                return Response(
+                    {"success": True, "order": serializer.data, "duplicate": True},
+                    status=status.HTTP_200_OK,
+                )
+            # Integrity error but no matching order — re-raise as unexpected
+            raise
 
         if isinstance(result, Ok):
             order = result.value
@@ -705,11 +723,6 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                         preflight = {"errors": errs, "warnings": warns}
                 except Exception as e:
                     logger.warning(f"⚠️ [API] Auto-pending failed for {order.order_number}: {e}")
-
-            # 🔒 SECURITY: Persist idempotency key on order for DB-backed deduplication (S3)
-            if idempotency_key and not order.idempotency_key:
-                order.idempotency_key = idempotency_key[:64]
-                order.save(update_fields=["idempotency_key"])
 
             # 🔒 SECURITY: Store idempotency key in cache to prevent duplicate orders
             cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
