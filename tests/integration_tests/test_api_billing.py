@@ -6,13 +6,10 @@ Integration tests for billing API endpoints.
 Tests cover invoices, payments, refunds, and Romanian e-Factura compliance.
 """
 
-import json
 import os
 import sys
 from datetime import timedelta
 from decimal import Decimal
-
-import pytest
 
 # Add platform to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../services/platform'))
@@ -27,7 +24,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 
 from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile
-from apps.billing.models import Currency, Invoice, InvoiceLine, Payment, Proforma
+from apps.billing.models import Currency, Invoice, InvoiceLine, Payment, ProformaInvoice  # noqa: E402
 
 User = get_user_model()
 
@@ -341,7 +338,7 @@ class TestProformaAPIIntegration(TestCase):
             preferred_currency='RON',
         )
 
-        self.proforma = Proforma.objects.create(
+        self.proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
             number='PRO-2024-00001',

@@ -105,8 +105,9 @@ class TestDockerServicesIntegration:
         redis_env_vars = [env for env in platform_env if 'REDIS_URL' in str(env)]
         assert len(redis_env_vars) == 0, "Platform should not have REDIS_URL environment variable"
 
-        # Verify database cache is used (no Redis cache)
-        assert 'DATABASE_URL' in str(platform_env), "Platform should have DATABASE_URL"
+        # Verify database connection is configured (individual DB_* vars, not DATABASE_URL)
+        assert 'DB_HOST' in str(platform_env), "Platform should have DB_HOST"
+        assert 'DB_NAME' in str(platform_env), "Platform should have DB_NAME"
 
         # Verify portal service configuration
         portal = services['portal']

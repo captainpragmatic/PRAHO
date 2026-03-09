@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 from django.utils import timezone
@@ -1864,7 +1865,7 @@ class Command(BaseCommand):
 
         # Get payment terms for logical due_at calculation
         billing_profile = None
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(ObjectDoesNotExist):
             billing_profile = customer.billing_profile
         payment_terms_days = billing_profile.payment_terms if billing_profile else 30
 

@@ -134,19 +134,16 @@ class HMACPriceSealer:
             logger.warning("🔒 [HMAC] Signature mismatch")
             return False
 
-        # Check nonce for replay protection
+        # Check nonce for replay protection — atomic check-and-set prevents race condition
         nonce_cache_key = f"hmac_nonce:{nonce}"
-        if cache.get(nonce_cache_key):
+        if not cache.add(nonce_cache_key, True, timeout=max_age_seconds * 2):
             logger.warning("🔒 [HMAC] Replay detected - nonce already used")
             return False
-
-        # Mark nonce as used
-        cache.set(nonce_cache_key, True, timeout=max_age_seconds * 2)
 
         return True
 
     @staticmethod
-    def verify_seal_metadata(  # noqa: PLR0911
+    def verify_seal_metadata(
         sealed_data: dict[str, Any],
         client_ip: str = "127.0.0.1",
         max_age_seconds: int = 61,
@@ -189,11 +186,7 @@ class HMACPriceSealer:
             return False
 
         nonce_cache_key = f"hmac_nonce:{nonce}"
-        if cache.get(nonce_cache_key):
-            return False
-
-        cache.set(nonce_cache_key, True, timeout=max_age_seconds * 2)
-        return True
+        return cache.add(nonce_cache_key, True, timeout=max_age_seconds * 2)
 
 
 class CartRateLimiter:
@@ -254,11 +247,6 @@ class CartRateLimiter:
             if ip_hour_count >= CartRateLimiter.IP_OPERATIONS_LIMIT_HOUR:
                 logger.warning(f"🚨 [Cart] IP rate limit (hour) exceeded for IP hash {ip_hash}")
                 return False
-
-        # Backward-compatible behavior for legacy call sites/tests:
-        # when no client_ip is supplied, check acts as "consume one slot".
-        if client_ip is None:
-            CartRateLimiter.record_operation(session_key)
 
         return True
 
@@ -590,7 +578,7 @@ class GDPRCompliantCartSession:
         Version changes when cart contents, quantities, or configuration changes.
         """
         # Create canonical representation of cart state
-        version_data = {"items": [], "currency": cart.get("currency", "RON"), "updated_at": cart.get("updated_at", "")}
+        version_data = {"items": [], "currency": cart.get("currency", "RON")}
 
         # Include essential item data that affects pricing/checkout
         for item in cart.get("items", []):
@@ -788,9 +776,6 @@ class OrderCreationService:
             if getattr(e, "is_rate_limited", False):
                 raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Preflight validation failed: {e}")
-
-            # Try to extract specific error message from the exception
-            str(e)
 
             # Check if this is an API response with error details
             if hasattr(e, "response") and e.response:

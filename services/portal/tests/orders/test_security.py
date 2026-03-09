@@ -174,9 +174,10 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
         session['user_id'] = 456
         session.save()
 
-    @patch('apps.orders.views.PlatformAPIClient')
+    @patch('apps.orders.views.OrderCreationService.create_draft_order')
+    @patch('apps.orders.views.OrderCreationService.preflight_order')
     @patch('apps.orders.views.GDPRCompliantCartSession')
-    def test_idempotent_order_creation(self, mock_cart_class, mock_api_client):
+    def test_idempotent_order_creation(self, mock_cart_class, mock_preflight, mock_create_draft):
         """🔒 Test idempotent order creation with same key"""
         # Mock cart
         mock_cart = Mock()
@@ -187,10 +188,15 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
         mock_cart.get_cart_version.return_value = 'v1_test_version'
         mock_cart_class.return_value = mock_cart
 
-        # Mock API client
-        mock_api = Mock()
-        mock_api.post.return_value = {'order_id': 'ORDER_123', 'status': 'created'}
-        mock_api_client.return_value = mock_api
+        # Mock service layer (preflight always runs now per S5 fix)
+        mock_preflight.return_value = {'valid': True, 'errors': [], 'warnings': []}
+        mock_create_draft.return_value = {
+            'order': {
+                'id': '550e8400-e29b-41d4-a716-446655440000',
+                'order_number': 'ORD-123',
+                'status': 'draft',
+            }
+        }
 
         idempotency_key = 'test_key_12345'
 
@@ -212,8 +218,8 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
 
         # Both should succeed and return same order ID
         self.assertEqual(response1.status_code, response2.status_code)
-        # API should only be called once due to idempotency
-        self.assertEqual(mock_api.post.call_count, 1)
+        # Order creation (create_draft_order) should only be called once — second request hits cache
+        self.assertEqual(mock_create_draft.call_count, 1)
 
     @patch('apps.orders.views.CartCalculationService')
     @patch('apps.orders.views.GDPRCompliantCartSession')

@@ -255,14 +255,17 @@ class TestCartVersionMismatch(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# BACKEND-4: payment_method=stripe routes to process_payment
+# BACKEND-4: payment_method=stripe routes through shared order creation logic
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
 class TestStripePaymentRouting(SimpleTestCase):
-    """BACKEND-4: payment_method=stripe must delegate to process_payment."""
+    """BACKEND-4: payment_method=stripe must use the shared order creation path."""
 
     def setUp(self) -> None:
+        from django.core.cache import cache  # noqa: PLC0415
+
+        cache.clear()  # Prevent idempotency key collisions between test methods
         self.client = Client()
         session = self.client.session
         session["customer_id"] = 42
@@ -282,14 +285,22 @@ class TestStripePaymentRouting(SimpleTestCase):
 
         session.save()
 
-    def test_stripe_payment_method_calls_process_payment(self) -> None:
-        """create_order with payment_method=stripe invokes process_payment."""
-        with patch("apps.orders.views.process_payment") as mock_process:
-            from django.http import HttpResponse  # noqa: PLC0415
+    def test_stripe_payment_method_uses_shared_order_creation(self) -> None:
+        """create_order with payment_method=stripe uses _create_and_process_order (shared path)."""
+        with (
+            patch("apps.orders.views.OrderCreationService.preflight_order") as mock_pre,
+            patch("apps.orders.views.OrderCreationService.create_draft_order") as mock_create,
+        ):
+            mock_pre.return_value = {"valid": True, "errors": [], "warnings": []}
+            mock_create.return_value = {
+                "order": {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "order_number": "ORD-STRIPE-001",
+                    "status": "draft",
+                }
+            }
 
-            mock_process.return_value = HttpResponse(status=302)
-
-            self.client.post(
+            response = self.client.post(
                 "/order/create/",
                 {
                     "cart_version": self.cart_version,
@@ -298,7 +309,10 @@ class TestStripePaymentRouting(SimpleTestCase):
                 },
             )
 
-        mock_process.assert_called_once()
+        # Should proceed through shared order creation — preflight always runs
+        mock_pre.assert_called_once()
+        mock_create.assert_called_once()
+        self.assertIn(response.status_code, [200, 302])
 
     def test_bank_transfer_does_not_call_process_payment(self) -> None:
         """create_order with payment_method=bank_transfer does NOT call process_payment."""

@@ -12,6 +12,9 @@ from django.utils.translation import gettext as _
 
 logger = logging.getLogger(__name__)
 
+# Matches any HTML tag opening (e.g. <script>, <img, </div, <!-- comment -->) for XSS defense-in-depth
+_HTML_TAG_PATTERN = re.compile(r"<[a-zA-Z/!]")
+
 MAX_CONFIG_KEYS = 50
 MAX_DOMAIN_LENGTH = 253
 MAX_CONFIG_VALUE_LENGTH = 100
@@ -164,8 +167,8 @@ class OrderInputValidator:
         if len(notes) > MAX_PROMO_CODE_LENGTH:
             raise ValidationError(_("Notes cannot exceed 500 characters"))
 
-        # Basic security check - prevent script injection
-        if any(pattern in notes.lower() for pattern in ["<script", "javascript:", "alert(", "eval("]):
-            raise ValidationError(_("Notes contain invalid content"))
+        # Basic security check — reject any HTML markup (catches <script>, <img onerror=...>, etc.)
+        if _HTML_TAG_PATTERN.search(notes):
+            raise ValidationError(_("Notes cannot contain HTML markup."))
 
         return notes

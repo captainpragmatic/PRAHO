@@ -97,6 +97,8 @@
                   {% trans "Draft" as bt5 %}{% badge bt5 icon="document" variant="secondary" %}
                 {% elif order.status == "pending" %}
                   {% trans "Pending" as bt6 %}{% badge bt6 icon="clock" variant="warning" %}
+                {% elif order.status == "confirmed" %}
+                  {% trans "Confirmed" as bt6b %}{% badge bt6b icon="check" variant="success" %}
                 {% elif order.status == "processing" %}
                   {% trans "Processing" as bt7 %}{% badge bt7 icon="settings" variant="primary" %}
                 {% elif order.status == "completed" %}
@@ -343,9 +345,12 @@
                 <option value="pending" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Pending" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "pending" %}
-                <option value="processing">⚙️ {% trans "Processing" %}</option>
+                <option value="confirmed">✅ {% trans "Confirmed" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
                 <option value="failed">🔥 {% trans "Failed" %}</option>
+              {% elif order.status == "confirmed" %}
+                <option value="processing">⚙️ {% trans "Processing" %}</option>
+                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "processing" %}
                 <option value="completed">✅ {% trans "Completed" %}</option>
                 <option value="failed">🔥 {% trans "Failed" %}</option>

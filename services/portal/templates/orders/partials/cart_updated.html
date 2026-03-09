@@ -19,7 +19,8 @@
     <div hx-get="{% url 'orders:mini_cart_content' %}"
          hx-trigger="load, cartUpdated from:body"
          hx-target="this"
-         hx-swap="innerHTML">
+         hx-swap="innerHTML"
+         hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
       <!-- Loading content -->
       <div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700 p-4">
         <div class="animate-pulse">
@@ -47,6 +48,9 @@
     {% if product_name %}
     <div class="text-xs opacity-90 ml-2">({{ product_name }})</div>
     {% endif %}
+    <a href="{% url 'orders:cart_review' %}" class="text-blue-400 hover:text-blue-300 text-sm font-medium ml-2">
+      {% trans "View Cart" %} →
+    </a>
   </div>
 </div>
 {% endif %}

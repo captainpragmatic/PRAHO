@@ -274,11 +274,11 @@ class TestCartRateLimiterStandalone(SimpleTestCase):
         """Test that rate limiting blocks abuse"""
         session_key = 'test_session_abuse_v2'
 
-        # Exhaust the rate limit
+        # Exhaust the rate limit: check + record mirrors the view pattern
         for i in range(30):
             result = CartRateLimiter.check_rate_limit(session_key)
-            if i < 30:
-                self.assertTrue(result, f"Check {i+1} should pass")
+            self.assertTrue(result, f"Check {i+1} should pass")
+            CartRateLimiter.record_operation(session_key)
 
         # Next request should be blocked
         self.assertFalse(CartRateLimiter.check_rate_limit(session_key))
@@ -293,31 +293,33 @@ class TestCartRateLimiterStandalone(SimpleTestCase):
         """Test that recording operations increments the counter"""
         session_key = 'test_session_record_v2'
 
-        # Record several operations
-        for i in range(10):
+        # Record 10 operations directly (as a view would after a successful operation)
+        for _ in range(10):
             CartRateLimiter.record_operation(session_key)
 
-        # Should have used up 10 of the 30 allowed operations
-        remaining_checks = 0
-        for i in range(25):  # Try 25 more (total would be 35)
+        # Should have used up 10 of the 30 allowed operations.
+        # Each iteration: check first (pure), then record if allowed — mirrors view pattern.
+        remaining_ops = 0
+        for _ in range(25):  # Try 25 more operations (total would be 35)
             if CartRateLimiter.check_rate_limit(session_key):
-                remaining_checks += 1
+                CartRateLimiter.record_operation(session_key)
+                remaining_ops += 1
             else:
                 break
 
-        # Should allow exactly 20 more operations (30 - 10 recorded)
-        self.assertEqual(remaining_checks, 20)
+        # Should allow exactly 20 more operations (30 - 10 already recorded)
+        self.assertEqual(remaining_ops, 20)
 
     def test_rate_limit_session_isolation(self):
         """Test that rate limits are isolated per session"""
         session1 = 'test_session_1_v2'
         session2 = 'test_session_2_v2'
 
-        # Exhaust rate limit for session1
+        # Exhaust rate limit for session1: check + record mirrors the view pattern
         for i in range(30):
             result = CartRateLimiter.check_rate_limit(session1)
-            if i < 30:
-                self.assertTrue(result, f"Session1 check {i+1} should pass")
+            self.assertTrue(result, f"Session1 check {i+1} should pass")
+            CartRateLimiter.record_operation(session1)
 
         # session1 should be blocked
         self.assertFalse(CartRateLimiter.check_rate_limit(session1))

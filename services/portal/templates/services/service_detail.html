@@ -134,7 +134,15 @@
         <!-- Service Age -->
         {% trans 'Age' as st3_label %}
         {% if service.service_age_days != None %}
-          {% with val=service.service_age_days|stringformat:"s" %}{% stat_tile st3_label val icon="clock" variant="info" %}{% endwith %}
+          {% with days=service.service_age_days %}
+            {% if days == 1 %}
+              {% trans "1 day" as st3_age_val %}
+            {% else %}
+              {# nosemgrep: python.django.security.audit.xss.template-blocktranslate-no-escape.template-blocktranslate-no-escape #}
+              {% blocktrans with count=days asvar st3_age_val %}{{ count }} days{% endblocktrans %}
+            {% endif %}
+            {% stat_tile st3_label st3_age_val icon="clock" variant="info" %}
+          {% endwith %}
         {% else %}
           {% trans 'New' as st3_val %}{% stat_tile st3_label st3_val icon="clock" variant="default" %}
         {% endif %}

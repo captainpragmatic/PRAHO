@@ -215,9 +215,12 @@ class OrderNumberingService:
         customer_id = str(customer.pk).replace("-", "")[:8].upper()
         prefix = f"ORD-{current_year}-{customer_id}"
 
-        # Get the highest existing order number for this customer and year
+        # Get the highest existing order number for this customer and year.
+        # select_for_update() acquires a row lock to prevent concurrent reads
+        # of the same latest order number (race condition fix — S4).
         latest_order = (
-            Order.objects.filter(customer=customer, order_number__startswith=prefix, created_at__year=current_year)
+            Order.objects.select_for_update()
+            .filter(customer=customer, order_number__startswith=prefix, created_at__year=current_year)
             .order_by("-order_number")
             .first()
         )

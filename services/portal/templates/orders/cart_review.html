@@ -93,8 +93,9 @@
                           hx-swap="outerHTML"
                           hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                           hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));"
+                          hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')"
                           class="bg-slate-700 text-white rounded px-2 py-1 text-sm border border-slate-600 focus:border-blue-500 focus:outline-none">
-                    {% for i in "12345678910"|make_list %}
+                    {% for i in "xxxxxxxxxx"|make_list %}
                     <option value="{{ forloop.counter }}" {% if item.quantity == forloop.counter %}selected{% endif %}>
                       {{ forloop.counter }}
                     </option>
@@ -154,7 +155,9 @@
              hx-trigger="load"
              hx-target="this"
              hx-swap="outerHTML"
-             hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+             hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+             hx-indicator="#cart-totals-spinner"
+             hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
 
           <!-- Loading State -->
           <div class="p-6">

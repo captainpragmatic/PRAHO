@@ -136,6 +136,11 @@ PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhos
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
 
+# Company bank details for bank transfer payment instructions
+COMPANY_BANK_IBAN = os.environ.get("COMPANY_BANK_IBAN", "")
+COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
+COMPANY_BANK_BENEFICIARY = os.environ.get("COMPANY_BANK_BENEFICIARY", "PragmaticHost SRL")
+
 
 # ===============================================================================
 # INTERNATIONALIZATION

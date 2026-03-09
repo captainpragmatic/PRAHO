@@ -11,6 +11,7 @@ from typing import Any
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
@@ -83,7 +84,9 @@ class ProductCatalogThrottle(ScopedRateThrottle):
 @public_api_endpoint
 def product_list(request: Request) -> Response:
     """
-    Public product catalog listing -- intentionally public.
+    Public endpoint — intentionally accessible without HMAC authentication.
+    Product catalog information is not sensitive and must be accessible
+    for the portal to display products to unauthenticated visitors.
 
     Supports filtering by product type and featured status.
     """
@@ -115,7 +118,11 @@ def product_list(request: Request) -> Response:
 @throttle_classes([ProductCatalogThrottle])
 @public_api_endpoint
 def product_detail(request: Request, slug: str) -> Response:
-    """Public product details by slug -- intentionally public."""
+    """
+    Public endpoint — intentionally accessible without HMAC authentication.
+    Product catalog information is not sensitive and must be accessible
+    for the portal to display products to unauthenticated visitors.
+    """
 
     try:
         product = Product.objects.prefetch_related("prices").get(slug=slug, is_active=True, is_public=True)
@@ -211,7 +218,7 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
         # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
         try:
-            customer_obj = Customer.objects.get(id=customer_id)
+            customer_obj = customer  # Already injected by @require_customer_authentication
             customer_country = getattr(customer_obj, "country", "RO") or "RO"
             is_business = bool(getattr(customer_obj, "company_name", ""))
             vat_number = (
@@ -429,8 +436,10 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
             total_cents=int(vat_result.total_cents),
         )
 
-        # Mark as preflight order so validation uses our computed subtotal
+        # Mark as preflight order so validation uses our computed subtotal and cached VAT result.
+        # Caching vat_result avoids a duplicate OrderVATCalculator.calculate_vat call inside validate().
         temp_order._preflight_subtotal_cents = subtotal_cents
+        temp_order._preflight_vat_result = vat_result
 
         # Run preflight validation on the temporary order
         logger.info(
@@ -463,12 +472,12 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
             }
         )
 
-    except Exception as e:
-        logger.exception(f"🔥 [API] Preflight validation failed: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Preflight validation failed for customer %s", customer.id)
         return Response(
             {
                 "success": False,
-                "errors": [f"Preflight validation failed: {e!s}"],
+                "errors": [str(_("Order validation encountered an unexpected error. Please try again."))],
                 "warnings": [],
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -519,6 +528,23 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
         except Order.DoesNotExist:
             # Order was deleted, clear cache and continue with creation
             cache.delete(cache_key)
+
+    # DB fallback: check database for existing order when cache misses (S3)
+    if idempotency_key:
+        db_existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
+        if db_existing:
+            logger.info(f"🔄 [API] DB fallback: found existing order for idempotency key: {idempotency_key[:8]}...")
+            # Re-warm the cache for future lookups
+            cache.set(cache_key, str(db_existing.id), timeout=3600)
+            serializer = OrderDetailSerializer(db_existing)
+            return Response(
+                {
+                    "success": True,
+                    "order": serializer.data,
+                    "duplicate": True,
+                },
+                status=status.HTTP_200_OK,
+            )
 
     # Validate input
     input_serializer = OrderCreateInputSerializer(data=request.data)
@@ -674,9 +700,14 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 except Exception as e:
                     logger.warning(f"⚠️ [API] Auto-pending failed for {order.order_number}: {e}")
 
-            # 🔒 SECURITY: Store idempotency key to prevent duplicate orders
+            # 🔒 SECURITY: Persist idempotency key on order for DB-backed deduplication (S3)
+            if idempotency_key and not order.idempotency_key:
+                order.idempotency_key = idempotency_key[:64]
+                order.save(update_fields=["idempotency_key"])
+
+            # 🔒 SECURITY: Store idempotency key in cache to prevent duplicate orders
             cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
-            cache.set(cache_key, order.id, timeout=3600)  # Store for 1 hour
+            cache.set(cache_key, str(order.id), timeout=3600)  # Store for 1 hour
 
             logger.info(
                 f"📦 [API] Order created: {order.order_number} for customer {customer_id} (idempotency: {idempotency_key[:8]}...)"
@@ -798,7 +829,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
             domain=item.domain_name or "",
             username=username,
             billing_cycle="monthly",
-            price=Decimal(str(item.unit_price_cents / 100)),
+            price=Decimal(item.unit_price_cents) / Decimal(100),
             setup_fee_paid=item.setup_cents > 0,
             server=server,
             provisioning_data={
@@ -819,7 +850,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
         }
     except Exception as e:
         logger.error(f"❌ Failed to provision service for {item.product.name}: {e}")
-        return {"product": item.product.name, "error": str(e)}
+        return {"product": item.product.name, "error": "Provisioning failed"}
 
 
 @api_view(["POST"])
@@ -836,13 +867,23 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
         # Use atomic transaction for order confirmation and service creation
         with transaction.atomic():
-            # Get order with row-level lock to prevent double-confirmation
+            # Get order with row-level lock to prevent double-confirmation.
+            # of=("self",) locks only the Order row, not related tables.
             order = (
-                Order.objects.select_for_update().prefetch_related("items").get(id=order_id, customer_id=customer.id)
+                Order.objects.select_for_update(of=("self",))
+                .prefetch_related("items")
+                .get(id=order_id, customer_id=customer.id)
             )
 
+            # Verify PaymentIntent belongs to this order (prevent cross-binding — S2)
+            if payment_intent_id and order.payment_intent_id and payment_intent_id != order.payment_intent_id:
+                return Response(
+                    {"success": False, "error": "Payment intent does not match this order"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             # Idempotency guard — prevent double-processing
-            if order.status not in ["pending", "payment_processing"]:
+            if order.status not in ["pending"]:
                 return Response(
                     {"success": False, "error": "Order already processed"},
                     status=status.HTTP_409_CONFLICT,
@@ -905,6 +946,6 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
     except Exception as e:
         logger.exception(f"🔥 [API] Order confirmation failed: {e}")
         return Response(
-            {"success": False, "error": f"Failed to confirm order: {e!s}"},
+            {"success": False, "error": "Failed to confirm order"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

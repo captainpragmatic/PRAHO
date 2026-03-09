@@ -84,7 +84,7 @@ class TestOrderViews(SimpleTestCase):
                     'product_type': 'shared_hosting',
                     'is_featured': True,
                     'prices': [
-                        {'billing_period': 'monthly', 'price_cents': 2999, 'currency': 'RON'}
+                        {'billing_period': 'monthly', 'price_cents': 2999, 'monthly_price': '29.99', 'semiannual_price': '149.94', 'annual_price': '269.88', 'setup_fee': '0.00', 'has_semiannual_discount': False, 'has_annual_discount': False, 'currency': 'RON'}
                     ]
                 }
             ]
@@ -364,7 +364,7 @@ class TestOrderViewsIntegration(SimpleTestCase):
                     'name': 'Basic Shared Hosting',
                     'product_type': 'shared_hosting',
                     'prices': [
-                        {'billing_period': 'monthly', 'price_cents': 2999}
+                        {'billing_period': 'monthly', 'price_cents': 2999, 'monthly_price': '29.99', 'semiannual_price': '149.94', 'annual_price': '269.88', 'setup_fee': '0.00', 'has_semiannual_discount': False, 'has_annual_discount': False, 'currency': 'RON'}
                     ]
                 }
             ]

@@ -478,8 +478,10 @@ class PortalServiceHMACMiddleware:
         return False, error_msg
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        # Only process API requests
-        if request.path.startswith("/api/"):
+        # Process API and billing requests — both require HMAC authentication.
+        # NOTE: /billing/ endpoints (create-payment-intent, confirm-payment, process-refund)
+        # are inter-service endpoints called by Portal with HMAC signatures.
+        if request.path.startswith("/api/") or request.path.startswith("/billing/"):
             # Skip HMAC validation for public endpoints only (exact match to prevent bypass).
             # NOTE: /api/users/login/ is NOT exempt - the portal service signs
             # login requests with HMAC, so we validate portal origin to prevent

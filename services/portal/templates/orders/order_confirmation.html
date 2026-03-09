@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
-{% load i18n %}
 
 {% block title %}{% trans "Order Confirmed" %}{% endblock %}
 
@@ -218,6 +217,61 @@
   </div>
   {% endif %}{% endif %}
 
+  <!-- Bank Transfer Payment Details -->
+  {% if order.payment_method == "bank_transfer" and order.status == "pending" %}
+  <div class="bg-gradient-to-r from-amber-900/30 to-yellow-900/20 border border-amber-600/50 rounded-lg mb-8">
+    <div class="px-6 py-4 border-b border-amber-700/50">
+      <h3 class="text-xl font-medium text-white flex items-center">
+        {% icon "building" size="sm" css_class="mr-2 text-amber-400" %}
+        {% trans "Bank Transfer Payment Details" %}
+      </h3>
+      <p class="text-amber-200 text-sm mt-1">
+        {% trans "Please complete your payment using the details below" %}
+      </p>
+    </div>
+
+    <div class="p-6">
+      <div class="grid sm:grid-cols-2 gap-6">
+        <div class="space-y-4">
+          {% if bank_details.iban %}
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "IBAN" %}</label>
+            <p class="text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ bank_details.iban }}</p>
+          </div>
+          {% endif %}
+          {% if bank_details.bank_name %}
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Bank" %}</label>
+            <p class="text-white text-sm">{{ bank_details.bank_name }}</p>
+          </div>
+          {% endif %}
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Beneficiary" %}</label>
+            <p class="text-white text-sm">{{ bank_details.beneficiary }}</p>
+          </div>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Payment Reference" %}</label>
+            <p class="text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ order.order_number }}</p>
+          </div>
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Amount Due" %}</label>
+            <p class="text-green-400 font-bold text-lg font-mono">{{ order.total }} {{ order.currency_code }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 p-3 bg-amber-900/30 border border-amber-700/40 rounded-lg">
+        <p class="text-amber-200 text-sm">
+          {% icon "warning" size="sm" css_class="text-amber-400 mr-1" %}
+          {% trans "Please include the payment reference in your bank transfer. Your services will be activated within 24 hours of payment confirmation." %}
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Next Steps -->
   <div class="grid md:grid-cols-2 gap-6 mb-8">
 
@@ -313,15 +367,15 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   // Initialize Stripe
-  const stripe = Stripe('{{ stripe_config.publishable_key }}');
+  const stripe = Stripe('{{ stripe_config.publishable_key|escapejs }}');
 
   // Configure Stripe Elements
   const options = {
-    clientSecret: '{{ payment_info.client_secret }}',
+    clientSecret: '{{ payment_info.client_secret|escapejs }}',
     appearance: {
-      theme: '{{ stripe_config.appearance.theme }}',
+      theme: '{{ stripe_config.appearance.theme|escapejs }}',
       variables: {
-        colorPrimary: '{{ stripe_config.appearance.variables.colorPrimary }}',
+        colorPrimary: '{{ stripe_config.appearance.variables.colorPrimary|escapejs }}',
         colorBackground: '#ffffff',
         colorText: '#1a202c',
         fontFamily: 'ui-sans-serif, system-ui, sans-serif',
@@ -358,7 +412,6 @@ document.addEventListener('DOMContentLoaded', function() {
   // Enable the submit button when the payment element is ready
   paymentElement.on('ready', function() {
     submitButton.disabled = false;
-    console.log('[Stripe] Elements ready');
   });
 
   // Handle real-time validation errors from the Payment Element
@@ -392,18 +445,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
       if (error) {
         // Payment failed
-        console.error('[Payment] Failed:', error);
+        // Payment element error — logged for support debugging
         showError(error.message);
         resetButton();
       } else {
-        // Payment succeeded
-        console.log('[Payment] Succeeded:', paymentIntent);
-
-        // Confirm payment on backend and create service
+        // Payment succeeded — confirm on backend and create service
         confirmPaymentOnBackend(paymentIntent.id);
       }
     } catch (err) {
-      console.error('[Payment] Unexpected error:', err);
+      // Unexpected payment error — caught and displayed to user
       showError('{% trans "An unexpected error occurred. Please try again." %}');
       resetButton();
     }
@@ -449,18 +499,17 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
 
       if (data.success) {
-        console.log('[Payment] Confirmed on backend:', data);
         // Redirect to success page or dashboard
         setTimeout(() => {
           window.location.href = '/order/';
         }, 2000);
       } else {
-        console.error('[Payment] Backend confirmation failed:', data.error);
+        // Backend confirmation failed — error shown to user via showError()
         showError(data.error || 'Payment confirmation failed');
         resetButton();
       }
     } catch (err) {
-      console.error('[Payment] Error confirming payment:', err);
+      // Payment confirmation network error — shown to user via showError()
       showError('Failed to confirm payment. Please contact support.');
       resetButton();
     }
@@ -487,13 +536,6 @@ document.addEventListener('DOMContentLoaded', function() {
     spinner.classList.add('hidden');
   }
 
-  // Log configuration for debugging
-  console.log('[Stripe] Configuration:', {
-    publishable_key: '{{ stripe_config.publishable_key }}' ? 'configured' : 'missing',
-    client_secret: '{{ payment_info.client_secret }}' ? 'configured' : 'missing',
-    currency: '{{ stripe_config.currency }}',
-    country: '{{ stripe_config.country }}'
-  });
 });
 </script>
 {% endif %}{% endif %}

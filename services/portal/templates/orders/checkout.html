@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% load i18n ui_components formatting %}
-{% load i18n %}
 
 {% block title %}{% trans "Checkout" %}{% endblock %}
 
@@ -283,16 +282,7 @@
             </div>
           </div>
 
-          <!-- Next Steps Info -->
-          <div class="bg-green-900/20 border border-green-700/30 rounded-lg p-3">
-            <h4 class="text-green-400 font-medium text-sm mb-2">{% trans "Next steps" %}</h4>
-            <ol class="text-green-300 text-xs space-y-1 list-decimal list-inside">
-              <li>{% trans "Order will be validated and created" %}</li>
-              <li>{% trans "You will receive confirmation by email" %}</li>
-              <li>{% trans "Order will be ready for payment" %}</li>
-              <li>{% trans "Services will be activated after payment" %}</li>
-            </ol>
-          </div>
+          {# Next Steps section removed — shown only on order_confirmation.html after the order is created #}
         </div>
         {% else %}
         <!-- Error loading totals -->

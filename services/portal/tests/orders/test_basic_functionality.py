@@ -57,15 +57,17 @@ class TestBasicOrderFunctionality(SimpleTestCase):
 
         session_key = 'test_basic_rate_limit'
 
-        # Should allow normal operations
-        for i in range(20):  # Well under limit
+        # Should allow normal operations (check + record mirrors the view pattern)
+        for _ in range(20):  # Well under limit
             self.assertTrue(CartRateLimiter.check_rate_limit(session_key))
+            CartRateLimiter.record_operation(session_key)
 
-        # Exhaust the rate limit
-        for i in range(11):  # Remaining to reach 30 + 1 extra
+        # Exhaust the remaining limit (10 more to reach 30, then 1 extra to trigger block)
+        for i in range(11):
             result = CartRateLimiter.check_rate_limit(session_key)
             if i < 10:  # Should allow up to 30 total
                 self.assertTrue(result)
+                CartRateLimiter.record_operation(session_key)
             else:  # Should block the 31st
                 self.assertFalse(result)
 
@@ -75,9 +77,10 @@ class TestBasicOrderFunctionality(SimpleTestCase):
         session1 = 'test_session_basic_1'
         session2 = 'test_session_basic_2'
 
-        # Exhaust limit for session1
-        for i in range(30):
+        # Exhaust limit for session1: check + record mirrors the view pattern
+        for _ in range(30):
             self.assertTrue(CartRateLimiter.check_rate_limit(session1))
+            CartRateLimiter.record_operation(session1)
 
         # session1 blocked
         self.assertFalse(CartRateLimiter.check_rate_limit(session1))

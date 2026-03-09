@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load i18n ui_components formatting %}
 
 {% block title %}{% trans "Product Catalog" %}{% endblock %}
 
@@ -38,7 +38,8 @@
             <div hx-get="{% url 'orders:mini_cart_content' %}"
                  hx-trigger="load, cartUpdated from:body"
                  hx-target="this"
-                 hx-swap="innerHTML">
+                 hx-swap="innerHTML"
+                 hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
               <!-- Loading content -->
               <div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700 p-4">
                 <div class="animate-pulse">
@@ -96,19 +97,19 @@
       <!-- Pricing Section -->
       <div class="px-4 sm:px-6 pb-4 flex-grow">
         {% if product.prices %}
-          {% for price in product.prices %}
+          {% with price=product.prices.0 %}
           <div class="mb-4">
             <!-- Current Price Display -->
             <div class="text-center mb-3 p-3 bg-slate-700/50 rounded-lg">
               <div class="text-xl sm:text-2xl font-bold text-green-400" id="price-display-{{ product.slug }}">
-                {{ price.monthly_price }} RON
+                {{ price.monthly_price|romanian_currency }}
               </div>
               <div class="text-xs text-slate-400" id="period-display-{{ product.slug }}">
                 {% trans "per month" %}
               </div>
               {% if price.setup_fee and price.setup_fee != "0.00" %}
               <div class="text-xs text-slate-500 mt-1" id="setup-display-{{ product.slug }}">
-                + {{ price.setup_fee }} RON {% trans "setup fee" %}
+                + {{ price.setup_fee|romanian_currency }} {% trans "setup fee" %}
               </div>
               {% endif %}
             </div>
@@ -139,7 +140,7 @@
               {% endif %}
             </select>
           </div>
-          {% endfor %}
+          {% endwith %}
         {% endif %}
 
         <!-- Features Preview -->
@@ -249,6 +250,14 @@
 
 <!-- JavaScript for cart and pricing -->
 <script>
+// Translatable period labels and setup fee label
+const PERIOD_LABELS = {
+  monthly: '{% trans "per month" %}',
+  semiannual: '{% trans "for 6 months" %}',
+  annual: '{% trans "for 12 months" %}',
+};
+const SETUP_FEE_LABEL = '{% trans "setup fee" %}';
+
 // Mini cart toggle
 function toggleMiniCart() {
   const miniCart = document.getElementById('mini-cart');
@@ -285,19 +294,19 @@ function updateProductPricing(productSlug, billingPeriod, monthlyPrice, semiannu
   switch(billingPeriod) {
     case 'monthly':
       price = monthlyPrice;
-      periodText = 'per month';
+      periodText = PERIOD_LABELS.monthly;
       break;
     case 'semiannual':
       price = semiannualPrice;
-      periodText = 'for 6 months';
+      periodText = PERIOD_LABELS.semiannual;
       break;
     case 'annual':
       price = annualPrice;
-      periodText = 'for 12 months';
+      periodText = PERIOD_LABELS.annual;
       break;
     default:
       price = monthlyPrice;
-      periodText = 'per month';
+      periodText = PERIOD_LABELS.monthly;
   }
 
   // Update display
@@ -307,7 +316,7 @@ function updateProductPricing(productSlug, billingPeriod, monthlyPrice, semiannu
   // Update setup fee display
   if (setupDisplay) {
     if (setupFee && setupFee !== "0.00") {
-      setupDisplay.textContent = `+ ${setupFee} RON setup fee`;
+      setupDisplay.textContent = `+ ${setupFee} RON ${SETUP_FEE_LABEL}`;
       setupDisplay.style.display = 'block';
     } else {
       setupDisplay.style.display = 'none';
