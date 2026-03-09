@@ -451,14 +451,18 @@ class Command(BaseCommand):
                 <p>Pentru întrebări sau asistență, contactați-ne:</p>
                 <ul>
                     <li>📧 Email: support@pragmatichost.com</li>
-                    <li>📞 Telefon: +40 XXX XXX XXX</li>
+                    <li>📞 Telefon: {{support_phone}}</li>
                     <li>💬 Chat live din zona client</li>
                 </ul>
                 <p>Bun venit în familia PragmaticHost!</p>
                 <p>Echipa PragmaticHost</p>
                 """,
                 "description": "Email de bun venit pentru clienți noi",
-                "variables": {"customer_name": "Numele clientului", "client_area_url": "URL zona client"},
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "client_area_url": "URL zona client",
+                    "support_phone": "Număr telefon suport",
+                },
             },
             {
                 "key": "customer_welcome",
@@ -482,14 +486,18 @@ class Command(BaseCommand):
                 <p>For questions or assistance, contact us:</p>
                 <ul>
                     <li>📧 Email: support@pragmatichost.com</li>
-                    <li>📞 Phone: +40 XXX XXX XXX</li>
+                    <li>📞 Phone: {{support_phone}}</li>
                     <li>💬 Live chat from client area</li>
                 </ul>
                 <p>Welcome to the PragmaticHost family!</p>
                 <p>PragmaticHost Team</p>
                 """,
                 "description": "Welcome email for new customers",
-                "variables": {"customer_name": "Customer name", "client_area_url": "Client area URL"},
+                "variables": {
+                    "customer_name": "Customer name",
+                    "client_area_url": "Client area URL",
+                    "support_phone": "Support phone number",
+                },
             },
             # ===============================================================================
             # PAYMENT TEMPLATES
@@ -1264,6 +1272,47 @@ class Command(BaseCommand):
                 """,
                 "description": "Customer account deactivation notification",
                 "variables": {"customer_name": "Customer name"},
+            },
+            # REACTIVATION TEMPLATES
+            {
+                "key": "customer_reactivation",
+                "locale": "ro",
+                "category": "engagement",
+                "subject": "Ne este dor de dumneavoastră! - PragmaticHost",
+                "body_html": """
+                <h2>Bună ziua {{customer_name}},</h2>
+                <p>Am observat că nu v-ați conectat la contul PragmaticHost de ceva timp.</p>
+                <p>Dorim să ne asigurăm că totul este în regulă cu contul dumneavoastră
+                și că nu aveți nevoie de ajutor.</p>
+                <p>Dacă aveți întrebări sau aveți nevoie de asistență, nu ezitați să ne contactați:</p>
+                <ul>
+                    <li>Email: support@pragmatichost.com</li>
+                    <li>Telefon: {{support_phone}}</li>
+                </ul>
+                <p>Cu stimă,<br/>Echipa PragmaticHost</p>
+                """,
+                "description": "Email de reactivare pentru clienți inactivi",
+                "variables": {"customer_name": "Numele clientului", "support_phone": "Număr telefon suport"},
+            },
+            {
+                "key": "customer_reactivation",
+                "locale": "en",
+                "category": "engagement",
+                "subject": "We miss you! - PragmaticHost",
+                "body_html": """
+                <h2>Hello {{customer_name}},</h2>
+                <p>We noticed you haven't logged into your PragmaticHost account in a while.</p>
+                <p>We wanted to check in and make sure everything is OK with your account
+                and that you don't need any assistance.</p>
+                <p>If you have any questions or need help, please don't hesitate to reach out:</p>
+                <ul>
+                    <li>Email: support@pragmatichost.com</li>
+                    <li>Phone: {{support_phone}}</li>
+                </ul>
+                <p>Best regards,<br/>The PragmaticHost Team</p>
+                """,
+                "description": "Reactivation check-in email for inactive customers",
+                "variables": {"customer_name": "Customer name", "support_phone": "Support phone number"},
             },
         ]
 

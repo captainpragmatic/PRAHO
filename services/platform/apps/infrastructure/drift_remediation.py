@@ -78,8 +78,8 @@ class DriftRemediationService:
             InfrastructureAuditService.log_drift_remediation_approved(
                 req.deployment, req, user, InfrastructureAuditContext(user=user)
             )
-        except Exception:
-            logger.warning("⚠️ [DriftRemediation] Failed to log audit for approval")
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for approval: {e}")
 
         # Trigger execution
         exec_result = self.execute_remediation(req)
@@ -179,8 +179,8 @@ class DriftRemediationService:
             InfrastructureAuditService.log_drift_accepted(
                 req.deployment, report, user, InfrastructureAuditContext(user=user)
             )
-        except Exception:
-            logger.warning("⚠️ [DriftRemediation] Failed to log audit for drift acceptance")
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for drift acceptance: {e}")
 
         return Ok(req)
 
@@ -239,8 +239,8 @@ class DriftRemediationService:
                 InfrastructureAuditService.log_drift_rollback_triggered(
                     deployment, snapshot, InfrastructureAuditContext()
                 )
-            except Exception:
-                logger.warning("⚠️ [DriftRemediation] Failed to log audit for rollback after apply failure")
+            except Exception as e:
+                logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback after apply failure: {e}")
 
             return Err(apply_result.unwrap_err())
 
@@ -261,8 +261,8 @@ class DriftRemediationService:
                 InfrastructureAuditService.log_drift_rollback_triggered(
                     deployment, snapshot, InfrastructureAuditContext()
                 )
-            except Exception:
-                logger.warning("⚠️ [DriftRemediation] Failed to log audit for rollback after health check failure")
+            except Exception as e:
+                logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback after health check failure: {e}")
 
             return Err(health_result.unwrap_err())
 
@@ -284,8 +284,8 @@ class DriftRemediationService:
             InfrastructureAuditService.log_drift_remediation_applied(
                 deployment, request, True, InfrastructureAuditContext()
             )
-        except Exception:
-            logger.warning("⚠️ [DriftRemediation] Failed to log audit for completion")
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for completion: {e}")
 
         return Ok(True)
 
@@ -386,7 +386,8 @@ class DriftRemediationService:
             if token_result.is_err():
                 return None
             return get_cloud_gateway(provider.provider_type, token_result.unwrap())
-        except Exception:
+        except Exception as e:
+            logger.error(f"🔥 [DriftRemediation] Gateway retrieval failed: {e}")
             return None
 
     def _mark_failed(self, request: DriftRemediationRequest, error: str) -> None:
@@ -400,8 +401,8 @@ class DriftRemediationService:
             InfrastructureAuditService.log_drift_remediation_failed(
                 request.deployment, request, error, InfrastructureAuditContext()
             )
-        except Exception:
-            logger.warning("⚠️ [DriftRemediation] Failed to log audit for failure")
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for failure: {e}")
 
     def _mark_rolled_back(self, request: DriftRemediationRequest, error: str) -> None:
         """Mark a remediation request as rolled back after failure."""
@@ -414,8 +415,8 @@ class DriftRemediationService:
             InfrastructureAuditService.log_drift_remediation_failed(
                 request.deployment, request, error, InfrastructureAuditContext()
             )
-        except Exception:
-            logger.warning("⚠️ [DriftRemediation] Failed to log audit for rollback")
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback: {e}")
 
     def _mark_rollback_failed(self, request: DriftRemediationRequest, error: str) -> None:
         """Mark a remediation request as rollback_failed when rollback itself fails."""
@@ -430,8 +431,8 @@ class DriftRemediationService:
             InfrastructureAuditService.log_drift_remediation_failed(
                 request.deployment, request, error, InfrastructureAuditContext()
             )
-        except Exception:
-            logger.warning("⚠️ [DriftRemediation] Failed to log audit for rollback failure")
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback failure: {e}")
 
 
 # Module-level singleton

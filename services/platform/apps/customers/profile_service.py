@@ -42,7 +42,7 @@ class ProfileService:
             extra={"customer_id": customer.id, "user_id": user.id, "operation": "tax_profile_create"},
         )
 
-        return tax_profile  # type: ignore[return-value]
+        return tax_profile
 
     @staticmethod
     def create_billing_profile(
@@ -64,7 +64,29 @@ class ProfileService:
             extra={"customer_id": customer.id, "user_id": user.id, "operation": "billing_profile_create"},
         )
 
-        return billing_profile  # type: ignore[return-value]
+        return billing_profile
+
+    TAX_PROFILE_UPDATABLE_FIELDS = frozenset(
+        {
+            "cui",
+            "cnp",
+            "registration_number",
+            "is_vat_payer",
+            "vat_number",
+            "vat_rate",
+            "reverse_charge_eligible",
+        }
+    )
+
+    BILLING_PROFILE_UPDATABLE_FIELDS = frozenset(
+        {
+            "payment_terms",
+            "credit_limit",
+            "preferred_currency",
+            "invoice_delivery_method",
+            "auto_payment_enabled",
+        }
+    )
 
     @staticmethod
     def update_tax_profile(
@@ -72,16 +94,27 @@ class ProfileService:
         user: User,
         **updates: Any,
     ) -> CustomerTaxProfile:
-        """Update tax profile with validation."""
-        # Validate CUI if provided
-        if updates.get("cui") and not tax_profile.validate_cui():
-            raise ValueError("Invalid CUI format")
+        """Update tax profile with validation. Only allows safe fields."""
+        safe_updates = {k: v for k, v in updates.items() if k in ProfileService.TAX_PROFILE_UPDATABLE_FIELDS}
 
-        for field, value in updates.items():
-            if hasattr(tax_profile, field):
-                setattr(tax_profile, field, value)
+        changed_fields: list[str] = []
 
-        tax_profile.save()
+        if "cui" in safe_updates:
+            new_cui = safe_updates.pop("cui")
+            from apps.common.cui_validator import CUIValidator
+
+            result = CUIValidator.validate_strict(new_cui)
+            if not result.is_valid:
+                raise ValueError(f"Invalid CUI format: {result.error_message}")
+            tax_profile.cui = new_cui
+            changed_fields.append("cui")
+
+        for field, value in safe_updates.items():
+            setattr(tax_profile, field, value)
+            changed_fields.append(field)
+
+        if changed_fields:
+            tax_profile.save(update_fields=[*changed_fields, "updated_at"])
 
         logger.info(
             f"📝 [Profile] Updated tax profile for customer: {tax_profile.customer.name}",
@@ -96,12 +129,16 @@ class ProfileService:
         user: User,
         **updates: Any,
     ) -> CustomerBillingProfile:
-        """Update billing profile."""
-        for field, value in updates.items():
-            if hasattr(billing_profile, field):
-                setattr(billing_profile, field, value)
+        """Update billing profile. Only allows safe fields."""
+        safe_updates = {k: v for k, v in updates.items() if k in ProfileService.BILLING_PROFILE_UPDATABLE_FIELDS}
 
-        billing_profile.save()
+        changed_fields = []
+        for field, value in safe_updates.items():
+            setattr(billing_profile, field, value)
+            changed_fields.append(field)
+
+        if changed_fields:
+            billing_profile.save(update_fields=[*changed_fields, "updated_at"])
 
         logger.info(
             f"📝 [Profile] Updated billing profile for customer: {billing_profile.customer.name}",

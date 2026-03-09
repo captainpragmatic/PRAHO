@@ -29,7 +29,7 @@ class CustomerService:
         # Late import to avoid circular dependencies
         from .customer_models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
-        if user.is_staff:
+        if user.is_staff or user.staff_role:
             return Customer.objects.all()
 
         # Regular users can only access customers they are members of
@@ -60,25 +60,52 @@ class CustomerService:
 
         return customer
 
+    # Explicit allowlist of fields that can be updated via update_customer()
+    UPDATABLE_FIELDS = frozenset(
+        {
+            "name",
+            "company_name",
+            "customer_type",
+            "primary_email",
+            "primary_phone",
+            "industry",
+            "website",
+            "status",
+            "assigned_account_manager",
+            "data_processing_consent",
+            "marketing_consent",
+        }
+    )
+
     @staticmethod
     def update_customer(customer: Customer, user: User, **updates: Any) -> Customer:
-        """Update customer with audit logging."""
-        # Log the update operation
+        """Update customer with audit logging. Only allows safe fields via UPDATABLE_FIELDS."""
+        # Filter to allowed fields only
+        safe_updates = {k: v for k, v in updates.items() if k in CustomerService.UPDATABLE_FIELDS}
+        rejected = set(updates.keys()) - CustomerService.UPDATABLE_FIELDS
+        if rejected:
+            logger.warning(
+                f"⚠️ [Customer] Rejected non-updatable fields: {rejected}",
+                extra={"customer_id": customer.id, "user_id": user.id, "rejected_fields": list(rejected)},
+            )
+
         logger.info(
             f"📝 [Customer] Updating customer: {customer.name} (ID: {customer.id})",
             extra={
                 "customer_id": customer.id,
                 "user_id": user.id,
                 "operation": "customer_update",
-                "fields_updated": list(updates.keys()),
+                "fields_updated": list(safe_updates.keys()),
             },
         )
 
-        for field, value in updates.items():
-            if hasattr(customer, field):
-                setattr(customer, field, value)
+        changed_fields = []
+        for field, value in safe_updates.items():
+            setattr(customer, field, value)
+            changed_fields.append(field)
 
-        customer.save()
+        if changed_fields:
+            customer.save(update_fields=[*changed_fields, "updated_at"])
         return customer
 
     @staticmethod
@@ -89,12 +116,13 @@ class CustomerService:
         if not query.strip():
             return accessible_customers
 
-        # Simple search across name, company_name, and email
+        # Search across name, company_name, email, and Romanian tax identifier (CUI)
         return accessible_customers.filter(
             models.Q(name__icontains=query)
             | models.Q(company_name__icontains=query)
             | models.Q(primary_email__icontains=query)
-        )
+            | models.Q(tax_profile__cui__icontains=query)
+        ).distinct()
 
     @staticmethod
     def get_customer_summary(customer: Customer) -> dict[str, Any]:

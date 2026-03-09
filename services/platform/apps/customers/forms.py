@@ -5,14 +5,17 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.types import CurrencyCode
 from apps.common.validators import SecureInputValidator
 from apps.users.models import CustomerMembership
 
@@ -120,7 +123,7 @@ class CustomerForm(forms.ModelForm):
         customer_type: str | None = self.cleaned_data.get("customer_type")
         company_name: str | None = self.cleaned_data.get("company_name")
 
-        if customer_type == "company" and not company_name:
+        if customer_type == Customer.CustomerType.COMPANY and not company_name:
             raise ValidationError(_("Company name is required for companies"))
 
         return company_name or ""
@@ -188,19 +191,25 @@ class CustomerTaxProfileForm(forms.ModelForm):
         }
 
     def clean_cui(self) -> str:
-        """🔒 Validate Romanian CUI format with ReDoS protection"""
+        """🔒 Validate Romanian CUI format with ReDoS protection and check digit validation"""
         cui: str | None = self.cleaned_data.get("cui")
         if cui:
             # Security: Prevent ReDoS attacks with strict input length validation
             if len(cui) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
                 raise ValidationError(_("CUI too long"))
-            # Security: Use more specific regex pattern to prevent ReDoS
-            if not re.match(r"^RO\d{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
+            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
+            if not re.match(r"^RO[0-9]{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
                 raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
+            # Validate check digit for compliance
+            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+            result = CUIValidator.validate_strict(cui)
+            if not result.is_valid:
+                raise ValidationError(_(result.error_message))
         return cui or ""
 
     def clean_vat_number(self) -> str:
-        """🔒 Validate VAT number format with ReDoS protection"""
+        """🔒 Validate VAT number format with ReDoS protection and check digit validation"""
         vat_number: str | None = self.cleaned_data.get("vat_number")
         is_vat_payer: bool | None = self.cleaned_data.get("is_vat_payer")
 
@@ -211,9 +220,15 @@ class CustomerTaxProfileForm(forms.ModelForm):
             # Security: Prevent ReDoS attacks with strict input length validation
             if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
                 raise ValidationError(_("VAT number too long"))
-            # Security: Use more specific regex pattern to prevent ReDoS
-            if not re.match(r"^RO\d{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
+            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
+            if not re.match(r"^RO[0-9]{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
                 raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
+            # Validate check digit for compliance
+            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+            result = CUIValidator.validate_strict(vat_number)
+            if not result.is_valid:
+                raise ValidationError(_(result.error_message))
 
         return vat_number or ""
 
@@ -255,12 +270,12 @@ class CustomerBillingProfileForm(forms.ModelForm):
             ),
         }
 
-    def clean_credit_limit(self) -> float:
+    def clean_credit_limit(self) -> Decimal:
         """Ensure credit limit is not negative"""
-        credit_limit: float | None = self.cleaned_data.get("credit_limit")
+        credit_limit: Decimal | None = self.cleaned_data.get("credit_limit")
         if credit_limit is not None and credit_limit < 0:
             raise ValidationError(_("Credit limit cannot be negative"))
-        return credit_limit or 0.0
+        return Decimal(str(credit_limit)) if credit_limit else Decimal("0")
 
 
 # ===============================================================================
@@ -329,7 +344,7 @@ class CustomerAddressForm(forms.ModelForm):
         postal_code: str | None = self.cleaned_data.get("postal_code")
         country: str | None = self.cleaned_data.get("country")
 
-        if country == "România" and postal_code and not re.match(r"^\d{6}$", postal_code):
+        if country in ("România", "Romania") and postal_code and not re.match(r"^[0-9]{6}$", postal_code):
             raise ValidationError(_("Romanian postal codes must be 6 digits"))
 
         return postal_code or ""
@@ -463,7 +478,7 @@ class CustomerCreationForm(forms.Form):
 
     # Business Information (matching registration)
     customer_type = forms.ChoiceField(
-        choices=Customer.CUSTOMER_TYPE_CHOICES,
+        choices=Customer.CustomerType.choices,
         label=_("Customer Type"),
         help_text=_("Individual, company, PFA, or NGO"),
         widget=forms.Select(
@@ -625,7 +640,7 @@ class CustomerCreationForm(forms.Form):
         ),
     )
     preferred_currency = forms.ChoiceField(
-        choices=[("RON", "RON"), ("EUR", "EUR"), ("USD", "USD")],
+        choices=CurrencyCode.choices(),
         initial="RON",
         label=_("Preferred Currency"),
         widget=forms.Select(
@@ -671,7 +686,10 @@ class CustomerCreationForm(forms.Form):
         email: str | None = cleaned_data.get("email")
 
         # Require company name for companies, PFA, and NGOs
-        if customer_type in ["company", "pfa", "ngo"] and not company_name:
+        if (
+            customer_type in [Customer.CustomerType.COMPANY, Customer.CustomerType.PFA, Customer.CustomerType.NGO]
+            and not company_name
+        ):
             raise ValidationError(_("Company name is required for companies, PFA, and NGOs"))
 
         # Validate CUI format
@@ -699,55 +717,56 @@ class CustomerCreationForm(forms.Form):
         return cleaned_data
 
     def save(self, user: User | None = None) -> dict[str, Any]:
-        """Create customer with all related profiles and handle user assignment"""
+        """Create customer with all related profiles and handle user assignment."""
         data = self.cleaned_data
 
         # Build customer name from first_name + last_name
         full_name = f"{data['first_name']} {data['last_name']}".strip()
 
-        # Create core customer
-        customer = Customer.objects.create(
-            name=full_name,
-            customer_type=data["customer_type"],
-            company_name=data.get("company_name", ""),
-            primary_email=data["email"],
-            primary_phone=data["phone"],
-            industry=data.get("industry", ""),
-            website=data.get("website", ""),
-            data_processing_consent=data["data_processing_consent"],
-            marketing_consent=data.get("marketing_consent", False),
-            created_by=user,
-        )
+        with transaction.atomic():
+            # Create core customer
+            customer = Customer.objects.create(
+                name=full_name,
+                customer_type=data["customer_type"],
+                company_name=data.get("company_name", ""),
+                primary_email=data["email"],
+                primary_phone=data["phone"],
+                industry=data.get("industry", ""),
+                website=data.get("website", ""),
+                data_processing_consent=data["data_processing_consent"],
+                marketing_consent=data.get("marketing_consent", False),
+                created_by=user,
+            )
 
-        # Create tax profile
-        CustomerTaxProfile.objects.create(
-            customer=customer,
-            cui=data.get("cui", ""),
-            is_vat_payer=data.get("is_vat_payer", False),
-            vat_number=data.get("vat_number", ""),
-            vat_rate=21.0 if data.get("is_vat_payer", False) else 0.0,
-        )
+            # Create tax profile
+            CustomerTaxProfile.objects.create(
+                customer=customer,
+                cui=data.get("cui", ""),
+                is_vat_payer=data.get("is_vat_payer", False),
+                vat_number=data.get("vat_number", ""),
+                vat_rate=21.0 if data.get("is_vat_payer", False) else 0.0,
+            )
 
-        # Create billing profile
-        CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=data["payment_terms"],
-            credit_limit=data["credit_limit"],
-            preferred_currency=data.get("preferred_currency", "RON"),
-        )
+            # Create billing profile
+            CustomerBillingProfile.objects.create(
+                customer=customer,
+                payment_terms=data["payment_terms"],
+                credit_limit=data["credit_limit"],
+                preferred_currency=data.get("preferred_currency", "RON"),
+            )
 
-        # Create primary address
-        CustomerAddress.objects.create(
-            customer=customer,
-            address_type="primary",
-            address_line1=data["address_line1"],
-            address_line2=data.get("address_line2", ""),
-            city=data["city"],
-            county=data["county"],
-            postal_code=data["postal_code"],
-            country="Romania",
-            is_current=True,
-        )
+            # Create primary address
+            CustomerAddress.objects.create(
+                customer=customer,
+                address_type="primary",
+                address_line1=data["address_line1"],
+                address_line2=data.get("address_line2", ""),
+                city=data["city"],
+                county=data["county"],
+                postal_code=data["postal_code"],
+                country="Romania",
+                is_current=True,
+            )
 
         # Return customer and user action data for view to handle
         return {
@@ -781,7 +800,7 @@ class CustomerEditForm(forms.Form):
         ),
     )
     customer_type = forms.ChoiceField(
-        choices=Customer.CUSTOMER_TYPE_CHOICES,
+        choices=Customer.CustomerType.choices,
         label=_("Customer Type"),
         widget=forms.Select(
             attrs={
@@ -929,7 +948,7 @@ class CustomerEditForm(forms.Form):
         ),
     )
     preferred_currency = forms.ChoiceField(
-        choices=[("RON", "RON"), ("EUR", "EUR"), ("USD", "USD")],
+        choices=CurrencyCode.choices(),
         initial="RON",
         label=_("Preferred Currency"),
         widget=forms.Select(
@@ -1226,25 +1245,34 @@ class CustomerEditForm(forms.Form):
         customer_type: str | None = self.cleaned_data.get("customer_type")
         company_name: str | None = self.cleaned_data.get("company_name")
 
-        if customer_type in ["company", "pfa", "ngo"] and not company_name:
+        if (
+            customer_type in [Customer.CustomerType.COMPANY, Customer.CustomerType.PFA, Customer.CustomerType.NGO]
+            and not company_name
+        ):
             raise ValidationError(_("Company name is required for companies, PFA, and NGOs"))
 
         return company_name or ""
 
     def clean_cui(self) -> str:
-        """🔒 Validate Romanian CUI format with ReDoS protection"""
+        """🔒 Validate Romanian CUI format with ReDoS protection and check digit validation"""
         cui: str | None = self.cleaned_data.get("cui")
         if cui:
             # Security: Prevent ReDoS attacks with strict input length validation
             if len(cui) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
                 raise ValidationError(_("CUI too long"))
-            # Security: Use more specific regex pattern to prevent ReDoS
-            if not re.match(r"^RO\d{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
+            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
+            if not re.match(r"^RO[0-9]{6,10}$", cui):  # Romanian CUI is typically 6-10 digits
                 raise ValidationError(_("CUI must be in format RO followed by 6-10 digits"))
+            # Validate check digit for compliance
+            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+            result = CUIValidator.validate_strict(cui)
+            if not result.is_valid:
+                raise ValidationError(_(result.error_message))
         return cui or ""
 
     def clean_vat_number(self) -> str:
-        """🔒 Validate VAT number format with ReDoS protection"""
+        """🔒 Validate VAT number format with ReDoS protection and check digit validation"""
         vat_number: str | None = self.cleaned_data.get("vat_number")
         is_vat_payer: bool | None = self.cleaned_data.get("is_vat_payer")
 
@@ -1255,9 +1283,15 @@ class CustomerEditForm(forms.Form):
             # Security: Prevent ReDoS attacks with strict input length validation
             if len(vat_number) > MAX_RO_PREFIXED_ID_LENGTH:  # RO + max 10 digits
                 raise ValidationError(_("VAT number too long"))
-            # Security: Use more specific regex pattern to prevent ReDoS
-            if not re.match(r"^RO\d{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
+            # Security: Use [0-9] instead of \d to prevent unicode digit bypass
+            if not re.match(r"^RO[0-9]{6,10}$", vat_number):  # Romanian VAT is typically 6-10 digits
                 raise ValidationError(_("VAT number must be in format RO followed by 6-10 digits"))
+            # Validate check digit for compliance
+            from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+            result = CUIValidator.validate_strict(vat_number)
+            if not result.is_valid:
+                raise ValidationError(_(result.error_message))
 
         return vat_number or ""
 
@@ -1273,7 +1307,7 @@ class CustomerEditForm(forms.Form):
         postal_code: str | None = self.cleaned_data.get("postal_code")
         country: str | None = self.cleaned_data.get("country")
 
-        if country in ["România", "Romania"] and postal_code and not re.match(r"^\d{6}$", postal_code):
+        if country in ("România", "Romania") and postal_code and not re.match(r"^[0-9]{6}$", postal_code):
             raise ValidationError(_("Romanian postal codes must be 6 digits"))
 
         return postal_code or ""
@@ -1284,9 +1318,9 @@ class CustomerEditForm(forms.Form):
         billing_country: str | None = self.cleaned_data.get("billing_country")
 
         if (
-            billing_country in ["România", "Romania"]
+            billing_country in ("România", "Romania")
             and billing_postal_code
-            and not re.match(r"^\d{6}$", billing_postal_code)
+            and not re.match(r"^[0-9]{6}$", billing_postal_code)
         ):
             raise ValidationError(_("Romanian postal codes must be 6 digits"))
 
@@ -1328,92 +1362,93 @@ class CustomerEditForm(forms.Form):
         """Update customer and all related profiles"""
         data = self.cleaned_data
 
-        # Update core customer
-        self.customer.name = data["name"]
-        self.customer.customer_type = data["customer_type"]
-        self.customer.company_name = data["company_name"]
-        self.customer.primary_email = data["primary_email"]
-        self.customer.primary_phone = data["primary_phone"]
-        self.customer.industry = data["industry"]
-        self.customer.website = data["website"]
-        self.customer.data_processing_consent = data["data_processing_consent"]
-        self.customer.marketing_consent = data["marketing_consent"]
-        if user:
-            self.customer.updated_by = user
-        self.customer.save()
+        with transaction.atomic():
+            # Update core customer
+            self.customer.name = data["name"]
+            self.customer.customer_type = data["customer_type"]
+            self.customer.company_name = data["company_name"]
+            self.customer.primary_email = data["primary_email"]
+            self.customer.primary_phone = data["primary_phone"]
+            self.customer.industry = data["industry"]
+            self.customer.website = data["website"]
+            self.customer.data_processing_consent = data["data_processing_consent"]
+            self.customer.marketing_consent = data["marketing_consent"]
+            if user:
+                self.customer.updated_by = user
+            self.customer.save()
 
-        # Update or create tax profile
-        tax_profile = self.customer.get_tax_profile()
-        if not tax_profile:
-            tax_profile = CustomerTaxProfile.objects.create(customer=self.customer)
+            # Update or create tax profile
+            tax_profile = self.customer.get_tax_profile()
+            if not tax_profile:
+                tax_profile = CustomerTaxProfile.objects.create(customer=self.customer)
 
-        assert tax_profile is not None
-        tax_profile.cui = data["cui"]
-        tax_profile.registration_number = data["registration_number"]
-        tax_profile.is_vat_payer = data["is_vat_payer"]
-        tax_profile.vat_number = data["vat_number"]
-        tax_profile.vat_rate = data["vat_rate"]
-        tax_profile.save()
+            assert tax_profile is not None
+            tax_profile.cui = data["cui"]
+            tax_profile.registration_number = data["registration_number"]
+            tax_profile.is_vat_payer = data["is_vat_payer"]
+            tax_profile.vat_number = data["vat_number"]
+            tax_profile.vat_rate = data["vat_rate"]
+            tax_profile.save()
 
-        # Update or create billing profile
-        billing_profile = self.customer.get_billing_profile()
-        if not billing_profile:
-            billing_profile = CustomerBillingProfile.objects.create(customer=self.customer)
+            # Update or create billing profile
+            billing_profile = self.customer.get_billing_profile()
+            if not billing_profile:
+                billing_profile = CustomerBillingProfile.objects.create(customer=self.customer)
 
-        assert billing_profile is not None
-        billing_profile.payment_terms = data["payment_terms"]
-        billing_profile.credit_limit = data["credit_limit"]
-        billing_profile.preferred_currency = data["preferred_currency"]
-        billing_profile.invoice_delivery_method = data["invoice_delivery_method"]
-        billing_profile.auto_payment_enabled = data["auto_payment_enabled"]
-        billing_profile.save()
+            assert billing_profile is not None
+            billing_profile.payment_terms = data["payment_terms"]
+            billing_profile.credit_limit = data["credit_limit"]
+            billing_profile.preferred_currency = data["preferred_currency"]
+            billing_profile.invoice_delivery_method = data["invoice_delivery_method"]
+            billing_profile.auto_payment_enabled = data["auto_payment_enabled"]
+            billing_profile.save()
 
-        # Update or create primary address
-        primary_address = self.customer.get_primary_address()
-        if not primary_address:
-            from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
+            # Update or create primary address
+            primary_address = self.customer.get_primary_address()
+            if not primary_address:
+                from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
-            primary_address = CustomerAddress.objects.create(
-                customer=self.customer, address_type="primary", is_current=True
-            )
-
-        assert primary_address is not None
-        primary_address.address_line1 = data["address_line1"]
-        primary_address.address_line2 = data["address_line2"]
-        primary_address.city = data["city"]
-        primary_address.county = data["county"]
-        primary_address.postal_code = data["postal_code"]
-        primary_address.country = data["country"]
-        primary_address.save()
-
-        # Handle billing address
-        from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
-
-        billing_same_as_primary = data.get("billing_same_as_primary", True)
-        existing_billing_address = CustomerAddress.objects.filter(
-            customer=self.customer, address_type="billing", is_current=True
-        ).first()
-
-        if billing_same_as_primary:
-            # Remove separate billing address if it exists
-            if existing_billing_address:
-                existing_billing_address.delete()
-        else:
-            # Create or update separate billing address
-            if not existing_billing_address:
-                existing_billing_address = CustomerAddress.objects.create(
-                    customer=self.customer, address_type="billing", is_current=True
+                primary_address = CustomerAddress.objects.create(
+                    customer=self.customer, address_type="primary", is_current=True
                 )
 
-            existing_billing_address.address_line1 = data["billing_address_line1"]
-            existing_billing_address.address_line2 = data["billing_address_line2"]
-            existing_billing_address.city = data["billing_city"]
-            existing_billing_address.county = data["billing_county"]
-            existing_billing_address.postal_code = data["billing_postal_code"]
-            existing_billing_address.country = data["billing_country"]
-            existing_billing_address.save()
+            assert primary_address is not None
+            primary_address.address_line1 = data["address_line1"]
+            primary_address.address_line2 = data["address_line2"]
+            primary_address.city = data["city"]
+            primary_address.county = data["county"]
+            primary_address.postal_code = data["postal_code"]
+            primary_address.country = data["country"]
+            primary_address.save()
 
-        return self.customer
+            # Handle billing address
+            from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
+
+            billing_same_as_primary = data.get("billing_same_as_primary", True)
+            existing_billing_address = CustomerAddress.objects.filter(
+                customer=self.customer, address_type="billing", is_current=True
+            ).first()
+
+            if billing_same_as_primary:
+                # Remove separate billing address if it exists
+                if existing_billing_address:
+                    existing_billing_address.delete()
+            else:
+                # Create or update separate billing address
+                if not existing_billing_address:
+                    existing_billing_address = CustomerAddress.objects.create(
+                        customer=self.customer, address_type="billing", is_current=True
+                    )
+
+                existing_billing_address.address_line1 = data["billing_address_line1"]
+                existing_billing_address.address_line2 = data["billing_address_line2"]
+                existing_billing_address.city = data["billing_city"]
+                existing_billing_address.county = data["billing_county"]
+                existing_billing_address.postal_code = data["billing_postal_code"]
+                existing_billing_address.country = data["billing_country"]
+                existing_billing_address.save()
+
+            return self.customer
 
 
 # ===============================================================================

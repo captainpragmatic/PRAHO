@@ -1,0 +1,8 @@
+# GitGuardian configuration — suppress false positives from test fixtures
+# These files contain intentional test credentials (DEBUG-only, never in prod)
+
+paths-ignore:
+  - "**/management/commands/generate_sample_data.py"
+  - "**/management/commands/create_sample_domains.py"
+  - "**/tests/**"
+  - "tests/**"

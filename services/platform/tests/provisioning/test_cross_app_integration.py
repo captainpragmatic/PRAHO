@@ -49,9 +49,9 @@ class BillingProvisioningIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create user and membership
@@ -181,9 +181,9 @@ class DomainsProvisioningIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create TLD and registrar
@@ -256,17 +256,14 @@ class DomainsProvisioningIntegrationTest(TestCase):
 
     @patch('apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account')
     def test_domain_status_change_suspends_virtualmin_account(self, mock_suspend):
-        """Test that domain status change suspends Virtualmin account"""
+        """Test that domain status change suspends Virtualmin account via post_save signal"""
         mock_suspend.return_value = Ok(True)
 
-        # Change domain status to inactive
+        # Change domain status — post_save signal triggers sync_domain_to_virtualmin
         self.domain.status = "suspended"
         self.domain.save()
 
-        # Trigger domain sync
-        sync_domain_to_virtualmin(self.domain)
-
-        # Verify suspension was called
+        # Verify suspension was called (by the signal, not manually)
         mock_suspend.assert_called_once_with(
             self.virtualmin_account,
             reason="Domain status changed to suspended"
@@ -274,21 +271,22 @@ class DomainsProvisioningIntegrationTest(TestCase):
 
     @patch('apps.provisioning.virtualmin_service.VirtualminProvisioningService.unsuspend_account')
     def test_domain_reactivation_unsuspends_virtualmin_account(self, mock_unsuspend):
-        """Test that domain reactivation unsuspends Virtualmin account"""
+        """Test that domain reactivation unsuspends Virtualmin account via post_save signal"""
         mock_unsuspend.return_value = Ok(True)
 
         # Set account as suspended
         self.virtualmin_account.status = "suspended"
         self.virtualmin_account.save()
 
-        # Change domain status to active
+        # Set domain to suspended in DB first (so pre_save captures old_status="suspended")
+        Domain.objects.filter(pk=self.domain.pk).update(status="suspended")
+        self.domain.refresh_from_db()
+
+        # Change domain status back to active — post_save signal triggers sync
         self.domain.status = "active"
         self.domain.save()
 
-        # Trigger domain sync
-        sync_domain_to_virtualmin(self.domain)
-
-        # Verify unsuspension was called
+        # Verify unsuspension was called (by the signal, not manually)
         mock_unsuspend.assert_called_once_with(self.virtualmin_account)
 
     def test_domain_sync_handles_missing_virtualmin_account(self):
@@ -315,9 +313,9 @@ class ProvisioningAuditIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create service
@@ -509,9 +507,9 @@ class CustomerProvisioningIntegrationTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create user and membership
@@ -605,9 +603,9 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         """Set up test data for performance testing"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create currency

@@ -241,7 +241,7 @@ class SecureUserRegistrationService:
             )
 
             # Step 6: Create billing address with validated data
-            CustomerAddress.objects.create(  # type: ignore[misc]
+            CustomerAddress.objects.create(
                 customer=customer,
                 address_type="billing",
                 address_line1=customer_data.get("billing_address", ""),  # Sanitized

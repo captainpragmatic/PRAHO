@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit check-types pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -66,7 +66,8 @@ help:
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
 	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
-	@echo "  make type-check      - Type check all services"
+	@echo "  make lint-health     - Code health anti-pattern scan"
+	@echo "  make check-types     - Type check all services"
 	@echo "  make pre-commit      - Run pre-commit hooks"
 	@echo ""
 	@echo "🔒 SECURITY:"
@@ -174,7 +175,7 @@ check-env:
 
 RUNSERVER_FLAGS := $(if $(NORELOAD),--noreload,)
 
-dev-platform: check-env build-css
+dev-platform: check-env
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
@@ -184,15 +185,14 @@ dev-platform: check-env build-css
 	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --settings=config.settings.dev || echo "⚠️ Initial data setup skipped"
 	@echo "🔧 Loading dev sample data..."
 	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
-	@echo "🚀 Starting Django-Q2 workers in background..."
-	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 &
-	@QCLUSTER_PID=$$!; \
-	echo "📊 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
+	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 & \
+	QCLUSTER_PID=$$!; \
+	echo "🚀 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
 	echo "🌐 Starting platform server on :8700$(if $(NORELOAD), (no-reload),)..."; \
 	trap 'echo "🛑 Stopping Django-Q2 workers..."; kill $$QCLUSTER_PID 2>/dev/null || true' EXIT; \
 	$(PYTHON_PLATFORM_MANAGE) runserver 0.0.0.0:8700 --settings=config.settings.dev $(RUNSERVER_FLAGS)
 
-dev-portal: check-env build-css
+dev-portal: check-env
 	@echo "🌐 [Portal] Starting customer portal service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔒 NO PYTHONPATH - portal cannot import platform code"
@@ -207,10 +207,10 @@ dev-all: build-css
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
 
-dev: build-css
+dev:
 	@$(MAKE) dev-all
 
-dev-e2e: check-env build-css
+dev-e2e: check-env
 	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@RATE_LIMITING_ENABLED=false $(MAKE) NORELOAD=1 dev-all
@@ -319,7 +319,7 @@ test-security:
 		fi && \
 		echo "✅ Portal properly isolated from platform modules"
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
+	@cd services/platform && DJANGO_SETTINGS_MODULE=config.settings.base PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
 	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
@@ -398,6 +398,16 @@ test:
 	@$(MAKE) test-security
 	@echo "🎉 All test phases completed successfully!"
 
+test-fast:
+	@echo "⚡ [Platform] Fast test run (failfast + keepdb + parallel)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ifdef FILE
+	@$(PYTHON_PLATFORM_MANAGE) test $(FILE) --settings=config.settings.test --verbosity=2 --failfast --keepdb
+else
+	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --failfast --keepdb --parallel
+endif
+	@echo "✅ Fast tests completed!"
+
 # ===============================================================================
 # DATABASE & ASSETS 🗄️
 # ===============================================================================
@@ -465,6 +475,10 @@ lint-portal:
 	@echo "✅ Portal linting complete!"
 
 lint:
+ifdef FILE
+	@echo "🔍 [Lint] Checking: $(FILE)"
+	@$(VENV_DIR)/bin/ruff check $(FILE) --config=pyproject.toml
+else
 	@echo "🔄 [All Services] Comprehensive linting..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📋 Phase 0: Ruff no-new-debt gate"
@@ -479,7 +493,30 @@ lint:
 	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "📋 Phase 4: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
+	@echo "📋 Phase 5: Code health scan"
+	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
 	@echo "🎉 All services linting complete!"
+endif
+
+lint-fix:
+ifdef FILE
+	@echo "🔧 [Lint Fix] Auto-fixing: $(FILE)"
+	@$(VENV_DIR)/bin/ruff check $(FILE) --fix --config=pyproject.toml || true
+	@echo "✅ Auto-fix complete — review changes before committing."
+else
+	@echo "🔧 [All Services] Auto-fixing safe lint issues..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "📋 Platform:"
+	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --fix --config=../../pyproject.toml || true
+	@echo "📋 Portal:"
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --fix --config=../../pyproject.toml || true
+	@echo "✅ Auto-fix complete — review changes before committing."
+endif
+
+lint-health:
+	@echo "🏥 [Health] Code health scan..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=medium --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."
@@ -524,6 +561,19 @@ lint-credentials:
 # ===============================================================================
 # DESIGN SYSTEM CHECKS 🎨  (Phase C.3, C.4, D.1)
 # ===============================================================================
+
+check-pysyntax:
+ifdef FILE
+	@echo "🐍 [Syntax] Checking: $(FILE)"
+	@$(VENV_DIR)/bin/python -c "import ast; ast.parse(open('$(FILE)').read())" && echo "✅ $(FILE) — valid syntax" || { echo "❌ $(FILE) — syntax error"; exit 1; }
+else
+	@echo "🐍 [Syntax] Checking Python syntax across all services..."
+	@errors=0; \
+	for f in $$(find services/platform services/portal -name '*.py' -not -path '*/migrations/*' -not -path '*/.venv*'); do \
+		$(VENV_DIR)/bin/python -c "import ast, sys; ast.parse(open('$$f').read())" 2>/dev/null || { echo "  ❌ $$f"; errors=$$((errors+1)); }; \
+	done; \
+	if [ $$errors -eq 0 ]; then echo "✅ All Python files have valid syntax!"; else echo "❌ $$errors file(s) with syntax errors"; exit 1; fi
+endif
 
 check-parity:
 	@echo "🔍 [Parity] Checking component parity: portal ↔ platform..."
@@ -597,12 +647,17 @@ audit-dark-mode-strict:
 # ===============================================================================
 
 
-type-check:
+check-types:
+ifdef FILE
+	@echo "🏷️ [Type Check] $(FILE)"
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy $(FILE) --config-file=../../pyproject.toml --follow-imports=silent
+else
 	@echo "🏷️ [All Services] Comprehensive type checking..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 	@echo "🎉 All services type checking complete!"
+endif
 
 # ===============================================================================
 # PRE-COMMIT HOOKS 🔗

@@ -467,6 +467,15 @@ class SecurityScanner:
                 Severity.MEDIUM,
                 "A09:2021-Security Logging and Monitoring Failures",
             ),
+            # Exception message leakage in return values (info-leak via str(e) in dicts)
+            (
+                r'["\']error["\']\s*:\s*str\(\w+\)',
+                "Information Leakage — exception str() in return dict exposes "
+                "internal error details (DB paths, field names, connection strings) "
+                "in stored task results (OWASP A09, CWE-209). Return generic message, log exception separately.",
+                Severity.MEDIUM,
+                "A09:2021-Security Logging and Monitoring Failures",
+            ),
         ]
 
         # Scoped patterns: (regex, description, severity, owasp_cat, path_glob, warn_level)
@@ -611,6 +620,22 @@ class SecurityScanner:
                 "A01:2021-Broken Access Control",
                 "services/**/*.py",
             ),
+            # 16. Unguarded JSONField meta write — race condition risk in async tasks.
+            # Flags .meta[key] = or .meta = {/var assignments in task files where
+            # concurrent Django-Q2 workers may overwrite each other's changes.
+            # NOTE: This regex intentionally over-matches for defense-in-depth — it is
+            # better to flag a safe write than to miss a dangerous one. If the write is
+            # already guarded (select_for_update inside transaction.atomic), add an inline
+            # suppression comment: # nosec: locked-meta-write
+            (
+                r"\.meta\s*\[.+\]\s*=|\.meta\s*=\s*(\{|[a-z])",
+                "Unguarded JSONField write — .meta mutation without select_for_update() "
+                "risks lost updates when concurrent tasks write to the same JSON blob "
+                "(OWASP A04, CWE-362). Wrap in transaction.atomic() + select_for_update().",
+                Severity.MEDIUM,
+                "A04:2021-Insecure Design",
+                "**/tasks.py",
+            ),
         ]
 
     def generate_finding_id(self) -> str:
@@ -646,6 +671,7 @@ class SecurityScanner:
 
         Uses Python 3.13's PurePath.full_match() which supports ** recursive wildcards.
         Patterns without **/ prefix are auto-expanded to match anywhere in the path tree.
+        Supports comma-separated globs (e.g., "**/tasks.py,**/signals.py").
         """
         if glob_pattern is None:
             return True
@@ -654,10 +680,15 @@ class SecurityScanner:
         except ValueError:
             rel = file_path.as_posix()
         rel_path = PurePosixPath(rel)
-        candidates = [glob_pattern]
-        if not glob_pattern.startswith("**/"):
-            candidates.append(f"**/{glob_pattern}")
-        return any(rel_path.full_match(pattern) for pattern in candidates)
+        # Support comma-separated globs
+        for single_glob in glob_pattern.split(","):
+            single_glob = single_glob.strip()
+            candidates = [single_glob]
+            if not single_glob.startswith("**/"):
+                candidates.append(f"**/{single_glob}")
+            if any(rel_path.full_match(pattern) for pattern in candidates):
+                return True
+        return False
 
     def _scan_patterns(self, file_path: Path, content: str, lines: list[str]) -> list[SecurityFinding]:
         """Scan file using regex patterns"""
@@ -771,6 +802,14 @@ class SecurityScanner:
             "Weak Crypto": "Use AES-256-GCM or ChaCha20-Poly1305 for encryption",
             "Unguarded response.json": "Wrap response.json() in try/except (ValueError, TypeError) or use a safe wrapper",
             "Unbounded int": "Clamp external values with min(max(1, value), MAX_VALUE) before use",
+            "Information Leakage": (
+                "Return a generic error message (e.g., 'Task failed, see logs'). "
+                "Use logger.exception() for the full traceback — never expose str(e) in return values."
+            ),
+            "Unguarded JSONField": (
+                "Wrap meta writes in transaction.atomic() + "
+                "Model.objects.select_for_update().get(id=pk) to prevent lost updates from concurrent tasks."
+            ),
         }
 
         for key, rec in recommendations.items():

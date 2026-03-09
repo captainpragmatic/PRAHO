@@ -15,7 +15,7 @@ from django.contrib.messages.api import MessageFailure
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -31,6 +31,7 @@ from apps.users.models import User
 from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
 from .customer_models import Customer
+from .customer_service import CustomerService
 from .forms import CustomerCreationForm, CustomerEditForm, CustomerUserAssignmentForm
 
 logger = logging.getLogger(__name__)
@@ -84,26 +85,12 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     """
     # Get user's accessible customers (multi-tenant)
     user = cast(User, request.user)  # Safe due to @login_required
-    accessible_customers_list = user.get_accessible_customers()
+    customers = CustomerService.get_accessible_customers(user)
 
-    # Convert to QuerySet for database operations
-    if isinstance(accessible_customers_list, QuerySet):
-        customers = accessible_customers_list
-    elif accessible_customers_list:
-        customer_ids = [c.id for c in accessible_customers_list]
-        customers = Customer.objects.filter(id__in=customer_ids)
-    else:
-        customers = Customer.objects.none()
-
-    # Search functionality - updated for new model structure
+    # Search functionality — delegates to canonical service method
     search_query = request.GET.get("search", "")
     if search_query:
-        customers = customers.filter(
-            Q(company_name__icontains=search_query)
-            | Q(name__icontains=search_query)
-            | Q(primary_email__icontains=search_query)
-            | Q(tax_profile__cui__icontains=search_query)  # Search in related tax profile
-        ).distinct()
+        customers = CustomerService.search_customers(search_query, user)
 
     # Expected queries: 3 (customers + tax profiles + addresses for display)
     customers = (
@@ -132,13 +119,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @login_required
-    accessible_customers = user.get_accessible_customers()
-    if isinstance(accessible_customers, QuerySet):
-        accessible_qs: QuerySet[Customer] = accessible_customers
-    elif accessible_customers:
-        accessible_qs = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-    else:
-        accessible_qs = Customer.objects.none()
+    accessible_qs = CustomerService.get_accessible_customers(user)
 
     # Expected queries: 4 (customer + tax + billing + addresses)
     customer = get_object_or_404(
@@ -149,69 +130,45 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     # Get recent notes
     recent_notes = customer.notes.order_by("-created_at")[:5]
 
-    # Get services for this customer (using services app)
-    services = []
-    services_summary = {"total": 0, "active": 0, "suspended": 0}
-    try:
-        # Import here to avoid circular imports
-        services_qs = (
-            Service.objects.filter(customer=customer).select_related("service_plan").order_by("-created_at")[:5]
-        )
-        services = list(services_qs)
+    # Build base querysets once; each is evaluated exactly twice below (aggregate + slice).
+    services_qs = Service.objects.filter(customer=customer)
+    invoices_qs = Invoice.objects.filter(customer=customer)
+    tickets_qs = Ticket.objects.filter(customer=customer)
 
-        # Calculate services summary
-        all_services = Service.objects.filter(customer=customer)
-        services_summary = {
-            "total": all_services.count(),
-            "active": all_services.filter(status="active").count(),
-            "suspended": all_services.filter(status="suspended").count(),
-            "pending": all_services.filter(status="pending").count(),
-        }
-    except ImportError:
-        # Services app not available
-        pass
+    # Get services for this customer (single aggregate query instead of 4 separate counts)
+    services_summary = services_qs.aggregate(
+        total=Count("id"),
+        active=Count("id", filter=Q(status="active")),
+        suspended=Count("id", filter=Q(status="suspended")),
+        pending=Count("id", filter=Q(status="pending")),
+    )
+    services = list(services_qs.select_related("service_plan").order_by("-created_at")[:5])
 
-    # Get recent invoices/orders for this customer (using billing app)
-    invoices = []
-    invoices_summary = {"total": 0, "paid": 0, "unpaid": 0}
-    try:
-        invoices_qs = Invoice.objects.filter(customer=customer).order_by("-created_at")[:5]
-        invoices = list(invoices_qs)
+    # Get recent invoices (single aggregate query instead of 4 separate counts)
+    invoices_summary = invoices_qs.aggregate(
+        total=Count("id"),
+        paid=Count("id", filter=Q(status="paid")),
+        unpaid=Count("id", filter=Q(status__in=["issued", "overdue"])),
+        draft=Count("id", filter=Q(status="draft")),
+    )
+    invoices = list(invoices_qs.order_by("-created_at")[:5])
 
-        # Calculate invoices summary
-        all_invoices = Invoice.objects.filter(customer=customer)
-        invoices_summary = {
-            "total": all_invoices.count(),
-            "paid": all_invoices.filter(status="paid").count(),
-            "unpaid": all_invoices.filter(status__in=["pending", "overdue"]).count(),
-            "draft": all_invoices.filter(status="draft").count(),
-        }
-    except ImportError:
-        # Billing app not available
-        pass
+    # Get recent tickets (single aggregate query instead of 4 separate counts)
+    tickets_summary = tickets_qs.aggregate(
+        total=Count("id"),
+        open=Count("id", filter=Q(status__in=["open", "in_progress"])),
+        closed=Count("id", filter=Q(status="closed")),
+        pending=Count("id", filter=Q(status="waiting_on_customer")),
+    )
+    tickets = list(tickets_qs.order_by("-created_at")[:5])
 
-    # Get recent tickets for this customer (using tickets app)
-    tickets = []
-    tickets_summary = {"total": 0, "open": 0, "closed": 0}
-    try:
-        tickets_qs = Ticket.objects.filter(customer=customer).order_by("-created_at")[:5]
-        tickets = list(tickets_qs)
-
-        # Calculate tickets summary
-        all_tickets = Ticket.objects.filter(customer=customer)
-        tickets_summary = {
-            "total": all_tickets.count(),
-            "open": all_tickets.filter(status__in=["open", "in_progress"]).count(),
-            "closed": all_tickets.filter(status="closed").count(),
-            "pending": all_tickets.filter(status="pending").count(),
-        }
-    except ImportError:
-        # Tickets app not available
-        pass
-
-    # User management context for safeguards
-    total_users = customer.memberships.count()
-    owner_count = customer.memberships.filter(role="owner").count()
+    # User management context — single aggregate instead of two separate .count() queries
+    membership_stats = customer.memberships.aggregate(
+        total=Count("id"),
+        owners=Count("id", filter=Q(role="owner")),
+    )
+    total_users = membership_stats["total"]
+    owner_count = membership_stats["owners"]
 
     context = {
         "customer": customer,
@@ -235,6 +192,20 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     }
 
     return render(request, "customers/detail.html", context)
+
+
+# --- Customer-creation workflow handlers ---
+# These three helpers (_handle_user_creation_for_customer, _handle_user_linking_for_customer,
+# _handle_skip_user_for_customer) are intentionally separate from the user-assignment workflow
+# handlers below (_handle_user_creation_action, _handle_user_linking_action, _handle_user_skip_action).
+#
+# Key differences that make unification awkward:
+#   - send_welcome source: result dict (bool, already coerced) vs. POST data (raw string, needs coercion)
+#   - is_primary flag: True for new customers (first owner), False for existing customers
+#   - Success messages: creation says "created and linked", assignment is role-aware
+#   - Skip messages: creation says "no user assigned", assignment says "skipped"
+# Merging would require a parameter-heavy _handle_user_workflow() that is harder to follow than
+# two focused sets of handlers.
 
 
 def _handle_user_creation_for_customer(
@@ -320,25 +291,8 @@ def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
 
         return redirect("customers:detail", customer_id=customer.pk)
 
-    except ValidationError as e:
-        # Known validation issues - safe to show some details
-        messages.error(request, _("❌ Please check your input: Invalid data provided"))
-        logger.warning(f"Customer creation validation error for user {request.user.id}: {e}")
-
-    except IntegrityError as e:
-        # Database constraint violations - generic message
-        messages.error(request, _("❌ This customer information conflicts with existing data"))
-        logger.error(f"Customer creation integrity error for user {request.user.id}: {e}")
-
-    except PermissionDenied as e:
-        # Authorization issues
-        messages.error(request, _("❌ You don't have permission to create customers"))
-        logger.warning(f"Unauthorized customer creation attempt by user {request.user.id}: {e}")
-
     except Exception as e:
-        # Unexpected errors - completely generic message
-        messages.error(request, _("❌ Unable to create customer. Please contact support if this continues"))
-        logger.exception(f"Unexpected error creating customer for user {request.user.id}: {e}")
+        _handle_secure_error(request, e, "customer_create", request.user.id)
 
     return _render_customer_form(request, form)
 
@@ -375,14 +329,7 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     # Prefetch related profiles for efficiency
     customer = get_object_or_404(
         accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses"), id=customer_id
@@ -425,14 +372,7 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
@@ -476,21 +416,7 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"results": []})
 
     user = cast(User, request.user)  # Safe due to @login_required
-    customers = user.get_accessible_customers()
-
-    # Filter based on search query
-    if hasattr(customers, "filter"):  # QuerySet
-        customers = customers.filter(
-            Q(name__icontains=query) | Q(company_name__icontains=query) | Q(primary_email__icontains=query)
-        )[:10]
-    else:  # List
-        customers = [
-            c
-            for c in customers
-            if query.lower() in c.name.lower()
-            or query.lower() in c.company_name.lower()
-            or query.lower() in c.primary_email.lower()
-        ][:10]
+    customers = CustomerService.search_customers(query, user)[:10]
 
     results = [
         {
@@ -510,6 +436,10 @@ def _validate_customer_assign_access(request: HttpRequest, user: User, customer:
         messages.error(request, _("Access denied to this customer"))
         return redirect("customers:list")
     return None
+
+
+# --- User-assignment workflow handlers (post-creation) ---
+# See the comment above the customer-creation handlers for why these are kept separate.
 
 
 def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict[str, str]) -> None:
@@ -615,27 +545,8 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
 
         return redirect("customers:detail", customer_id=customer.pk)
 
-    except ValidationError as e:
-        # Known validation issues - safe to show some details
-        messages.error(request, _("❌ Please check your input: Invalid user assignment data"))
-        logger.warning(f"User assignment validation error for customer {customer.id} by user {request.user.id}: {e}")
-
-    except IntegrityError as e:
-        # Database constraint violations - generic message
-        messages.error(request, _("❌ This user assignment conflicts with existing data"))
-        logger.error(f"User assignment integrity error for customer {customer.id} by user {request.user.id}: {e}")
-
-    except PermissionDenied as e:
-        # Authorization issues
-        messages.error(request, _("❌ You don't have permission to assign users to this customer"))
-        logger.warning(
-            f"Unauthorized user assignment attempt for customer {customer.id} by user {request.user.id}: {e}"
-        )
-
     except Exception as e:
-        # Unexpected errors - completely generic message
-        messages.error(request, _("❌ Unable to assign user. Please contact support if this continues"))
-        logger.exception(f"Unexpected error assigning user to customer {customer.id} by user {request.user.id}: {e}")
+        _handle_secure_error(request, e, "user_assignment", request.user.id)
 
     return _render_assignment_form(request, form, customer)
 
@@ -663,14 +574,7 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
     user = cast(User, request.user)  # Safe due to @staff_required
-    accessible_customers = user.get_accessible_customers()
-    accessible_qs = (
-        accessible_customers
-        if isinstance(accessible_customers, QuerySet)
-        else Customer.objects.filter(id__in=[c.id for c in accessible_customers])
-        if accessible_customers
-        else Customer.objects.none()
-    )
+    accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
     if request.method == "POST":
@@ -684,7 +588,7 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
 def customer_services_api(request: HttpRequest, customer_id: int) -> JsonResponse:
     """
     🔗 API endpoint for customer services (for ticket form) with rate limiting
-    Returns empty list for now - placeholder for future service management
+    Returns real Service objects filtered by customer access.
     """
     # Check if rate limited
     if getattr(request, "limited", False):
@@ -693,18 +597,16 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
 
     # Verify user has access to this customer
     user = cast(User, request.user)
-    accessible_customers_list = user.get_accessible_customers()
-    if isinstance(accessible_customers_list, QuerySet):
-        customers_qs = accessible_customers_list
-    elif accessible_customers_list:
-        customer_ids = [c.id for c in accessible_customers_list]
-        customers_qs = Customer.objects.filter(id__in=customer_ids)
-    else:
-        customers_qs = Customer.objects.none()
+    customers_qs = CustomerService.get_accessible_customers(user)
 
     if not customers_qs.filter(id=customer_id).exists():
         return JsonResponse({"error": "Access denied"}, status=403)
 
-    # For now, return empty services list
-    # TODO: Implement actual service management
-    return JsonResponse([], safe=False)
+    # Response contract: {"results": [{"id": ..., "service_name": ..., "status": ..., "service_plan__name": ...}, ...]}
+    # Consumers (e.g. ticket form dropdown JS) must use the "results" key — not a bare array.
+    services = list(
+        Service.objects.filter(customer_id=customer_id)
+        .values("id", "service_name", "status", "service_plan__name")
+        .order_by("service_name")
+    )
+    return JsonResponse({"results": services})

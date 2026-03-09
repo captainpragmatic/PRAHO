@@ -505,6 +505,5 @@ class CustomerProfileSerializer(serializers.Serializer):
             "email_notifications": profile.email_notifications,
             "sms_notifications": profile.sms_notifications,
             "marketing_emails": profile.marketing_emails,
-            "last_login": instance.last_login.isoformat() if instance.last_login else None,
             "date_joined": instance.date_joined.isoformat(),
         }

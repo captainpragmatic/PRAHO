@@ -7,8 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`str(e)` information leakage** (CWE-209) — replaced all 5 `return {"error": str(e)}` patterns in `customers/tasks.py` with generic `"Task failed, see server logs"` message; exception details now only in server logs via `logger.exception()`
+- **JSONField race condition** (CWE-362) — added `transaction.atomic()` + `select_for_update()` narrow locks around all `customer.meta` read-modify-write operations in `tasks.py`, `credit_service.py`, `services.py`, and `billing/invoice_service.py`; prevents lost updates from concurrent Django-Q2 tasks
+- **Stale-owner cache lock** — replaced `cache.add(key, True)` + unconditional `cache.delete()` in `cleanup_inactive_customers` with tokenized lock pattern (`uuid4` token, compare-and-delete in `finally`); prevents TTL-expired first worker from deleting second worker's lock
+- **`Customer.meta` type validation** — two-layer enforcement: app-level `save()` coerces `None` → `{}` and raises `ValueError` for non-dict; `clean()` raises `ValidationError` for form/admin; DB-level `CHECK (jsonb_typeof(meta) = 'object')` constraint (migration 0008)
+- **Fail-closed on corrupt cooldown dates** — `cleanup_inactive_customers` now skips send (instead of fail-open) when `last_reactivation_email` date is unparseable, preventing unlimited reactivation email spam
+- **New scanner rule: `exception-str-return`** (AST) — `error_handling_scan.py` detects `return {"error": str(e)}` inside except handlers; found 32 pre-existing instances in billing/
+- **New scanner rule: Unguarded JSONField write** (regex, scoped) — `security_scanner.py` flags `.meta[key] =` mutations in `**/tasks.py` as race condition risk
+- **New scanner rule: Information Leakage** (regex) — `security_scanner.py` detects `"error": str(var)` patterns exposing exception internals in return dicts
+
+### Changed
+
+- **MyPy type errors fully resolved** — removed 27 stale `# type: ignore` comments across `orders/services.py`, `billing/usage_invoice_service.py`, `common/validators.py`, `audit/siem.py`, and `users/services.py` that became unnecessary after `SoftDeleteManager` was made generic; fixed 10 genuine errors in `rate_limiting.py` (getattr annotations, unreachable code, no-any-return), `infrastructure/views.py` (4x request.user arg-type), `billing/efactura/b2c.py` (`__all__` for re-exports), `common/key_derivation.py` (`SECRET_KEY` None guard), `common/management/commands/post_encryption_upgrade.py` (`HostingAccount` → `VirtualminAccount` broken import), and `api/users/views.py` (bool wrapper on DRF Any return); removing stale ignores in `usage_invoice_service.py` exposed and fixed 5 hidden attribute errors from wrong field names
+- **Magic number constants extracted** — `refund_service.py` `_FALLBACK_ORDER_TOTAL_CENTS` and `_FALLBACK_INVOICE_TOTAL_CENTS`; `infrastructure/apps.py` `_CLEANUP_FAILED_INTERVAL_MINUTES` and `_RECOVER_STUCK_INTERVAL_MINUTES`
+- **Exception logging improved** — `drift_remediation.py` bare `except Exception:` blocks now capture and log `e` for observability; `_get_cloud_gateway` adds `logger.error` on failure
+- **`rate_limiting.py` nosemgrep comment** moved to inline position on the `importlib.import_module` call line (cosmetic, no behaviour change)
+- **`notifications/services.py` `save()` scoped** — `customer.save()` now uses `update_fields=["marketing_consent", "newsletter_consent"]` to avoid full-row overwrites on unsubscribe
+- **Code health scan integrated into `make lint`** (Phase 5) and exposed as standalone `make lint-health`; pre-commit hook `code-health-check` added to `.pre-commit-config.yaml`
+- **`make test-security` cache check** — removed spurious `os.environ.setdefault` call; `DJANGO_SETTINGS_MODULE` now set via env prefix
+- Engagement score weights from `SettingsService` now clamped to `[1, 100]` to prevent division-by-zero or negative scores from misconfigured settings
+- Ticket open statuses in `cleanup_inactive_customers` extracted to `_OPEN_TICKET_STATUSES` module constant (was inline list)
+- `security_scanner.py` `_matches_path_glob` now supports comma-separated globs for multi-file-type scoping
+- **`SoftDeleteManager` now generic** — parameterised over `TypeVar("_M", bound=models.Model)` instead of hardcoded `Manager["Customer"]`; subclass models (`CustomerAddress`, `CustomerPaymentMethod`, `CustomerNote`) now get correctly typed `QuerySet[T]` returns, eliminating ~20 `# type: ignore[misc]` and `# type: ignore[return-value]` comments across `contact_service.py`, `contact_views.py`, and `profile_service.py`
+- **`CustomerPaymentMethod.save()` simplified** — removed premature `clean_fields()`/`clean()` calls before the atomic block; Django's default `save()` already handles validation
+- **Forms use `TextChoices.choices`** — `CustomerCreationForm` and `CustomerEditForm` now reference `Customer.CustomerType.choices` instead of legacy `CUSTOMER_TYPE_CHOICES` tuple
+- **Tasks use raw string values** — `start_customer_onboarding` and `cleanup_inactive_customers` compare against stored string values (`"company"`, `"active"`) instead of enum members, matching what the DB actually stores
+- Removed unnecessary `cast()` calls in `Customer.get_primary_address()` and `get_billing_address()` — generic manager makes return types correct without casting
+
 ### Added
 
+- **Customer TODO stubs flushed** — all 6 placeholder implementations replaced with real business logic:
+  - `process_customer_feedback`: keyword extraction + category tagging with sentiment analysis
+  - `start_customer_onboarding` / onboarding steps: multi-step orchestration (welcome email → billing setup → verification)
+  - `cleanup_inactive_customers`: GDPR-aware inactive customer processing with reactivation emails
+  - `send_customer_welcome_email`: delegates to `EmailService.send_template_email` with bilingual support
+  - `customer_services_api`: wired to provisioning `Service` model with filters, pagination, and stats
+- **Shared CUI validator** (`apps/common/cui_validator.py`) — extracted from inline regex to reusable `CUIValidator` class (pattern matches `CNPValidator`); accepts both `RO12345678` and `12345678` formats; used by customers and billing apps
 - **`@public_api_endpoint` marker decorator** (`apps/api/secure_auth.py`) — marks endpoints as intentionally unauthenticated; CI test enforces every API view has either this marker or an auth decorator
 - **`@require_portal_authentication` decorator** (`apps/api/secure_auth.py`) — lightweight HMAC backup that verifies `_portal_authenticated` flag; defense-in-depth for endpoints previously relying only on middleware
 - **Structural CI test** (`tests/api/test_api_auth_coverage.py`) — scans all `/api/` URL patterns via Django URL resolver and fails if any view lacks an explicit auth decorator or `@public_api_endpoint` marker; walks DRF `@api_view` closure chains and CBV `permission_classes`
@@ -18,6 +54,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Mass assignment vulnerability** (OWASP A04:2021) — added `UPDATABLE_FIELDS` frozensets to `CustomerService`, `ProfileService`; `update_customer()` and profile update methods now filter against allowlists and log rejected fields
+- **`User.objects.create()` bypassing password hashing** — changed to `create_user()` in `customer_create_user` view
+- **Missing role validation** — `customer_add_user` and `customer_create_user` now validate role against `CustomerMembership.CUSTOMER_ROLE_CHOICES`
+- **Missing ownership validation** — `set_default_payment_method` now verifies payment method belongs to the customer
+- **Address versioning race condition** — wrapped in `transaction.atomic()` + `select_for_update()` in both view and service layer
+- **Form save atomicity** — `CustomerCreationForm.save()` now wraps 4 object creations in `transaction.atomic()`
+- **Broken `unique_together` on addresses** — replaced with partial `UniqueConstraint(condition=Q(is_current=True))` for correct current-address uniqueness
+- **CUI validation always returning False** — `validate_cui()` on `CustomerTaxProfile` was passing RO-prefixed values to a validator that rejected RO prefix; now uses shared `CUIValidator` that handles both formats
+- **Credit scoring dead code** — `get_base_credit_score()` and `get_credit_adjustments()` were defined but never called; `calculate_credit_score()` now uses them instead of module constants
+- **`_get_consecutive_on_time_payments` not checking due dates** — was counting consecutive successful payments regardless of timing; now checks `invoice.due_at`
+- **Phantom order statuses** — removed references to non-existent `"delivered"` and `"fulfilled"` statuses from analytics queries
+- **USD currency option** — removed from billing profile form (model only allows RON/EUR)
+- **Soft-delete signal using filtered manager** — `store_original_customer_values` pre_save signal changed from `Customer.objects.get()` to `Customer.all_objects.get()` to handle soft-deleted record restore
+- **Duplicate default payment method signal** — removed redundant `_ensure_single_default_payment_method` call (already handled in model `save()`)
+- **`meta` dict access on None** — added `customer.meta = customer.meta or {}` guard before dict operations
+- **Manager declaration order** — `SoftDeleteManager` is now first (default manager) for correct admin/reverse FK behavior
 - **Missing `CustomerAnalyticsService.record_invoice_event`** — method called from `billing/signals.py` but never existed; `AttributeError` was silently swallowed by broad `except Exception`. Added implementation using `AuditService.log_simple_event` pattern.
 - **`SECURE_SSL_REDIRECT` hardcoded in prod/staging settings** (#30) — Replaced hardcoded `SECURE_SSL_REDIRECT = True` in all 4 prod/staging settings files with env-configurable `DJANGO_SECURE_SSL_REDIRECT` (default: `true`, secure-by-default). Strict boolean parsing with `.strip().lower()` and `ImproperlyConfigured` on invalid values. Logs warning when disabled. Added `security.W060` system check for disabled redirect in production. Updated 4 Docker Compose files, 3 Ansible templates, 2 `.env.example` files, and 3 docs to match.
 - **SECRET_KEY env var mismatch** (#19) — Standardized on `DJANGO_SECRET_KEY` as canonical env var name across portal/platform settings, Docker Compose, CI workflows, Ansible templates, and env examples

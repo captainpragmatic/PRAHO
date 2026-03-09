@@ -30,7 +30,8 @@ class APIUser:
         self.is_active = user_data.get("is_active", True)
         self.is_staff = user_data.get("is_staff", False)
         self.date_joined = user_data.get("date_joined")
-        self.last_login = user_data.get("last_login")
+        # last_login is intentionally excluded from the API response per
+        # GDPR Article 5(1)(c) data minimization (behavioral metadata).
 
         # Store full API data for additional fields
         self._api_data = user_data

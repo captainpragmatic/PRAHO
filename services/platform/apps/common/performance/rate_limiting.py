@@ -122,6 +122,7 @@ def validate_throttle_class_scopes(class_paths: Sequence[str | type[Any]], rates
     """
     errors: list[str] = []
     for class_path in class_paths:
+        scope: str | None
         if isinstance(class_path, str):
             display_name = class_path
             known_scope = _KNOWN_THROTTLE_CLASS_SCOPES.get(class_path)
@@ -134,13 +135,10 @@ def validate_throttle_class_scopes(class_paths: Sequence[str | type[Any]], rates
                     errors.append(f"{class_path} (import failed: {exc})")
                     continue
                 scope = getattr(throttle_cls, "scope", None)
-        elif isinstance(class_path, type):
+        else:
             throttle_cls = class_path
             display_name = f"{class_path.__module__}.{class_path.__name__}"
             scope = getattr(throttle_cls, "scope", None)
-        else:
-            errors.append(f"{class_path!r} (invalid throttle class reference)")
-            continue
 
         if scope and scope not in rates:
             errors.append(f"{display_name} (missing scope '{scope}' in THROTTLE_RATES)")
@@ -161,7 +159,7 @@ def _extract_hmac_identity(request: Request) -> str:
     Use a portal-only key so callers cannot bypass limits by rotating signed
     payload fields (customer_id/user_id) and creating unbounded cache keys.
     """
-    return request.headers.get("X-Portal-Id", "unknown")
+    return str(request.headers.get("X-Portal-Id", "unknown"))
 
 
 class _CustomTimeRateMixin:

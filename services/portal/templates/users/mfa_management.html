@@ -55,19 +55,8 @@
           {% endif %}
         </div>
 
-        <!-- Last Activity -->
+        <!-- Security Settings -->
         <div class="space-y-4">
-          <div>
-            <dt class="text-sm font-medium text-slate-400">{% trans 'Last Login' %}</dt>
-            <dd class="mt-1 text-sm text-white">
-              {% if profile.last_login %}
-                {{ profile.last_login|date:"d.m.Y H:i" }}
-              {% else %}
-                <span class="text-slate-500">{% trans 'Never' %}</span>
-              {% endif %}
-            </dd>
-          </div>
-
           {% if mfa_enabled %}
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Backup Codes Available' %}</dt>

@@ -1,9 +1,9 @@
 """
 Tests for CustomerProfileSerializer.to_representation().
 
-Verifies that last_login and date_joined fields are included in the serialized
-output, that last_login serializes correctly when None, and that both fields
-use ISO 8601 format.
+Verifies that date_joined is included in the serialized output and that
+last_login is excluded (GDPR Article 5(1)(c) data minimization — behavioral
+metadata must not be returned to the customer portal).
 
 Platform tests — full database access via Django TestCase.
 """
@@ -12,7 +12,6 @@ from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-from django.utils import timezone
 
 from apps.api.customers.serializers import CustomerProfileSerializer
 
@@ -62,11 +61,16 @@ def _ensure_profile(user: "User") -> None:
 
 
 # ---------------------------------------------------------------------------
-# CustomerProfileSerializer — field presence tests
+# CustomerProfileSerializer — GDPR data minimization
 # ---------------------------------------------------------------------------
 
-class CustomerProfileSerializerFieldsTestCase(TestCase):
-    """Verify that CustomerProfileSerializer.to_representation includes new fields."""
+
+class CustomerProfileSerializerGDPRTestCase(TestCase):
+    """
+    Verify GDPR Article 5(1)(c) data minimization: last_login is behavioral
+    metadata and must NOT appear in the customer-facing profile API response.
+    date_joined is acceptable account information and must still be present.
+    """
 
     def setUp(self) -> None:
         self.user = _create_user(
@@ -80,29 +84,23 @@ class CustomerProfileSerializerFieldsTestCase(TestCase):
         serializer = CustomerProfileSerializer(instance=self.user)
         return serializer.to_representation(self.user)
 
-    # ------------------------------------------------------------------
-    # last_login
-    # ------------------------------------------------------------------
+    def test_last_login_is_absent_from_output(self) -> None:
+        """
+        last_login must NOT be present in the serialized output.
 
-    def test_last_login_field_is_present_in_output(self) -> None:
-        """Serialized output must contain a 'last_login' key."""
+        Behavioral metadata (last_login) must be excluded per GDPR
+        Article 5(1)(c) data minimization. This applies even when the user
+        has a recorded last_login timestamp.
+        """
         data = self._serialize()
-        self.assertIn("last_login", data, "CustomerProfileSerializer must include 'last_login'")
+        self.assertNotIn(
+            "last_login",
+            data,
+            "CustomerProfileSerializer must NOT expose 'last_login' (GDPR data minimization)",
+        )
 
-    def test_last_login_is_iso_format_string_when_set(self) -> None:
-        """last_login should be an ISO 8601 string when the user has logged in."""
-        data = self._serialize()
-        last_login_value = data["last_login"]
-        self.assertIsNotNone(last_login_value)
-        self.assertIsInstance(last_login_value, str)
-        # Must be parseable as an ISO timestamp
-        parsed = datetime.fromisoformat(last_login_value)
-        self.assertEqual(parsed.year, _KNOWN_LAST_LOGIN.year)
-        self.assertEqual(parsed.month, _KNOWN_LAST_LOGIN.month)
-        self.assertEqual(parsed.day, _KNOWN_LAST_LOGIN.day)
-
-    def test_last_login_serialized_as_none_when_never_logged_in(self) -> None:
-        """last_login must serialize as None when the user has never logged in."""
+    def test_last_login_absent_when_user_never_logged_in(self) -> None:
+        """last_login must NOT be present even when its value would be None."""
         never_logged_in = _create_user(
             "never-logged-in@example.ro",
             last_login=None,
@@ -111,12 +109,7 @@ class CustomerProfileSerializerFieldsTestCase(TestCase):
         _ensure_profile(never_logged_in)
 
         data = CustomerProfileSerializer(instance=never_logged_in).to_representation(never_logged_in)
-        self.assertIn("last_login", data)
-        self.assertIsNone(data["last_login"])
-
-    # ------------------------------------------------------------------
-    # date_joined
-    # ------------------------------------------------------------------
+        self.assertNotIn("last_login", data)
 
     def test_date_joined_field_is_present_in_output(self) -> None:
         """Serialized output must contain a 'date_joined' key."""
@@ -134,27 +127,14 @@ class CustomerProfileSerializerFieldsTestCase(TestCase):
         self.assertEqual(parsed.month, _KNOWN_DATE_JOINED.month)
         self.assertEqual(parsed.day, _KNOWN_DATE_JOINED.day)
 
-    # ------------------------------------------------------------------
-    # Both fields together
-    # ------------------------------------------------------------------
-
-    def test_both_last_login_and_date_joined_present_simultaneously(self) -> None:
-        """last_login and date_joined are both present in a single serialization pass."""
-        data = self._serialize()
-        self.assertIn("last_login", data)
-        self.assertIn("date_joined", data)
-        # last_login must be after date_joined chronologically
-        last_login_dt = datetime.fromisoformat(data["last_login"])
-        date_joined_dt = datetime.fromisoformat(data["date_joined"])
-        self.assertGreater(last_login_dt, date_joined_dt)
-
 
 # ---------------------------------------------------------------------------
 # CustomerProfileSerializer — existing fields not broken
 # ---------------------------------------------------------------------------
 
+
 class CustomerProfileSerializerExistingFieldsTestCase(TestCase):
-    """Ensure the new last_login / date_joined additions did not break existing fields."""
+    """Ensure the GDPR last_login removal did not break existing fields."""
 
     def setUp(self) -> None:
         self.user = _create_user(

@@ -22,7 +22,7 @@ env:
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
-  type-check:
+  check-types:
     runs-on: ubuntu-latest
 
     steps:

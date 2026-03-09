@@ -62,8 +62,8 @@ repos:
         require_serial: true
 
       # Only check modified Python files for performance
-      - id: type-check-modified
-        name: "Type Check Modified Files"
+      - id: check-types-modified
+        name: "Checking type issues on modified files"
         entry: uv run python
         args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
@@ -135,6 +135,16 @@ repos:
         name: "Security: Audit Coverage Check"
         entry: uv run python
         args: [scripts/audit_coverage_scan.py, --min-severity=high, --exclude-tests, services/platform/apps]
+        language: system
+        files: ^services/platform/apps/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # Code health regression check
+      - id: code-health-check
+        name: "Health: Code Health Check"
+        entry: uv run python
+        args: [scripts/code_health_scan.py, --min-severity=high, --exclude-tests, --allowlist=scripts/code_health_allowlist.txt, services/platform/apps]
         language: system
         files: ^services/platform/apps/.*\.py$
         pass_filenames: false

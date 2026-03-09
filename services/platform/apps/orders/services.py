@@ -257,45 +257,33 @@ class OrderService:
         address = None
 
         # First, try to get billing address marked as current
-        address = CustomerAddress.objects.filter(  # type: ignore[misc]
-            customer=customer, address_type="billing", is_current=True
-        ).first()
+        address = CustomerAddress.objects.filter(customer=customer, address_type="billing", is_current=True).first()
 
         # If no billing address, try primary address marked as current
         if not address:
-            address = CustomerAddress.objects.filter(  # type: ignore[misc]
-                customer=customer, address_type="primary", is_current=True
-            ).first()
+            address = CustomerAddress.objects.filter(customer=customer, address_type="primary", is_current=True).first()
 
         # If still no address, get any current address
         if not address:
-            address = CustomerAddress.objects.filter(  # type: ignore[misc]
-                customer=customer, is_current=True
-            ).first()
+            address = CustomerAddress.objects.filter(customer=customer, is_current=True).first()
 
         # Last resort: get the most recent address for this customer
         if not address:
-            address = (
-                CustomerAddress.objects.filter(  # type: ignore[misc]
-                    customer=customer
-                )
-                .order_by("-created_at")
-                .first()
-            )
+            address = CustomerAddress.objects.filter(customer=customer).order_by("-created_at").first()
 
         return BillingAddressData(
             company_name=customer.company_name or "",
             contact_name=customer.name,
             email=customer.primary_email,
             phone=customer.primary_phone if customer.primary_phone != "+40712345678" else "",  # Skip default phone
-            address_line1=address.address_line1 if address else "",  # type: ignore[attr-defined]
-            address_line2=address.address_line2 if address else "",  # type: ignore[attr-defined]
-            city=address.city if address else "",  # type: ignore[attr-defined]
-            county=address.county if address else "",  # type: ignore[attr-defined]
-            postal_code=address.postal_code if address else "",  # type: ignore[attr-defined]
+            address_line1=address.address_line1 if address else "",
+            address_line2=address.address_line2 if address else "",
+            city=address.city if address else "",
+            county=address.county if address else "",
+            postal_code=address.postal_code if address else "",
             country="RO"
-            if (address and address.country in ["România", "Romania"]) or not address  # type: ignore[attr-defined]
-            else (address.country if address else "RO"),  # type: ignore[attr-defined]
+            if (address and address.country in ["România", "Romania"]) or not address
+            else (address.country if address else "RO"),
             fiscal_code=getattr(customer.tax_profile, "cui", "") if hasattr(customer, "tax_profile") else "",
             registration_number=getattr(customer, "registration_number", ""),
             vat_number=getattr(customer.tax_profile, "vat_number", "") if hasattr(customer, "tax_profile") else "",

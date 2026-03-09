@@ -1629,18 +1629,18 @@ def test_cart_quantity_change_recalculates_totals_no_400(monitored_customer_page
     page.goto(f"{BASE_URL}/order/cart/")
     page.wait_for_load_state("networkidle")
 
-    # Look for quantity input
-    qty_input: Locator = page.locator('input[name*="quantity"], select[name*="quantity"]')
-    if qty_input.count() == 0:
-        print("  [i] No quantity input found on cart page — skipping")
-        return
+    # Look for quantity control — prefer visible <select> over hidden inputs
+    qty_select: Locator = page.locator('select[name*="quantity"]')
+    qty_number: Locator = page.locator('input[type="number"][name*="quantity"]')
 
-    # Try to change quantity
-    if qty_input.first.get_attribute("type") == "number":
-        qty_input.first.fill("2")
-        qty_input.first.press("Tab")  # trigger change event
+    if qty_select.count() > 0:
+        qty_select.first.select_option(value="2")
+    elif qty_number.count() > 0:
+        qty_number.first.fill("2")
+        qty_number.first.press("Tab")  # trigger change event
     else:
-        qty_input.first.select_option(value="2")
+        print("  [i] No visible quantity control found on cart page — skipping")
+        return
 
     # Wait for any HTMX recalculation
     page.wait_for_timeout(1500)

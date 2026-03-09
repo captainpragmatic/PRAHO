@@ -9,17 +9,15 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from django.db import models
+from django.db import models, transaction
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
     from apps.users.models import User
 
-    from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
     from .customer_models import Customer
 
-# Import at top level to fix PLC0415
 from .contact_models import CustomerAddress, CustomerNote, CustomerPaymentMethod
 
 logger = logging.getLogger(__name__)
@@ -53,32 +51,33 @@ class ContactService:
 
     @staticmethod
     def create_address(customer: Customer, user: User, address_data: AddressData, **kwargs: Any) -> CustomerAddress:
-        """Create customer address with versioning support."""
-        # If creating a new current address of this type, mark existing ones as non-current
-        if kwargs.get("is_current", True):
-            CustomerAddress.objects.filter(  # type: ignore[misc]
-                customer=customer, address_type=address_data.address_type, is_current=True
-            ).update(is_current=False)
+        """Create customer address with versioning support (atomic)."""
+        with transaction.atomic():
+            # If creating a new current address of this type, mark existing ones as non-current
+            if kwargs.get("is_current", True):
+                CustomerAddress.objects.filter(
+                    customer=customer, address_type=address_data.address_type, is_current=True
+                ).select_for_update(of=("self",)).update(is_current=False)
 
-            # Get the next version number
-            last_version = (
-                CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(  # type: ignore[misc]
-                    models.Max("version")
-                )["version__max"]
-                or 0
+                # Get the next version number
+                last_version = (
+                    CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(
+                        models.Max("version")
+                    )["version__max"]
+                    or 0
+                )
+
+                kwargs["version"] = last_version + 1
+
+            address = CustomerAddress.objects.create(
+                customer=customer,
+                address_type=address_data.address_type,
+                address_line1=address_data.address_line1,
+                city=address_data.city,
+                county=address_data.county,
+                postal_code=address_data.postal_code,
+                **kwargs,
             )
-
-            kwargs["version"] = last_version + 1
-
-        address = CustomerAddress.objects.create(  # type: ignore[misc]
-            customer=customer,
-            address_type=address_data.address_type,
-            address_line1=address_data.address_line1,
-            city=address_data.city,
-            county=address_data.county,
-            postal_code=address_data.postal_code,
-            **kwargs,
-        )
 
         logger.info(
             f"✅ [Contact] Created address for customer: {customer.name}",
@@ -90,7 +89,7 @@ class ContactService:
             },
         )
 
-        return address  # type: ignore[return-value]
+        return address
 
     @staticmethod
     def create_payment_method(
@@ -98,7 +97,7 @@ class ContactService:
     ) -> CustomerPaymentMethod:
         """Create customer payment method."""
 
-        payment_method = CustomerPaymentMethod.objects.create(  # type: ignore[misc]
+        payment_method = CustomerPaymentMethod.objects.create(
             customer=customer, method_type=method_type, display_name=display_name, **kwargs
         )
 
@@ -112,7 +111,7 @@ class ContactService:
             },
         )
 
-        return payment_method  # type: ignore[return-value]
+        return payment_method
 
     @staticmethod
     def create_note(
@@ -120,7 +119,7 @@ class ContactService:
     ) -> CustomerNote:
         """Create customer note."""
 
-        note = CustomerNote.objects.create(  # type: ignore[misc]
+        note = CustomerNote.objects.create(
             customer=customer, created_by=user, title=title, content=content, note_type=note_type, **kwargs
         )
 
@@ -129,34 +128,36 @@ class ContactService:
             extra={"customer_id": customer.id, "user_id": user.id, "note_type": note_type, "operation": "note_create"},
         )
 
-        return note  # type: ignore[return-value]
+        return note
 
     @staticmethod
     def get_current_addresses(customer: Customer) -> QuerySet[CustomerAddress]:
         """Get all current addresses for customer."""
-        return CustomerAddress.objects.filter(customer=customer, is_current=True)  # type: ignore[misc, return-value]
+        return CustomerAddress.objects.filter(customer=customer, is_current=True)
 
     @staticmethod
     def get_active_payment_methods(customer: Customer) -> QuerySet[CustomerPaymentMethod]:
         """Get active payment methods for customer."""
-        return CustomerPaymentMethod.objects.filter(customer=customer, is_active=True)  # type: ignore[misc, return-value]
+        return CustomerPaymentMethod.objects.filter(customer=customer, is_active=True)
 
     @staticmethod
     def get_recent_notes(customer: Customer, limit: int = 10) -> QuerySet[CustomerNote]:
         """Get recent notes for customer."""
-        return CustomerNote.objects.filter(customer=customer)[:limit]  # type: ignore[misc, return-value]
+        return CustomerNote.objects.filter(customer=customer)[:limit]
 
     @staticmethod
     def set_default_payment_method(
         customer: Customer, payment_method: CustomerPaymentMethod, user: User
     ) -> CustomerPaymentMethod:
         """Set a payment method as default for customer."""
-        # Remove default from other methods
-        CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)  # type: ignore[misc]
+        if payment_method.customer_id != customer.id:
+            raise ValueError("Payment method does not belong to this customer")
 
-        # Set this method as default
-        payment_method.is_default = True
-        payment_method.save()
+        with transaction.atomic():
+            # Remove default from other methods and set the new one atomically
+            CustomerPaymentMethod.objects.filter(customer=customer, is_default=True).update(is_default=False)
+            payment_method.is_default = True
+            payment_method.save(update_fields=["is_default", "updated_at"])
 
         logger.info(
             f"✅ [Contact] Set default payment method for customer: {customer.name}",
@@ -183,7 +184,7 @@ class ContactService:
 
         # Validate postal code format for Romania
         if (
-            address.country == "România"
+            address.country in ("România", "Romania")
             and address.postal_code
             and (not address.postal_code.isdigit() or len(address.postal_code) != ROMANIAN_POSTAL_CODE_LENGTH)
         ):

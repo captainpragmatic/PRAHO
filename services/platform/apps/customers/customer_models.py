@@ -6,7 +6,7 @@ Customer model and SoftDeleteModel infrastructure for customer management.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from .contact_models import CustomerAddress
     from .profile_models import CustomerBillingProfile, CustomerTaxProfile
 
-# Python 3.13 + Django 5.2 Generic Support - TypeVar removed for compatibility
+# Generic TypeVar for SoftDeleteManager — bound to models.Model so the manager
+# can be shared across all SoftDeleteModel subclasses without losing type safety.
+_M = TypeVar("_M", bound=models.Model)
 
 # Security logging
 security_logger = logging.getLogger("security")
@@ -88,19 +90,24 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
     )
 
 
-class SoftDeleteManager(models.Manager["Customer"]):
-    """Manager for soft delete operations with Python 3.13 generic support"""
+class SoftDeleteManager(models.Manager[_M]):
+    """Manager for soft delete operations — generic over any SoftDeleteModel subclass.
 
-    def get_queryset(self) -> QuerySet[Customer]:
-        """Only show non-deleted records by default"""
+    By parameterising over _M (bound: models.Model) each subclass gets a correctly
+    typed QuerySet (e.g. QuerySet[CustomerAddress]) instead of QuerySet[Customer],
+    eliminating the need for # type: ignore[misc] at every .objects call-site.
+    """
+
+    def get_queryset(self) -> QuerySet[_M]:
+        """Only show non-deleted records by default."""
         return super().get_queryset().filter(deleted_at__isnull=True)
 
-    def with_deleted(self) -> QuerySet[Customer]:
-        """Show all records including soft-deleted"""
+    def with_deleted(self) -> QuerySet[_M]:
+        """Show all records including soft-deleted."""
         return super().get_queryset()
 
-    def deleted_only(self) -> QuerySet[Customer]:
-        """Only show soft-deleted records"""
+    def deleted_only(self) -> QuerySet[_M]:
+        """Only show soft-deleted records."""
         return super().get_queryset().filter(deleted_at__isnull=False)
 
 
@@ -117,8 +124,8 @@ class SoftDeleteModel(models.Model):
         verbose_name=_("Șters de"),
     )
 
-    all_objects = models.Manager()  # Manager - All records including soft-deleted
-    objects = SoftDeleteManager()  # SoftDeleteManager - Only non-deleted records
+    objects = SoftDeleteManager()  # Default manager — only non-deleted records
+    all_objects = models.Manager()  # noqa: DJ012  # All records including soft-deleted
 
     class Meta:
         abstract = True
@@ -203,27 +210,26 @@ class Customer(SoftDeleteModel):
     - CustomerMembership: CASCADE (user access removed when customer deleted)
     """
 
-    # Customer Types aligned with PostgreSQL schema
-    CUSTOMER_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("individual", _("Individual")),
-        ("company", _("Company")),
-        ("pfa", _("PFA/SRL")),
-        ("ngo", _("NGO/Association")),
-    )
+    class CustomerType(models.TextChoices):
+        INDIVIDUAL = "individual", _("Individual")
+        COMPANY = "company", _("Company")
+        PFA = "pfa", _("PFA/SRL")
+        NGO = "ngo", _("NGO/Association")
 
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("active", _("Active")),
-        ("inactive", _("Inactive")),
-        ("suspended", _("Suspended")),
-        ("prospect", _("Prospect")),
-    )
+    class CustomerStatus(models.TextChoices):
+        ACTIVE = "active", _("Active")
+        INACTIVE = "inactive", _("Inactive")
+        SUSPENDED = "suspended", _("Suspended")
+        PROSPECT = "prospect", _("Prospect")
 
     # Core Identity Fields
     name = models.CharField(max_length=255, verbose_name=_("Nume"))
     customer_type = models.CharField(
-        max_length=20, choices=CUSTOMER_TYPE_CHOICES, default="individual", verbose_name=_("Tip client")
+        max_length=20, choices=CustomerType, default=CustomerType.INDIVIDUAL, verbose_name=_("Tip client")
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="prospect", verbose_name=_("Status"))
+    status = models.CharField(
+        max_length=20, choices=CustomerStatus, default=CustomerStatus.PROSPECT, verbose_name=_("Status")
+    )
 
     # Company Fields (when customer_type = 'company')
     company_name = models.CharField(max_length=255, blank=True, verbose_name=_("Nume companie"))
@@ -231,13 +237,15 @@ class Customer(SoftDeleteModel):
     # Primary Contact (from users via CustomerMembership)
     primary_email = models.EmailField(
         verbose_name=_("Email principal"),
-        default="contact@example.com",  # Temporary default for migration
+        blank=True,
+        default="",
     )
     primary_phone = models.CharField(
         max_length=20,
         validators=[RegexValidator(r"^(\+40|0)[0-9]{9,10}$", "Număr telefon invalid")],
         verbose_name=_("Telefon principal"),
-        default="+40712345678",  # Temporary default for migration
+        blank=True,
+        default="",
     )
 
     # Business Context
@@ -254,6 +262,9 @@ class Customer(SoftDeleteModel):
         related_name="managed_customers",
         verbose_name=_("Manager cont"),
     )
+
+    # Extensible metadata (onboarding state, credit history, analytics cache)
+    meta = models.JSONField(default=dict, blank=True, verbose_name=_("Metadata"))
 
     # GDPR Compliance (simplified)
     data_processing_consent = models.BooleanField(default=False)
@@ -275,41 +286,60 @@ class Customer(SoftDeleteModel):
             models.Index(fields=["customer_type"]),
             models.Index(fields=["created_at"]),
             models.Index(fields=["deleted_at"]),  # For soft delete queries
+            # Partial indexes: SoftDeleteManager always filters deleted_at__isnull=True
+            models.Index(
+                fields=["status"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="customers_status_active_idx",
+            ),
+            models.Index(
+                fields=["customer_type"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="customers_type_active_idx",
+            ),
         )
 
     def __str__(self) -> str:
         return self.get_display_name()
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Accept legacy kwargs without requiring DB columns in tests."""
-        # Swallow non-model identity kwargs that some tests pass
-        kwargs.pop("email", None)
-        kwargs.pop("first_name", None)
-        kwargs.pop("last_name", None)
-        kwargs.pop("fiscal_code", None)  # Legacy field from old Customer structure
-        super().__init__(*args, **kwargs)
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self.meta is None:
+            self.meta = {}
+        if not isinstance(self.meta, dict):
+            # ValueError (not ValidationError): non-dict meta is a programming error, not user input.
+            # Django convention: ValidationError belongs in clean(), ValueError signals caller bug.
+            raise ValueError(f"Customer.meta must be a dict, got {type(self.meta).__name__}")
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        if self.meta is not None and not isinstance(self.meta, dict):
+            raise ValidationError(
+                {"meta": "meta must be a JSON object (dict), not %(type)s"},
+                params={"type": type(self.meta).__name__},
+            )
 
     def get_display_name(self) -> str:
         """Get customer display name"""
-        if self.customer_type == "company" and self.company_name:
+        if self.customer_type == Customer.CustomerType.COMPANY and self.company_name:
             return self.company_name
         return self.name
 
     def get_tax_profile(self) -> CustomerTaxProfile | None:
-        """Get customer tax profile"""
+        """Get customer tax profile (uses select_related cache when available)."""
         from .profile_models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
-            return cast(CustomerTaxProfile, CustomerTaxProfile.objects.get(customer=self))
+            return self.tax_profile
         except CustomerTaxProfile.DoesNotExist:
             return None
 
     def get_billing_profile(self) -> CustomerBillingProfile | None:
-        """Get customer billing profile"""
+        """Get customer billing profile (uses select_related cache when available)."""
         from .profile_models import CustomerBillingProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
-            return cast(CustomerBillingProfile, CustomerBillingProfile.objects.get(customer=self))
+            return self.billing_profile
         except CustomerBillingProfile.DoesNotExist:
             return None
 
@@ -317,17 +347,11 @@ class Customer(SoftDeleteModel):
         """Get primary address"""
         from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
-        return cast(
-            CustomerAddress | None,
-            CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first(),
-        )
+        return CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first()
 
     def get_billing_address(self) -> CustomerAddress | None:
         """Get billing address or fall back to primary"""
         from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
-        billing_address = cast(
-            CustomerAddress | None,
-            CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first(),
-        )
+        billing_address = CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first()
         return billing_address or self.get_primary_address()

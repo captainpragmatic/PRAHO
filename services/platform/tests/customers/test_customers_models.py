@@ -14,6 +14,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.test import TestCase
 
 from apps.customers.models import (
@@ -113,6 +114,27 @@ class CustomerModelTestCase(TestCase):
         self.assertFalse(self.customer.is_deleted)
         self.assertIsNone(self.customer.deleted_at)
         self.assertIsNone(self.customer.deleted_by)
+
+    def test_primary_email_default_is_not_fake(self):
+        """Verify primary_email default is not the legacy fake placeholder."""
+        field_default = Customer._meta.get_field("primary_email").default
+        self.assertNotEqual(field_default, "contact@example.com")
+
+    def test_primary_phone_default_is_not_fake(self):
+        """Verify primary_phone default is not the legacy fake placeholder."""
+        field_default = Customer._meta.get_field("primary_phone").default
+        self.assertNotEqual(field_default, "+40712345678")
+
+    def test_customer_created_without_contact_fields_has_empty_strings(self):
+        """Customer created without explicit email/phone gets empty strings, not fake data."""
+        customer = Customer.objects.create(
+            name="No Contact Co",
+            customer_type="company",
+            data_processing_consent=True,
+            created_by=self.admin_user,
+        )
+        self.assertEqual(customer.primary_email, "")
+        self.assertEqual(customer.primary_phone, "")
 
 
 # ===============================================================================
@@ -329,6 +351,54 @@ class CustomerAddressTestCase(TestCase):
         # Should return specific billing address
         billing_address = self.customer.get_billing_address()
         self.assertEqual(billing_address, specific_billing)
+
+    def test_duplicate_current_address_same_type_rejected(self):
+        """Partial unique constraint rejects two current addresses of same type."""
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            address_type='primary',
+            address_line1='First Primary St',
+            city='București',
+            county='Sector 1',
+            postal_code='010101',
+            is_current=True,
+        )
+        with self.assertRaises(IntegrityError):
+            CustomerAddress.objects.create(
+                customer=self.customer,
+                address_type='primary',
+                address_line1='Second Primary St',
+                city='Cluj-Napoca',
+                county='Cluj',
+                postal_code='400000',
+                is_current=True,
+            )
+
+    def test_soft_deleted_address_does_not_block_new_current(self):
+        """Soft-deleted address excluded from partial unique constraint."""
+        address = CustomerAddress.objects.create(
+            customer=self.customer,
+            address_type='primary',
+            address_line1='Old Primary St',
+            city='București',
+            county='Sector 1',
+            postal_code='010101',
+            is_current=True,
+        )
+        address.soft_delete(user=self.admin_user)
+
+        # Creating a new current primary address should succeed
+        new_address = CustomerAddress.objects.create(
+            customer=self.customer,
+            address_type='primary',
+            address_line1='New Primary St',
+            city='Timișoara',
+            county='Timiș',
+            postal_code='300001',
+            is_current=True,
+        )
+        self.assertTrue(new_address.is_current)
+        self.assertIsNone(new_address.deleted_at)
 
 
 # ===============================================================================

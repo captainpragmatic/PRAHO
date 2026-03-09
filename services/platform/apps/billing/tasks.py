@@ -344,7 +344,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
     logger.info(f"🏛️ [VAT] Validating VAT number for tax profile {tax_profile_id}")
 
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.common.types import validate_romanian_cui  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415  # Deferred: avoids circular import
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: avoids circular import
 
     try:
@@ -354,26 +354,20 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             logger.info(f"🏛️ [VAT] No VAT number to validate for tax profile {tax_profile_id}")
             return {"success": True, "tax_profile_id": str(tax_profile.id), "message": "No VAT number to validate"}
 
-        # Validate using CUI validator and store result in VATValidation
+        # Validate using shared CUIValidator (handles RO prefix automatically)
         vat_number = tax_profile.vat_number
-        is_valid = False
-        validation_msg = ""
-
-        # Strip RO prefix for CUI validation
-        cui_number = vat_number.replace("RO", "").strip() if vat_number.startswith("RO") else vat_number
-        cui_result = validate_romanian_cui(cui_number)
-        if hasattr(cui_result, "is_ok") and cui_result.is_ok():
-            is_valid = True
-            validation_msg = "CUI format valid"
-        else:
-            validation_msg = f"CUI validation failed: {getattr(cui_result, 'error', 'invalid format')}"
+        cui_result = CUIValidator.validate(vat_number)
+        is_valid = cui_result.is_valid
+        validation_msg = "CUI format valid" if is_valid else f"CUI validation failed: {cui_result.error_message}"
 
         # Store validation result
         VATValidation.objects.update_or_create(
             vat_number=vat_number,
             defaults={
                 "country_code": "RO",
-                "full_vat_number": f"RO{cui_number}" if not vat_number.startswith("RO") else vat_number,
+                "full_vat_number": f"RO{cui_result.digits}"
+                if cui_result.digits and not vat_number.startswith("RO")
+                else vat_number,
                 "is_valid": is_valid,
                 "validation_source": "manual",
                 "response_data": {"message": validation_msg},
@@ -444,29 +438,35 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
             else None
         )
 
+        # Determine outcome
+        outcome = "skipped"
         if result and result.get("success"):
             payment_intent_id = result.get("payment_intent_id", "")
             confirm = PaymentService.confirm_payment(payment_intent_id, gateway="stripe")
             if confirm.get("success") and confirm.get("status") == "succeeded":
                 logger.info(f"💳 [AutoPay] Payment succeeded for invoice {invoice.number}")
                 invoice.update_status_from_payments()
+                outcome = "success"
             else:
                 logger.warning(f"⚠️ [AutoPay] Payment confirmation pending for invoice {invoice.number}")
+                outcome = "pending"
         else:
             logger.info(f"💳 [AutoPay] No order linked or payment failed for invoice {invoice.number}")
+            outcome = "failed"
 
-        # Log the auto-payment attempt
+        # Log with outcome
         AuditService.log_simple_event(
-            event_type="auto_payment_attempted",
+            event_type=f"auto_payment_{outcome}",
             user=None,
             content_object=invoice,
-            description=f"Auto-payment attempted for invoice {invoice.number}",
+            description=f"Auto-payment {outcome} for invoice {invoice.number}",
             actor_type="system",
             metadata={
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
                 "customer_id": str(invoice.customer.id),
                 "amount_cents": invoice.total_cents,
+                "outcome": outcome,
                 "source_app": "billing",
             },
         )

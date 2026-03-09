@@ -573,9 +573,9 @@ class VirtualminAccountSignalsTest(TestCase):
         """Set up test data"""
         # Create customer
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         # Create service
@@ -739,9 +739,9 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
         """Set up test data"""
         # Create customer and service
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         self.service_plan = ServicePlan.objects.create(
@@ -901,9 +901,9 @@ class ProvisioningCompletionSignalsTest(TestCase):
         """Set up test data"""
         # Create customer and service
         self.customer = Customer.objects.create(
+            name="Test Customer Ltd",
             company_name="Test Customer Ltd",
-            fiscal_code="RO12345678",
-            customer_type="company"
+            customer_type="company",
         )
 
         self.service_plan = ServicePlan.objects.create(

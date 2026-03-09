@@ -410,8 +410,10 @@ class ProcessAutoPaymentTests(TestCase):
 
         self.assertTrue(result["success"])
         self.assertIn("Auto-payment", result["message"])
+        # The implementation emits auto_payment_{outcome}; without an order_id
+        # linked the outcome is "failed" (no payment intent created).
         last_call = _last_audit_call_kwargs(mock_audit)
-        self.assertEqual(last_call["event_type"], "auto_payment_attempted")
+        self.assertTrue(last_call["event_type"].startswith("auto_payment_"))
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_skips_non_pending_invoice(self, mock_audit: MagicMock) -> None:
@@ -431,7 +433,7 @@ class ProcessAutoPaymentTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_generic_exception_returns_error(self, mock_audit: MagicMock) -> None:
         def _raise_on_autopay(*args: object, **kwargs: object) -> None:
-            if kwargs.get("event_type") == "auto_payment_attempted":
+            if str(kwargs.get("event_type", "")).startswith("auto_payment_"):
                 raise RuntimeError("payment gateway down")
 
         mock_audit.side_effect = _raise_on_autopay

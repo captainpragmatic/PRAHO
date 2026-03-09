@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.test import TestCase
 
 from apps.api.customers import views
+from apps.customers import customer_views
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Server, Service, ServicePlan
 
@@ -57,3 +58,38 @@ class CustomerServicesApiDataTests(TestCase):
         """api/customers/views.py no longer has TODO or empty list stub"""
         source = inspect.getsource(views)
         self.assertNotIn("TODO: Implement actual service management", source)
+
+    def test_customer_views_no_longer_returns_empty_stub(self):
+        """customer_views.py customer_services_api no longer has TODO"""
+        source = inspect.getsource(customer_views.customer_services_api)
+        self.assertNotIn("TODO: Implement actual service management", source)
+        # Should no longer return hardcoded empty list
+        self.assertNotIn("return JsonResponse([], safe=False)", source)
+
+    def test_customer_views_services_api_queries_service_model(self):
+        """customer_views.py customer_services_api returns real services"""
+        Service.objects.create(
+            customer=self.customer, service_plan=self.plan, server=self.server,
+            service_name="web.example.com", username="webuser",
+            status="active", domain="web.example.com",
+            price=Decimal("29.99"),
+        )
+        # Verify the query pattern returns data
+        services = list(
+            Service.objects.filter(customer_id=self.customer.id)
+            .values("id", "service_name", "status", "service_plan__name")
+            .order_by("service_name")
+        )
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0]["service_name"], "web.example.com")
+        self.assertEqual(services[0]["service_plan__name"], "Basic Hosting")
+
+    def test_customer_views_services_api_no_longer_uses_safe_false(self):
+        """customer_services_api in customer_views.py must not use safe=False (F05)"""
+        source = inspect.getsource(customer_views.customer_services_api)
+        self.assertNotIn("safe=False", source)
+
+    def test_customer_views_services_api_returns_envelope_object(self):
+        """customer_services_api must return JSON object with 'results' key, not a bare array (F05)"""
+        source = inspect.getsource(customer_views.customer_services_api)
+        self.assertIn('"results"', source)

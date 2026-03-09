@@ -18,6 +18,9 @@ from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFa
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
 from apps.orders.models import Order
 
+_FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing order total
+_FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
+
 
 class Result[T, E]:
     """Result type for RefundService operations - implements Result<T,E> pattern"""
@@ -318,7 +321,7 @@ class RefundService:
         refund_type = refund_data.get("refund_type", "full")
         if refund_type in ("full", RefundType.FULL):
             if refund_data.get("amount_cents", 0) == 0:
-                return getattr(order, "total_cents", 15000)
+                return getattr(order, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
             else:
                 return refund_data.get("amount_cents", 0)
         else:
@@ -403,7 +406,9 @@ class RefundService:
 
             # Use max_refund_amount_cents from eligibility data
             eligibility_data = eligibility.unwrap()
-            max_refundable = eligibility_data.get("max_refund_amount_cents", getattr(invoice, "total_cents", 11900))
+            max_refundable = eligibility_data.get(
+                "max_refund_amount_cents", getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
+            )
             if amount > max_refundable:
                 return Result.err("Refund amount exceeds maximum refundable amount")
 
@@ -497,10 +502,10 @@ class RefundService:
         # Get refund amounts
         if entity_type == "order":
             already_refunded = RefundService._get_order_refunded_amount(entity)
-            total_amount_cents = getattr(entity, "total_cents", 15000)
+            total_amount_cents = getattr(entity, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
         else:  # invoice
             already_refunded = RefundService._get_invoice_refunded_amount(entity)
-            total_amount_cents = getattr(entity, "total_cents", 11900)
+            total_amount_cents = getattr(entity, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
 
         max_refundable = total_amount_cents - already_refunded
 
@@ -566,7 +571,7 @@ class RefundService:
 
             # Get refund amounts
             already_refunded = RefundService._get_order_refunded_amount(order)
-            total_amount_cents = getattr(order, "total_cents", 15000)
+            total_amount_cents = getattr(order, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
             max_refundable = total_amount_cents - already_refunded
 
             # Check order status eligibility
@@ -697,7 +702,7 @@ class RefundService:
 
             # Get already refunded amount
             already_refunded = RefundService._get_invoice_refunded_amount(invoice)
-            total_amount_cents = getattr(invoice, "total_cents", 11900)
+            total_amount_cents = getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
             max_refundable = total_amount_cents - already_refunded
 
             # If not eligible due to status, return immediately
@@ -799,9 +804,9 @@ class RefundService:
     def _calculate_original_amount(order: Any, invoice: Any, refund_amount_cents: int) -> int:
         """Calculate original amount based on available entities"""
         if order:
-            return getattr(order, "total_cents", 15000)
+            return getattr(order, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
         elif invoice:
-            return getattr(invoice, "total_cents", 11900)
+            return getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
         else:
             return refund_amount_cents
 
@@ -902,7 +907,7 @@ class RefundService:
     ) -> Result[None, str]:
         """Update order refund status"""
         try:
-            total_amount_cents = getattr(order, "total_cents", 15000)
+            total_amount_cents = getattr(order, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
 
             # Update order status to indicate it has been refunded
             if hasattr(order, "status"):
@@ -939,7 +944,7 @@ class RefundService:
         try:
             # Get already refunded amount
             already_refunded = RefundService._get_invoice_refunded_amount(invoice)
-            total_amount_cents = getattr(invoice, "total_cents", 11900)
+            total_amount_cents = getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
 
             # Update invoice status to indicate it has been refunded
             if hasattr(invoice, "status"):
@@ -1045,7 +1050,7 @@ class RefundService:
 
             # Get already refunded amount
             already_refunded = RefundService._get_order_refunded_amount(order)
-            total_amount_cents = getattr(order, "total_cents", 15000)
+            total_amount_cents = getattr(order, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
             max_refundable = total_amount_cents - already_refunded
 
             # Check if already fully refunded
@@ -1093,7 +1098,7 @@ class RefundService:
 
             # Get already refunded amount
             already_refunded = RefundService._get_invoice_refunded_amount(invoice)
-            total_amount_cents = getattr(invoice, "total_cents", 11900)
+            total_amount_cents = getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
             max_refundable = total_amount_cents - already_refunded
 
             # Check if already fully refunded

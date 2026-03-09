@@ -682,7 +682,7 @@ class HashChainManager:
         entry.sequence_number = new_sequence
 
         # Compute hash
-        entry_hash = entry.compute_hash(self.secret_key)  # type: ignore[arg-type]
+        entry_hash = entry.compute_hash(self.secret_key)
         entry.entry_hash = entry_hash
 
         # Update chain state
@@ -708,7 +708,7 @@ class HashChainManager:
                 errors.append(f"Entry {entry.event_id}: Sequence gap detected at {entry.sequence_number}")
 
             # Recompute and verify hash
-            expected_hash = entry.compute_hash(self.secret_key)  # type: ignore[arg-type]
+            expected_hash = entry.compute_hash(self.secret_key)
             if entry.entry_hash != expected_hash:
                 errors.append(f"Entry {entry.event_id}: Hash mismatch - possible tampering")
 
@@ -941,7 +941,7 @@ class SIEMService:
                 # Verify hash
                 entry.previous_hash = stored_prev_hash
                 entry.sequence_number = stored_sequence
-                computed_hash = entry.compute_hash(self.hash_chain.secret_key)  # type: ignore[arg-type]
+                computed_hash = entry.compute_hash(self.hash_chain.secret_key)
 
                 if stored_hash != computed_hash:
                     errors.append(f"Event {event.id}: Hash mismatch - possible tampering")

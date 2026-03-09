@@ -10,7 +10,6 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.customers.models import (
@@ -54,8 +53,6 @@ class TestCustomerModel:
         customer = Customer.objects.create(
             name='Ion Popescu',
             customer_type='individual',
-            first_name='Ion',
-            last_name='Popescu',
             primary_email='ion.popescu@email.ro',
             data_processing_consent=True,
             created_by=admin,
@@ -63,8 +60,7 @@ class TestCustomerModel:
 
         assert customer.pk is not None
         assert customer.customer_type == 'individual'
-        assert customer.first_name == 'Ion'
-        assert customer.last_name == 'Popescu'
+        assert customer.name == 'Ion Popescu'
 
     def test_customer_str_representation(self):
         """Customer string representation should be meaningful"""
@@ -264,13 +260,12 @@ class TestCustomerSoftDelete:
 class TestCustomerCreationValidation:
     """Test customer creation validation"""
 
-    def test_email_required(self):
-        """Customer should require primary email"""
+    def test_email_defaults_to_placeholder(self):
+        """Customer without explicit email gets default placeholder."""
         from tests.factories.core_factories import create_admin_user
 
         admin = create_admin_user(username='customer_admin_email')
 
-        # Primary email should be required
         customer = Customer(
             name='No Email Customer',
             customer_type='company',
@@ -279,15 +274,12 @@ class TestCustomerCreationValidation:
             created_by=admin,
         )
 
-        # This should either fail or create with null email
-        # depending on model configuration
-        try:
-            customer.full_clean()
-        except ValidationError:
-            pass  # Expected if email is required
+        # Model has a default; full_clean should pass
+        customer.full_clean()
+        assert customer.primary_email == 'contact@example.com'
 
-    def test_customer_type_required(self):
-        """Customer type should be required"""
+    def test_customer_type_defaults_to_individual(self):
+        """Customer type should default to 'individual'."""
         from tests.factories.core_factories import create_admin_user
 
         admin = create_admin_user(username='customer_admin_type')
@@ -299,8 +291,7 @@ class TestCustomerCreationValidation:
             created_by=admin,
         )
 
-        # Should have a default or be required
-        assert customer.customer_type in ['', 'company', 'individual'] or customer.customer_type is None
+        assert customer.customer_type == 'individual'
 
 
 @pytest.mark.django_db

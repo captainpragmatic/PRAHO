@@ -1378,7 +1378,7 @@ class EmailPreferenceService:
             "transactional": True,  # Always receive transactional emails
             "billing": True,  # Always receive billing emails
             "security": True,  # Always receive security emails
-            "newsletters": getattr(customer, "newsletter_consent", False),
+            "newsletters": getattr(customer, "marketing_consent", False),
         }
 
     @staticmethod
@@ -1387,8 +1387,8 @@ class EmailPreferenceService:
         if "marketing" in preferences:
             customer.marketing_consent = preferences["marketing"]
         if "newsletters" in preferences:
-            customer.newsletter_consent = preferences["newsletters"]  # type: ignore[attr-defined]
-        customer.save(update_fields=["marketing_consent", "newsletter_consent"])
+            customer.marketing_consent = preferences["newsletters"]
+        customer.save(update_fields=["marketing_consent"])
 
         # Log the preference change
         validators.log_security_event(
@@ -1448,10 +1448,7 @@ class EmailPreferenceService:
 
             if category == "marketing" or category is None:
                 customer.marketing_consent = False
-            if category == "newsletter" or category is None:
-                customer.newsletter_consent = False  # type: ignore[attr-defined]
-
-            customer.save()
+            customer.save(update_fields=["marketing_consent"])
 
             # Log the unsubscribe
             validators.log_security_event(
