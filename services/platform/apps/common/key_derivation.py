@@ -52,6 +52,7 @@ def derive_key(domain: str) -> bytes:
         salt=None,
         info=info,
     )
+    assert settings.SECRET_KEY is not None, "SECRET_KEY must be configured"  # noqa: SECRET_KEY
     return hkdf.derive(settings.SECRET_KEY.encode())  # noqa: SECRET_KEY
 
 

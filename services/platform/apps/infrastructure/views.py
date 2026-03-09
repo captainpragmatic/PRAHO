@@ -305,7 +305,9 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
 
             # Audit: deployment created
             try:
-                audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+                audit_ctx = InfrastructureAuditContext(
+                    user=request.user if request.user.is_authenticated else None, request=request
+                )
                 InfrastructureAuditService.log_deployment_created(deployment, audit_ctx)
             except (DatabaseError, OSError):
                 logger.warning("⚠️ [Audit] Failed to log deployment creation for %s", deployment.hostname, exc_info=True)
@@ -1008,7 +1010,9 @@ def provider_create(request: HttpRequest) -> HttpResponse:
 
         # Audit: provider created
         try:
-            audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+            audit_ctx = InfrastructureAuditContext(
+                user=request.user if request.user.is_authenticated else None, request=request
+            )
             InfrastructureAuditService.log_provider_created(provider, audit_ctx)
         except (DatabaseError, OSError):
             logger.warning("⚠️ [Audit] Failed to log provider creation for %s", provider.name, exc_info=True)
@@ -1072,7 +1076,9 @@ def provider_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
         # Audit: provider updated
         try:
-            audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+            audit_ctx = InfrastructureAuditContext(
+                user=request.user if request.user.is_authenticated else None, request=request
+            )
             InfrastructureAuditService.log_provider_updated(provider, old_values, audit_ctx)
         except (DatabaseError, OSError):
             logger.warning("⚠️ [Audit] Failed to log provider update for %s", provider.name, exc_info=True)
@@ -1215,7 +1221,9 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
 
     # Audit: region toggled
     try:
-        audit_ctx = InfrastructureAuditContext(user=request.user, request=request)
+        audit_ctx = InfrastructureAuditContext(
+            user=request.user if request.user.is_authenticated else None, request=request
+        )
         InfrastructureAuditService.log_region_toggled(region, audit_ctx)
     except (DatabaseError, OSError):
         logger.warning("⚠️ [Audit] Failed to log region toggle for %s", region.name, exc_info=True)

@@ -43,12 +43,12 @@ class Command(BaseCommand):
     def _report_servers(self) -> None:
         try:
             from apps.provisioning.service_models import Server  # noqa: PLC0415
-            from apps.provisioning.virtualmin_models import HostingAccount, VirtualminServer  # noqa: PLC0415
+            from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
 
             servers_empty = VirtualminServer.objects.filter(encrypted_api_password=b"").count()
             servers_total = VirtualminServer.objects.count()
-            accounts_empty = HostingAccount.objects.filter(encrypted_password=b"").count()
-            accounts_total = HostingAccount.objects.count()
+            accounts_empty = VirtualminAccount.objects.filter(encrypted_password=b"").count()
+            accounts_total = VirtualminAccount.objects.count()
 
             self.stdout.write("\nProvisioning Credentials:")
             self.stdout.write(f"  Servers needing API password: {servers_empty}/{servers_total}")

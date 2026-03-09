@@ -140,6 +140,16 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # Code health regression check
+      - id: code-health-check
+        name: "Health: Code Health Check"
+        entry: uv run python
+        args: [scripts/code_health_scan.py, --min-severity=high, --exclude-tests, --allowlist=scripts/code_health_allowlist.txt, services/platform/apps]
+        language: system
+        files: ^services/platform/apps/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+
       # Check for hardcoded credentials (warning only)
       - id: security-credentials-check
         name: "Security: Check for Hardcoded Credentials"

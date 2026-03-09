@@ -110,9 +110,9 @@ def _resolve_key(key: str | Callable[..., str], group: str, request: HttpRequest
         if module_path not in _ALLOWED_KEY_MODULES:
             msg = f"Rate limit key module not in allowlist: {module_path!r}"
             raise ValueError(msg)
-        mod = importlib.import_module(
+        mod = importlib.import_module(  # nosemgrep: non-literal-import — restricted to _ALLOWED_KEY_MODULES allowlist
             module_path
-        )  # nosemgrep: non-literal-import — restricted to _ALLOWED_KEY_MODULES allowlist
+        )
         return cast(str, getattr(mod, func_name)(group, request))
 
     msg = f"Unsupported rate limit key: {key!r}"

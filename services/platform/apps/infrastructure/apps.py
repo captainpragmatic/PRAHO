@@ -9,6 +9,9 @@ from django.db import utils as db_utils
 
 logger = logging.getLogger(__name__)
 
+_CLEANUP_FAILED_INTERVAL_MINUTES = 360  # 6 hours
+_RECOVER_STUCK_INTERVAL_MINUTES = 30
+
 
 class InfrastructureConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
@@ -55,7 +58,7 @@ class InfrastructureConfig(AppConfig):
             (
                 "cleanup_failed_deployments",
                 "apps.infrastructure.tasks.cleanup_failed_deployments_task",
-                360,
+                _CLEANUP_FAILED_INTERVAL_MINUTES,
                 Schedule.MINUTES,
             ),
             ("bulk_validate_nodes", "apps.infrastructure.tasks.bulk_validate_nodes_task", 1, Schedule.DAILY),
@@ -64,7 +67,7 @@ class InfrastructureConfig(AppConfig):
             (
                 "recover_stuck_deployments",
                 "apps.infrastructure.tasks.recover_stuck_deployments_task",
-                30,
+                _RECOVER_STUCK_INTERVAL_MINUTES,
                 Schedule.MINUTES,
             ),
         ]

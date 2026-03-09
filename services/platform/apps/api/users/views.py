@@ -363,7 +363,7 @@ class SessionValidationThrottle(ScopedRateThrottle):
         # Skip throttling in test/dev environments (RATE_LIMITING_ENABLED=False)
         if not getattr(settings, "RATE_LIMITING_ENABLED", True):
             return True
-        return super().allow_request(request, view)
+        return bool(super().allow_request(request, view))
 
 
 @never_cache  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint

@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MyPy type errors fully resolved** — removed 27 stale `# type: ignore` comments across `orders/services.py`, `billing/usage_invoice_service.py`, `common/validators.py`, `audit/siem.py`, and `users/services.py` that became unnecessary after `SoftDeleteManager` was made generic; fixed 10 genuine errors in `rate_limiting.py` (getattr annotations, unreachable code, no-any-return), `infrastructure/views.py` (4x request.user arg-type), `billing/efactura/b2c.py` (`__all__` for re-exports), `common/key_derivation.py` (`SECRET_KEY` None guard), `common/management/commands/post_encryption_upgrade.py` (`HostingAccount` → `VirtualminAccount` broken import), and `api/users/views.py` (bool wrapper on DRF Any return); removing stale ignores in `usage_invoice_service.py` exposed and fixed 5 hidden attribute errors from wrong field names
+- **Magic number constants extracted** — `refund_service.py` `_FALLBACK_ORDER_TOTAL_CENTS` and `_FALLBACK_INVOICE_TOTAL_CENTS`; `infrastructure/apps.py` `_CLEANUP_FAILED_INTERVAL_MINUTES` and `_RECOVER_STUCK_INTERVAL_MINUTES`
+- **Exception logging improved** — `drift_remediation.py` bare `except Exception:` blocks now capture and log `e` for observability; `_get_cloud_gateway` adds `logger.error` on failure
+- **`rate_limiting.py` nosemgrep comment** moved to inline position on the `importlib.import_module` call line (cosmetic, no behaviour change)
+- **`notifications/services.py` `save()` scoped** — `customer.save()` now uses `update_fields=["marketing_consent", "newsletter_consent"]` to avoid full-row overwrites on unsubscribe
+- **Code health scan integrated into `make lint`** (Phase 5) and exposed as standalone `make lint-health`; pre-commit hook `code-health-check` added to `.pre-commit-config.yaml`
+- **`make test-security` cache check** — removed spurious `os.environ.setdefault` call; `DJANGO_SETTINGS_MODULE` now set via env prefix
 - Engagement score weights from `SettingsService` now clamped to `[1, 100]` to prevent division-by-zero or negative scores from misconfigured settings
 - Ticket open statuses in `cleanup_inactive_customers` extracted to `_OPEN_TICKET_STATUSES` module constant (was inline list)
 - `security_scanner.py` `_matches_path_glob` now supports comma-separated globs for multi-file-type scoping

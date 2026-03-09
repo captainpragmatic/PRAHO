@@ -672,12 +672,12 @@ class BusinessLogicValidator:
                 )
 
             if vat_number:
-                existing_vat = CustomerTaxProfile.objects.select_for_update().filter(vat_number=vat_number).first()  # type: ignore[misc,assignment] # django-stubs bug: fields exist but not recognized
+                existing_vat = CustomerTaxProfile.objects.select_for_update().filter(vat_number=vat_number).first()
 
             if registration_number:
                 existing_reg = (
-                    CustomerTaxProfile.objects.select_for_update()  # type: ignore[assignment] # django-stubs bug: fields exist but not recognized
-                    .filter(registration_number=registration_number)  # type: ignore[misc] # django-stubs bug: fields exist but not recognized
+                    CustomerTaxProfile.objects.select_for_update()
+                    .filter(registration_number=registration_number)
                     .first()
                 )
 

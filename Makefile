@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-credentials lint-audit check-types pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit check-types pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -66,6 +66,7 @@ help:
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
 	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
+	@echo "  make lint-health     - Code health anti-pattern scan"
 	@echo "  make check-types     - Type check all services"
 	@echo "  make pre-commit      - Run pre-commit hooks"
 	@echo ""
@@ -319,7 +320,7 @@ test-security:
 		fi && \
 		echo "✅ Portal properly isolated from platform modules"
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.base'); import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
+	@cd services/platform && DJANGO_SETTINGS_MODULE=config.settings.base PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
 	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
@@ -493,6 +494,8 @@ else
 	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "📋 Phase 4: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
+	@echo "📋 Phase 5: Code health scan"
+	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -510,6 +513,11 @@ else
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --fix --config=../../pyproject.toml || true
 	@echo "✅ Auto-fix complete — review changes before committing."
 endif
+
+lint-health:
+	@echo "🏥 [Health] Code health scan..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=medium --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."

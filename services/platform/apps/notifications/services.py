@@ -1451,7 +1451,7 @@ class EmailPreferenceService:
             if category == "newsletter" or category is None:
                 customer.newsletter_consent = False  # type: ignore[attr-defined]
 
-            customer.save()
+            customer.save(update_fields=["marketing_consent", "newsletter_consent"])
 
             # Log the unsubscribe
             validators.log_security_event(
