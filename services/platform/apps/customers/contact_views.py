@@ -44,17 +44,15 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
             address_type = address.address_type
             with transaction.atomic():
                 existing_current = (
-                    CustomerAddress.objects.filter(  # type: ignore[misc]  # SoftDeleteManager
-                        customer=customer, address_type=address_type, is_current=True
-                    )
+                    CustomerAddress.objects.filter(customer=customer, address_type=address_type, is_current=True)
                     .select_for_update(of=("self",))
                     .first()
                 )
 
                 if existing_current:
-                    existing_current.is_current = False  # type: ignore[attr-defined]  # narrowed by .first()
+                    existing_current.is_current = False
                     existing_current.save()
-                    address.version = existing_current.version + 1  # type: ignore[attr-defined]  # narrowed by .first()
+                    address.version = existing_current.version + 1
 
                 address.save()
             messages.success(

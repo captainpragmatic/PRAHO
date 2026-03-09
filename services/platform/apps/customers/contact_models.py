@@ -154,21 +154,12 @@ class CustomerPaymentMethod(SoftDeleteModel):
         return f"{self.customer.get_display_name()} - {self.display_name}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save with bank details validation and default method logic (atomic)."""
-        # Run field + model clean, but skip unique/constraint validation — the atomic
-        # block below clears other defaults before the INSERT/UPDATE, so the DB constraint
-        # (unique_default_payment_per_cust) is satisfied by the time the row is written.
-        self.clean_fields()
-        self.clean()
-
+        """Save with default payment method logic (atomic)."""
         with db_transaction.atomic():
-            # Handle default payment method logic
             if self.is_default:
-                # Set all other payment methods for this customer to non-default
                 CustomerPaymentMethod.objects.filter(customer=self.customer, is_default=True).exclude(
                     pk=self.pk
                 ).update(is_default=False)
-
             super().save(*args, **kwargs)
 
     def clean(self) -> None:

@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Engagement score weights from `SettingsService` now clamped to `[1, 100]` to prevent division-by-zero or negative scores from misconfigured settings
 - Ticket open statuses in `cleanup_inactive_customers` extracted to `_OPEN_TICKET_STATUSES` module constant (was inline list)
 - `security_scanner.py` `_matches_path_glob` now supports comma-separated globs for multi-file-type scoping
+- **`SoftDeleteManager` now generic** — parameterised over `TypeVar("_M", bound=models.Model)` instead of hardcoded `Manager["Customer"]`; subclass models (`CustomerAddress`, `CustomerPaymentMethod`, `CustomerNote`) now get correctly typed `QuerySet[T]` returns, eliminating ~20 `# type: ignore[misc]` and `# type: ignore[return-value]` comments across `contact_service.py`, `contact_views.py`, and `profile_service.py`
+- **`CustomerPaymentMethod.save()` simplified** — removed premature `clean_fields()`/`clean()` calls before the atomic block; Django's default `save()` already handles validation
+- **Forms use `TextChoices.choices`** — `CustomerCreationForm` and `CustomerEditForm` now reference `Customer.CustomerType.choices` instead of legacy `CUSTOMER_TYPE_CHOICES` tuple
+- **Tasks use raw string values** — `start_customer_onboarding` and `cleanup_inactive_customers` compare against stored string values (`"company"`, `"active"`) instead of enum members, matching what the DB actually stores
+- Removed unnecessary `cast()` calls in `Customer.get_primary_address()` and `get_billing_address()` — generic manager makes return types correct without casting
 
 ### Added
 

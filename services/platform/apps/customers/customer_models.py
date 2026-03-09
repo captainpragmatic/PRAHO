@@ -6,7 +6,7 @@ Customer model and SoftDeleteModel infrastructure for customer management.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from .contact_models import CustomerAddress
     from .profile_models import CustomerBillingProfile, CustomerTaxProfile
 
-# Python 3.13 + Django 5.2 Generic Support - TypeVar removed for compatibility
+# Generic TypeVar for SoftDeleteManager — bound to models.Model so the manager
+# can be shared across all SoftDeleteModel subclasses without losing type safety.
+_M = TypeVar("_M", bound=models.Model)
 
 # Security logging
 security_logger = logging.getLogger("security")
@@ -88,19 +90,24 @@ def validate_bank_details(bank_details: dict[str, Any]) -> None:
     )
 
 
-class SoftDeleteManager(models.Manager["Customer"]):
-    """Manager for soft delete operations with Python 3.13 generic support"""
+class SoftDeleteManager(models.Manager[_M]):
+    """Manager for soft delete operations — generic over any SoftDeleteModel subclass.
 
-    def get_queryset(self) -> QuerySet[Customer]:
-        """Only show non-deleted records by default"""
+    By parameterising over _M (bound: models.Model) each subclass gets a correctly
+    typed QuerySet (e.g. QuerySet[CustomerAddress]) instead of QuerySet[Customer],
+    eliminating the need for # type: ignore[misc] at every .objects call-site.
+    """
+
+    def get_queryset(self) -> QuerySet[_M]:
+        """Only show non-deleted records by default."""
         return super().get_queryset().filter(deleted_at__isnull=True)
 
-    def with_deleted(self) -> QuerySet[Customer]:
-        """Show all records including soft-deleted"""
+    def with_deleted(self) -> QuerySet[_M]:
+        """Show all records including soft-deleted."""
         return super().get_queryset()
 
-    def deleted_only(self) -> QuerySet[Customer]:
-        """Only show soft-deleted records"""
+    def deleted_only(self) -> QuerySet[_M]:
+        """Only show soft-deleted records."""
         return super().get_queryset().filter(deleted_at__isnull=False)
 
 
@@ -338,17 +345,11 @@ class Customer(SoftDeleteModel):
         """Get primary address"""
         from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
-        return cast(
-            CustomerAddress | None,
-            CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first(),
-        )
+        return CustomerAddress.objects.filter(customer=self, address_type="primary", is_current=True).first()
 
     def get_billing_address(self) -> CustomerAddress | None:
         """Get billing address or fall back to primary"""
         from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
-        billing_address = cast(
-            CustomerAddress | None,
-            CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first(),
-        )
+        billing_address = CustomerAddress.objects.filter(customer=self, address_type="billing", is_current=True).first()
         return billing_address or self.get_primary_address()

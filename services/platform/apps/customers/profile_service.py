@@ -42,7 +42,7 @@ class ProfileService:
             extra={"customer_id": customer.id, "user_id": user.id, "operation": "tax_profile_create"},
         )
 
-        return tax_profile  # type: ignore[return-value]
+        return tax_profile
 
     @staticmethod
     def create_billing_profile(
@@ -64,7 +64,7 @@ class ProfileService:
             extra={"customer_id": customer.id, "user_id": user.id, "operation": "billing_profile_create"},
         )
 
-        return billing_profile  # type: ignore[return-value]
+        return billing_profile
 
     TAX_PROFILE_UPDATABLE_FIELDS = frozenset(
         {

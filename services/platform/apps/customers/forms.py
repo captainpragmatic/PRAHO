@@ -478,7 +478,7 @@ class CustomerCreationForm(forms.Form):
 
     # Business Information (matching registration)
     customer_type = forms.ChoiceField(
-        choices=Customer.CUSTOMER_TYPE_CHOICES,
+        choices=Customer.CustomerType.choices,
         label=_("Customer Type"),
         help_text=_("Individual, company, PFA, or NGO"),
         widget=forms.Select(
@@ -800,7 +800,7 @@ class CustomerEditForm(forms.Form):
         ),
     )
     customer_type = forms.ChoiceField(
-        choices=Customer.CUSTOMER_TYPE_CHOICES,
+        choices=Customer.CustomerType.choices,
         label=_("Customer Type"),
         widget=forms.Select(
             attrs={
