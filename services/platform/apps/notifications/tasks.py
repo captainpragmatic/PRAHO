@@ -518,7 +518,6 @@ ALLOWED_CAMPAIGN_FILTER_FIELDS = frozenset(
         "city",
         # Business fields
         "marketing_consent",
-        "newsletter_consent",
         # Relationship fields (safe lookups)
         "services__status",
         "services__service_type",

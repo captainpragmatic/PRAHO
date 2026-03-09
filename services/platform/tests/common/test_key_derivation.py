@@ -83,3 +83,29 @@ class GetKeyHexTests(SimpleTestCase):
         key_bytes = derive_key("mfa-backup")
         key_hex = get_key_hex("mfa-backup")
         self.assertEqual(key_hex, key_bytes.hex())
+
+
+class DeriveKeySecretKeyGuardTests(SimpleTestCase):
+    """Tests for SECRET_KEY None/empty guards — must raise ImproperlyConfigured."""
+
+    def setUp(self) -> None:
+        derive_key.cache_clear()
+
+    def tearDown(self) -> None:
+        derive_key.cache_clear()
+
+    def test_none_secret_key_raises_improperly_configured(self) -> None:
+        """Must raise ImproperlyConfigured (not AssertionError) for None SECRET_KEY."""
+        with self.settings(SECRET_KEY=None):
+            with self.assertRaises(ImproperlyConfigured) as ctx:
+                derive_key("mfa-backup")
+            self.assertIn("SECRET_KEY", str(ctx.exception))
+            self.assertNotIsInstance(ctx.exception, AssertionError)
+
+    def test_empty_secret_key_raises_improperly_configured(self) -> None:
+        """Must raise ImproperlyConfigured for empty SECRET_KEY (zero-entropy guard)."""
+        with self.settings(SECRET_KEY=""):
+            with self.assertRaises(ImproperlyConfigured) as ctx:
+                derive_key("mfa-backup")
+            self.assertIn("SECRET_KEY", str(ctx.exception))
+            self.assertNotIsInstance(ctx.exception, AssertionError)
