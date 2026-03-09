@@ -177,7 +177,7 @@ class PortalAuthenticationMiddleware:
         Session validation fields:
         - validated_at: Last successful validation timestamp
         - next_validate_at: When next validation should occur (with jitter)
-        - state_version: Incrementing version for cache invalidation
+        - membership_hash: Hash of user's memberships for cache invalidation
         - session_created_at: When session was first created
         """
         now = django_timezone.now()
@@ -264,7 +264,19 @@ class PortalAuthenticationMiddleware:
                 # Update session with successful validation
                 request.session["validated_at"] = now.isoformat()
                 request.session["next_validate_at"] = self._calculate_next_validation_time(now).isoformat()
-                request.session["state_version"] = state_version + 1
+
+                # Compare membership_hash — if it changed, clear cached memberships
+                # so decorators force-refresh roles on next access check.
+                new_hash = validation_response.get("membership_hash")
+                old_hash = request.session.get("membership_hash")
+                if new_hash and new_hash != old_hash:
+                    request.session["membership_hash"] = new_hash
+                    request.session.pop("user_memberships", None)
+                    request.session.pop("user_memberships_fetched_at", None)
+                    logger.info(
+                        f"🔄 [Auth] Membership hash changed for user {customer_id}, invalidated cached memberships"
+                    )
+
                 request.session.modified = True
 
                 logger.debug(f"✅ [Auth] Customer {customer_id} validated successfully")
