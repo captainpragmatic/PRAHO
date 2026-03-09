@@ -884,7 +884,7 @@ class Command(BaseCommand):
             bank_details={
                 "iban": "RO49BTRL0301202012345678",
                 "bank_name": "Banca Transilvania",
-                "swift": "BTRLRO22",
+                "swift_code": "BTRLRO22",
                 "account_holder": "Test Company SRL",
             },
         )
@@ -1052,7 +1052,7 @@ class Command(BaseCommand):
             sec_kwargs["bank_details"] = {
                 "iban": f"RO49AAAA1B31{fake.random_int(min=10000000, max=99999999)}",
                 "bank_name": random.choice(["Banca Transilvania", "BRD", "ING Bank", "BCR"]),
-                "swift": random.choice(["BTRLRO22", "BRDEROBU", "INGBROBU", "RNCBROBU"]),
+                "swift_code": random.choice(["BTRLRO22", "BRDEROBU", "INGBROBU", "RNCBROBU"]),
             }
         CustomerPaymentMethod.objects.create(**sec_kwargs)
 
@@ -1486,7 +1486,7 @@ class Command(BaseCommand):
                         "bank_details": {
                             "iban": f"RO49BTRL{10000000 + idx * 1000000:08d}",
                             "bank_name": "Banca Transilvania",
-                            "swift": "BTRLRO22",
+                            "swift_code": "BTRLRO22",
                             "account_holder": customer.get_display_name(),
                         },
                     }
