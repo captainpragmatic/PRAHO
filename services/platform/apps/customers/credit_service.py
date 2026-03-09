@@ -14,7 +14,7 @@ from django.utils import timezone
 from apps.settings.services import SettingsService
 
 if TYPE_CHECKING:
-    pass
+    from .customer_models import Customer
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class CustomerCreditService:
     """
 
     @staticmethod
-    def update_credit_score(customer: Any, event_type: str, event_date: datetime) -> dict[str, Any]:
+    def update_credit_score(customer: Customer, event_type: str, event_date: datetime) -> dict[str, Any]:
         """
         Update customer credit score based on payment events.
 
@@ -164,7 +164,7 @@ class CustomerCreditService:
             raise
 
     @staticmethod
-    def revert_credit_change(customer: Any, event_type: str, event_date: datetime) -> dict[str, Any]:
+    def revert_credit_change(customer: Customer, event_type: str, event_date: datetime) -> dict[str, Any]:
         """
         Revert a previously applied credit score change.
 
@@ -242,7 +242,7 @@ class CustomerCreditService:
             raise
 
     @staticmethod
-    def calculate_credit_score(customer: Any) -> int:
+    def calculate_credit_score(customer: Customer) -> int:
         """
         Calculate current credit score for a customer.
 
@@ -326,7 +326,7 @@ class CustomerCreditService:
             return "Very Poor"
 
     @staticmethod
-    def _get_payment_statistics(customer: Any) -> dict[str, int]:
+    def _get_payment_statistics(customer: Customer) -> dict[str, int]:
         """Get payment statistics for credit calculation."""
         try:
             from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -356,7 +356,7 @@ class CustomerCreditService:
             return {"total_payments": 0, "successful_payments": 0, "failed_payments": 0, "on_time_payments": 0}
 
     @staticmethod
-    def _get_order_statistics(customer: Any) -> dict[str, int]:
+    def _get_order_statistics(customer: Customer) -> dict[str, int]:
         """Get order statistics for credit calculation."""
         try:
             from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -374,7 +374,7 @@ class CustomerCreditService:
             return {"total_orders": 0, "completed_orders": 0, "cancelled_orders": 0}
 
     @staticmethod
-    def _get_consecutive_on_time_payments(customer: Any) -> int:
+    def _get_consecutive_on_time_payments(customer: Customer) -> int:
         """Count consecutive on-time payments (for bonus calculation)."""
         try:
             from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import

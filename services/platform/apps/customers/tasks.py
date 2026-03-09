@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .customer_models import Customer
 
 from django.core.cache import cache
 from django.db.models import Sum
@@ -357,7 +360,7 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
+def _calculate_engagement_score(customer: Customer, total_orders: int, account_age_days: int) -> int:
     """Calculate customer engagement score (0-100) based on weighted factors."""
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import

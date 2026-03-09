@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from .customer_models import Customer
 
 from django.db.models import Avg, Sum
 from django.utils import timezone
@@ -186,7 +189,7 @@ class CustomerAnalyticsService:
             return {"error": str(e), "customer_id": customer_id}
 
     @staticmethod
-    def _get_order_metrics(customer: Any) -> dict[str, Any]:
+    def _get_order_metrics(customer: Customer) -> dict[str, Any]:
         """Get order-related metrics for a customer."""
         try:
             from apps.orders.models import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -229,7 +232,7 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _get_billing_metrics(customer: Any) -> dict[str, Any]:
+    def _get_billing_metrics(customer: Customer) -> dict[str, Any]:
         """Get billing-related metrics for a customer."""
         try:
             from apps.billing.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
@@ -268,7 +271,7 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _get_service_metrics(customer: Any) -> dict[str, Any]:
+    def _get_service_metrics(customer: Customer) -> dict[str, Any]:
         """Get service-related metrics for a customer."""
         try:
             from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -294,7 +297,7 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def _calculate_engagement_score(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
-        customer: Any, metrics: dict[str, Any]
+        customer: Customer, metrics: dict[str, Any]
     ) -> int:  # Complexity: customer processing  # Complexity: multi-step business logic
         """Calculate customer engagement score (0-100)."""
         score = 0
@@ -343,10 +346,10 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def record_invoice_event(
-        customer: Any,
+        customer: Customer,
         event_type: str,
         invoice_amount_cents: int,
-        invoice_id: Any,
+        invoice_id: int,
     ) -> None:
         """
         Record an invoice event for customer analytics tracking.

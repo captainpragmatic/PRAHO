@@ -128,6 +128,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",  # MUST be first
     "apps.common.middleware.RequestIDMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -187,6 +188,14 @@ X_FRAME_OPTIONS = "DENY"
 
 # Legacy browser XSS protection (deprecated but still useful)
 SECURE_BROWSER_XSS_FILTER = True
+
+# ===============================================================================
+# CORS CONFIGURATION (Cross-Origin Resource Sharing)
+# ===============================================================================
+
+# Only allow cross-origin requests from the Portal domain
+CORS_ALLOWED_ORIGINS = [f"https://{PORTAL_DOMAIN}"]
+CORS_ALLOW_CREDENTIALS = True
 
 # ===============================================================================
 # SESSION SECURITY CONFIGURATION

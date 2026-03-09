@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import logging
 import uuid
 from decimal import Decimal
 from typing import Any, TypedDict, cast
@@ -17,6 +18,8 @@ from django.db.models import Count, Q, Sum
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
 from apps.orders.models import Order
+
+logger = logging.getLogger(__name__)
 
 
 class Result[T, E]:
@@ -192,7 +195,7 @@ class RefundService:
                 return RefundService._execute_order_refund_internal(order, refund_data)
 
         except Exception:
-            # SECURITY: Don't expose internal error details to caller
+            logger.exception("Refund processing failed")
             return Result.err("Failed to process refund: internal error")
 
     @staticmethod
@@ -215,7 +218,7 @@ class RefundService:
         except Order.DoesNotExist:
             return Result.err("Failed to process refund: Order not found")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund database lookup failed")
             return Result.err("Failed to process refund: database error")
 
     @staticmethod
@@ -358,7 +361,7 @@ class RefundService:
                 return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Invoice refund processing failed")
             return Result.err("Failed to process refund: internal error")
 
     @staticmethod
@@ -375,7 +378,7 @@ class RefundService:
         except Invoice.DoesNotExist:
             return Result.err("Failed to process refund: Invoice not found")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund database lookup failed")
             return Result.err("Failed to process refund: database error")
 
     @staticmethod
@@ -477,7 +480,7 @@ class RefundService:
             return RefundService._check_entity_refund_eligibility(entity, entity_type)
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund eligibility check failed")
             return Result.err("Error checking eligibility")
 
     @staticmethod
@@ -553,7 +556,7 @@ class RefundService:
 
             return Result.ok(stats)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund statistics query failed")
             return Result.err("Error getting statistics")
 
     # Internal validation methods
@@ -585,7 +588,7 @@ class RefundService:
 
             return Result.ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund eligibility validation failed")
             return Result.err("Failed to validate eligibility")
 
     @staticmethod
@@ -726,7 +729,7 @@ class RefundService:
             )
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund eligibility validation failed")
             return Result.err("Failed to validate eligibility")
 
     @staticmethod
@@ -784,7 +787,7 @@ class RefundService:
 
             return Result.ok(final_result)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund execution failed")
             return Result.err("Failed to process refund")
 
     @staticmethod
@@ -849,13 +852,14 @@ class RefundService:
             return Result.ok(None)
 
         except Exception as db_error:
+            logger.exception("Bidirectional refund DB operation failed")
             error_msg = str(db_error)
             if "FOREIGN KEY constraint failed" in error_msg:
                 return Result.err("Failed to process bidirectional refund")
             elif "Cannot assign" in error_msg:
                 return Result.err("Order update failed" if order else "Invoice update failed")
             else:
-                return Result.err(f"Failed to process bidirectional refund: {error_msg}")
+                return Result.err("Failed to process bidirectional refund")
 
     @staticmethod
     def _process_entity_updates(
@@ -928,7 +932,7 @@ class RefundService:
 
             return Result.err("Order update failed")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Order refund status update failed")
             return Result.err("Failed to update order status")
 
     @staticmethod
@@ -956,7 +960,7 @@ class RefundService:
 
             return Result.err("Invoice update failed")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Invoice refund status update failed")
             return Result.err("Invoice update failed")
 
     @staticmethod
@@ -1071,7 +1075,7 @@ class RefundService:
             )
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund eligibility validation failed")
             return Result.err("Failed to validate eligibility")
 
     @staticmethod
@@ -1119,7 +1123,7 @@ class RefundService:
             )
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund eligibility validation failed")
             return Result.err("Failed to validate eligibility")
 
     @staticmethod
@@ -1174,7 +1178,7 @@ class RefundService:
             return gateway_result
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Payment gateway refund failed")
             return Result.err("Failed to process payment refund")
 
     @staticmethod
@@ -1293,7 +1297,7 @@ class RefundQueryService:
             }
             return Result.ok(stats)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund statistics query failed")
             return Result.err("Error getting refund statistics")
 
     @staticmethod
@@ -1358,7 +1362,7 @@ class RefundQueryService:
 
             return Result.ok(refunds)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund history query failed")
             return Result.err("Failed to get refund history")
 
 

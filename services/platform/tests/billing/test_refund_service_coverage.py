@@ -1008,7 +1008,7 @@ class TestCreateRefundRecord(TestCase):
             )
             r = RefundService._create_refund_record(params)
             assert r.is_err()
-            assert "something else broke" in r.unwrap_err()
+            assert "Failed to process bidirectional refund" in r.unwrap_err()
 
     def test_currency_creation_on_missing(self):
         """When RON currency doesn't exist, it should be created."""
