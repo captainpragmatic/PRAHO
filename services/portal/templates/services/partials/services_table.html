@@ -41,7 +41,7 @@
             <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
-            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|romanian_currency:service.currency_code }}/mo</div>
+            <div class="text-sm font-mono text-green-400">{% with cur=service.currency_code|default:"RON" %}{{ service.monthly_price|romanian_currency:cur }}{% endwith %}/mo</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" css_class="w-28 justify-center" %}
@@ -79,7 +79,7 @@
       </div>
       <div class="text-right">
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
-        <div class="text-sm font-mono text-green-400">{{ service.monthly_price|romanian_currency:service.currency_code }}/mo</div>
+        <div class="text-sm font-mono text-green-400">{% with cur=service.currency_code|default:"RON" %}{{ service.monthly_price|romanian_currency:cur }}{% endwith %}/mo</div>
       </div>
     </div>
   </div>

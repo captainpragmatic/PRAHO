@@ -85,6 +85,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
 
     # Pricing
     monthly_price = serializers.SerializerMethodField()
+    currency_code = serializers.SerializerMethodField()
 
     # Service lifecycle
     is_overdue = serializers.ReadOnlyField()
@@ -127,6 +128,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
             "created_at",
             "activated_at",
             "expires_at",
+            "currency_code",
             "updated_at",
         ]
 
@@ -153,6 +155,15 @@ class ServiceListSerializer(serializers.ModelSerializer):
     def get_monthly_price(self, obj: Service) -> Decimal:
         """Get monthly equivalent price"""
         return obj.service_plan.get_monthly_equivalent_price(obj.billing_cycle)
+
+    def get_currency_code(self, obj: Service) -> str:
+        """Currency code for the service.
+
+        The Service model has no currency FK yet — when FEATURE_MULTI_CURRENCY
+        is enabled and a currency field is added, derive from the order or
+        product price that originated this service.
+        """
+        return getattr(obj, "currency_code", None) or "RON"
 
     def get_is_active(self, obj: Service) -> bool:
         """Check if service is active"""
@@ -192,6 +203,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     monthly_price = serializers.SerializerMethodField()
     total_monthly_cost = serializers.SerializerMethodField()
     vat_amount = serializers.SerializerMethodField()
+    currency_code = serializers.SerializerMethodField()
 
     # Service lifecycle
     is_overdue = serializers.ReadOnlyField()
@@ -221,6 +233,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             "monthly_price",
             "total_monthly_cost",
             "vat_amount",
+            "currency_code",
             "setup_fee_paid",
             "auto_renew",
             # Customer info
@@ -305,6 +318,15 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
         base_price = self.get_monthly_price(obj)
         vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
         return round(base_price * vat_rate, 2)  # Romanian VAT (current rate)
+
+    def get_currency_code(self, obj: Service) -> str:
+        """Currency code for the service.
+
+        The Service model has no currency FK yet — when FEATURE_MULTI_CURRENCY
+        is enabled and a currency field is added, derive from the order or
+        product price that originated this service.
+        """
+        return getattr(obj, "currency_code", None) or "RON"
 
     def get_next_billing_date(self, obj: Service) -> str | None:
         """Get next billing date"""
