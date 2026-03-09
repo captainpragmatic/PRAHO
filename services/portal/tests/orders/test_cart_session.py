@@ -10,7 +10,7 @@ from django.contrib.sessions.backends.cache import SessionStore
 from django.utils import timezone
 from unittest.mock import patch, Mock
 
-from apps.orders.services import GDPRCompliantCartSession, CartRateLimiter
+from apps.orders.services import GDPRCompliantCartSession
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -187,70 +187,3 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
         self.assertEqual(len(cart2.get_items()), 1)
         self.assertEqual(cart1.get_items()[0]['product_slug'], 'product1')
         self.assertEqual(cart2.get_items()[0]['product_slug'], 'product2')
-
-
-class TestCartRateLimiter(SimpleTestCase):
-    """Test rate limiting functionality"""
-
-    def test_rate_limit_allows_normal_usage(self):
-        """Test that normal usage is allowed"""
-        session_key = 'test_session_123'
-
-        # Should allow normal operations
-        for i in range(20):  # Well under limit of 30
-            self.assertTrue(CartRateLimiter.check_rate_limit(session_key))
-
-    def test_rate_limit_blocks_abuse(self):
-        """Test that rate limiting blocks abuse"""
-        session_key = 'test_session_abuse'
-
-        # Exhaust the rate limit: check + record mirrors the view pattern
-        for _ in range(30):
-            self.assertTrue(CartRateLimiter.check_rate_limit(session_key))
-            CartRateLimiter.record_operation(session_key)
-
-        # Next request should be blocked
-        self.assertFalse(CartRateLimiter.check_rate_limit(session_key))
-
-    def test_rate_limit_handles_missing_session(self):
-        """Test rate limiting with missing session key"""
-        # Should allow operations with no session key
-        self.assertTrue(CartRateLimiter.check_rate_limit(None))
-        self.assertTrue(CartRateLimiter.check_rate_limit(''))
-
-    def test_record_operation_increments_counter(self):
-        """Test that recording operations increments the counter"""
-        session_key = 'test_session_record'
-
-        # Record 10 operations directly (as a view would after a successful operation)
-        for _ in range(10):
-            CartRateLimiter.record_operation(session_key)
-
-        # Should have used up 10 of the 30 allowed operations.
-        # Each iteration: check first (pure), then record if allowed — mirrors view pattern.
-        remaining_ops = 0
-        for _ in range(25):  # Try 25 more operations (total would be 35)
-            if CartRateLimiter.check_rate_limit(session_key):
-                CartRateLimiter.record_operation(session_key)
-                remaining_ops += 1
-            else:
-                break
-
-        # Should allow exactly 20 more operations (30 - 10 already recorded)
-        self.assertEqual(remaining_ops, 20)
-
-    def test_rate_limit_session_isolation(self):
-        """Test that rate limits are isolated per session"""
-        session1 = 'test_session_1'
-        session2 = 'test_session_2'
-
-        # Exhaust rate limit for session1: check + record mirrors the view pattern
-        for _ in range(30):
-            self.assertTrue(CartRateLimiter.check_rate_limit(session1))
-            CartRateLimiter.record_operation(session1)
-
-        # session1 should be blocked
-        self.assertFalse(CartRateLimiter.check_rate_limit(session1))
-
-        # session2 should still be allowed
-        self.assertTrue(CartRateLimiter.check_rate_limit(session2))

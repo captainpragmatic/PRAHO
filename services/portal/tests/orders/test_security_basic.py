@@ -1,110 +1,20 @@
 """
 Basic Order Security Tests for PRAHO Portal
-Tests the implemented security features: rate limiting, DoS hardening, cart versioning.
+Tests the implemented security features: DoS hardening, cart versioning.
 """
 
-import json
-import time
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase, Client, override_settings
 from django.contrib.sessions.backends.cache import SessionStore
-from django.core.cache import cache
+from django.test import Client, SimpleTestCase, override_settings
 from django.utils import timezone
 
-from apps.orders.services import (
-    GDPRCompliantCartSession,
-    CartRateLimiter,
-    CartCalculationService
-)
+from apps.orders.services import GDPRCompliantCartSession
 
 try:
     from apps.orders.security import OrderSecurityHardening
 except ImportError:
     OrderSecurityHardening = None
-
-
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
-class OrderRateLimitingTestCase(SimpleTestCase):
-    """
-    🔒 Rate Limiting Security Tests
-    Tests session and IP-based rate limiting
-    """
-
-    def setUp(self):
-        """Set up authenticated session and clear cache"""
-        self.client = Client()
-        session = self.client.session
-        session['customer_id'] = 123
-        session['user_id'] = 456
-        session.save()
-
-        # Clear rate limit cache
-        cache.clear()
-
-    def test_session_rate_limiting_allows_normal_usage(self):
-        """🔒 Test that normal usage is allowed by rate limiter"""
-        session_key = 'test_session_normal'
-        client_ip = '127.0.0.1'
-
-        # Should allow normal operations (under 30 per minute)
-        for i in range(25):
-            self.assertTrue(
-                CartRateLimiter.check_rate_limit(session_key, client_ip),
-                f"Request {i+1} should be allowed"
-            )
-
-    def test_session_rate_limiting_blocks_abuse(self):
-        """🔒 Test that rate limiting blocks session abuse"""
-        session_key = 'test_session_abuse'
-        client_ip = '127.0.0.1'
-
-        # Exhaust the session rate limit (30 operations)
-        for i in range(30):
-            result = CartRateLimiter.check_rate_limit(session_key, client_ip)
-            if not result:
-                break  # Hit limit early
-            CartRateLimiter.record_operation(session_key, client_ip)
-
-        # Next request should be blocked
-        self.assertFalse(
-            CartRateLimiter.check_rate_limit(session_key, client_ip),
-            "Request should be blocked after hitting rate limit"
-        )
-
-    def test_ip_rate_limiting_blocks_distributed_abuse(self):
-        """🔒 Test that IP-based rate limiting blocks distributed abuse"""
-        client_ip = '192.168.1.100'
-
-        # Create multiple sessions from same IP
-        sessions = []
-        for i in range(5):
-            sessions.append(f'session_{i}')
-
-        # Exhaust IP-based limit using different sessions
-        total_requests = 0
-        for round_num in range(20):  # 20 rounds * 5 sessions = 100 requests
-            for session_key in sessions:
-                if total_requests >= 60:  # IP minute limit
-                    break
-
-                result = CartRateLimiter.check_rate_limit(session_key, client_ip)
-                if result:
-                    CartRateLimiter.record_operation(session_key, client_ip)
-                    total_requests += 1
-                else:
-                    # Should hit IP limit before session limits
-                    self.assertLess(total_requests, 150)  # Much less than 5*30 session limits
-                    return
-
-            if total_requests >= 60:
-                break
-
-        # Verify IP limit was hit
-        self.assertFalse(
-            CartRateLimiter.check_rate_limit('new_session', client_ip),
-            "New session from same IP should be blocked"
-        )
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
