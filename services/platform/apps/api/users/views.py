@@ -384,7 +384,6 @@ def validate_session_secure(request: HttpRequest) -> Response:
     Request Body:
     {
         "user_id": "2",
-        "state_version": 42,
         "timestamp": 1694022337
     }
 
@@ -443,10 +442,13 @@ def validate_session_secure(request: HttpRequest) -> Response:
         try:
             user = User.objects.get(id=user_id, is_active=True)
 
-            # Compute a stable hash of the user's current memberships so Portal
+            # Compute a stable hash of the user's active memberships so Portal
             # can detect changes (role grant/revoke) without polling.
+            # Truncated to 64 bits — sufficient for change detection (not a security boundary).
             memberships = (
-                CustomerMembership.objects.filter(user=user).order_by("customer_id").values_list("customer_id", "role")
+                CustomerMembership.objects.filter(user=user, is_active=True)
+                .order_by("customer_id")
+                .values_list("customer_id", "role")
             )
             hash_input = ",".join(f"{cid}:{role}" for cid, role in memberships)
             membership_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:16]
