@@ -74,7 +74,7 @@
   {% if products %}
   <div class="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
     {% for product in products %}
-    <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors group relative overflow-hidden">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors group relative overflow-hidden h-full flex flex-col">
 
       <!-- Featured Badge -->
       {% if product.is_featured %}
@@ -94,7 +94,7 @@
       </div>
 
       <!-- Pricing Section -->
-      <div class="px-4 sm:px-6 pb-4">
+      <div class="px-4 sm:px-6 pb-4 flex-grow">
         {% if product.prices %}
           {% for price in product.prices %}
           <div class="mb-4">
@@ -153,7 +153,7 @@
           {% endfor %}
           {% if product.meta.features|length > 3 %}
           <li class="text-slate-500 text-xs">
-            + {{ product.meta.features|length|add:"-3" }} {% trans "mai multe funcții" %}
+            + {{ product.meta.features|length|add:"-3" }} {% trans "more features" %}
           </li>
           {% endif %}
         </ul>
@@ -166,7 +166,7 @@
         <form hx-post="{% url 'orders:add_to_cart' %}"
               hx-target="#cart-widget"
               hx-swap="outerHTML"
-              hx-on::after-request="if(event.detail.successful) { document.body.dispatchEvent(new CustomEvent('cartUpdated')); showToast('success', '{% trans "Product added to cart!" %}'); }"
+              hx-on::after-request="if(event.detail.successful) { document.body.dispatchEvent(new CustomEvent('cartUpdated')); }"
               id="cart-form-{{ product.slug }}">
           {% csrf_token %}
 
@@ -265,9 +265,6 @@ document.addEventListener('click', function(event) {
   }
 });
 
-// Toast notifications now handled by static/js/components/toast.js
-// Usage: showToast('success', message) — loaded globally via base.html
-
 // Update product pricing display
 function updateProductPricing(productSlug, billingPeriod, monthlyPrice, semiannualPrice, annualPrice, setupFee) {
   const priceDisplay = document.getElementById(`price-display-${productSlug}`);
@@ -317,7 +314,6 @@ function updateProductPricing(productSlug, billingPeriod, monthlyPrice, semiannu
     }
   }
 
-  console.log(`Updated pricing for ${productSlug}: ${price} RON (${periodText})`);
 }
 </script>
 {% endblock %}

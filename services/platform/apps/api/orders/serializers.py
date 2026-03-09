@@ -252,6 +252,7 @@ class CartCalculationOutputSerializer(serializers.Serializer):
     subtotal_cents = serializers.IntegerField()
     tax_cents = serializers.IntegerField()
     total_cents = serializers.IntegerField()
+    vat_rate_percent = serializers.IntegerField(required=False, default=0)
     currency = serializers.CharField(max_length=3)
     warnings = serializers.ListField(child=serializers.DictField(), default=list)
 

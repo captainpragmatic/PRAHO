@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load i18n ui_components formatting %}
 
 {% block title %}{{ service.service_name }} - {% trans "Service Details" %}{% endblock %}
 
@@ -115,7 +115,7 @@
         <!-- Monthly Cost -->
         {% if service.monthly_price %}
           {% trans 'Monthly' as st1_label %}
-          {% with val=service.monthly_price|floatformat:2 %}{% stat_tile st1_label val icon="currency" variant="success" %}{% endwith %}
+          {% with val=service.monthly_price|romanian_currency:service.currency_code %}{% stat_tile st1_label val icon="currency" variant="success" %}{% endwith %}
         {% else %}
           {% trans 'Monthly' as st1_label %}{% trans 'N/A' as st1_val %}
           {% stat_tile st1_label st1_val icon="currency" variant="default" %}
@@ -253,7 +253,7 @@
                   <div class="space-y-3">
                     <div class="flex justify-between">
                       <span class="text-slate-400">{% trans "Username" %}</span>
-                      <span class="text-white font-mono">
+                      <span class="text-white font-mono truncate max-w-[200px] inline-block align-bottom" title="{{ service.username }}">
                         {% if service.username %}
                           {{ service.username }}
                         {% else %}
@@ -608,17 +608,17 @@
                       <span class="text-slate-400">{% trans "Base Price" %}</span>
                       <span class="text-white font-mono">
                         {% if service.monthly_price %}
-                          {{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}
+                          {{ service.monthly_price|romanian_currency:service.currency_code }}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>
                         {% endif %}
                       </span>
                     </div>
                     <div class="flex justify-between">
-                      <span class="text-slate-400">{% trans "VAT (19%)" %}</span>
+                      <span class="text-slate-400">{% trans "VAT" %}</span>
                       <span class="text-white font-mono">
                         {% if service.vat_amount %}
-                          + {{ service.vat_amount|floatformat:2 }} {{ service.currency_code|default:"RON" }}
+                          + {{ service.vat_amount|romanian_currency:service.currency_code }}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>
                         {% endif %}
@@ -628,7 +628,7 @@
                       <span class="text-white font-medium">{% trans "Total" %}</span>
                       <span class="text-green-400 font-bold font-mono">
                         {% if service.total_monthly_cost %}
-                          {{ service.total_monthly_cost|floatformat:2 }} {{ service.currency_code|default:"RON" }}
+                          {{ service.total_monthly_cost|romanian_currency:service.currency_code }}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>
                         {% endif %}
@@ -808,15 +808,15 @@
                       {% if service.monthly_price and service.vat_amount %}
                       <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "Base Amount" %}</span>
-                        <span class="text-white">{{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}</span>
+                        <span class="text-white">{{ service.monthly_price|romanian_currency:service.currency_code }}</span>
                       </div>
                       <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "VAT Amount" %}</span>
-                        <span class="text-white">{{ service.vat_amount|floatformat:2 }} {{ service.currency_code|default:"RON" }}</span>
+                        <span class="text-white">{{ service.vat_amount|romanian_currency:service.currency_code }}</span>
                       </div>
                       <div class="flex justify-between border-t border-slate-600 pt-2">
                         <span class="text-white font-medium">{% trans "Total Amount" %}</span>
-                        <span class="text-green-400 font-bold">{{ service.total_monthly_cost|floatformat:2 }} {{ service.currency_code|default:"RON" }}</span>
+                        <span class="text-green-400 font-bold">{{ service.total_monthly_cost|romanian_currency:service.currency_code }}</span>
                       </div>
                       {% else %}
                       <div class="text-slate-400 text-center py-4">{% trans "No billing information available" %}</div>

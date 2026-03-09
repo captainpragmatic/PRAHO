@@ -251,9 +251,19 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
             "subtotal_cents": totals["subtotal_cents"],
             "tax_cents": totals["tax_cents"],
             "total_cents": totals["total_cents"],
+            "vat_rate_percent": round(vat_result.vat_rate),
             "currency": currency_code,
             "warnings": warnings,
-            "items": [],  # Could include per-item calculations if needed
+            "items": [
+                {
+                    "product_name": item["description"],
+                    "quantity": item["quantity"],
+                    "unit_price_cents": item["unit_price_cents"],
+                    "setup_cents": item["setup_cents"],
+                    "line_total_cents": item["unit_price_cents"] * item["quantity"] + item["setup_cents"],
+                }
+                for item in order_items
+            ],
         }
 
         # Validate output

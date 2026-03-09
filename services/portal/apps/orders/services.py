@@ -430,6 +430,7 @@ class GDPRCompliantCartSession:
                 "item_id": self._generate_item_id(product_slug, billing_period),
                 "product_slug": product_slug,
                 "product_name": product_data.get("name") or product_slug,
+                "product_type": product_data.get("product_type", ""),
                 "quantity": quantity,
                 "billing_period": billing_period,
                 "domain_name": domain_name,

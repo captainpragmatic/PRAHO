@@ -161,8 +161,8 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
         for item in cart_data['items']:
             # These fields should NOT contain PII
             allowed_fields = [
-                'item_id', 'product_slug', 'product_name', 'quantity',
-                'billing_period', 'domain_name', 'config', 'added_at'
+                'item_id', 'product_slug', 'product_name', 'product_type',
+                'quantity', 'billing_period', 'domain_name', 'config', 'added_at'
             ]
             for field in item.keys():
                 self.assertIn(field, allowed_fields,

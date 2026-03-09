@@ -46,7 +46,7 @@
                 </h3>
 
                 <div class="flex flex-wrap items-center gap-2 text-sm text-slate-400 mb-3">
-                  {% badge item.product_type|title variant="secondary" size="sm" %}
+                  {% if item.product_type %}{% badge item.product_type|title variant="secondary" size="sm" %}{% endif %}
                   {% badge item.billing_period|title variant="primary" size="sm" %}
 
                   {% if item.domain_name %}

@@ -194,18 +194,20 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
 
         idempotency_key = 'test_key_12345'
 
-        # First order creation
+        # First order creation (agree_terms required by EU compliance validation)
         response1 = self.client.post('/order/create/', {
             'notes': 'Test order',
             'idempotency_key': idempotency_key,
-            'cart_version': 'v1_test_version'
+            'cart_version': 'v1_test_version',
+            'agree_terms': 'on',
         })
 
         # Second order creation with same key - should return same result
         response2 = self.client.post('/order/create/', {
             'notes': 'Test order duplicate',
             'idempotency_key': idempotency_key,
-            'cart_version': 'v1_test_version'
+            'cart_version': 'v1_test_version',
+            'agree_terms': 'on',
         })
 
         # Both should succeed and return same order ID
@@ -584,14 +586,21 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
         mock_cart.get_cart_version.return_value = 'v1_current_version'
         mock_cart_class.return_value = mock_cart
 
-        # Attempt order creation with old cart version
+        # Non-AJAX request with stale version → redirects to checkout (Phase 1 BACKEND-3)
         response = self.client.post('/order/create/', {
             'notes': 'Test order',
             'cart_version': 'v0_old_version'  # Stale version
         })
+        # Non-AJAX: redirect to checkout with flash message
+        self.assertEqual(response.status_code, 302)
 
-        # Should detect stale version and handle appropriately
-        self.assertIn(response.status_code, [400, 409])  # Bad request or conflict
+        # AJAX request with stale version → JSON 400
+        response_ajax = self.client.post(
+            '/order/create/',
+            {'notes': 'Test order', 'cart_version': 'v0_old_version'},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertEqual(response_ajax.status_code, 400)
 
     @patch('apps.orders.views.GDPRCompliantCartSession')
     def test_cart_version_integrity(self, mock_cart_class):
@@ -602,14 +611,20 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
         mock_cart.get_cart_version.return_value = 'valid_sha256_hash'
         mock_cart_class.return_value = mock_cart
 
-        # Test with tampered version
+        # Non-AJAX: tampered version → redirect (Phase 1 BACKEND-3)
         response = self.client.post('/order/create/', {
             'notes': 'Test order',
             'cart_version': 'tampered_hash_value'
         })
+        self.assertEqual(response.status_code, 302)
 
-        # Should reject tampered version
-        self.assertIn(response.status_code, [400, 401])
+        # AJAX: tampered version → JSON 400
+        response_ajax = self.client.post(
+            '/order/create/',
+            {'notes': 'Test order', 'cart_version': 'tampered_hash_value'},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertIn(response_ajax.status_code, [400, 401])
 
     def test_cart_version_generation_consistency(self):
         """🔒 Test that cart version generation is consistent and secure"""

@@ -163,7 +163,14 @@
                     {% if item.domain_name %}• {{ item.domain_name }}{% endif %}
                   </div>
                 </div>
-                {% badge item.product_type|title variant="secondary" size="xs" %}
+                <div class="flex items-center gap-2">
+                  {% if item.product_type %}{% badge item.product_type|title variant="secondary" size="xs" %}{% endif %}
+                  {% if item.line_total_cents %}
+                    <span class="text-slate-300 font-mono text-xs">
+                      {{ item.line_total_cents|cents_to_currency|romanian_currency:calculation.currency }}
+                    </span>
+                  {% endif %}
+                </div>
               </div>
               {% endfor %}
             </div>
@@ -190,7 +197,24 @@
             <p class="text-xs text-slate-400 mt-2 ml-8">
               {% trans "By continuing, you confirm that you accept our" %}
               <a href="/terms/" class="text-blue-400 hover:text-blue-300 underline">{% trans "terms and conditions" %}</a>
+              {% trans "and" %}
+              <a href="/privacy/" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a>
               {% trans "for hosting services." %}
+            </p>
+          </div>
+
+          <!-- EU Consumer Rights — withdrawal notice (Directive 2011/83/EU, OUG 34/2014) -->
+          <div class="mb-6 p-3 bg-slate-700/20 rounded-lg border border-slate-600/50">
+            <p class="text-xs text-slate-400 leading-relaxed">
+              {% trans "By requesting immediate service activation, you acknowledge and agree to waive the 14-day right of withdrawal once your service is provisioned, in accordance with EU Directive 2011/83/EU." %}
+            </p>
+          </div>
+
+          <!-- GDPR data retention notice (Art. 13) -->
+          <div class="mb-6">
+            <p class="text-xs text-slate-500">
+              {% trans "Your order data will be retained for the duration required by Romanian fiscal law (minimum 10 years). For details, see our" %}
+              <a href="/privacy/" class="text-blue-400 hover:text-blue-300 underline">{% trans "privacy policy" %}</a>.
             </p>
           </div>
 
@@ -243,7 +267,7 @@
             </div>
 
             <div class="flex justify-between items-center">
-              <span class="text-slate-400">{% trans "VAT (21%)" %}</span>
+              <span class="text-slate-400">{% trans "VAT" %} ({{ calculation.vat_rate_percent|default:"21" }}%)</span>
               <span class="text-white font-mono">
                 {{ calculation.tax_cents|cents_to_currency|romanian_currency:calculation.currency }}
               </span>
@@ -286,106 +310,61 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Checkout page JavaScript loaded');
-
-    // ===============================================================================
-    // PAYMENT METHOD HANDLING
-    // ===============================================================================
-
     const orderForm = document.querySelector('form[action="{% url 'orders:create_order' %}"]');
     const submitButton = document.getElementById('checkout-submit');
     const buttonText = document.getElementById('button-text');
     const buttonLoading = document.getElementById('button-loading');
     const paymentMethodInputs = document.querySelectorAll('input[name="payment_method"]');
 
-    // Debug logging
-    console.log('Found elements:', {
-        orderForm: !!orderForm,
-        submitButton: !!submitButton,
-        buttonText: !!buttonText,
-        buttonLoading: !!buttonLoading,
-        paymentMethodInputs: paymentMethodInputs.length
-    });
-
-    // Update button text based on payment method
     function updateButtonText() {
-        try {
-            const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
-            console.log('Payment method changed to:', selectedMethod);
-
-            if (buttonText) {
-                if (selectedMethod === 'stripe') {
-                    buttonText.innerHTML = '{% trans "Continue to Payment" %}';
-                } else if (selectedMethod === 'bank_transfer') {
-                    buttonText.innerHTML = '{% trans "Create Order for Bank Transfer" %}';
-                }
+        const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
+        if (buttonText) {
+            if (selectedMethod === 'stripe') {
+                buttonText.innerHTML = '{% trans "Continue to Payment" %}';
+            } else if (selectedMethod === 'bank_transfer') {
+                buttonText.innerHTML = '{% trans "Create Order for Bank Transfer" %}';
             }
-        } catch (error) {
-            console.error(' Error updating button text:', error);
         }
     }
 
-    // Listen for payment method changes
-    if (paymentMethodInputs.length > 0) {
-        paymentMethodInputs.forEach(input => {
-            input.addEventListener('change', updateButtonText);
-            console.log(' Added change listener to payment method input');
-        });
-    } else {
-        console.warn(' No payment method inputs found');
-    }
+    paymentMethodInputs.forEach(function(input) {
+        input.addEventListener('change', updateButtonText);
+    });
 
-    // Handle form submission
     if (orderForm) {
-        console.log(' Order form found, setting up submission handler');
         const canSubmit = {% if can_submit %}true{% else %}false{% endif %};
-        console.log('[Checkout] Can submit form:', canSubmit);
 
         orderForm.addEventListener('submit', function(e) {
-            console.log(' Form submission triggered');
             e.preventDefault();
             e.stopPropagation();
 
             try {
                 if (!canSubmit) {
-                    console.log(' Submission blocked - profile incomplete');
                     {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                     {% trans "Please complete your company profile information before creating the order." as profile_incomplete_msg %}
-                    alert('{{ profile_incomplete_msg|escapejs }}');
+                    showToast('error', '{{ profile_incomplete_msg|escapejs }}');
                     return false;
                 }
 
                 const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
-                console.log(' Selected payment method:', selectedMethod);
 
                 // Show loading state
-                if (submitButton) {
-                    submitButton.disabled = true;
-                    console.log(' Submit button disabled');
-                }
+                if (submitButton) submitButton.disabled = true;
                 if (buttonText && buttonLoading) {
                     buttonText.classList.add('hidden');
                     buttonLoading.classList.remove('hidden');
-                    console.log(' Loading state shown');
                 }
 
                 // Determine the correct action URL
                 let actionUrl;
                 if (selectedMethod === 'stripe') {
-                    // For Stripe, redirect to payment processing
                     actionUrl = "{% url 'orders:process_payment' %}";
-                    console.log(' Processing Stripe payment to:', actionUrl);
                 } else if (selectedMethod === 'bank_transfer') {
-                    // For bank transfer, create order directly
                     actionUrl = "{% url 'orders:create_order' %}";
-                    console.log(' Creating bank transfer order to:', actionUrl);
                 } else {
-                    console.error(' No payment method selected!');
                     {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                     {% trans "Please select a payment method" as select_payment_msg %}
-                    alert('{{ select_payment_msg|escapejs }}');
-
-                    // Reset button state
+                    showToast('error', '{{ select_payment_msg|escapejs }}');
                     if (submitButton) submitButton.disabled = false;
                     if (buttonText && buttonLoading) {
                         buttonText.classList.remove('hidden');
@@ -394,23 +373,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     return false;
                 }
 
-                // Update form action and submit
-                console.log('[Checkout] Updating form action to:', actionUrl);
                 orderForm.action = actionUrl;
-
-                // Use setTimeout to ensure the form action is updated
-                setTimeout(function() {
-                    console.log('[Checkout] Submitting form to:', orderForm.action);
-                    orderForm.submit();
-                }, 100);
+                setTimeout(function() { orderForm.submit(); }, 50);
 
             } catch (error) {
-                console.error('[Checkout] Error during form submission:', error);
+                console.error('[Checkout] Submission error:', error);
                 {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "An error occurred. Please try again." as checkout_error_msg %}
-                alert('{{ checkout_error_msg|escapejs }}');
-
-                // Reset button state
+                showToast('error', '{{ checkout_error_msg|escapejs }}');
                 if (submitButton) submitButton.disabled = false;
                 if (buttonText && buttonLoading) {
                     buttonText.classList.remove('hidden');
@@ -418,10 +388,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
-
-        console.log(' Form submission handler attached');
-    } else {
-        console.error(' Order form not found!');
     }
 });
 </script>

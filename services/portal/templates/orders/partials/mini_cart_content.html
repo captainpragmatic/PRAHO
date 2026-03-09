@@ -52,7 +52,7 @@
     {% if show_view_all %}
     <div class="pt-2 border-t border-slate-700">
       <p class="text-xs text-slate-400 text-center">
-        {% trans "... și alte produse" %}
+        {% trans "... and more products" %}
       </p>
     </div>
     {% endif %}
@@ -75,7 +75,7 @@
       {% icon "orders" size="2xl" css_class="text-slate-400" %}
     </div>
     <p class="text-sm text-slate-400 mb-3">
-      {% trans "Coșul dumneavoastră este gol" %}
+      {% trans "Your cart is empty" %}
     </p>
     <a href="{% url 'orders:catalog' %}" class="w-full text-center inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
       {% icon "orders" size="sm" css_class="mr-1" %} {% trans "Explore products" %}

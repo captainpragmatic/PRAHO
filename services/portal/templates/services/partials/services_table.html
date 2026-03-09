@@ -1,5 +1,5 @@
 {% load i18n %}
-{% load ui_components %}
+{% load ui_components formatting %}
 
 {% if rate_limited %}
 {% include "components/rate_limit_inline_alert.html" %}
@@ -32,7 +32,7 @@
         {% for service in services %}
         <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}';">
           <td class="px-6 py-4 whitespace-nowrap">
-            <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
+            <a href="{% url 'services:detail' service_id=service.id %}" class="block text-sm font-medium text-white hover:text-blue-300 transition-colors">{{ service.service_name }}</a>
             {% if service.domain %}
             <div class="text-sm text-slate-400">{{ service.domain }}</div>
             {% endif %}
@@ -41,7 +41,7 @@
             <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
-            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}/mo</div>
+            <div class="text-sm font-mono text-green-400">{{ service.monthly_price|romanian_currency:service.currency_code }}/mo</div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" css_class="w-28 justify-center" %}
@@ -62,7 +62,7 @@
   <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}';">
     <div class="flex items-start justify-between mb-3">
       <div class="flex-1">
-        <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
+        <a href="{% url 'services:detail' service_id=service.id %}" class="text-sm font-medium text-white hover:text-blue-300 transition-colors">{{ service.service_name }}</a>
         {% if service.domain %}
         <div class="text-xs text-slate-400 mt-1">{{ service.domain }}</div>
         {% endif %}
@@ -79,7 +79,7 @@
       </div>
       <div class="text-right">
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>
-        <div class="text-sm font-mono text-green-400">{{ service.monthly_price|floatformat:2 }} {{ service.currency_code|default:"RON" }}/mo</div>
+        <div class="text-sm font-mono text-green-400">{{ service.monthly_price|romanian_currency:service.currency_code }}/mo</div>
       </div>
     </div>
   </div>

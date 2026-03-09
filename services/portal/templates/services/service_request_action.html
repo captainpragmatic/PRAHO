@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load i18n ui_components formatting %}
 
 {% block title %}{% trans "Service Action Request" %} - {{ service.service_name }}{% endblock %}
 
@@ -210,7 +210,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans "Monthly Cost" %}</dt>
-            <dd class="text-sm text-white font-mono">{{ service.monthly_price|floatformat:2 }} RON</dd>
+            <dd class="text-sm text-white font-mono">{{ service.monthly_price|romanian_currency }}</dd>
           </div>
 
           <div>

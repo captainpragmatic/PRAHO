@@ -3,6 +3,7 @@ Order Views for PRAHO Portal
 Product catalog, cart management, and order creation with Romanian compliance.
 """
 
+import contextlib
 import hashlib
 import hmac as _hmac_module
 import json
@@ -10,6 +11,8 @@ import logging
 import time as _time_module
 import uuid
 from collections.abc import Callable
+from datetime import datetime as _dt
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from django.conf import settings
@@ -687,9 +690,17 @@ def checkout(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Error calculating order totals."))
         return redirect("orders:cart_review")
 
+    # Pre-join cart items with per-item calculation data (avoids fragile name matching in template)
+    cart_items = cart.get_items()
+    if calculation_result and calculation_result.get("items"):
+        calc_items = calculation_result["items"]
+        for idx, item in enumerate(cart_items):
+            if idx < len(calc_items):
+                item["line_total_cents"] = calc_items[idx].get("line_total_cents", 0)
+
     context = {
         "cart": cart,
-        "cart_items": cart.get_items(),
+        "cart_items": cart_items,
         "calculation": calculation_result,
         "warnings": cart.get_warnings(),
         "preflight": preflight_result,
@@ -732,12 +743,25 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
         expected_version = request.POST.get("cart_version", "")
         current_version = cart.get_cart_version()
         if not expected_version or expected_version != current_version:
-            return JsonResponse(
-                {"error": _("Cart version mismatch. Please refresh and try again.")},
-                status=400,
-            )
+            if request.headers.get("HX-Request") or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse(
+                    {"error": _("Cart version mismatch. Please refresh and try again.")},
+                    status=400,
+                )
+            messages.error(request, _("Your cart was updated. Please review and try again."))
+            return redirect("orders:checkout")
+
+        # Validate terms acceptance (required for EU compliance)
+        agree_terms = request.POST.get("agree_terms", "") == "on"
+        if not agree_terms:
+            messages.error(request, _("You must agree to the terms and conditions."))
+            return redirect("orders:checkout")
+
+        # Read payment method once — used by Stripe guard and no-JS routing
+        payment_method = request.POST.get("payment_method", "")
 
         # Idempotency handling for duplicate submissions from client retries.
+        # Must run BEFORE Stripe routing to prevent duplicate orders on double-click.
         idempotency_key = request.POST.get("idempotency_key", "").strip()
         idem_cache_key = f"orders:idempotency:{customer_id}:{idempotency_key}" if idempotency_key else None
         if idem_cache_key:
@@ -748,6 +772,10 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
                     return redirect("orders:confirmation", order_id=cached_order_id)
                 except (ValueError, TypeError):
                     return redirect("orders:checkout")
+
+        # Server-side payment method routing (progressive enhancement for no-JS)
+        if payment_method == "stripe":
+            return process_payment(request)
 
         # 🔒 CRITICAL: Re-run preflight validation before order creation to prevent bypassing validation
         # For explicit idempotency submissions, skip preflight to avoid duplicate upstream
@@ -816,20 +844,25 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
         # Check if order was auto-promoted to pending
         order_status = order_data.get("status", "draft")
 
-        # 💳 NEW: Create payment intent for pending orders
+        # 💳 Create payment intent for pending Stripe orders only
         payment_intent_result = None
-        if order_status == "pending":
+        if order_status == "pending" and payment_method != "bank_transfer":
             try:
                 # Get order details needed for payment intent
                 order_total = order_data.get("total", "0")
                 order_currency = order_data.get("currency_code", "RON")
 
-                # Convert total from decimal to cents (Stripe requires amount in smallest currency unit)
+                # Convert total from decimal string to cents using Decimal to avoid float precision loss
                 try:
-                    total_cents = int(float(order_total) * 100)
+                    total_cents = int(Decimal(str(order_total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100)
                 except (ValueError, TypeError):
                     logger.error(f"❌ Invalid order total format: {order_total}")
                     total_cents = 0
+
+                # Guard: skip PaymentIntent for zero/negative amounts (Stripe rejects < 50 cents)
+                if total_cents <= 0:
+                    logger.error(f"❌ Cannot create payment intent with total_cents={total_cents} for order {order_id}")
+                    raise ValueError(f"Invalid order total: {total_cents} cents")
 
                 # Call Platform API to create payment intent
                 platform_api = PlatformAPIClient()
@@ -865,7 +898,14 @@ def create_order(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0911, 
                 # Continue without payment intent - user can still view order
 
         if order_status == "pending":
-            if payment_intent_result and payment_intent_result.get("success"):
+            if payment_method == "bank_transfer":
+                messages.success(
+                    request,
+                    _("Order #{} was created successfully. Please complete bank transfer to activate it.").format(
+                        order_number
+                    ),
+                )
+            elif payment_intent_result and payment_intent_result.get("success"):
                 messages.success(
                     request, _("Order #{} was created successfully and is ready for payment!").format(order_number)
                 )
@@ -987,12 +1027,18 @@ def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR091
             order_total = order_data.get("total", "0")
             order_currency = order_data.get("currency_code", "RON")
 
-            # Convert total from decimal to cents (Stripe requires amount in smallest currency unit)
+            # Convert total from decimal string to cents using Decimal to avoid float precision loss
             try:
-                total_cents = int(float(order_total) * 100)
+                total_cents = int(Decimal(str(order_total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100)
             except (ValueError, TypeError):
                 logger.error(f"❌ Invalid order total format: {order_total}")
                 total_cents = 0
+
+            # Guard: skip PaymentIntent for zero/negative amounts (Stripe rejects < 50 cents)
+            if total_cents <= 0:
+                logger.error(f"❌ Cannot create payment intent with total_cents={total_cents} for order {order_id}")
+                messages.warning(request, _("Order created but payment amount is invalid. Please contact support."))
+                return redirect("orders:confirmation", order_id=order_id)
 
             # Create payment intent
             payment_result = platform_api.post_billing(
@@ -1030,18 +1076,31 @@ def process_payment(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR091
                 return redirect("orders:confirmation", order_id=order_id)
             else:
                 logger.error(f"❌ Failed to create payment intent: {payment_result}")
-                messages.error(request, _("Payment initialization failed. Please try again."))
-                return redirect("orders:checkout")
+                messages.warning(
+                    request, _("Order created but payment initialization failed. You can retry payment later.")
+                )
+                return redirect("orders:confirmation", order_id=order_id)
 
         except Exception as e:
             logger.error(f"🔥 Error creating Stripe checkout: {e}")
-            messages.error(request, _("Payment processing is temporarily unavailable."))
-            return redirect("orders:checkout")
+            messages.warning(request, _("Order created but payment processing is temporarily unavailable."))
+            return redirect("orders:confirmation", order_id=order_id)
 
     except Exception as e:
         logger.error(f"🔥 [Payment] Unexpected error: {e}")
         messages.error(request, _("Error processing payment. Please try again."))
         return redirect("orders:checkout")
+
+
+def _parse_order_timestamp(order_data: dict[str, Any]) -> None:
+    """Parse ISO timestamp string to TZ-aware datetime for Django template rendering."""
+    created_at_str = order_data.get("created_at", "")
+    if created_at_str and isinstance(created_at_str, str):
+        with contextlib.suppress(ValueError, TypeError):
+            parsed_dt = _dt.fromisoformat(created_at_str)
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+            order_data["created_at"] = parsed_dt
 
 
 @require_customer_authentication
@@ -1101,6 +1160,9 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
 
                 except Exception as e:
                     logger.error(f"🔥 Error getting Stripe config: {e}")
+
+        # Parse ISO timestamp for template rendering
+        _parse_order_timestamp(order_data)
 
         context = {
             "order": order_data,

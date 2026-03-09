@@ -2,7 +2,7 @@
 
 > **Status**: Active specification
 > **Owner**: PRAHO Platform Team
-> **Last updated**: 2026-03-05
+> **Last updated**: 2026-03-09
 > **Companion**: [portal-ui-ux-backlog.md](portal-ui-ux-backlog.md) (implementation roadmap)
 > **Branch**: `feat/ui-ux-design-system-epic`
 
@@ -629,3 +629,42 @@ See [portal-ui-ux-backlog.md](portal-ui-ux-backlog.md) for the full task breakdo
 | D.2 | Component usage documentation / living styleguide page |
 | D.3 | Accessibility audit (WCAG AA compliance) |
 | D.4 | Dark mode completeness pass |
+
+---
+
+## Appendix: Order Flow Design System Decisions (2026-03-09)
+
+Consolidated from the 28-issue order flow audit. These decisions apply to the order catalog → cart → checkout → confirmation flow.
+
+### Feedback Patterns
+
+| Pattern | Old | New | Rationale |
+|---------|-----|-----|-----------|
+| Validation errors | `alert()` | `showToast('error', msg)` | Non-blocking, dismissible, matches DS |
+| Cart operations | Double toast (HTMX + JS) | Server-only HTMX swap | Single source of truth |
+| Debug logging | 20+ `console.log` in checkout | 1 `console.error` in catch | No implementation leaks in devtools |
+
+### Monetary Display
+
+All monetary values use `|romanian_currency` filter (comma-decimal, RON suffix). Never use `|floatformat` for money.
+
+| Context | Filter | Example output |
+|---------|--------|----------------|
+| Invoices (cents) | `cents_to_currency\|romanian_currency:currency_code` | `29,99 RON` |
+| Service prices (decimal) | `romanian_currency:currency_code` | `149,00 EUR` |
+| VAT label | Dynamic `{{ vat_rate_percent }}%` from API | `VAT (21%)` |
+
+### Breadcrumb Navigation
+
+Order flow breadcrumbs (catalog → cart → checkout → confirmation) use `<a>` links for completed steps and `<span>` for current/future steps. Completed steps show a green checkmark. Arrow separators are inside step `<li>` elements (not separate `<li>` nodes) for correct screen reader behavior.
+
+### Per-Item Pricing
+
+The Platform API `calculate_cart_totals` returns an `items` array with `product_name`, `unit_price_cents`, `setup_cents`, and `line_total_cents` per item. Checkout displays line totals next to each product in the "Ordered products" section.
+
+### Compliance Blocks
+
+Checkout includes three compliance blocks below the terms checkbox:
+1. **Privacy policy link** alongside T&C (COMP-1)
+2. **EU withdrawal notice** — Directive 2011/83/EU waiver for immediate activation (COMP-2)
+3. **GDPR data retention** — Art. 13 notice with privacy policy link (COMP-3)

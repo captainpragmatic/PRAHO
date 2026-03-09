@@ -1,7 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
-{% load ui_components %}
-{% load formatting %}
+{% load ui_components formatting %}
 
 {% block title %}{% trans 'Dashboard' %} - PRAHO Portal{% endblock %}
 
@@ -91,7 +90,7 @@
                   {{ invoice.created_at|date:"d.m.Y" }}
                 </div>
                 <div class="text-white font-medium text-sm leading-4">
-                  {{ invoice.total_cents|cents_to_currency|floatformat:2 }} {{ invoice.currency.code }}
+                  {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
                 </div>
               </div>
             </div>
