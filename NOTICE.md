@@ -11,7 +11,7 @@ Attributions and third-party components:
 - HTMX — MIT
 - Tailwind CSS — MIT
 - Alpine.js — MIT
-- psycopg2 — LGPL or BSD (depending on packaging)
+- psycopg — LGPL-3.0
 - pytest — MIT
 - django-debug-toolbar — BSD
 - cryptography — Apache-2.0 / BSD-3-Clause

@@ -105,7 +105,7 @@ class TestPlatformPortalIntegration:
         # Portal architecture should be stateless (see STATELESS_ARCHITECTURE.md)
         # The actual enforcement happens through:
         # 1. Portal has no DATABASE_URL in production
-        # 2. Portal requirements.txt has no psycopg2
+        # 2. Portal requirements.txt has no psycopg driver
         # 3. Portal settings use in-memory dummy DB
 
         # Verify portal requirements don't include database drivers
@@ -125,7 +125,7 @@ class TestPlatformPortalIntegration:
                     if line_stripped.startswith('#') or not line_stripped:
                         continue
                     # Portal should NOT have database driver packages as dependencies
-                    assert 'psycopg2' not in line_stripped.lower(), "Portal should not have psycopg2"
+                    assert 'psycopg' not in line_stripped.lower(), "Portal should not have psycopg"
                     assert 'mysqlclient' not in line_stripped.lower(), "Portal should not have mysqlclient"
 
     @pytest.mark.integration

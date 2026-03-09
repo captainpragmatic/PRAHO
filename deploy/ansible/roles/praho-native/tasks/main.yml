@@ -58,9 +58,9 @@
     state: started
     enabled: yes
 
-- name: Install psycopg2 for Ansible PostgreSQL modules
+- name: Install psycopg for Ansible PostgreSQL modules
   apt:
-    name: python3-psycopg2
+    name: python3-psycopg
     state: present
 
 - name: Create PostgreSQL user

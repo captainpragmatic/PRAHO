@@ -191,7 +191,7 @@ pragmatichost/                  # 🚀 Root directory for Romanian hosting provi
 │  ├─ copilot-instructions.md  # GitHub Copilot context for consistent code generation
 │  └─ ISSUE_TEMPLATE/          # Issue templates for bugs, features, security
 ├─ requirements/                # 📦 Python dependencies (environment-specific)
-│  ├─ base.txt                 # Core dependencies: Django, psycopg2, redis
+│  ├─ base.txt                 # Core dependencies: Django, psycopg, redis
 │  ├─ dev.txt                  # Development: django-debug-toolbar, pytest, black
 │  └─ prod.txt                 # Production: gunicorn, sentry-sdk, newrelic
 ├─ manage.py                    # 🐍 Django management script (standard)

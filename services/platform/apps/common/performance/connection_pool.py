@@ -289,14 +289,13 @@ def get_http_session(
 def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
     """
     Get recommended database connection pool configuration.
-    Returns settings suitable for Django's CONN_MAX_AGE and psycopg pool settings.
+    Returns settings suitable for Django's CONN_MAX_AGE and psycopg3 pool settings.
     """
     configs = {
         "development": {
             "CONN_MAX_AGE": 60,
             "CONN_HEALTH_CHECKS": False,
             "OPTIONS": {
-                "MAX_CONNS": 5,
                 "connect_timeout": 10,
             },
         },
@@ -304,7 +303,6 @@ def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
             "CONN_MAX_AGE": 300,
             "CONN_HEALTH_CHECKS": True,
             "OPTIONS": {
-                "MAX_CONNS": 10,
                 "connect_timeout": 10,
                 "keepalives": 1,
                 "keepalives_idle": 30,
@@ -316,7 +314,6 @@ def get_database_pool_config(environment: str = "production") -> dict[str, Any]:
             "CONN_MAX_AGE": 600,
             "CONN_HEALTH_CHECKS": True,
             "OPTIONS": {
-                "MAX_CONNS": 20,
                 "connect_timeout": 10,
                 "keepalives": 1,
                 "keepalives_idle": 30,

@@ -158,7 +158,7 @@ class TestDockerServicesIntegration:
         mock_build_output = """
         Step 5/9 : RUN pip install -r requirements/prod.txt
          ---> Running in abc123
-        Successfully installed Django-5.2.6 gunicorn-21.2.0 psycopg2-binary-2.9.7
+        Successfully installed Django-5.2.6 gunicorn-21.2.0 psycopg-3.2.0
         """
 
         with patch('subprocess.run') as mock_run:

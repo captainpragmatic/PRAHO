@@ -141,7 +141,7 @@ POST /api/v1/tickets/{id}/comments/ # Add comment
 ```
 
 ### Security Constraints
-- ❌ **NO PostgreSQL access** (no psycopg2, no connection to business database)
+- ❌ **NO PostgreSQL access** (no psycopg driver, no connection to business database)
 - ❌ **NO direct model imports** from platform (enforced by pre-commit hooks)
 - ❌ **NO business data models** (apps have no models.py with domain entities)
 - ✅ **SQLite for sessions only** (minimal local storage, no business data)

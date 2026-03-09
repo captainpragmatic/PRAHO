@@ -71,7 +71,7 @@ This archaeological analysis reveals a codebase undergoing rapid, intentional ev
 2. **Services Architecture** (PR #1, commit `cbc795c`)
    - Split into `platform/` (full Django) and `portal/` (API-only)
    - Portal explicitly excludes database drivers for security isolation
-   - Requirements explicitly state: "NO psycopg2, NO redis"
+   - Requirements explicitly state: "NO psycopg, NO redis"
 
 3. **Result Pattern Adoption**
    - Rust-inspired `Ok()/Err()` pattern introduced

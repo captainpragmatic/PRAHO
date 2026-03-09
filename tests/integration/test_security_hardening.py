@@ -442,8 +442,8 @@ class TestPortalIsolation:
 
     @pytest.mark.integration
     @pytest.mark.security
-    def test_portal_has_no_psycopg2_in_requirements(self):
-        """Portal requirements must not include psycopg2 (no direct DB access)."""
+    def test_portal_has_no_database_driver_in_requirements(self):
+        """Portal requirements must not include any database driver (no direct DB access)."""
         portal_req = PORTAL_DIR / "requirements.txt"
         if not portal_req.exists():
             pytest.skip("Portal requirements.txt not found")
@@ -453,8 +453,8 @@ class TestPortalIsolation:
             stripped = line.strip()
             if stripped.startswith("#") or not stripped:
                 continue
-            assert "psycopg2" not in stripped.lower(), (
-                f"Portal must not depend on psycopg2 (direct DB access): {stripped}"
+            assert "psycopg" not in stripped.lower(), (
+                f"Portal must not depend on psycopg (direct DB access): {stripped}"
             )
             assert "mysqlclient" not in stripped.lower(), (
                 f"Portal must not depend on mysqlclient (direct DB access): {stripped}"

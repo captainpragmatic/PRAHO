@@ -410,7 +410,7 @@ BACKUP_ENCRYPTION_KEY = os.environ.get("BACKUP_ENCRYPTION_KEY")
 # ===============================================================================
 
 # Database connection pooling
-# Note: MAX_CONNS is not a valid psycopg2 option. Use CONN_MAX_AGE (set above)
+# Note: psycopg3 is used as the database adapter. Use CONN_MAX_AGE (set above)
 # and Django's connection pool settings for connection reuse.
 
 # Template caching

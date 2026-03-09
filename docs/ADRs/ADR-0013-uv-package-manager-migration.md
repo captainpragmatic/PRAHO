@@ -127,7 +127,7 @@ PRAHO/
 **Dependency Groups:**
 - `dev`: Testing, linting, type checking (pytest, ruff, mypy, etc.)
 - `prod`: Production server and monitoring (gunicorn, sentry, etc.)
-- `platform`: Database, auth, billing, etc. (psycopg2, django-allauth, stripe, etc.)
+- `platform`: Database, auth, billing, etc. (psycopg, django-allauth, stripe, etc.)
 - `portal`: Minimal production dependencies (gunicorn only)
 
 **Service Installation:**

@@ -164,7 +164,7 @@ prod = [
 # Platform-specific dependencies (database, auth, billing, etc.)
 platform = [
     # Database
-    "psycopg2-binary>=2.9.0",
+    "psycopg[binary]>=3.2.0",
     "dj-database-url>=2.1.0",
 
     # Authentication & Security
