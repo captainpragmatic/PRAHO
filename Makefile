@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-platform lint-portal lint-security lint-credentials lint-audit type-check pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-credentials lint-audit check-types pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -66,7 +66,7 @@ help:
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
 	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
-	@echo "  make type-check      - Type check all services"
+	@echo "  make check-types     - Type check all services"
 	@echo "  make pre-commit      - Run pre-commit hooks"
 	@echo ""
 	@echo "🔒 SECURITY:"
@@ -398,6 +398,16 @@ test:
 	@$(MAKE) test-security
 	@echo "🎉 All test phases completed successfully!"
 
+test-fast:
+	@echo "⚡ [Platform] Fast test run (failfast + keepdb + parallel)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ifdef FILE
+	@$(PYTHON_PLATFORM_MANAGE) test $(FILE) --settings=config.settings.test --verbosity=2 --failfast --keepdb
+else
+	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --failfast --keepdb --parallel
+endif
+	@echo "✅ Fast tests completed!"
+
 # ===============================================================================
 # DATABASE & ASSETS 🗄️
 # ===============================================================================
@@ -465,6 +475,10 @@ lint-portal:
 	@echo "✅ Portal linting complete!"
 
 lint:
+ifdef FILE
+	@echo "🔍 [Lint] Checking: $(FILE)"
+	@$(VENV_DIR)/bin/ruff check $(FILE) --config=pyproject.toml
+else
 	@echo "🔄 [All Services] Comprehensive linting..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📋 Phase 0: Ruff no-new-debt gate"
@@ -480,6 +494,22 @@ lint:
 	@echo "📋 Phase 4: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
 	@echo "🎉 All services linting complete!"
+endif
+
+lint-fix:
+ifdef FILE
+	@echo "🔧 [Lint Fix] Auto-fixing: $(FILE)"
+	@$(VENV_DIR)/bin/ruff check $(FILE) --fix --config=pyproject.toml || true
+	@echo "✅ Auto-fix complete — review changes before committing."
+else
+	@echo "🔧 [All Services] Auto-fixing safe lint issues..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "📋 Platform:"
+	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/ruff check . --fix --config=../../pyproject.toml || true
+	@echo "📋 Portal:"
+	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --fix --config=../../pyproject.toml || true
+	@echo "✅ Auto-fix complete — review changes before committing."
+endif
 
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."
@@ -610,7 +640,7 @@ audit-dark-mode-strict:
 # ===============================================================================
 
 
-type-check:
+check-types:
 ifdef FILE
 	@echo "🏷️ [Type Check] $(FILE)"
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy $(FILE) --config-file=../../pyproject.toml --follow-imports=silent

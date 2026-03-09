@@ -119,7 +119,7 @@ make test-security     # Service isolation validation
 
 # Code quality
 make lint              # Ruff linting (all services)
-make type-check        # MyPy type checking
+make check-types       # MyPy type checking
 make pre-commit        # Run all pre-commit hooks
 
 # Database

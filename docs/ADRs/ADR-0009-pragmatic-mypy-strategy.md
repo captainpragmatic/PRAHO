@@ -121,7 +121,7 @@ Special attention to type safety in:
 - Target: <200 errors
 
 ### Phase 3: Maintenance
-- Monitor error trends with `make type-check-modified`
+- Monitor error trends with `make check-types-modified`
 - Add type annotations for new business logic
 - Keep Django layers relaxed
 
@@ -129,13 +129,13 @@ Special attention to type safety in:
 
 ```bash
 # Check specific error types
-make type-check 2>&1 | grep -o '\[[a-z-]*\]$' | sort | uniq -c
+make check-types 2>&1 | grep -o '\[[a-z-]*\]$' | sort | uniq -c
 
-# Focus on business logic files
-mypy apps/*/services.py apps/*/utils.py
+# Focus on business logic files (always use Makefile target)
+make check-types FILE=apps/billing/services.py
 
 # Modified files only (developer workflow)
-make type-check-modified
+make check-types-modified
 ```
 
 ## Rationale
