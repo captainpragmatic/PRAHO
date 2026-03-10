@@ -333,60 +333,117 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
 
 
 def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
-    """
-    Validate VAT number with Romanian authorities.
+    """Validate a customer's VAT number with format check and VIES verification.
+
+    Routing logic:
+    - Detects country from VAT prefix (defaults to RO if no prefix).
+    - RO numbers: CUIValidator strict check digit + VIES.
+    - Other EU numbers: stdnum format check + VIES REST API.
+    - Non-EU: rejected immediately.
+    - VIES down: falls back to format-only validation.
+
+    Updates CustomerTaxProfile VIES fields and stores result in VATValidation.
 
     Args:
-        tax_profile_id: CustomerTaxProfile UUID
+        tax_profile_id: CustomerTaxProfile UUID.
 
     Returns:
-        Dictionary with validation result
+        Dictionary with validation result.
     """
-    logger.info(f"🏛️ [VAT] Validating VAT number for tax profile {tax_profile_id}")
+    logger.info("[VAT] Validating VAT number for tax profile %s", tax_profile_id)
 
-    from apps.billing.tax_models import VATValidation  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415  # Deferred: avoids circular import
-    from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.billing.gateways.vies_gateway import VIESGateway  # noqa: PLC0415
+    from apps.common.eu_vat_validator import (  # noqa: PLC0415
+        is_eu_country,
+        parse_vat_number,
+        validate_vat_format,
+    )
+    from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
     try:
-        tax_profile = CustomerTaxProfile.objects.get(id=tax_profile_id)
+        tax_profile = CustomerTaxProfile.objects.select_related("customer").get(id=tax_profile_id)
 
         if not tax_profile.vat_number:
-            logger.info(f"🏛️ [VAT] No VAT number to validate for tax profile {tax_profile_id}")
+            logger.info("[VAT] No VAT number for tax profile %s", tax_profile_id)
             return {"success": True, "tax_profile_id": str(tax_profile.id), "message": "No VAT number to validate"}
 
-        # Validate using shared CUIValidator (handles RO prefix automatically)
-        vat_number = tax_profile.vat_number
-        cui_result = CUIValidator.validate(vat_number)
-        is_valid = cui_result.is_valid
-        validation_msg = "CUI format valid" if is_valid else f"CUI validation failed: {cui_result.error_message}"
+        # Step 1: Parse country + digits
+        country_code, vat_digits = parse_vat_number(tax_profile.vat_number)
 
-        # Store validation result
-        VATValidation.objects.update_or_create(
-            vat_number=vat_number,
-            defaults={
-                "country_code": "RO",
-                "full_vat_number": f"RO{cui_result.digits}"
-                if cui_result.digits and not vat_number.startswith("RO")
-                else vat_number,
-                "is_valid": is_valid,
-                "validation_source": "manual",
-                "response_data": {"message": validation_msg},
-            },
+        if not is_eu_country(country_code):
+            _update_tax_profile_vies(tax_profile, status="not_applicable")
+            return {
+                "success": True,
+                "tax_profile_id": str(tax_profile.id),
+                "message": f"Non-EU country ({country_code}), VIES not applicable",
+            }
+
+        # Step 2: Offline format validation
+        fmt = validate_vat_format(country_code, vat_digits)
+        if not fmt.is_valid:
+            _store_validation(
+                fmt.country_code,
+                vat_digits,
+                fmt.full_vat_number,
+                is_valid=False,
+                source="format_check",
+                response_data={"error": fmt.error_message},
+            )
+            _update_tax_profile_vies(tax_profile, status="invalid")
+            logger.info("[VAT] Format invalid: %s — %s", fmt.full_vat_number, fmt.error_message)
+            return {
+                "success": True,
+                "tax_profile_id": str(tax_profile.id),
+                "is_valid": False,
+                "message": f"Format invalid: {fmt.error_message}",
+            }
+
+        # Step 3: VIES API verification
+        vies = VIESGateway.check_vat(country_code, vat_digits)
+
+        if vies.api_available:
+            source = "vies"
+            is_valid = vies.is_valid
+            status = "valid" if vies.is_valid else "invalid"
+        else:
+            # VIES down — accept format-only
+            source = "format_check"
+            is_valid = True
+            status = "format_only"
+            logger.warning("[VAT] VIES unavailable for %s, accepting format-only", fmt.full_vat_number)
+
+        # Step 4: Store results
+        _store_validation(
+            country_code,
+            vat_digits,
+            fmt.full_vat_number,
+            is_valid=is_valid,
+            source=source,
+            company_name=vies.company_name,
+            company_address=vies.company_address,
+            response_data=vies.raw_response,
         )
-        logger.info(f"🏛️ [VAT] Validated {vat_number}: {'✅ valid' if is_valid else '❌ invalid'}")
+        _update_tax_profile_vies(
+            tax_profile,
+            status=status,
+            company_name=vies.company_name if vies.api_available else "",
+        )
 
-        # Log the validation attempt
+        logger.info("[VAT] Validated %s: %s (source=%s)", fmt.full_vat_number, status, source)
+
         AuditService.log_simple_event(
-            event_type="vat_validation_attempted",
+            event_type="vat_validation_completed",
             user=None,
             content_object=tax_profile,
-            description=f"VAT validation attempted for {tax_profile.vat_number}",
+            description=f"VAT validation: {fmt.full_vat_number} -> {status}",
             actor_type="system",
             metadata={
                 "tax_profile_id": str(tax_profile.id),
-                "vat_number": tax_profile.vat_number,
-                "customer_id": str(tax_profile.customer.id),
+                "vat_number": fmt.full_vat_number,
+                "country_code": country_code,
+                "is_valid": is_valid,
+                "source": source,
+                "customer_id": str(tax_profile.customer_id),
                 "source_app": "billing",
             },
         )
@@ -394,13 +451,66 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
         return {
             "success": True,
             "tax_profile_id": str(tax_profile.id),
-            "vat_number": tax_profile.vat_number,
+            "vat_number": fmt.full_vat_number,
+            "is_valid": is_valid,
+            "vies_status": status,
             "message": "VAT validation completed",
         }
 
     except Exception as e:
-        logger.exception(f"💥 [VAT] Error validating VAT for tax profile {tax_profile_id}: {e}")
+        logger.exception("[VAT] Error validating VAT for tax profile %s: %s", tax_profile_id, e)
         return {"success": False, "error": str(e)}
+
+
+def _store_validation(  # noqa: PLR0913
+    country_code: str,
+    vat_number: str,
+    full_vat_number: str,
+    *,
+    is_valid: bool,
+    source: str,
+    company_name: str = "",
+    company_address: str = "",
+    response_data: dict[str, Any] | None = None,
+) -> None:
+    """Upsert a VATValidation record."""
+    from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+
+    expires_at = timezone.now() + timedelta(hours=24 if is_valid else 1)
+    VATValidation.objects.update_or_create(
+        country_code=country_code,
+        vat_number=vat_number,
+        defaults={
+            "full_vat_number": full_vat_number,
+            "is_valid": is_valid,
+            "is_active": is_valid,
+            "company_name": company_name,
+            "company_address": company_address,
+            "validation_source": "vies" if source == "vies" else "manual",
+            "response_data": response_data or {},
+            "expires_at": expires_at,
+        },
+    )
+
+
+def _update_tax_profile_vies(
+    tax_profile: Any,
+    *,
+    status: str,
+    company_name: str = "",
+) -> None:
+    """Update CustomerTaxProfile VIES verification fields."""
+    tax_profile.vies_verification_status = status
+    tax_profile.vies_verified_name = company_name
+    update_fields = ["vies_verification_status", "vies_verified_name", "updated_at"]
+    if status == "valid":
+        tax_profile.vies_verified_at = timezone.now()
+        tax_profile.reverse_charge_eligible = True
+        update_fields.extend(["vies_verified_at", "reverse_charge_eligible"])
+    elif status == "invalid":
+        tax_profile.reverse_charge_eligible = False
+        update_fields.append("reverse_charge_eligible")
+    tax_profile.save(update_fields=update_fields)
 
 
 def process_auto_payment(invoice_id: str) -> dict[str, Any]:
@@ -922,3 +1032,41 @@ def notify_expiring_grandfathering_async(days_ahead: int = 30) -> str:
 def run_payment_collection_async() -> str:
     """Queue payment collection task."""
     return async_task("apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2)
+
+
+def reverify_expired_vat_validations() -> dict[str, Any]:
+    """Re-verify VAT numbers whose VIES validation has expired.
+
+    Runs as a periodic task (e.g., daily). Picks up VATValidation records
+    past their expires_at and re-queues validate_vat_number for each.
+    """
+    from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+
+    logger.info("[VAT] Starting periodic VIES re-verification")
+
+    expired = (
+        VATValidation.objects.filter(
+            expires_at__lt=timezone.now(),
+            is_valid=True,
+        )
+        .select_related()
+        .values_list("vat_number", "country_code")[:100]
+    )
+
+    queued = 0
+    for vat_number, _country_code in expired:
+        # Find the tax profile that owns this VAT number
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        profile = CustomerTaxProfile.objects.filter(vat_number__icontains=vat_number).first()
+        if profile:
+            async_task("apps.billing.tasks.validate_vat_number", str(profile.id))
+            queued += 1
+
+    logger.info("[VAT] Re-verification: queued %d of %d expired validations", queued, len(expired))
+    return {"success": True, "queued": queued, "expired_found": len(expired)}
+
+
+def reverify_expired_vat_validations_async() -> str:
+    """Queue periodic VIES re-verification task."""
+    return async_task("apps.billing.tasks.reverify_expired_vat_validations", timeout=TASK_TIME_LIMIT)
