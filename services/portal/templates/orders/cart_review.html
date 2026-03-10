@@ -88,7 +88,7 @@
                   <select id="qty-{{ forloop.counter0 }}"
                           name="quantity"
                           hx-post="{% url 'orders:update_cart_item' %}"
-                          hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}'
+                          hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}'
                           hx-target="#cart-totals"
                           hx-swap="outerHTML"
                           hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
@@ -104,7 +104,7 @@
                 </div>
 
                 <!-- Remove Button -->
-                <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-item-{{ forloop.counter0 }}" hx-swap="outerHTML swap:1s" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
+                <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-item-{{ forloop.counter0 }}" hx-swap="outerHTML swap:1s" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
                   <span>{% icon "x" size="sm" css_class="text-slate-400" %}</span>
                   <span class="ml-1 text-sm hidden sm:inline">{% trans "Remove" %}</span>
                 </button>

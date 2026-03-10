@@ -42,10 +42,11 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
-    # 🔒 SECURITY: Rate limiting before sessions to prevent DoS
+    # 🔒 SECURITY: Auth rate limiting before sessions (IP-only, no session needed)
     "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
-    "apps.common.rate_limiting.APIRateLimitMiddleware",  # API rate limiting
     "django.contrib.sessions.middleware.SessionMiddleware",  # Cache-only sessions
+    # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
+    "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
     "django.middleware.locale.LocaleMiddleware",  # After sessions
     "apps.users.middleware.SessionLanguageMiddleware",  # Activate session language
     "django.middleware.common.CommonMiddleware",  # After locale

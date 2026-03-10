@@ -212,6 +212,9 @@ class Order(models.Model):
     # Markers to identify order_number uniqueness violations in IntegrityError messages.
     # PostgreSQL uses the constraint name; SQLite uses "column_name".
     _ORDER_NUMBER_COLLISION_MARKERS = ("orders_order_number_key", "orders.order_number")
+    # Markers for non-retryable IntegrityErrors (e.g., idempotency key constraint).
+    # If these appear in the exception string, re-raise immediately instead of retrying.
+    _NON_RETRYABLE_CONSTRAINT_MARKERS = ("unique_customer_idempotency_key",)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Auto-generate order number before saving, with retry on collision.
@@ -233,16 +236,20 @@ class Order(models.Model):
                 return
             except IntegrityError as exc:
                 exc_str = str(exc)
+                # Never retry non-order-number constraints (e.g., idempotency key)
+                if any(m in exc_str for m in self._NON_RETRYABLE_CONSTRAINT_MARKERS):
+                    raise
                 is_order_number_collision = any(m in exc_str for m in self._ORDER_NUMBER_COLLISION_MARKERS)
                 if not is_order_number_collision or attempt >= max_retries - 1:
                     raise
-                # Regenerate on collision
+                # Regenerate sequence only, preserving the original prefix format.
+                # This prevents split-brain between model format (ORD-{date}-{seq})
+                # and service format (ORD-{year}-{customer}-{seq}).
                 logger.warning(
-                    "⚠️ [Order] order_number collision on attempt %d, regenerating",
+                    "⚠️ [Order] order_number collision on attempt %d, regenerating sequence",
                     attempt + 1,
                 )
-                self.order_number = ""
-                self.generate_order_number()
+                self._regenerate_order_number_sequence()
 
     @property
     def subtotal(self) -> Decimal:
@@ -314,6 +321,41 @@ class Order(models.Model):
             else:
                 next_seq = 1
             self.order_number = f"{prefix}{next_seq:06d}"
+
+    def _regenerate_order_number_sequence(self) -> None:
+        """Regenerate just the sequence part of an existing order number.
+
+        Preserves the prefix format (whether from model or service generator)
+        to prevent format split-brain on collision retry.
+        """
+        if not self.order_number:
+            self.generate_order_number()
+            return
+        # Split on last dash to extract prefix and sequence
+        parts = self.order_number.rsplit("-", 1)
+        expected_parts = 2  # prefix + sequence
+        if len(parts) != expected_parts:
+            # Can't determine format — fall back to full regeneration
+            self.order_number = ""
+            self.generate_order_number()
+            return
+        prefix = parts[0] + "-"
+        seq_width = len(parts[1])  # Preserve zero-padding width (4 or 6)
+        latest = (
+            Order.objects.filter(order_number__startswith=prefix)
+            .order_by("-order_number")
+            .values_list("order_number", flat=True)
+            .first()
+        )
+        if latest:
+            try:
+                last_seq = int(latest.rsplit("-", 1)[-1])
+                next_seq = last_seq + 1
+            except (ValueError, IndexError):
+                next_seq = 1
+        else:
+            next_seq = 1
+        self.order_number = f"{prefix}{next_seq:0{seq_width}d}"
 
     def calculate_totals(self) -> None:
         """

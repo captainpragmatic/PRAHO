@@ -14,7 +14,7 @@ import time as _time_module
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote as _url_quote
 
@@ -133,7 +133,7 @@ def _get_customer_context(request: HttpRequest) -> tuple[str | None, str | None]
         or request.session.get("selected_customer_id")
         or request.session.get("customer_id")
     )
-    user_id = getattr(request, "user_id", None) or request.session.get("user_id") or request.session.get("customer_id")
+    user_id = getattr(request, "user_id", None) or request.session.get("user_id")
     return (str(customer_id) if customer_id else None), (str(user_id) if user_id else None)
 
 
@@ -143,7 +143,7 @@ def _parse_total_cents(order_total: str) -> int:
     Returns 0 if conversion fails (caller should validate).
     """
     try:
-        amount = Decimal(str(order_total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        amount = Decimal(str(order_total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
         return int(amount * 100)
     except (InvalidOperation, ValueError, TypeError):
         logger.error("💰 [Orders] Failed to convert order total to cents: %s", order_total)
@@ -200,7 +200,7 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
 
     # Validate payment method against allowlist
     payment_method = request.POST.get("payment_method", "")
-    if payment_method and payment_method not in ALLOWED_PAYMENT_METHODS:
+    if not payment_method or payment_method not in ALLOWED_PAYMENT_METHODS:
         messages.error(request, _("Invalid payment method selected."))
         return redirect("orders:checkout")
 
@@ -260,7 +260,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         if not ctx.idempotency_key:
             session_key = (getattr(request, "session", None) and request.session.session_key) or ""
             ctx.idempotency_key = hashlib.sha256(
-                f"{ctx.customer_id}:{ctx.cart_version}:{session_key}:{_time_module.time():.0f}".encode()
+                f"{ctx.customer_id}:{ctx.cart_version}:{session_key}".encode()
             ).hexdigest()[:64]
 
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
@@ -336,6 +336,8 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                     total_cents,
                     order_id,
                 )
+                messages.error(request, _("Unable to process payment. Please contact support."))
+                return redirect("orders:checkout")
             else:
                 try:
                     platform_api = PlatformAPIClient()
@@ -1028,10 +1030,12 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
         # Bank transfer details for pending bank_transfer orders
         bank_details: dict[str, str] = {}
         if order_data.get("payment_method") == "bank_transfer":
+            if not getattr(settings, "COMPANY_BANK_IBAN", ""):
+                logger.warning("⚠️ [Orders] COMPANY_BANK_IBAN not configured — bank transfer details unavailable")
             bank_details = {
-                "iban": settings.COMPANY_BANK_IBAN,
-                "bank_name": settings.COMPANY_BANK_NAME,
-                "beneficiary": settings.COMPANY_BANK_BENEFICIARY,
+                "iban": getattr(settings, "COMPANY_BANK_IBAN", "") or _("Not configured"),
+                "bank_name": getattr(settings, "COMPANY_BANK_NAME", "") or _("Not configured"),
+                "beneficiary": getattr(settings, "COMPANY_BANK_BENEFICIARY", "") or _("Not configured"),
             }
 
         context = {
@@ -1191,7 +1195,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912, C901
+def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """
     Confirm payment and trigger service creation.
     Called after successful Stripe payment from frontend.
@@ -1204,6 +1208,11 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
 
         if not payment_intent_id or not order_id:
             return JsonResponse({"success": False, "error": "Missing payment_intent_id or order_id"}, status=400)
+
+        # 🔒 SECURITY: Validate gateway against allowlist
+        allowed_gateways = frozenset({"stripe"})
+        if gateway not in allowed_gateways:
+            return JsonResponse({"success": False, "error": "Invalid payment gateway"}, status=400)
 
         # Validate order_id format (must be a valid UUID)
         try:
@@ -1225,66 +1234,87 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
         idem_key = f"confirm_payment:{customer_id}:{payment_intent_id}"
         if not cache.add(idem_key, "processing", timeout=300):
             logger.warning("⚠️ [Orders] Duplicate confirm_payment blocked: %s", idem_key)
+            # Return 200 with success:true — from the customer's perspective the payment
+            # IS being processed.  A 409 would trigger the error path in the frontend JS
+            # (which checks data.success), confusing the user.
             return JsonResponse(
                 {"success": True, "status": "already_processing", "message": "Payment is already being processed"},
             )
 
         logger.info(f"💳 Confirming payment {payment_intent_id} for order {order_id}")
 
-        # Step 1: Confirm payment with platform
-        api_client = PlatformAPIClient()
+        # Track whether we succeeded — clear idem_key on failure so customer can retry
+        payment_confirmed = False
+        try:
+            # Step 1: Confirm payment with platform
+            api_client = PlatformAPIClient()
 
-        # Call the billing/confirm-payment endpoint
-        payment_result = api_client.post_billing(
-            "confirm-payment/", {"payment_intent_id": payment_intent_id, "gateway": gateway}, user_id=int(user_id)
-        )
-
-        if not payment_result.get("success"):
-            logger.error(f"❌ Payment confirmation failed: {payment_result.get('error')}")
-            return JsonResponse(
-                {"success": False, "error": payment_result.get("error", "Payment confirmation failed")}, status=400
+            # Call the billing/confirm-payment endpoint
+            payment_result = api_client.post_billing(
+                "confirm-payment/", {"payment_intent_id": payment_intent_id, "gateway": gateway}, user_id=int(user_id)
             )
 
-        payment_status = payment_result.get("status")
-        logger.info(f"✅ Payment confirmed with status: {payment_status}")
-
-        # Step 2: If payment succeeded, update order status
-        if payment_status == "succeeded":
-            # Update order to confirmed status via API
-            order_update_result = api_client.post(
-                f"orders/{order_id}/confirm/",
-                {"payment_intent_id": payment_intent_id, "payment_status": payment_status, "customer_id": customer_id},
-                user_id=int(user_id),
-            )
-
-            if order_update_result.get("success"):
-                logger.info(f"✅ Order {order_id} confirmed and service provisioning triggered")
-
-                # Clear cart after successful payment
-                cart_service = GDPRCompliantCartSession(request.session)
-                cart_service.clear()
-
+            if not payment_result.get("success"):
+                logger.error(f"❌ Payment confirmation failed: {payment_result.get('error')}")
                 return JsonResponse(
-                    {
-                        "success": True,
-                        "status": "confirmed",
-                        "message": "Payment confirmed and service is being provisioned",
-                    }
+                    {"success": False, "error": payment_result.get("error", "Payment confirmation failed")}, status=400
                 )
+
+            payment_status = payment_result.get("status")
+            logger.info(f"✅ Payment confirmed with status: {payment_status}")
+
+            # Step 2: If payment succeeded, update order status
+            if payment_status == "succeeded":
+                # Update order to confirmed status via API
+                order_update_result = api_client.post(
+                    f"orders/{order_id}/confirm/",
+                    {
+                        "payment_intent_id": payment_intent_id,
+                        "payment_status": payment_status,
+                        "customer_id": customer_id,
+                    },
+                    user_id=int(user_id),
+                )
+
+                if order_update_result.get("success"):
+                    logger.info(f"✅ Order {order_id} confirmed and service provisioning triggered")
+                    payment_confirmed = True
+
+                    # Clear cart after successful payment
+                    cart_service = GDPRCompliantCartSession(request.session)
+                    cart_service.clear()
+
+                    return JsonResponse(
+                        {
+                            "success": True,
+                            "status": "confirmed",
+                            "message": "Payment confirmed and service is being provisioned",
+                        }
+                    )
+                else:
+                    logger.error(f"⚠️ Payment succeeded but order update failed: {order_update_result.get('error')}")
+                    # Keep idem_key: payment succeeded at Stripe, order confirmation should be retried
+                    # by support or webhook, not by customer re-submitting
+                    payment_confirmed = True
+                    return JsonResponse(
+                        {
+                            "success": False,
+                            "status": "payment_received_confirmation_pending",
+                            "error": "Payment received but order confirmation is pending. Please contact support.",
+                        }
+                    )
             else:
-                logger.error(f"⚠️ Payment succeeded but order update failed: {order_update_result.get('error')}")
                 return JsonResponse(
-                    {
-                        "success": False,
-                        "status": "payment_received_confirmation_pending",
-                        "error": "Payment received but order confirmation is pending. Please contact support.",
-                    }
+                    {"success": False, "error": "Payment has not been completed. Please try again or contact support."},
+                    status=400,
                 )
-        else:
-            return JsonResponse(
-                {"success": False, "error": "Payment has not been completed. Please try again or contact support."},
-                status=400,
-            )
+        finally:
+            # Clear idempotency key on failure so the customer can retry.
+            # Keep it on success to prevent double-charging.
+            # contextlib.suppress prevents cache errors from masking the return value.
+            if not payment_confirmed:
+                with contextlib.suppress(Exception):
+                    cache.delete(idem_key)
 
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid request data"}, status=400)

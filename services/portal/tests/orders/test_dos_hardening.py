@@ -192,6 +192,8 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
             content_type="application/json",
         )
 
+        # Duplicate confirm_payment returns 200 with success=True — from the customer's
+        # perspective the payment IS being processed; a 409 would trigger the JS error path.
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.content)
         self.assertTrue(data["success"])

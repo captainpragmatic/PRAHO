@@ -1,12 +1,12 @@
 """
-ENH-4: ProductListSerializer must expose `meta` field for feature specs.
+ProductListSerializer and ProductDetailSerializer field coverage tests.
 
-The portal product catalog needs feature specs (storage, bandwidth, email
-accounts, databases) from product.meta to render feature lists on cards.
-The `ProductListSerializer` previously omitted `meta`, which meant the portal
-template's `product.meta.features` block was always skipped.
+The `meta` field is a JSONField containing product features (e.g., disk space,
+bandwidth) that the catalog template renders via `product.meta.features`.
+Both list and detail serializers must include `meta`.
 
-TDD — these tests must fail before the fix and pass after.
+(H2 was originally a chaos-monkey finding to remove `meta` from the list
+serializer, but the catalog template depends on it for feature display.)
 """
 
 from __future__ import annotations
@@ -15,16 +15,13 @@ from typing import ClassVar
 
 from django.test import SimpleTestCase
 
-from apps.api.orders.serializers import ProductListSerializer
+from apps.api.orders.serializers import ProductDetailSerializer, ProductListSerializer
 
 
-class ProductListSerializerMetaFieldTest(SimpleTestCase):
-    """
-    ProductListSerializer must include `meta` in its serialised output
-    so the portal catalog can render feature lists on product cards.
-    """
+class ProductListSerializerFieldsTest(SimpleTestCase):
+    """ProductListSerializer must include all fields the catalog template needs."""
 
-    DECLARED_FIELDS: ClassVar[tuple[str, ...]] = (
+    REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = (
         "id",
         "slug",
         "name",
@@ -38,29 +35,23 @@ class ProductListSerializerMetaFieldTest(SimpleTestCase):
         "meta",
     )
 
-    def test_meta_field_declared_in_serializer(self) -> None:
-        """
-        `meta` must be a declared field on ProductListSerializer so that
-        product.meta.features is available in the portal catalog template.
-        """
-        serializer = ProductListSerializer()
-        self.assertIn(
-            "meta",
-            serializer.fields,
-            msg=(
-                "ProductListSerializer does not expose 'meta'. "
-                "Add 'meta' to the Meta.fields tuple so the portal can render "
-                "product feature lists on catalog cards."
-            ),
-        )
-
     def test_all_required_catalog_fields_declared(self) -> None:
         """All fields needed by the catalog template must be declared."""
         serializer = ProductListSerializer()
         declared = set(serializer.fields.keys())
-        for field_name in self.DECLARED_FIELDS:
+        for field_name in self.REQUIRED_FIELDS:
             self.assertIn(
                 field_name,
                 declared,
                 msg=f"Required catalog field '{field_name}' missing from ProductListSerializer",
             )
+
+    def test_meta_in_list_serializer(self) -> None:
+        """meta must be in ProductListSerializer — catalog uses product.meta.features."""
+        serializer = ProductListSerializer()
+        self.assertIn("meta", serializer.fields)
+
+    def test_meta_in_detail_serializer(self) -> None:
+        """ProductDetailSerializer must also expose meta."""
+        serializer = ProductDetailSerializer()
+        self.assertIn("meta", serializer.fields)

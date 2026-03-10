@@ -272,6 +272,20 @@ class APIRateLimitMiddleware:
     BURST_RATE_LIMIT = 20  # Requests per burst window per IP
     BURST_WINDOW_SECONDS = 10  # 10 seconds
 
+    # Per-session rate limiting for cart mutation endpoints.
+    # Each calculate_totals call triggers a Platform API call → DB chain,
+    # so session-level limits prevent amplification even when IP limits are bypassed.
+    CART_SESSION_RATE_LIMIT = 30  # Requests per minute per session
+    CART_SESSION_WINDOW_SECONDS = 60
+
+    # Cart mutation paths that get per-session rate limiting
+    CART_MUTATION_PATHS: ClassVar[list[str]] = [
+        "/order/cart/add/",
+        "/order/cart/update/",
+        "/order/cart/remove/",
+        "/order/cart/totals/",
+    ]
+
     # API paths that should be rate limited
     API_PATHS: ClassVar[list[str]] = [
         "/api/",
@@ -354,12 +368,55 @@ class APIRateLimitMiddleware:
             except ValueError:
                 cache.set(general_cache_key, 1, timeout=self.GENERAL_WINDOW_SECONDS)
 
+            # Check per-session rate limit for cart mutation endpoints
+            if self._is_cart_mutation(request):
+                cart_response = self._check_cart_session_rate_limit(request)
+                if cart_response:
+                    return cart_response
+
             return None  # Rate limits not exceeded
 
         except Exception:
             # Fail-closed: matches AuthenticationRateLimitMiddleware behavior
             logger.error("🔥 [API Rate Limit] Cache error — failing closed")
             return JsonResponse({"error": "Service temporarily unavailable"}, status=503)
+
+    def _is_cart_mutation(self, request: HttpRequest) -> bool:
+        """Check if request is a cart mutation endpoint"""
+        return any(request.path.startswith(path) for path in self.CART_MUTATION_PATHS)
+
+    def _check_cart_session_rate_limit(self, request: HttpRequest) -> JsonResponse | None:
+        """
+        🔒 Per-session rate limiting for cart mutation endpoints.
+        Uses session key (if available) to prevent a single session from hammering
+        calculate_totals, which triggers Platform API calls and DB chains.
+        Falls through to IP-level limiting when no session exists.
+        """
+        session_key = getattr(request, "session", None) and getattr(request.session, "session_key", None)
+        if not session_key:
+            return None  # No session yet — IP-level limiting still applies
+
+        cart_cache_key = f"cart_session_{session_key}"
+        cart_requests = cache.get(cart_cache_key, 0)
+
+        if cart_requests >= self.CART_SESSION_RATE_LIMIT:
+            logger.warning(f"🚨 [APIRateLimit] Cart session limit exceeded: session={session_key[:8]}...")
+            return JsonResponse(
+                {
+                    "error": _("Too many cart updates. Please slow down."),
+                    "retry_after": self.CART_SESSION_WINDOW_SECONDS,
+                },
+                status=429,
+            )
+
+        # Atomic increment
+        try:
+            cache.add(cart_cache_key, 0, timeout=self.CART_SESSION_WINDOW_SECONDS)
+            cache.incr(cart_cache_key)
+        except ValueError:
+            cache.set(cart_cache_key, 1, timeout=self.CART_SESSION_WINDOW_SECONDS)
+
+        return None
 
     def _get_client_ip(self, request: HttpRequest) -> str:
         """Safely extract client IP address"""

@@ -4,6 +4,7 @@ DRF views for product catalog, order management, and cart calculations.
 """
 
 import logging
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -20,7 +21,6 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
-from apps.audit.services import AuditService
 from apps.billing.models import Currency
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Ok
@@ -514,6 +514,13 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             {"error": "Idempotency key must be between 16-64 characters"}, status=status.HTTP_400_BAD_REQUEST
         )
 
+    # 🔒 SECURITY: Validate key content to prevent cache key injection (M10)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", idempotency_key):
+        return Response(
+            {"error": "Idempotency key must contain only alphanumeric characters, hyphens, and underscores"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     # 🔒 SECURITY: Check for existing order with this idempotency key
     cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
     existing_order_id = cache.get(cache_key)
@@ -535,14 +542,9 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             # Order was deleted, clear cache and continue with creation
             cache.delete(cache_key)
 
-    # Validate input before any DB queries (M9: avoid unnecessary DB hits on invalid requests)
-    input_serializer = OrderCreateInputSerializer(data=request.data)
-    if not input_serializer.is_valid():
-        return Response(
-            {"error": "Invalid input", "details": input_serializer.errors}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    # DB fallback: check database for existing order when cache misses (S3)
+    # DB fallback: check database for existing order when cache misses.
+    # Runs BEFORE input validation so that retries with slightly different payloads
+    # still return the existing order (correct idempotency semantics).
     if idempotency_key:
         db_existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
         if db_existing:
@@ -558,6 +560,13 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 },
                 status=status.HTTP_200_OK,
             )
+
+    # Validate input after idempotency checks
+    input_serializer = OrderCreateInputSerializer(data=request.data)
+    if not input_serializer.is_valid():
+        return Response(
+            {"error": "Invalid input", "details": input_serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+        )
 
     validated_data = input_serializer.validated_data
     # customer parameter is injected by decorator and already validated
@@ -877,7 +886,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:
+def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911
     """
     Confirm order after successful payment and trigger service provisioning.
     """
@@ -897,8 +906,10 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
             # Verify PaymentIntent belongs to this order (prevent cross-binding)
             if payment_intent_id:
-                # Reject PI binding for non-stripe orders (e.g. bank_transfer)
-                if order.payment_method and order.payment_method != "stripe":
+                # Reject PI binding for non-stripe orders (e.g. bank_transfer).
+                # Check explicitly for "stripe" — empty payment_method also rejects PI
+                # to prevent cross-binding on orders that haven't set a method yet.
+                if order.payment_method not in ("stripe", "card", ""):
                     return Response(
                         {"success": False, "error": "Order payment method does not accept payment intents"},
                         status=status.HTTP_400_BAD_REQUEST,
@@ -917,39 +928,30 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Update order status to confirmed
-            old_status = order.status
-            order.status = "confirmed"
-            update_fields = ["status"]
+            # Set payment_intent_id before status change so the audit trail includes it
             if payment_intent_id is not None:
                 order.payment_intent_id = payment_intent_id
-                update_fields.append("payment_intent_id")
-            order.save(update_fields=update_fields)
+                order.save(update_fields=["payment_intent_id"])
 
-            logger.info(f"✅ Order {order.order_number} confirmed after payment")
-
-            # Log audit event
-            # API requests don't have a real user, just pass None
+            # Use OrderService.update_order_status() for proper state machine validation
+            # and OrderStatusHistory creation (audit trail for this legally-significant transition).
             audit_user = None
             if hasattr(request, "user") and request.user.is_authenticated:
                 audit_user = request.user
 
-            AuditService.log_simple_event(
-                event_type="order_confirmed",
-                user=audit_user,
-                content_object=order,
-                description=f"Order {order.order_number} confirmed after payment",
-                old_values={"status": old_status},
-                new_values={"status": "confirmed", "payment_status": payment_status},
-                actor_type="customer",
-                metadata={
-                    "order_id": str(order.id),
-                    "order_number": order.order_number,
-                    "customer_id": str(customer.id),
-                    "payment_intent_id": payment_intent_id,
-                    "source_app": "api",
-                },
+            status_change = StatusChangeData(
+                new_status="confirmed",
+                notes=f"Payment confirmed (PI: {payment_intent_id or 'N/A'}, status: {payment_status})",
+                changed_by=audit_user,
             )
+            status_result = OrderService.update_order_status(order, status_change)
+            if not status_result.is_ok():
+                return Response(
+                    {"success": False, "error": f"Status update failed: {status_result.err_value}"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            order.refresh_from_db()
+            logger.info(f"✅ Order {order.order_number} confirmed after payment")
 
             # Collect provisionable items inside the atomic block, but dispatch outside
             provisionable_items = [

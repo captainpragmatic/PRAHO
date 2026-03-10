@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Matches any HTML tag opening (e.g. <script>, <img, </div, <!-- comment -->) for XSS defense-in-depth
 _HTML_TAG_PATTERN = re.compile(r"<[a-zA-Z/!]")
 
+# Matches dangerous URI schemes (javascript:, data:, vbscript:) — case-insensitive with optional whitespace
+_DANGEROUS_URI_PATTERN = re.compile(r"\b(?:javascript|data|vbscript)\s*:", re.IGNORECASE)
+
 MAX_CONFIG_KEYS = 50
 MAX_DOMAIN_LENGTH = 253
 MAX_CONFIG_VALUE_LENGTH = 100
@@ -90,6 +93,10 @@ class OrderInputValidator:
 
         # Security check: prevent injection attempts
         if any(char in domain for char in ["<", ">", '"', "'", "&", ";"]):
+            raise ValidationError(_("Domain name contains invalid characters"))
+
+        # Security check: prevent URI scheme injection (javascript:, data:, etc.)
+        if _DANGEROUS_URI_PATTERN.search(domain):
             raise ValidationError(_("Domain name contains invalid characters"))
 
         # Length validation
@@ -171,5 +178,9 @@ class OrderInputValidator:
         # Basic security check — reject any HTML markup (catches <script>, <img onerror=...>, etc.)
         if _HTML_TAG_PATTERN.search(notes):
             raise ValidationError(_("Notes cannot contain HTML markup."))
+
+        # Reject dangerous URI schemes in free-text (javascript:, data:, etc.)
+        if _DANGEROUS_URI_PATTERN.search(notes):
+            raise ValidationError(_("Notes contain invalid content."))
 
         return notes

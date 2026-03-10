@@ -5,26 +5,16 @@ session security, enumeration protection, and DoS hardening.
 """
 
 import json
-import hashlib
-import hmac
 import os
 import time
 import unittest
-from datetime import timedelta
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase, Client, override_settings
 from django.contrib.sessions.backends.cache import SessionStore
-from django.utils import timezone
 from django.core.cache import cache
-from django.urls import reverse
+from django.test import Client, SimpleTestCase, override_settings
 
-from apps.orders.services import (
-    GDPRCompliantCartSession,
-    CartCalculationService,
-    HMACPriceSealer
-)
-from apps.orders.security import OrderSecurityHardening
+from apps.orders.services import GDPRCompliantCartSession, HMACPriceSealer
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -176,7 +166,10 @@ class OrderHMACSecurityTestCase(SimpleTestCase):
         self.assertEqual(response.status_code, 401)
 
 
-@override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.cache',
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
 class OrderIdempotencySecurityTestCase(SimpleTestCase):
     """
     🔒 Order Idempotency and Race Condition Tests
@@ -185,16 +178,24 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
 
     def setUp(self):
         """Set up authenticated session for order tests"""
+        from django.core.cache import cache  # noqa: PLC0415
+        cache.clear()
         self.client = Client()
         session = self.client.session
         session['customer_id'] = 123
         session['user_id'] = 456
         session.save()
 
+    @patch('apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure', return_value=None)
+    @patch('apps.orders.views.OrderSecurityHardening.validate_request_size', return_value=None)
+    @patch('apps.orders.views.OrderSecurityHardening.check_suspicious_patterns', return_value=None)
     @patch('apps.orders.views.OrderCreationService.create_draft_order')
     @patch('apps.orders.views.OrderCreationService.preflight_order')
     @patch('apps.orders.views.GDPRCompliantCartSession')
-    def test_idempotent_order_creation(self, mock_cart_class, mock_preflight, mock_create_draft):
+    def test_idempotent_order_creation(
+        self, mock_cart_class, mock_preflight, mock_create_draft,
+        _mock_patterns, _mock_size, _mock_cache,
+    ):
         """🔒 Test idempotent order creation with same key"""
         # Mock cart
         mock_cart = Mock()
@@ -217,12 +218,13 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
 
         idempotency_key = 'test_key_12345'
 
-        # First order creation (agree_terms required by EU compliance validation)
+        # First order creation — payment_method required by M4 fix
         response1 = self.client.post('/order/create/', {
             'notes': 'Test order',
             'idempotency_key': idempotency_key,
             'cart_version': 'v1_test_version',
             'agree_terms': 'on',
+            'payment_method': 'bank_transfer',
         })
 
         # Second order creation with same key - should return same result
@@ -231,6 +233,7 @@ class OrderIdempotencySecurityTestCase(SimpleTestCase):
             'idempotency_key': idempotency_key,
             'cart_version': 'v1_test_version',
             'agree_terms': 'on',
+            'payment_method': 'bank_transfer',
         })
 
         # Both should succeed and return same order ID

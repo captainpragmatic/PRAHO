@@ -2,8 +2,9 @@
 Validation ordering test for create_order API endpoint.
 
 Verifies:
-  M9: Input validation runs BEFORE DB fallback idempotency check,
-      so invalid requests don't incur unnecessary database queries.
+  M9: DB fallback idempotency check runs BEFORE input validation,
+      so previously-processed requests return cached results regardless
+      of current payload validity (correct idempotency semantics).
 """
 
 from unittest.mock import patch
@@ -38,7 +39,7 @@ def _make_customer(user: User) -> Customer:
 
 
 class CreateOrderValidationBeforeDBTest(TestCase):
-    """M9: Invalid requests must be rejected before DB idempotency check."""
+    """M9: DB idempotency check runs first, then input validation."""
 
     def setUp(self) -> None:
         cache.clear()
@@ -47,15 +48,15 @@ class CreateOrderValidationBeforeDBTest(TestCase):
         self.customer = _make_customer(self.user)
         self.factory = APIRequestFactory()
 
-    def test_invalid_input_rejected_without_db_query(self) -> None:
-        """Malformed requests get 400 without hitting Order.objects.filter()."""
+    def test_invalid_input_still_checks_db_idempotency(self) -> None:
+        """DB idempotency check runs before validation — even for malformed requests."""
         from apps.api.orders.views import create_order  # noqa: PLC0415
 
         request = self.factory.post(
             "/api/orders/create/",
             data={
                 "idempotency_key": "a" * 32,
-                # Missing required fields (items, currency) — should fail validation
+                # Missing required fields (items, currency) — will fail validation
             },
             format="json",
         )
@@ -64,17 +65,17 @@ class CreateOrderValidationBeforeDBTest(TestCase):
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.orders.models.Order.objects") as mock_manager,
+            patch("apps.api.orders.views.Order.objects") as mock_manager,
         ):
-            # If DB fallback runs, this mock would be called
+            # DB fallback runs first — no cached order found
             mock_manager.filter.return_value.first.return_value = None
 
             response = create_order(request)
 
-        # Should get 400 (invalid input) without querying the DB
+        # Still gets 400 (invalid input) — but DB WAS checked first
         self.assertEqual(response.status_code, 400)
-        # DB should NOT have been queried for idempotency
-        mock_manager.filter.assert_not_called()
+        # DB SHOULD have been queried for idempotency (M9: DB check before validation)
+        mock_manager.filter.assert_called_once()
 
     def test_valid_input_reaches_db_fallback(self) -> None:
         """Valid requests with idempotency key DO reach the DB fallback check."""
