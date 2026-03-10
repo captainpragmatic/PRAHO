@@ -32,7 +32,6 @@ from apps.billing.metering_service import (
     AggregationService,
     MeteringService,
     RatingEngine,
-    Result,
     UsageAlertService,
     UsageEventData,
     _get_allowance_from_service_plan,
@@ -41,8 +40,10 @@ from apps.billing.metering_service import (
     _parse_decimal,
 )
 from apps.billing.models import Currency, Subscription, SubscriptionItem
+from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.products.models import Product
+from tests.helpers.fsm_helpers import force_status
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -120,28 +121,31 @@ def _make_aggregation(meter, customer, billing_cycle, subscription=None, **kwarg
 
 class TestResult(TestCase):
     def test_ok(self):
-        r = Result.ok(42)
+        r = Ok(42)
         assert r.is_ok()
         assert not r.is_err()
         assert r.unwrap() == 42
         assert r.value == 42
-        assert r.error is None
 
     def test_err(self):
-        r = Result.err("boom")
+        r = Err("boom")
         assert r.is_err()
         assert not r.is_ok()
         assert r.error == "boom"
-        assert r.value is None
 
     def test_unwrap_on_error_raises(self):
-        r = Result.err("nope")
+        r = Err("nope")
         with self.assertRaises(ValueError):
             r.unwrap()
 
+    def test_unwrap_err_on_ok_raises(self):
+        r = Ok(42)
+        with self.assertRaises(ValueError):
+            r.unwrap_err()
+
     def test_unwrap_or(self):
-        assert Result.ok(5).unwrap_or(0) == 5
-        assert Result.err("x").unwrap_or(99) == 99
+        assert Ok(5).unwrap_or(0) == 5
+        assert Err("x").unwrap_or(99) == 99
 
 
 # ============================================================================
@@ -475,8 +479,7 @@ class TestUpdateAggregationSync(TransactionTestCase):
     def test_sync_update_no_subscription_at_all(self):
         """No subscription for customer — should log warning and return."""
         # Make subscription inactive
-        self.subscription.status = "cancelled"
-        self.subscription.save()
+        force_status(self.subscription, "cancelled")
         event = UsageEvent.objects.create(
             meter=self.meter, customer=self.customer, subscription=None,
             value=Decimal("5"), timestamp=timezone.now(), idempotency_key="k3",
@@ -891,7 +894,7 @@ class TestRateBillingCycle(TransactionTestCase):
     def test_rate_cycle_with_error(self, mock_audit):
         _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
                                  total_value=Decimal("10"), status="pending_rating")
-        with patch.object(RatingEngine, "rate_aggregation", return_value=Result.err("fail")):
+        with patch.object(RatingEngine, "rate_aggregation", return_value=Err("fail")):
             result = self.engine.rate_billing_cycle(str(self.billing_cycle.id))
         assert result.is_ok()
         assert result.unwrap()["error_count"] == 1

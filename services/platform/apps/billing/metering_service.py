@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, TypeVar
+from typing import Any
 
 from django.core.cache import cache as django_cache
 from django.db import IntegrityError, transaction
@@ -24,6 +24,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.audit.services import AuditService
+from apps.common.types import Err, Ok, Result
 from apps.customers.models import Customer
 from apps.notifications.services import EmailService
 from apps.provisioning.models import Service
@@ -43,10 +44,6 @@ from .metering_models import (
 from .subscription_models import Subscription, SubscriptionItem
 
 logger = logging.getLogger(__name__)
-
-# Type variables for Result pattern
-T = TypeVar("T")
-E = TypeVar("E")
 
 
 def _parse_decimal(value: Any) -> Decimal:
@@ -122,44 +119,6 @@ def _get_allowance_from_service_plan(  # noqa: PLR0911  # Complexity: multi-step
 
 
 @dataclass
-class Result:
-    """Result pattern for operations that can fail"""
-
-    _value: Any
-    _error: str | None
-
-    @classmethod
-    def ok(cls, value: Any) -> Result:
-        return cls(_value=value, _error=None)
-
-    @classmethod
-    def err(cls, error: str) -> Result:
-        return cls(_value=None, _error=error)
-
-    def is_ok(self) -> bool:
-        return self._error is None
-
-    def is_err(self) -> bool:
-        return self._error is not None
-
-    def unwrap(self) -> Any:
-        if self._error:
-            raise ValueError(f"Called unwrap on error: {self._error}")
-        return self._value
-
-    def unwrap_or(self, default: Any) -> Any:
-        return self._value if self._error is None else default
-
-    @property
-    def error(self) -> str | None:
-        return self._error
-
-    @property
-    def value(self) -> Any:
-        return self._value
-
-
-@dataclass
 class UsageEventData:
     """Data for creating a usage event"""
 
@@ -188,7 +147,7 @@ class MeteringService:
 
     def record_event(  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
         self, event_data: UsageEventData
-    ) -> Result:  # Complexity: usage aggregation  # Complexity: multi-step business logic
+    ) -> Result[Any, str]:  # Complexity: usage aggregation  # Complexity: multi-step business logic
         """
         Record a usage event with idempotency protection.
 
@@ -199,16 +158,16 @@ class MeteringService:
             try:
                 meter = UsageMeter.objects.get(name=event_data.meter_name)
             except UsageMeter.DoesNotExist:
-                return Result.err(f"Meter not found: {event_data.meter_name}")
+                return Err(f"Meter not found: {event_data.meter_name}")
 
             if not meter.is_active:
-                return Result.err(f"Meter is inactive: {event_data.meter_name}")
+                return Err(f"Meter is inactive: {event_data.meter_name}")
 
             # Get customer
             try:
                 customer = Customer.objects.get(id=event_data.customer_id)
             except Customer.DoesNotExist:
-                return Result.err(f"Customer not found: {event_data.customer_id}")
+                return Err(f"Customer not found: {event_data.customer_id}")
 
             # Validate timestamp
             timestamp = event_data.timestamp or timezone.now()
@@ -217,11 +176,11 @@ class MeteringService:
             max_timestamp = timezone.now() + timedelta(minutes=billing_config.get_future_event_drift_minutes())
 
             if timestamp < min_timestamp:
-                return Result.err(
+                return Err(
                     f"Event timestamp too old: {timestamp}. Grace period is {meter.event_grace_period_hours} hours."
                 )
             if timestamp > max_timestamp:
-                return Result.err(f"Event timestamp in future: {timestamp}")
+                return Err(f"Event timestamp in future: {timestamp}")
 
             # Get optional relationships
             subscription = None
@@ -263,7 +222,7 @@ class MeteringService:
                     ).first()
                     if existing:
                         logger.info(f"Duplicate event ignored (idempotency): {event_data.idempotency_key}")
-                        return Result.ok(existing)
+                        return Ok(existing)
                 raise  # Re-raise if not an idempotency issue
 
             # Log the event
@@ -275,15 +234,15 @@ class MeteringService:
             # Check thresholds
             self._check_thresholds_async(customer, meter, subscription)
 
-            return Result.ok(event)
+            return Ok(event)
 
         except Exception as e:
             logger.exception(f"Error recording usage event: {e}")
-            return Result.err(str(e))
+            return Err(str(e))
 
     def record_bulk_events(
         self, events: list[UsageEventData], stop_on_error: bool = False
-    ) -> tuple[list[Result], int, int]:
+    ) -> tuple[list[Result[Any, str]], int, int]:
         """
         Record multiple usage events efficiently.
 
@@ -458,17 +417,17 @@ class AggregationService:
         logger.info(f"Processed {processed} events, {errors} errors")
         return processed, errors
 
-    def close_billing_cycle(self, billing_cycle_id: str) -> Result:
+    def close_billing_cycle(self, billing_cycle_id: str) -> Result[Any, str]:
         """
         Close a billing cycle and prepare aggregations for rating.
         """
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
-            return Result.err(f"Billing cycle not found: {billing_cycle_id}")
+            return Err(f"Billing cycle not found: {billing_cycle_id}")
 
         if billing_cycle.status not in ("active", "upcoming"):
-            return Result.err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
+            return Err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
 
         with transaction.atomic():
             # Process any remaining pending events
@@ -497,7 +456,7 @@ class AggregationService:
                 },
             )
 
-        return Result.ok(billing_cycle)
+        return Ok(billing_cycle)
 
     def get_customer_usage_summary(
         self, customer_id: str, period_start: datetime | None = None, period_end: datetime | None = None
@@ -552,7 +511,7 @@ class RatingEngine:
     - Overage calculation
     """
 
-    def rate_aggregation(self, aggregation_id: str) -> Result:
+    def rate_aggregation(self, aggregation_id: str) -> Result[Any, str]:
         """
         Calculate charges for a usage aggregation.
         """
@@ -561,10 +520,10 @@ class RatingEngine:
                 id=aggregation_id
             )
         except UsageAggregation.DoesNotExist:
-            return Result.err(f"Aggregation not found: {aggregation_id}")
+            return Err(f"Aggregation not found: {aggregation_id}")
 
         if aggregation.status not in ("accumulating", "pending_rating"):
-            return Result.err(f"Aggregation already rated or finalized: {aggregation.status}")
+            return Err(f"Aggregation already rated or finalized: {aggregation.status}")
 
         meter = aggregation.meter
         subscription = aggregation.subscription
@@ -639,16 +598,16 @@ class RatingEngine:
                 },
             )
 
-        return Result.ok(aggregation)
+        return Ok(aggregation)
 
-    def rate_billing_cycle(self, billing_cycle_id: str) -> Result:
+    def rate_billing_cycle(self, billing_cycle_id: str) -> Result[Any, str]:
         """
         Rate all aggregations for a billing cycle.
         """
         try:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
-            return Result.err(f"Billing cycle not found: {billing_cycle_id}")
+            return Err(f"Billing cycle not found: {billing_cycle_id}")
 
         aggregations = UsageAggregation.objects.filter(
             billing_cycle=billing_cycle, status__in=("accumulating", "pending_rating")
@@ -665,7 +624,7 @@ class RatingEngine:
                 total_usage_charge += result.unwrap().charge_cents
             else:
                 error_count += 1
-                logger.error(f"Error rating aggregation {agg.id}: {result.error}")
+                logger.error(f"Error rating aggregation {agg.id}: {result.unwrap_err()}")
 
         # Update billing cycle totals
         with transaction.atomic():
@@ -684,7 +643,7 @@ class RatingEngine:
             f"{rated_count} aggregations, {total_usage_charge} cents usage charge"
         )
 
-        return Result.ok(
+        return Ok(
             {
                 "billing_cycle_id": str(billing_cycle_id),
                 "rated_count": rated_count,
@@ -926,7 +885,7 @@ class UsageAlertService:
         except Exception as e:
             logger.warning(f"Could not schedule alert notification: {e}")
 
-    def send_alert_notification(self, alert_id: str) -> Result:
+    def send_alert_notification(self, alert_id: str) -> Result[Any, str]:
         """
         Send notification for a usage alert.
         """
@@ -935,10 +894,10 @@ class UsageAlertService:
         try:
             alert = UsageAlert.objects.select_related("threshold", "customer", "threshold__meter").get(id=alert_id)
         except UsageAlert.DoesNotExist:
-            return Result.err(f"Alert not found: {alert_id}")
+            return Err(f"Alert not found: {alert_id}")
 
         if alert.status not in ("pending",):
-            return Result.ok(alert)  # Already sent
+            return Ok(alert)  # Already sent
 
         threshold = alert.threshold
 
@@ -965,16 +924,16 @@ class UsageAlertService:
                     )
                 else:
                     alert.mark_failed(email_result.error or "Email send failed")
-                    return Result.err(f"Failed to send notification: {email_result.error}")
+                    return Err(f"Failed to send notification: {email_result.error}")
             except Exception as e:
                 alert.mark_failed(str(e))
-                return Result.err(f"Failed to send notification: {e}")
+                return Err(f"Failed to send notification: {e}")
 
         # Take action if configured
         if threshold.action_on_breach:
             self._take_threshold_action(alert, threshold.action_on_breach)
 
-        return Result.ok(alert)
+        return Ok(alert)
 
     def _take_threshold_action(self, alert: Any, action: str) -> None:
         """Take automated action for threshold breach"""

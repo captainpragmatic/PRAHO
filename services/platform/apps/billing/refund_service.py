@@ -9,72 +9,19 @@ import contextlib
 import enum
 import uuid
 from decimal import Decimal
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, Sum
+from django_fsm import TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
+from apps.common.types import Err, Ok, Result
 from apps.orders.models import Order
 
 _FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing order total
 _FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
-
-
-class Result[T, E]:
-    """Result type for RefundService operations - implements Result<T,E> pattern"""
-
-    def __init__(self, value: T | E, is_success: bool = True):
-        self._value = value
-        self._is_success = is_success
-
-    def is_ok(self) -> bool:
-        """Check if result is successful"""
-        return self._is_success
-
-    def is_err(self) -> bool:
-        """Check if result is an error"""
-        return not self._is_success
-
-    def unwrap(self) -> T:
-        """Get the success value (raises if error)"""
-        if self._is_success:
-            return cast(T, self._value)
-        raise RuntimeError(f"Called unwrap on error result: {self._value}")
-
-    def unwrap_err(self) -> E:
-        """Get the error value (raises if success)"""
-        if not self._is_success:
-            return cast(E, self._value)
-        raise RuntimeError("Called unwrap_err on success result")
-
-    @property
-    def error(self) -> E:
-        """Get the error value"""
-        if not self._is_success:
-            return cast(E, self._value)
-        raise RuntimeError("Called error on success result")
-
-    @property
-    def value(self) -> T:
-        """Get the success value - alias for unwrap() for test compatibility"""
-        return self.unwrap()
-
-    @classmethod
-    def ok(cls, value: T) -> Result[T, E]:
-        """Create a successful result"""
-        return cls(value, True)
-
-    @classmethod
-    def err(cls, error: E) -> Result[T, E]:
-        """Create an error result"""
-        return cls(error, False)
-
-
-# Alias for legacy tests that import Ok/Err directly
-Ok = Result.ok
-Err = Result.err
 
 
 class RefundType(enum.Enum):
@@ -179,24 +126,24 @@ class RefundService:
                 try:
                     order = Order.objects.select_related("customer").get(id=order_id)
                 except Order.DoesNotExist:
-                    return Result.err("Failed to process refund: Order not found")
+                    return Err("Failed to process refund: Order not found")
                 except Exception as e:
                     # Some tests/mock paths raise a generic "does not exist" exception.
                     if "does not exist" in str(e).lower():
-                        return Result.err("Failed to process refund: Order not found")
+                        return Err("Failed to process refund: Order not found")
                     raise
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_order_refund(order, refund_data)
                 if validation_result.is_err():
-                    return Result.err(validation_result.unwrap_err())
+                    return Err(validation_result.unwrap_err())
 
                 # Process refund (already inside atomic block)
                 return RefundService._execute_order_refund_internal(order, refund_data)
 
         except Exception:
             # SECURITY: Don't expose internal error details to caller
-            return Result.err("Failed to process refund: internal error")
+            return Err("Failed to process refund: internal error")
 
     @staticmethod
     def _normalize_refund_data(refund_data: RefundData) -> None:
@@ -214,12 +161,12 @@ class RefundService:
         try:
             # SECURITY: Lock the order row to prevent concurrent refund processing
             order = Order.objects.select_for_update().select_related("customer").get(id=order_id)
-            return Result.ok(order)
+            return Ok(order)
         except Order.DoesNotExist:
-            return Result.err("Failed to process refund: Order not found")
+            return Err("Failed to process refund: Order not found")
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to process refund: database error")
+            return Err("Failed to process refund: database error")
 
     @staticmethod
     def _validate_order_refund(order: Any, refund_data: RefundData) -> Result[None, str]:
@@ -227,39 +174,39 @@ class RefundService:
         # Check eligibility first
         eligibility = RefundService._validate_order_refund_eligibility(order, refund_data)
         if eligibility.is_err():
-            return Result.err(eligibility.error)
+            return Err(eligibility.unwrap_err())
 
         elig_data = eligibility.unwrap()
         if not elig_data.get("is_eligible", False):
             reason = elig_data.get("reason", "Not eligible")
             # Ensure "not eligible for refund" phrase is included for test compatibility
             error_msg = reason if "not eligible for refund" in reason.lower() else f"{reason} - not eligible for refund"
-            return Result.err(error_msg)
+            return Err(error_msg)
 
         # Validate order status
         if hasattr(order, "status") and order.status == "draft":
-            return Result.err("Refund failed: Order not eligible for refund")
+            return Err("Refund failed: Order not eligible for refund")
 
         # Validate partial refund amounts if applicable
         validation_result = RefundService._validate_partial_refund_amount(refund_data, elig_data)
-        return validation_result if validation_result.is_err() else Result.ok(None)
+        return validation_result if validation_result.is_err() else Ok(None)
 
     @staticmethod
     def _validate_partial_refund_amount(refund_data: RefundData, eligibility_data: dict[str, Any]) -> Result[None, str]:
         """Validate partial refund amount constraints"""
         refund_type = refund_data.get("refund_type", "full")
         if refund_type not in (RefundType.PARTIAL, "partial"):
-            return Result.ok(None)
+            return Ok(None)
 
         amount = refund_data.get("amount_cents", refund_data.get("amount", 0))
         if amount <= 0:
-            return Result.err("Refund failed: Refund amount must be greater than 0")
+            return Err("Refund failed: Refund amount must be greater than 0")
 
         max_refundable = eligibility_data.get("max_refund_amount_cents", 0)
         if amount > max_refundable:
-            return Result.err("Refund failed: Refund amount exceeds maximum refundable amount")
+            return Err("Refund failed: Refund amount exceeds maximum refundable amount")
 
-        return Result.ok(None)
+        return Ok(None)
 
     @staticmethod
     def _execute_order_refund(order: Any, refund_data: RefundData) -> Result[RefundResult, str]:
@@ -281,7 +228,7 @@ class RefundService:
         )
 
         if process_result.is_err():
-            return Result.err(f"Failed to process refund: {process_result.error}")
+            return Err(f"Failed to process refund: {process_result.unwrap_err()}")
 
         result_data = process_result.unwrap()
         actual_amount = RefundService._calculate_actual_refund_amount(order, refund_data)
@@ -300,7 +247,7 @@ class RefundService:
             },
         )
 
-        return Result.ok(
+        return Ok(
             RefundResult(
                 success=True,
                 refund_id=str(refund_id),
@@ -345,24 +292,24 @@ class RefundService:
                 try:
                     invoice = Invoice.objects.select_related("customer").get(id=invoice_id)
                 except Invoice.DoesNotExist:
-                    return Result.err("Failed to process refund: Invoice not found")
+                    return Err("Failed to process refund: Invoice not found")
                 except Exception as e:
                     # Some tests/mock paths raise a generic "does not exist" exception.
                     if "does not exist" in str(e).lower():
-                        return Result.err("Failed to process refund: Invoice not found")
+                        return Err("Failed to process refund: Invoice not found")
                     raise
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
                 if validation_result.is_err():
-                    return Result.err(validation_result.unwrap_err())
+                    return Err(validation_result.unwrap_err())
 
                 # Process refund (already inside atomic block)
                 return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to process refund: internal error")
+            return Err("Failed to process refund: internal error")
 
     @staticmethod
     def _get_invoice(invoice_id: Any) -> Result[Any, str]:
@@ -374,12 +321,12 @@ class RefundService:
         try:
             # SECURITY: Lock the invoice row to prevent concurrent refund processing
             invoice = Invoice.objects.select_related("customer").get(id=invoice_id)
-            return Result.ok(invoice)
+            return Ok(invoice)
         except Invoice.DoesNotExist:
-            return Result.err("Failed to process refund: Invoice not found")
+            return Err("Failed to process refund: Invoice not found")
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to process refund: database error")
+            return Err("Failed to process refund: database error")
 
     @staticmethod
     def _validate_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[None, str]:
@@ -391,18 +338,18 @@ class RefundService:
             if not eligibility_data.get("is_eligible", True):
                 reason = eligibility_data.get("reason", "Not eligible")
                 if "not eligible for refund" not in reason.lower():
-                    return Result.err(f"{reason} - not eligible for refund")
+                    return Err(f"{reason} - not eligible for refund")
                 else:
-                    return Result.err(reason)
+                    return Err(reason)
         elif eligibility.is_err():
-            return Result.err(eligibility.error)
+            return Err(eligibility.unwrap_err())
 
         # Check partial refund amounts against max refundable
         refund_type = refund_data.get("refund_type", "full")
         if refund_type in (RefundType.PARTIAL, "partial"):
             amount = refund_data.get("amount_cents", refund_data.get("amount", 0))
             if amount <= 0:
-                return Result.err("Refund failed: Refund amount must be greater than 0")
+                return Err("Refund failed: Refund amount must be greater than 0")
 
             # Use max_refund_amount_cents from eligibility data
             eligibility_data = eligibility.unwrap()
@@ -410,9 +357,9 @@ class RefundService:
                 "max_refund_amount_cents", getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
             )
             if amount > max_refundable:
-                return Result.err("Refund amount exceeds maximum refundable amount")
+                return Err("Refund amount exceeds maximum refundable amount")
 
-        return Result.ok(None)
+        return Ok(None)
 
     @staticmethod
     def _execute_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[RefundResult, str]:
@@ -434,7 +381,7 @@ class RefundService:
         )
 
         if process_result.is_err():
-            return Result.err(f"Failed to process refund: {process_result.error}")
+            return Err(f"Failed to process refund: {process_result.unwrap_err()}")
 
         result_data = process_result.unwrap()
 
@@ -452,7 +399,7 @@ class RefundService:
             },
         )
 
-        return Result.ok(
+        return Ok(
             RefundResult(
                 success=True,
                 refund_id=str(refund_id),
@@ -471,7 +418,7 @@ class RefundService:
     def get_refund_eligibility(entity_type: str, entity_id: Any, amount: int = 0) -> Result[RefundEligibility, str]:
         """Check refund eligibility for an entity"""
         if entity_type not in ["order", "invoice"]:
-            return Result.err("Invalid entity type")
+            return Err("Invalid entity type")
 
         try:
             entity_result = RefundService._get_entity_for_refund_check(entity_type, entity_id)
@@ -483,18 +430,18 @@ class RefundService:
 
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Error checking eligibility")
+            return Err("Error checking eligibility")
 
     @staticmethod
     def _get_entity_for_refund_check(entity_type: str, entity_id: Any) -> Result[Any, str]:
         """Get order or invoice entity for refund eligibility check"""
         try:
             entity = Order.objects.get(id=entity_id) if entity_type == "order" else Invoice.objects.get(id=entity_id)
-            return Result.ok(entity)
+            return Ok(entity)
         except Order.DoesNotExist:
-            return Result.err("Order not found")
+            return Err("Order not found")
         except Invoice.DoesNotExist:
-            return Result.err("Invoice not found")
+            return Err("Invoice not found")
 
     @staticmethod
     def _check_entity_refund_eligibility(entity: Any, entity_type: str) -> Result[RefundEligibility, str]:
@@ -515,7 +462,7 @@ class RefundService:
             if status_check.is_err():
                 return status_check
 
-        return Result.ok(
+        return Ok(
             RefundService._create_eligibility_result(True, "Eligible for refund", max_refundable, already_refunded)  # type: ignore[arg-type]
         )
 
@@ -523,7 +470,7 @@ class RefundService:
     def _check_entity_status_eligibility(status: str, entity_type: str) -> Result[RefundEligibility, str]:
         """Check if entity status allows refunds"""
         if status == "draft":
-            return Result.ok(
+            return Ok(
                 RefundEligibility(
                     is_eligible=False,
                     max_refund_amount_cents=0,
@@ -531,7 +478,7 @@ class RefundService:
                 )
             )
         elif status not in ["paid", "completed"]:
-            return Result.ok(
+            return Ok(
                 RefundEligibility(
                     is_eligible=False,
                     max_refund_amount_cents=0,
@@ -539,7 +486,7 @@ class RefundService:
                 )
             )
 
-        return Result.ok(RefundEligibility(is_eligible=True, max_refund_amount_cents=0, reason=""))
+        return Ok(RefundEligibility(is_eligible=True, max_refund_amount_cents=0, reason=""))
 
     @staticmethod
     def get_refund_statistics() -> Result[dict[str, Any], str]:
@@ -556,10 +503,10 @@ class RefundService:
             # Convert amount to Decimal
             stats["total_amount"] = Decimal(stats["total_amount_cents"]) / 100
 
-            return Result.ok(stats)
+            return Ok(stats)
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Error getting statistics")
+            return Err("Error getting statistics")
 
     # Internal validation methods
     @staticmethod
@@ -567,7 +514,7 @@ class RefundService:
         """Validate if order is eligible for refund"""
         try:
             if not order:
-                return Result.err("Order not found")
+                return Err("Order not found")
 
             # Get refund amounts
             already_refunded = RefundService._get_order_refunded_amount(order)
@@ -580,18 +527,18 @@ class RefundService:
                     order.status, already_refunded, total_amount_cents, max_refundable
                 )
                 if not status_result["is_eligible"]:
-                    return Result.ok(status_result)
+                    return Ok(status_result)
 
                 # Validate partial refund amounts for eligible orders
                 amount_result = RefundService._validate_order_partial_amount(
                     refund_data, max_refundable, already_refunded
                 )
-                return Result.ok(amount_result)
+                return Ok(amount_result)
 
-            return Result.ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
+            return Ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to validate eligibility")
+            return Err("Failed to validate eligibility")
 
     @staticmethod
     def _check_order_status_eligibility(
@@ -698,7 +645,7 @@ class RefundService:
             # Check basic invoice eligibility
             is_eligible, error_reason = RefundService._check_invoice_eligibility_status(invoice)
             if error_reason == "Invoice not found - special case":
-                return Result.err("Invoice not found")
+                return Err("Invoice not found")
 
             # Get already refunded amount
             already_refunded = RefundService._get_invoice_refunded_amount(invoice)
@@ -707,13 +654,13 @@ class RefundService:
 
             # If not eligible due to status, return immediately
             if not is_eligible:
-                return Result.ok(
+                return Ok(
                     RefundService._create_eligibility_response(False, error_reason, max_refundable, already_refunded)
                 )
 
             # Check if already fully refunded
             if already_refunded >= total_amount_cents:
-                return Result.ok(
+                return Ok(
                     RefundService._create_eligibility_response(
                         False, "Invoice has already been fully refunded", max_refundable, already_refunded
                     )
@@ -726,24 +673,24 @@ class RefundService:
             eligibility_status = is_valid
             reason = "Invoice is eligible for refund" if is_valid else validation_error
 
-            return Result.ok(
+            return Ok(
                 RefundService._create_eligibility_response(eligibility_status, reason, max_refundable, already_refunded)
             )
 
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to validate eligibility")
+            return Err("Failed to validate eligibility")
 
     @staticmethod
     def _validate_refund_amount(refund_type: RefundType, amount: int, max_amount: Decimal) -> Result[None, str]:
         """Validate refund amount"""
         if refund_type == RefundType.PARTIAL:
             if amount <= 0:
-                return Result.err("Refund amount must be greater than zero")
+                return Err("Refund amount must be greater than zero")
             if amount > max_amount:
-                return Result.err("Refund amount exceeds maximum refundable amount")
+                return Err("Refund amount exceeds maximum refundable amount")
 
-        return Result.ok(None)
+        return Ok(None)
 
     @staticmethod
     def _process_bidirectional_refund(
@@ -785,12 +732,12 @@ class RefundService:
             if payment_result:
                 final_result["payment_refund_processed"] = payment_result.is_ok()
                 if payment_result.is_err():
-                    final_result["payment_refund_error"] = payment_result.error
+                    final_result["payment_refund_error"] = payment_result.unwrap_err()
 
-            return Result.ok(final_result)
+            return Ok(final_result)
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to process refund")
+            return Err("Failed to process refund")
 
     @staticmethod
     def _extract_refund_amount(refund_data: RefundData | None, kwargs: dict[str, Any]) -> int:
@@ -851,16 +798,16 @@ class RefundService:
                     refund=refund, previous_status="", new_status="pending", change_reason="Refund initiated"
                 )
 
-            return Result.ok(None)
+            return Ok(None)
 
         except Exception as db_error:
             error_msg = str(db_error)
             if "FOREIGN KEY constraint failed" in error_msg:
-                return Result.err("Failed to process bidirectional refund")
+                return Err("Failed to process bidirectional refund")
             elif "Cannot assign" in error_msg:
-                return Result.err("Order update failed" if order else "Invoice update failed")
+                return Err("Order update failed" if order else "Invoice update failed")
             else:
-                return Result.err(f"Failed to process bidirectional refund: {error_msg}")
+                return Err(f"Failed to process bidirectional refund: {error_msg}")
 
     @staticmethod
     def _process_entity_updates(
@@ -886,7 +833,7 @@ class RefundService:
             result["invoice_status_updated"] = True
             result["invoice_id"] = invoice.id
 
-        return Result.ok(result)
+        return Ok(result)
 
     @staticmethod
     def _process_payment_refund_if_exists(
@@ -924,17 +871,20 @@ class RefundService:
                 already_refunded = 0  # Always assume 0 to avoid transaction issues
 
                 # Check if this refund makes it fully refunded
-                if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
-                    order.status = "refunded"
-                else:
-                    order.status = "partially_refunded"
-                order.save()
-                return Result.ok(None)
+                try:
+                    if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
+                        order.refund_order()
+                    else:
+                        order.partial_refund()
+                    order.save()
+                except TransitionNotAllowed:
+                    return Err("Order status transition not allowed for refund")
+                return Ok(None)
 
-            return Result.err("Order update failed")
+            return Err("Order update failed")
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to update order status")
+            return Err("Failed to update order status")
 
     @staticmethod
     def _update_invoice_refund_status(
@@ -946,23 +896,25 @@ class RefundService:
             already_refunded = RefundService._get_invoice_refunded_amount(invoice)
             total_amount_cents = getattr(invoice, "total_cents", _FALLBACK_INVOICE_TOTAL_CENTS)
 
-            # Update invoice status to indicate it has been refunded
+            # Update invoice status to indicate it has been refunded via FSM transitions
             if hasattr(invoice, "status"):
                 refund_type = refund_data.get("refund_type", "full") if refund_data else "full"
                 current_amount = refund_data.get("amount_cents", 0) if refund_data else 0
 
                 # Check if this refund makes it fully refunded
                 if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
-                    invoice.status = "refunded"
+                    with contextlib.suppress(TransitionNotAllowed):
+                        invoice.refund_invoice()
                 else:
-                    invoice.status = "partially_refunded"
+                    with contextlib.suppress(TransitionNotAllowed):
+                        invoice.mark_partially_refunded()
                 invoice.save()
-                return Result.ok(None)
+                return Ok(None)
 
-            return Result.err("Invoice update failed")
+            return Err("Invoice update failed")
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Invoice update failed")
+            return Err("Invoice update failed")
 
     @staticmethod
     def _create_audit_entry(refund_id: Any, entity_type: str, entity_id: Any, refund_data: RefundData | None) -> None:
@@ -1038,15 +990,13 @@ class RefundService:
             # Check order status
             if hasattr(order, "status"):
                 if order.status == "draft":
-                    return Result.ok(
+                    return Ok(
                         RefundService._create_order_refund_eligibility(
                             False, "Cannot refund order in 'draft' status", 0
                         )
                     )
                 if order.status not in ["paid", "completed"]:
-                    return Result.ok(
-                        RefundService._create_order_refund_eligibility(False, "Order not in refundable state", 0)
-                    )
+                    return Ok(RefundService._create_order_refund_eligibility(False, "Order not in refundable state", 0))
 
             # Get already refunded amount
             already_refunded = RefundService._get_order_refunded_amount(order)
@@ -1055,7 +1005,7 @@ class RefundService:
 
             # Check if already fully refunded
             if already_refunded >= total_amount_cents:
-                return Result.ok(
+                return Ok(
                     RefundService._create_order_refund_eligibility(
                         False, "Order has already been fully refunded", max_refundable, already_refunded
                     )
@@ -1064,20 +1014,20 @@ class RefundService:
             # Validate partial refund amount
             is_valid, error_reason = RefundService._validate_partial_refund_amount_legacy(refund_data, max_refundable)
             if not is_valid:
-                return Result.ok(
+                return Ok(
                     RefundService._create_order_refund_eligibility(
                         False, error_reason, max_refundable, already_refunded
                     )
                 )
 
             # All validations passed
-            return Result.ok(
+            return Ok(
                 RefundService._create_order_refund_eligibility(True, "Eligible", max_refundable, already_refunded)
             )
 
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to validate eligibility")
+            return Err("Failed to validate eligibility")
 
     @staticmethod
     def _validate_and_prepare_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[RefundEligibility, str]:
@@ -1086,13 +1036,13 @@ class RefundService:
             # Check invoice status
             if hasattr(invoice, "status"):
                 if invoice.status == "draft":
-                    return Result.ok(
+                    return Ok(
                         RefundService._create_order_refund_eligibility(
                             False, "Invoice is in draft status and cannot be refunded", 0
                         )
                     )
                 if invoice.status not in ["paid", "completed"]:
-                    return Result.ok(
+                    return Ok(
                         RefundService._create_order_refund_eligibility(False, "Invoice not in refundable state", 0)
                     )
 
@@ -1103,7 +1053,7 @@ class RefundService:
 
             # Check if already fully refunded
             if already_refunded >= total_amount_cents:
-                return Result.ok(
+                return Ok(
                     RefundService._create_order_refund_eligibility(
                         False, "Invoice has already been fully refunded", max_refundable, already_refunded
                     )
@@ -1112,20 +1062,20 @@ class RefundService:
             # Validate partial refund amount
             is_valid, error_reason = RefundService._validate_partial_refund_amount_legacy(refund_data, max_refundable)
             if not is_valid:
-                return Result.ok(
+                return Ok(
                     RefundService._create_order_refund_eligibility(
                         False, error_reason, max_refundable, already_refunded
                     )
                 )
 
             # All validations passed
-            return Result.ok(
+            return Ok(
                 RefundService._create_order_refund_eligibility(True, "Eligible", max_refundable, already_refunded)
             )
 
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to validate eligibility")
+            return Err("Failed to validate eligibility")
 
     @staticmethod
     def _process_payment_refund(
@@ -1146,7 +1096,7 @@ class RefundService:
 
         try:
             if not payment:
-                return Result.err("No successful payments found to refund")
+                return Err("No successful payments found to refund")
 
             # Determine refund type for status update (used after gateway succeeds)
             refund_type = refund_data.get("refund_type", "partial") if refund_data else "partial"
@@ -1173,14 +1123,24 @@ class RefundService:
 
             # Only update local payment status AFTER gateway succeeds (or for non-gateway payments)
             if gateway_result.is_ok() and hasattr(payment, "status"):
-                payment.status = "refunded" if refund_type == "full" else "partially_refunded"
-                payment.save()
+                # Use FSM transition methods to avoid protected-field direct assignment.
+                # refund_payment() transitions succeeded → refunded.
+                # partially_refund() transitions succeeded → partially_refunded.
+                try:
+                    if refund_type == "full":
+                        payment.refund_payment()
+                    else:
+                        payment.partially_refund()
+                    payment.save()
+                except TransitionNotAllowed:
+                    # Payment may already be in refunded/partially_refunded — log and continue.
+                    pass
 
             return gateway_result
 
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to process payment refund")
+            return Err("Failed to process payment refund")
 
     @staticmethod
     def _execute_gateway_refund(
@@ -1200,13 +1160,13 @@ class RefundService:
                     "error": "Gateway payment missing gateway_txn_id",
                 },
             )
-            return Result.err(f"Cannot refund {payment_method} payment: missing gateway transaction ID")
+            return Err(f"Cannot refund {payment_method} payment: missing gateway transaction ID")
 
         has_gateway = payment_method in GATEWAY_PAYMENT_METHODS and bool(gateway_txn_id)
 
         if not has_gateway:
             # Non-gateway payments (bank, cash) — succeed locally, manual reconciliation
-            return Result.ok(
+            return Ok(
                 {
                     "gateway_refund": "not_applicable",
                     "payment_status_updated": True,
@@ -1229,7 +1189,7 @@ class RefundService:
                     "error": refund_result["error"],
                 },
             )
-            return Result.err(f"Gateway refund failed: {refund_result['error']}")
+            return Err(f"Gateway refund failed: {refund_result['error']}")
 
         # Persist refund ID for audit trail (validate format)
         refund_id = refund_result["refund_id"] or ""
@@ -1237,7 +1197,7 @@ class RefundService:
             payment.meta = {**(payment.meta or {}), "refund_id": str(refund_id)[:255]}
             payment.save(update_fields=["meta"])
 
-        return Result.ok(
+        return Ok(
             {
                 "gateway_refund": "success",
                 "refund_id": refund_result["refund_id"],
@@ -1296,17 +1256,17 @@ class RefundQueryService:
                 "refunds_by_reason": refunds_by_reason,
                 "refunds_by_type": refunds_by_type,
             }
-            return Result.ok(stats)
+            return Ok(stats)
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Error getting refund statistics")
+            return Err("Error getting refund statistics")
 
     @staticmethod
     def get_entity_refunds(entity_type: str, entity_id: Any) -> Result[list[dict[str, Any]], str]:
         """Get refunds for a specific entity"""
         try:
             if entity_type not in ["order", "invoice"]:
-                return Result.err("Invalid entity type")
+                return Err("Invalid entity type")
 
             refunds = []
 
@@ -1361,10 +1321,10 @@ class RefundQueryService:
                 ]
             )
 
-            return Result.ok(refunds)
+            return Ok(refunds)
         except Exception:
             # SECURITY: Don't expose internal error details
-            return Result.err("Failed to get refund history")
+            return Err("Failed to get refund history")
 
 
 # Export all public interfaces
