@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.test import Client, SimpleTestCase, override_settings
 
 _CACHE_SETTINGS = {
@@ -82,7 +82,7 @@ class TestCartSessionRateLimit(SimpleTestCase):
         """_is_cart_mutation() recognises every declared cart mutation path."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
-        mw = APIRateLimitMiddleware(lambda r: None)  # type: ignore[arg-type]  # test stub get_response
+        mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         cart_paths = [
             "/order/cart/add/",
@@ -99,7 +99,7 @@ class TestCartSessionRateLimit(SimpleTestCase):
         """_is_cart_mutation() must NOT flag general API or non-cart paths."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
-        mw = APIRateLimitMiddleware(lambda r: None)  # type: ignore[arg-type]  # test stub get_response
+        mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         non_cart_paths = [
             "/api/orders/products/",
@@ -116,7 +116,7 @@ class TestCartSessionRateLimit(SimpleTestCase):
         """_check_cart_session_rate_limit() returns 429 after CART_SESSION_RATE_LIMIT hits."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
-        mw = APIRateLimitMiddleware(lambda r: None)  # type: ignore[arg-type]  # test stub get_response
+        mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         session = SessionStore()
         session.create()
@@ -133,17 +133,17 @@ class TestCartSessionRateLimit(SimpleTestCase):
         request.session = session  # type: ignore[assignment]  # Django test: inject SessionStore
 
         response = mw._check_cart_session_rate_limit(request)
-        self.assertIsNotNone(response)
-        self.assertEqual(response.status_code, 429)  # type: ignore[union-attr]  # asserted not None above
+        assert response is not None, "Expected 429 response, got None"
+        self.assertEqual(response.status_code, 429)
 
-        data = json.loads(response.content)  # type: ignore[union-attr]  # asserted not None above
+        data = json.loads(response.content)
         self.assertIn("retry_after", data)
 
     def test_cart_session_rate_limit_allows_below_limit(self) -> None:
         """_check_cart_session_rate_limit() returns None when count is below the limit."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
-        mw = APIRateLimitMiddleware(lambda r: None)  # type: ignore[arg-type]  # test stub get_response
+        mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         session = SessionStore()
         session.create()
@@ -164,7 +164,7 @@ class TestCartSessionRateLimit(SimpleTestCase):
         """When request has no session, _check_cart_session_rate_limit returns None (falls through to IP)."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
-        mw = APIRateLimitMiddleware(lambda r: None)  # type: ignore[arg-type]  # test stub get_response
+        mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         request = HttpRequest()
         # No session attribute set → getattr returns None
@@ -175,7 +175,7 @@ class TestCartSessionRateLimit(SimpleTestCase):
         """Each session has its own counter — saturating session A must not block session B."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
-        mw = APIRateLimitMiddleware(lambda r: None)  # type: ignore[arg-type]  # test stub get_response
+        mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         session_a = SessionStore()
         session_a.create()
@@ -259,11 +259,11 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         self.assertEqual(data["status"], "already_processing")
 
     @patch("apps.orders.views.PlatformAPIClient")
-    def test_idem_key_cleared_when_payment_api_fails(self, mock_api_class: object) -> None:
+    def test_idem_key_cleared_when_payment_api_fails(self, mock_api_class: MagicMock) -> None:
         """When payment API call fails, idem_key is removed so customer can retry."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
-        mock_api = mock_api_class.return_value  # type: ignore[union-attr]  # @patch injects MagicMock
+        mock_api = mock_api_class.return_value
         # Payment confirmation at platform level fails
         mock_api.post_billing.return_value = {"success": False, "error": "Stripe error"}
 
@@ -282,11 +282,11 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         self.assertIsNone(cache.get(idem_key), "idem_key should be cleared after payment API failure")
 
     @patch("apps.orders.views.PlatformAPIClient")
-    def test_idem_key_kept_when_payment_succeeded_but_order_update_failed(self, mock_api_class: object) -> None:
+    def test_idem_key_kept_when_payment_succeeded_but_order_update_failed(self, mock_api_class: MagicMock) -> None:
         """When Stripe payment succeeded but order update failed, idem_key must NOT be cleared."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
-        mock_api = mock_api_class.return_value  # type: ignore[union-attr]  # @patch injects MagicMock
+        mock_api = mock_api_class.return_value
         # Payment succeeded at Stripe
         mock_api.post_billing.return_value = {"success": True, "status": "succeeded"}
         # But order update in PRAHO failed
