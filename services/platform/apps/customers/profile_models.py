@@ -60,6 +60,32 @@ class CustomerTaxProfile(SoftDeleteModel):
     # Tax Reverse Charge (for B2B EU)
     reverse_charge_eligible = models.BooleanField(default=False)
 
+    # VIES Verification (EU cross-border VAT)
+    vies_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("VIES verified at"),
+        help_text=_("Timestamp of last successful VIES verification"),
+    )
+    vies_verified_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_("VIES company name"),
+        help_text=_("Company name returned by VIES API"),
+    )
+    vies_verification_status = models.CharField(
+        max_length=25,
+        choices=[
+            ("pending", _("Pending")),
+            ("valid", _("VIES Verified")),
+            ("invalid", _("VIES Invalid")),
+            ("format_only", _("Format Valid (VIES unavailable)")),
+            ("not_applicable", _("Not Applicable")),
+        ],
+        default="pending",
+        verbose_name=_("VIES status"),
+    )
+
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

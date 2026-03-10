@@ -209,6 +209,7 @@ platform = [
     # Romanian VAT/Legal compliance
     "xmltodict>=0.13.0",
     "lxml>=4.9.0",
+    "python-stdnum>=1.20",
 
     # Utilities
     "python-slugify>=8.0.0",
@@ -600,6 +601,7 @@ module = [
     "weasyprint",
     "ipware.*",
     "boto3.*",
+    "stdnum.*",
 ]
 ignore_missing_imports = true
 
