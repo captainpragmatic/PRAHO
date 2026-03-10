@@ -15,6 +15,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
 from apps.products.models import Product
 from apps.users.models import User
+from tests.helpers.fsm_helpers import force_status
 
 
 class OrderModelTestCase(TestCase):
@@ -98,11 +99,10 @@ class OrderModelTestCase(TestCase):
         # Test default status
         self.assertEqual(order.status, "draft")
 
-        # Test valid status changes
+        # Test valid status changes (use force_status to bypass FSMField protected=True)
         valid_statuses = ["draft", "pending", "confirmed", "processing", "completed", "cancelled", "failed"]
         for status in valid_statuses:
-            order.status = status
-            order.save()  # Save without full_clean to avoid migration constraint issues
+            force_status(order, status)
 
     def test_romanian_vat_compliance(self):
         """Test Romanian VAT calculation compliance"""
@@ -279,11 +279,10 @@ class OrderItemModelTestCase(TestCase):
             provisioning_status="pending"
         )
 
-        # Test valid provisioning statuses
+        # Test valid provisioning statuses (use force_status to bypass FSMField protected=True)
         valid_statuses = ["pending", "in_progress", "completed", "failed", "cancelled"]
         for status in valid_statuses:
-            item.provisioning_status = status
-            item.save()  # Save without full_clean to avoid migration constraint issues
+            force_status(item, status, field_name="provisioning_status")
 
     def test_order_item_uuid_primary_key(self):
         """Test that order items use UUID as primary key"""
@@ -510,7 +509,7 @@ class OrderSaveTransactionTestCase(TestCase):
             customer_name=self.customer.name,
         )
         # At this point order._state.adding is False (already persisted)
-        order.status = "pending"
+        force_status(order, "pending", save=False)
 
         with patch("apps.orders.models.transaction.atomic") as mock_atomic:
             order.save(update_fields=["status"])
@@ -550,7 +549,7 @@ class OrderSaveTransactionTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
-        order.status = "pending"
+        force_status(order, "pending", save=False)
         # Should not raise; no collision retry loop involved
         order.save(update_fields=["status"])
         order.refresh_from_db()
@@ -674,7 +673,7 @@ class OrderSaveRetryOnCreationOnlyTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
-        order.status = "pending"
+        force_status(order, "pending", save=False)
 
         # Patch Model.save (the super()) to raise IntegrityError
         with patch("django.db.models.Model.save", side_effect=IntegrityError("simulated")), self.assertRaises(IntegrityError):
@@ -723,3 +722,98 @@ class OrderSaveRetryOnCreationOnlyTestCase(TestCase):
             regenerate_calls,
             "_regenerate_order_number_sequence must be called on order_number collision during creation",
         )
+
+
+# ---------------------------------------------------------------------------
+# FSM: Transition guard enforcement
+# ---------------------------------------------------------------------------
+
+
+class OrderFSMTransitionTests(TestCase):
+    """Verify FSM transitions enforce valid state changes."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="FSM Test SRL",
+            customer_type="company",
+            status="active",
+            primary_email="fsm@testcompany.ro",
+        )
+        self.product = Product.objects.create(
+            slug="fsm-test-product",
+            name="FSM Test Product",
+            product_type="hosting",
+            is_active=True,
+        )
+
+    def _make_draft_order(self) -> Order:
+        return Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            status="draft",
+        )
+
+    def test_submit_from_draft_requires_items(self) -> None:
+        """draft → pending via submit() is blocked when the order has no items."""
+        from django_fsm import TransitionNotAllowed  # noqa: PLC0415
+
+        order = self._make_draft_order()
+        # No items attached — _order_has_items condition is False
+        with self.assertRaises(TransitionNotAllowed):
+            order.submit()
+
+    def test_submit_from_draft_succeeds_with_items(self) -> None:
+        """draft → pending via submit() succeeds when the order has at least one item."""
+        order = self._make_draft_order()
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=5000,
+        )
+        order.submit()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "pending")
+
+    def test_invalid_transition_raises(self) -> None:
+        """Verify TransitionNotAllowed for an illegal transition (draft → confirmed)."""
+        from django_fsm import TransitionNotAllowed  # noqa: PLC0415
+
+        order = self._make_draft_order()
+        # confirm() requires source="pending"; calling it from "draft" must raise
+        with self.assertRaises(TransitionNotAllowed):
+            order.confirm()
+
+    def test_completed_order_cannot_be_cancelled(self) -> None:
+        """Terminal state: completed orders cannot be cancelled."""
+        from django_fsm import TransitionNotAllowed  # noqa: PLC0415
+
+        order = self._make_draft_order()
+        force_status(order, "completed")
+        with self.assertRaises(TransitionNotAllowed):
+            order.cancel()
+
+    def test_refund_only_from_completed(self) -> None:
+        """refund_order() must be accepted from 'completed' and rejected from 'pending'."""
+        from django_fsm import TransitionNotAllowed  # noqa: PLC0415
+
+        # Accepted from completed
+        order = self._make_draft_order()
+        force_status(order, "completed")
+        order.refund_order()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "refunded")
+
+        # Rejected from pending
+        order2 = self._make_draft_order()
+        force_status(order2, "pending")
+        with self.assertRaises(TransitionNotAllowed):
+            order2.refund_order()

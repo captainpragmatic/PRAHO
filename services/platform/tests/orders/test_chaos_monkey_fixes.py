@@ -25,6 +25,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderStatusHistory
 from apps.orders.services import OrderNumberingService, StatusChangeData
 from apps.users.models import User
+from tests.helpers.fsm_helpers import force_status
 
 # ===============================================================================
 # HELPERS
@@ -398,8 +399,7 @@ class ConfirmOrderStatusHistoryTest(TestCase):
 
         order = _make_order(self.customer, self.currency)
         # Force the order into 'refunded' state directly (terminal state)
-        order.status = "refunded"
-        order.save(update_fields=["status"])
+        force_status(order, "refunded")
 
         status_change = StatusChangeData(new_status="confirmed", notes="attacker attempt", changed_by=None)
         result = OrderService.update_order_status(order, status_change)
@@ -411,8 +411,7 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         from apps.orders.services import OrderService  # noqa: PLC0415
 
         order = _make_order(self.customer, self.currency)
-        order.status = "cancelled"
-        order.save(update_fields=["status"])
+        force_status(order, "cancelled")
 
         status_change = StatusChangeData(new_status="confirmed", notes="unexpected retry", changed_by=None)
         result = OrderService.update_order_status(order, status_change)

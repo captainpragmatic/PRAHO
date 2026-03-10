@@ -14,6 +14,7 @@ from typing import Any, TypedDict
 from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 from django_q.models import Schedule
 from django_q.tasks import async_task, schedule
 
@@ -191,8 +192,12 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
     """Process payment confirmation for an order."""
     if total_paid_cents >= invoice.total_cents and order.status == "pending":
         old_status = order.status
-        order.status = "confirmed"
-        order.save(update_fields=["status", "updated_at"])
+        try:
+            order.confirm()
+            order.save()
+        except TransitionNotAllowed:
+            logger.warning("⚠️ [PaymentSync] Cannot confirm order %s from status %s", order.order_number, old_status)
+            return False
         results["payment_confirmations"] += 1
 
         # Log payment confirmation
@@ -228,11 +233,15 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
 
     if len(recent_failures) >= MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL:
         old_status = order.status
-        order.status = "failed"
+        try:
+            order.fail()
+        except TransitionNotAllowed:
+            logger.warning("⚠️ [PaymentSync] Cannot fail order %s from status %s", order.order_number, old_status)
+            return False
         order.notes = (
             f"{order.notes}\n[AUTO] Order marked as failed due to repeated payment failures at {timezone.now()}"
         )
-        order.save(update_fields=["status", "notes", "updated_at"])
+        order.save()
         results["payment_failures"] += 1
 
         # Log payment failure
@@ -262,20 +271,30 @@ def _process_refunds(order: Order, payments: list[Any], total_paid_cents: int, r
     if total_refunded_cents <= 0:
         return False
 
-    if total_refunded_cents >= total_paid_cents:
-        # Full refund
-        if order.status not in ["refunded", "cancelled"]:
-            order.status = "refunded"
-            order.save(update_fields=["status", "updated_at"])
-            results["refunds_processed"] += 1
-            return True
-    elif order.status != "partially_refunded":
-        # Partial refund
-        order.status = "partially_refunded"
-        order.save(update_fields=["status", "updated_at"])
+    updated = False
+    try:
+        if total_refunded_cents >= total_paid_cents and order.status not in ["refunded", "cancelled"]:
+            # Full refund — only callable from completed or partially_refunded
+            if order.status == "completed":
+                order.refund_order()
+                updated = True
+            elif order.status == "partially_refunded":
+                order.complete_refund()
+                updated = True
+        elif total_refunded_cents < total_paid_cents and order.status != "partially_refunded":
+            # Partial refund
+            order.partial_refund()
+            updated = True
+    except TransitionNotAllowed:
+        logger.warning(
+            "⚠️ [PaymentSync] Cannot process refund on order %s from status %s", order.order_number, order.status
+        )
+        return False
+
+    if updated:
+        order.save()
         results["refunds_processed"] += 1
-        return True
-    return False
+    return updated
 
 
 def _add_updated_order_result(
@@ -302,9 +321,15 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
         return False
 
     # Cancel timed out orders
-    order.status = "cancelled"
+    try:
+        order.cancel()
+    except TransitionNotAllowed:
+        logger.warning(
+            "⚠️ [OrderProcessor] Cannot cancel timed-out order %s from status %s", order.order_number, order.status
+        )
+        return False
     order.notes = f"{order.notes}\n[AUTO] Order cancelled due to timeout at {now}"
-    order.save(update_fields=["status", "notes", "updated_at"])
+    order.save()
 
     order_result["action"] = "timeout_cancelled"
     order_result["status"] = "cancelled"
@@ -346,8 +371,12 @@ def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
 def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
     """Process orders with paid invoices."""
     # Move to confirmed status and trigger provisioning
-    order.status = "confirmed"
-    order.save(update_fields=["status", "updated_at"])
+    try:
+        order.confirm()
+        order.save()
+    except TransitionNotAllowed:
+        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s from status %s", order.order_number, order.status)
+        return
 
     order_result["action"] = "payment_confirmed"
     order_result["status"] = "confirmed"
@@ -358,8 +387,14 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
 
     if provisioned_items > 0:
         results["provisioning_triggered"] += provisioned_items
-        order.status = "processing"
-        order.save(update_fields=["status", "updated_at"])
+        try:
+            order.start_processing()
+            order.save()
+        except TransitionNotAllowed:
+            logger.warning(
+                "⚠️ [OrderProcessor] Cannot start processing order %s from status %s", order.order_number, order.status
+            )
+            return
         order_result["status"] = "processing"
 
     # Log order confirmation
@@ -382,9 +417,16 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
 
 def _process_cancelled_invoice(order: Order, now: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
     """Process orders with cancelled invoices."""
-    order.status = "cancelled"
+    try:
+        order.cancel()
+    except TransitionNotAllowed:
+        logger.warning("⚠️ [OrderProcessor] Cannot cancel order %s from status %s", order.order_number, order.status)
+        order_result["action"] = "invoice_cancelled_skip"
+        order_result["status"] = order.status
+        results["failed_orders"] += 1
+        return
     order.notes = f"{order.notes}\n[AUTO] Order cancelled due to cancelled invoice at {now}"
-    order.save(update_fields=["status", "notes", "updated_at"])
+    order.save()
 
     order_result["action"] = "invoice_cancelled"
     order_result["status"] = "cancelled"
@@ -417,8 +459,14 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
 
 def _process_free_order(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
     """Process free orders."""
-    order.status = "confirmed"
-    order.save(update_fields=["status", "updated_at"])
+    try:
+        order.confirm()
+        order.save()
+    except TransitionNotAllowed:
+        logger.warning(
+            "⚠️ [OrderProcessor] Cannot confirm free order %s from status %s", order.order_number, order.status
+        )
+        return
 
     order_result["action"] = "free_order_confirmed"
     order_result["status"] = "confirmed"
