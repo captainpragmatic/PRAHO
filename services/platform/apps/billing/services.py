@@ -18,6 +18,7 @@ This file serves as a re-export hub following ADR-0012 feature-based organizatio
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from decimal import Decimal
 
 # Re-export all services from feature files
@@ -321,8 +322,7 @@ class ProformaConversionService:
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,
                     total_cents=total_cents,
-                    status="issued",
-                    issued_at=tz.now(),
+                    due_at=tz.now() + timedelta(days=30),
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",
                     bill_to_tax_id=getattr(proforma, "bill_to_tax_id", "") or "",
@@ -331,6 +331,9 @@ class ProformaConversionService:
                     bill_to_country=getattr(proforma, "bill_to_country", "RO") or "RO",
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )
+                # Issue via FSM transition to set locked_at and issued_at
+                invoice.issue()
+                invoice.save()
 
                 # Copy line items
                 for line in proforma.lines.all():

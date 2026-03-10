@@ -191,7 +191,7 @@ class TestGetInvoice(TestCase):
 
     @patch("apps.billing.refund_service.Invoice.objects")
     def test_invoice_generic_exception(self, mock_qs):
-        mock_qs.select_related.return_value.get.side_effect = RuntimeError("boom")
+        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
         r = RefundService._get_invoice(1)
         assert r.is_err()
         assert "database error" in r.unwrap_err()
@@ -352,7 +352,7 @@ class TestRefundOrder(TestCase):
     def test_refund_order_generic_exception_in_get(self):
         """Exception branch in refund_order where get raises non-DoesNotExist with 'does not exist'."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = Exception("thing does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Exception("thing does not exist")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Order not found" in r.unwrap_err()
@@ -360,7 +360,7 @@ class TestRefundOrder(TestCase):
     def test_refund_order_generic_exception_other(self):
         """Exception branch in refund_order where get raises something else."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = RuntimeError("unrelated")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("unrelated")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "internal error" in r.unwrap_err()
@@ -403,14 +403,14 @@ class TestRefundInvoice(TestCase):
 
     def test_refund_invoice_generic_exception_does_not_exist(self):
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = Exception("does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Exception("does not exist")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Invoice not found" in r.unwrap_err()
 
     def test_refund_invoice_generic_exception_other(self):
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = RuntimeError("boom")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "internal error" in r.unwrap_err()

@@ -109,13 +109,13 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertIn("Order", result.error)
 
     @patch('apps.billing.services.RefundService._validate_order_refund_eligibility')
-    @patch('apps.orders.models.Order.objects.select_related')
-    def test_refund_order_not_eligible(self, mock_select_related: Mock, mock_validate: Mock) -> None:
+    @patch('apps.orders.models.Order.objects.select_for_update')
+    def test_refund_order_not_eligible(self, mock_select_for_update: Mock, mock_validate: Mock) -> None:
         """Test refund_order when order is not eligible for refund"""
 
         mock_order = Mock()
         mock_order.id = uuid.uuid4()
-        mock_select_related.return_value.get.return_value = mock_order
+        mock_select_for_update.return_value.select_related.return_value.get.return_value = mock_order
 
         mock_validate.return_value = Err("Order not eligible")
 

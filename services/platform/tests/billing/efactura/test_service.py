@@ -402,7 +402,7 @@ class EFacturaRetryTestCase(TestCase):
         result = self.service.retry_failed_submission(mock_doc)
 
         self.assertTrue(result.success)
-        self.assertEqual(mock_doc.status, EFacturaStatus.QUEUED.value)
+        mock_doc.mark_queued.assert_called_once()
         mock_doc.save.assert_called_once()
 
 

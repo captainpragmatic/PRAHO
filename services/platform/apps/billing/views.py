@@ -778,16 +778,14 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
         sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
         invoice_number = sequence.get_next_number("INV")
 
-        # Create invoice from proforma
+        # Create invoice from proforma (draft first, then issue via FSM)
         invoice = Invoice.objects.create(
             customer=proforma.customer,
             number=invoice_number,
-            status="issued",  # Invoices start as issued, not draft
             currency=proforma.currency,
             subtotal_cents=proforma.subtotal_cents,
             tax_cents=proforma.tax_cents,
             total_cents=proforma.total_cents,
-            issued_at=timezone.now(),
             due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
             # Copy billing address from proforma
             bill_to_name=proforma.bill_to_name,
@@ -816,9 +814,9 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
                 line_total_cents=proforma_line.line_total_cents,
             )
 
-        # Lock the invoice after it has been created and lines copied.
-        # Use queryset update to avoid triggering immutability validation during creation.
-        Invoice.objects.filter(pk=invoice.pk).update(locked_at=timezone.now())
+        # Issue via FSM transition — sets issued_at and locked_at
+        invoice.issue()
+        invoice.save()
 
         messages.success(
             request,
@@ -1554,7 +1552,8 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         result = RefundService.refund_invoice(invoice.id, refund_data)
         if result.is_ok():
             refund_result = result.unwrap()
-            return JsonResponse({"success": True, "refund_id": str(refund_result.refund_id)})
+            refund_id = getattr(refund_result, "refund_id", None)
+            return JsonResponse({"success": True, "refund_id": str(refund_id)})
         return json_error(result.unwrap_err())
 
     except Exception as e:
@@ -1935,7 +1934,8 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
         if result.is_ok():
             refund_result = result.unwrap()
             logger.info(f"✅ API: Refund processed for payment {payment_id}")
-            return JsonResponse({"success": True, "refund_id": str(refund_result.refund_id)})
+            refund_id = getattr(refund_result, "refund_id", None)
+            return JsonResponse({"success": True, "refund_id": str(refund_id)})
         logger.warning(f"⚠️ API: Refund failed for payment {payment_id}: {result.unwrap_err()}")
         return JsonResponse({"success": False, "error": result.unwrap_err()}, status=400)
 

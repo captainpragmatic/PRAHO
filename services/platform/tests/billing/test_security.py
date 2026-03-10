@@ -198,21 +198,26 @@ class BillingModelSecurityTests(TestCase):
         self.assertIn("Financial calculation error", str(cm.exception))
 
     def test_invoice_immutability_validation(self):
-        """🔒 Test that locked invoices cannot be modified"""
-        invoice = Invoice(
+        """🔒 Test that locked invoices cannot be modified after issuing"""
+        invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
             subtotal_cents=1000,
             tax_cents=190,
             total_cents=1190,
-            status="issued",
-            locked_at=timezone.now()
         )
+        # Issue via FSM — sets locked_at
+        invoice.issue()
+        invoice.save()
 
+        # Attempt to modify financial data on locked invoice (keep sum consistent)
+        invoice.subtotal_cents = 2000
+        invoice.tax_cents = 380
+        invoice.total_cents = 2380
         with self.assertRaises(ValidationError) as cm:
             invoice.clean()
 
-        self.assertIn("Cannot modify locked invoice", str(cm.exception))
+        self.assertIn("Cannot modify financial data on a locked invoice", str(cm.exception))
 
     def test_invoice_date_consistency_validation(self):
         """🔒 Test that invoice dates are consistent"""

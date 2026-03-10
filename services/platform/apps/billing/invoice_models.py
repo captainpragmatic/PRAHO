@@ -239,12 +239,20 @@ class Invoice(models.Model):
         ):
             raise ValidationError(_("Financial calculation error: subtotal + tax must equal total"))
 
-        # Validate invoice immutability rules
-        # Keep strict validation when explicitly validating an invoice
-        # that is locked and not in draft. Views creating invoices that
-        # must be locked immediately should lock post-save.
-        if self.locked_at and self.status not in ["draft"]:
-            raise ValidationError(_("Cannot modify locked invoice"))
+        # Validate invoice immutability rules — financial fields are frozen
+        # once locked. Status transitions (mark_as_paid, void) are still
+        # allowed because they don't alter monetary values.
+        if self.locked_at and self.pk:
+            db_vals = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("locked_at", "total_cents", "subtotal_cents", "tax_cents")
+                .first()
+            )
+            if db_vals and db_vals[0] is not None:
+                _db_locked, db_total, db_subtotal, db_tax = db_vals
+                if self.total_cents != db_total or self.subtotal_cents != db_subtotal or self.tax_cents != db_tax:
+                    raise ValidationError(_("Cannot modify financial data on a locked invoice"))
 
         # Validate date consistency
         if self.issued_at and self.due_at and self.due_at <= self.issued_at:
@@ -322,7 +330,10 @@ class Invoice(models.Model):
 
     @transition(field=status, source="draft", target="issued")
     def issue(self) -> None:
-        """Issue the invoice."""
+        """Issue the invoice — sets timestamps and locks financial fields."""
+        if not self.issued_at:
+            self.issued_at = timezone.now()
+        self.locked_at = timezone.now()
 
     @transition(field=status, source=["issued", "overdue"], target="paid")
     def mark_as_paid(self) -> None:
@@ -337,11 +348,11 @@ class Invoice(models.Model):
     def void(self) -> None:
         """Void the invoice."""
 
-    @transition(field=status, source="paid", target="refunded")
+    @transition(field=status, source=["paid", "partially_refunded"], target="refunded")
     def refund_invoice(self) -> None:
         """Mark invoice as fully refunded."""
 
-    @transition(field=status, source=["issued", "overdue", "paid"], target="partially_refunded")
+    @transition(field=status, source=["issued", "overdue", "paid", "partially_refunded"], target="partially_refunded")
     def mark_partially_refunded(self) -> None:
         """Mark invoice as partially refunded."""
 

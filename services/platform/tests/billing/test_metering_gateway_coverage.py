@@ -641,8 +641,7 @@ class TestAggregationService(TransactionTestCase):
         assert "not found" in result.error
 
     def test_close_billing_cycle_bad_status(self):
-        self.billing_cycle.status = "closed"
-        self.billing_cycle.save()
+        force_status(self.billing_cycle, "closed")
         result = self.svc.close_billing_cycle(str(self.billing_cycle.id))
         assert result.is_err()
         assert "cannot be closed" in result.error

@@ -5,11 +5,11 @@ Secure webhook processing for server management integrations.
 
 import json
 import logging
-from datetime import datetime
 from typing import Any
 
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -184,7 +184,7 @@ class ServerWebhookView(View):
                 status__in=["pending", "running"],
             ).update(
                 status="completed",
-                completed_at=datetime.now(),
+                completed_at=timezone.now(),
                 result=webhook_data.get("provisioning_result", {}),
             )
 
@@ -222,6 +222,7 @@ class ServerWebhookView(View):
                 return False, f"Service {service_username} not found"
 
             service.suspend(reason=suspension_reason)
+            service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
 
             # Log security event
             log_security_event(
@@ -261,6 +262,7 @@ class ServerWebhookView(View):
                 return False, f"Service {service_username} not found"
 
             service.activate()
+            service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
 
             logger.info(f"▶️ [Server Webhook] Service activated: {service.service_name}")
             return True, "Service activation processed successfully"
@@ -384,7 +386,7 @@ class ServerWebhookView(View):
             try:
                 task = ProvisioningTask.objects.get(id=task_id)
                 task.status = "completed"  # fsm-bypass: ProvisioningTask is not FSM-protected
-                task.completed_at = datetime.now()
+                task.completed_at = timezone.now()
                 task.result = task_result
                 task.save()
 

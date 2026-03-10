@@ -125,9 +125,9 @@ class RefundService:
 
             # Execute entire refund process within atomic block to prevent race conditions
             with transaction.atomic():
-                # Get order with lock to prevent concurrent modifications
+                # Get order with row lock to prevent concurrent refund race
                 try:
-                    order = Order.objects.select_related("customer").get(id=order_id)
+                    order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
                 except Order.DoesNotExist:
                     return Err("Failed to process refund: Order not found")
                 except Exception as e:
@@ -291,9 +291,11 @@ class RefundService:
 
             # Execute entire refund process within atomic block to prevent race conditions
             with transaction.atomic():
-                # Get invoice with lock to prevent concurrent modifications
+                # Get invoice with row lock to prevent concurrent refund race
                 try:
-                    invoice = Invoice.objects.select_related("customer").get(id=invoice_id)
+                    invoice = (
+                        Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
+                    )
                 except Invoice.DoesNotExist:
                     return Err("Failed to process refund: Invoice not found")
                 except Exception as e:
@@ -323,7 +325,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the invoice row to prevent concurrent refund processing
-            invoice = Invoice.objects.select_related("customer").get(id=invoice_id)
+            invoice = Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
             return Ok(invoice)
         except Invoice.DoesNotExist:
             return Err("Failed to process refund: Invoice not found")
@@ -869,9 +871,14 @@ class RefundService:
                     else (refund_data.get("amount_cents", 0) if refund_data else 0)
                 )
 
-                # Avoid querying existing refunds when we're in an atomic transaction
-                # Instead, rely on the refund_type from the request data
-                already_refunded = 0  # Always assume 0 to avoid transaction issues
+                # Query existing non-failed refunds for this order (safe inside
+                # select_for_update atomic block — the row lock prevents races)
+                from apps.billing.models import Refund  # noqa: PLC0415  # Deferred: avoids circular import
+
+                already_refunded = Refund.objects.filter(
+                    order=order,
+                    status__in=["completed", "approved", "processing", "pending"],
+                ).aggregate(total=Sum("amount_cents", default=0))["total"]
 
                 # Check if this refund makes it fully refunded
                 try:

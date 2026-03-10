@@ -458,7 +458,7 @@ class SubscriptionService:
         tax_cents = int(Decimal(subtotal_cents) * vat_rate)
         total_cents = subtotal_cents + tax_cents
 
-        # Create invoice
+        # Create invoice as draft, then issue via FSM
         invoice = Invoice.objects.create(
             customer=subscription.customer,
             number=sequence.get_next_number("INV"),
@@ -466,8 +466,6 @@ class SubscriptionService:
             subtotal_cents=subtotal_cents,
             tax_cents=tax_cents,
             total_cents=total_cents,
-            status="issued",
-            issued_at=timezone.now(),
             due_at=timezone.now() + timedelta(days=7),
             bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
             bill_to_email=subscription.customer.primary_email or "",
@@ -490,6 +488,10 @@ class SubscriptionService:
             tax_rate=vat_rate,
             line_total_cents=total_cents,
         )
+
+        # Issue via FSM transition — sets issued_at and locked_at
+        invoice.issue()
+        invoice.save()
 
         # Link change to invoice
         change.invoice = invoice
@@ -856,7 +858,7 @@ class RecurringBillingService:
             tax_cents = int(Decimal(subtotal_cents) * tax_rate)
             total_cents = subtotal_cents + tax_cents
 
-            # Create invoice
+            # Create invoice as draft, then issue via FSM
             invoice = Invoice.objects.create(
                 customer=subscription.customer,
                 number=sequence.get_next_number("INV"),
@@ -864,8 +866,6 @@ class RecurringBillingService:
                 subtotal_cents=subtotal_cents,
                 tax_cents=tax_cents,
                 total_cents=total_cents,
-                status="issued",
-                issued_at=timezone.now(),
                 due_at=timezone.now() + timedelta(days=14),
                 bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
                 bill_to_email=subscription.customer.primary_email or "",
@@ -890,6 +890,10 @@ class RecurringBillingService:
                 tax_rate=tax_rate,
                 line_total_cents=total_cents,
             )
+
+            # Issue via FSM transition — sets issued_at and locked_at
+            invoice.issue()
+            invoice.save()
 
             return Ok(invoice)
 

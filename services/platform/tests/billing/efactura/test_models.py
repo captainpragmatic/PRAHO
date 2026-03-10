@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
+from tests.helpers.fsm_helpers import force_status
 
 
 class EFacturaDocumentModelTestCase(TestCase):
@@ -68,6 +69,7 @@ class EFacturaDocumentModelTestCase(TestCase):
         """Test marking document as queued."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
         document.mark_queued()
+        document.save()
 
         document.refresh_from_db()
         self.assertEqual(document.status, EFacturaStatus.QUEUED.value)
@@ -75,7 +77,11 @@ class EFacturaDocumentModelTestCase(TestCase):
     def test_mark_submitted(self):
         """Test marking document as submitted."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
+        # Walk FSM path: draft → queued → submitted
+        document.mark_queued()
+        document.save()
         document.mark_submitted("12345")
+        document.save()
 
         document.refresh_from_db()
         self.assertEqual(document.status, EFacturaStatus.SUBMITTED.value)
@@ -88,7 +94,11 @@ class EFacturaDocumentModelTestCase(TestCase):
             invoice=self.invoice,
             anaf_upload_index="12345",
         )
+        # Walk FSM path: draft → queued → submitted → processing → accepted
+        force_status(document, EFacturaStatus.PROCESSING.value)
+        document.save()
         document.mark_accepted("download-123", {"result": "ok"})
+        document.save()
 
         document.refresh_from_db()
         self.assertEqual(document.status, EFacturaStatus.ACCEPTED.value)
@@ -96,7 +106,8 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertIsNotNone(document.response_at)
         self.assertEqual(document.anaf_response, {"result": "ok"})
 
-        # Check invoice was updated
+        # Invoice sync happens via _update_invoice_on_acceptance() in service layer
+        document._update_invoice_on_acceptance()
         self.invoice.refresh_from_db()
         self.assertTrue(self.invoice.efactura_sent)
         self.assertEqual(self.invoice.efactura_id, "12345")
@@ -105,7 +116,11 @@ class EFacturaDocumentModelTestCase(TestCase):
         """Test marking document as rejected."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
         errors = [{"code": "BR-01", "message": "ID missing"}]
+        # Walk FSM: draft → processing → rejected
+        force_status(document, EFacturaStatus.PROCESSING.value)
+        document.save()
         document.mark_rejected(errors)
+        document.save()
 
         document.refresh_from_db()
         self.assertEqual(document.status, EFacturaStatus.REJECTED.value)
@@ -114,7 +129,11 @@ class EFacturaDocumentModelTestCase(TestCase):
     def test_mark_error_with_retry(self):
         """Test marking document as error with retry scheduling."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
+        # mark_error can be called from multiple source states
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.save()
         document.mark_error("Network timeout")
+        document.save()
 
         document.refresh_from_db()
         self.assertEqual(document.status, EFacturaStatus.ERROR.value)
@@ -128,7 +147,10 @@ class EFacturaDocumentModelTestCase(TestCase):
             invoice=self.invoice,
             retry_count=EFacturaDocument.MAX_RETRIES,
         )
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.save()
         document.mark_error("Final error")
+        document.save()
 
         document.refresh_from_db()
         self.assertIsNone(document.next_retry_at)
@@ -137,23 +159,23 @@ class EFacturaDocumentModelTestCase(TestCase):
         """Test terminal status detection."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
 
-        document.status = EFacturaStatus.DRAFT.value
+        force_status(document, EFacturaStatus.DRAFT.value)
         self.assertFalse(document.is_terminal)
 
-        document.status = EFacturaStatus.ACCEPTED.value
+        force_status(document, EFacturaStatus.ACCEPTED.value)
         self.assertTrue(document.is_terminal)
 
-        document.status = EFacturaStatus.REJECTED.value
+        force_status(document, EFacturaStatus.REJECTED.value)
         self.assertTrue(document.is_terminal)
 
     def test_can_retry(self):
         """Test retry eligibility check."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
 
-        document.status = EFacturaStatus.DRAFT.value
+        force_status(document, EFacturaStatus.DRAFT.value)
         self.assertFalse(document.can_retry)
 
-        document.status = EFacturaStatus.ERROR.value
+        force_status(document, EFacturaStatus.ERROR.value)
         self.assertTrue(document.can_retry)
 
         document.retry_count = EFacturaDocument.MAX_RETRIES

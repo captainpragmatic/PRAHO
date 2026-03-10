@@ -11,6 +11,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
@@ -773,7 +774,7 @@ def _schedule_next_retry(retry: Any, retry_model: Any) -> None:
             )
 
 
-def run_payment_collection() -> dict[str, Any]:
+def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
     """
     Run payment collection for failed payments.
 
@@ -833,9 +834,15 @@ def run_payment_collection() -> dict[str, Any]:
                     successful += 1
                     total_recovered_cents += retry.payment.amount_cents
 
-                    # Update payment status
-                    retry.payment.status = "succeeded"
-                    retry.payment.save(update_fields=["status"])
+                    # Update payment status via FSM transition
+                    try:
+                        retry.payment.succeed()
+                        retry.payment.save(update_fields=["status", "updated_at"])
+                    except TransitionNotAllowed:
+                        logger.warning(
+                            f"⚠️ [Collection] Payment {retry.payment_id} cannot transition to succeeded "
+                            f"from {retry.payment.status}"
+                        )
 
                 else:
                     retry.status = "failed"
