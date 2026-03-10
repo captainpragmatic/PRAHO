@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Security
+
+- **Order idempotency hardening** — DB-backed unique constraint per customer with atomic `cache.add` and stuck-lock recovery; `IntegrityError` catch narrowed to only handle idempotency race conditions, not financial check constraints
+- **Payment intent validation** — regex validation (`pi_[a-zA-Z0-9]{10,64}`) at both platform and portal boundaries with `isinstance` guard against non-string input
+- **Timing-safe HMAC** — switched to `hmac.compare_digest()` for signature comparison
+- **Order number generation race** — replaced `count()`-based TOCTOU race with `MAX(order_number)` + `select_for_update` (PostgreSQL lock with SQLite fallback) + retry on `IntegrityError`
+- **Cart DoS hardening** — per-session rate limiting, quantity caps, total amount ceiling, duplicate-item rejection, payload size checks, suspicious pattern detection; cache fails closed
+- **XSS hardening** — `escapejs` in 5 inline JS template contexts; sanitized error responses to stop leaking state machine internals
+- **Payment intent binding** — reject PI binding for non-stripe orders; only create `PaymentIntent` for explicit `payment_method="stripe"`
+- **UUID validation** on `confirm_payment` order_id and `user_id` null guard before `int()` cast
+
+### Added
+
+- **EU compliance on checkout** — terms acceptance validation (EU consumer law), privacy policy link, withdrawal notice (Directive 2011/83/EU), GDPR Art. 13 data retention notice
+- **Dynamic VAT rate** — platform API returns `vat_rate_percent` and per-item calculations; templates display actual rate instead of hardcoded 21%
+- **Currency FK on Service model** — required `ForeignKey` with 3-step migration (add nullable → backfill to RON → make required); all 4 service creation paths updated
+- **`currency_code` in service serializers** — added to `ServiceListSerializer` and `ServiceDetailSerializer` to fix `VariableDoesNotExist` in templates
+- **Stable cart API identifiers** — `product_slug` + `billing_period` in cart calculation response for deterministic per-item mapping
+- **"Confirmed" order status in admin** — badge rendering, filter dropdown, status transitions, stats card
+- **`step_progress` inclusion tag** — unified component replacing 3 duplicates (`step_navigation`, `progress_indicator`, `order_breadcrumbs`); 3 variants (default/compact/vertical), 3 color schemes, WCAG accessible, optional back button
+- **Per-item `line_total_cents`** display on checkout page
+- **ORDER_LIFECYCLE.md** — domain documentation for order state machine
+- **~8,500 lines of new tests** — 6 platform test files, 8 portal test files, 3 E2E test suites covering all hardening changes
+
+### Fixed
+
+- **Stripe skip for bank transfer** — payment intent creation no longer fires when `payment_method` is `bank_transfer`
+- **Decimal precision** — cents conversion uses `Decimal` instead of `float` to avoid IEEE 754 precision loss on amounts like 29.99
+- **HMAC middleware scoping** — replaced broad `/billing/` prefix with explicit tuple of 6 portal-facing API endpoints; staff billing UI pages no longer intercepted
+- **Stripe failure redirect** — redirects to confirmation (not checkout) since order already exists and cart is cleared
+- **Product type badges** — store `product_type` in cart item dict; guard empty values with `{% if %}` in 3 templates
+- **ISO timestamp parsing** — confirmation view parses ISO string to datetime
+- **Monetary display** — `romanian_currency` filter replaces `floatformat:2` across services, plans, and dashboard templates
+- **Pagination** — hidden when only 1 page exists
+- **Checkout `is not None`** — uses identity check instead of truthiness so $0 free-trial items display correctly
+
+### Changed
+
+- **Breadcrumb UX** — completed steps are now clickable `<a>` links; arrow separators moved inside `<li>` elements
+- **Cart rate limiting** — `CartRateLimiter` class removed; rate limiting handled by `APIRateLimitMiddleware`
+- **Portal checkout refactored** — extracted shared helpers for payment routing and flow guards
+
+### Removed
+
+- **3 duplicate UI components** — `progress_indicator.html`, `step_navigation.html`, `order_breadcrumbs.html` (~580 LOC) replaced by `step_progress.html`
+- **`CartRateLimiter`** class and related tests — superseded by `APIRateLimitMiddleware`
 
 ---
 
