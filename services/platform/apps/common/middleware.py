@@ -477,11 +477,25 @@ class PortalServiceHMACMiddleware:
 
         return False, error_msg
 
+    # Portal-facing billing API endpoints that require HMAC authentication.
+    # Staff UI pages under /billing/ (invoices, proformas, reports) are NOT listed
+    # here and pass through without HMAC checks.
+    _BILLING_API_PREFIXES = (
+        "/billing/create-payment-intent/",
+        "/billing/confirm-payment/",
+        "/billing/create-subscription/",
+        "/billing/payment-methods/",
+        "/billing/stripe-config/",
+        "/billing/process-refund/",
+    )
+
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        # Process API and billing requests — both require HMAC authentication.
-        # NOTE: /billing/ endpoints (create-payment-intent, confirm-payment, process-refund)
-        # are inter-service endpoints called by Portal with HMAC signatures.
-        if request.path.startswith("/api/") or request.path.startswith("/billing/"):
+        # Only intercept /api/ paths and specific /billing/ inter-service API endpoints.
+        # Staff billing UI pages (/billing/invoices/, /billing/proformas/, etc.) are
+        # excluded — they use normal session auth, not HMAC.
+        is_api = request.path.startswith("/api/")
+        is_billing_api = request.path.startswith(self._BILLING_API_PREFIXES)
+        if is_api or is_billing_api:
             # Skip HMAC validation for public endpoints only (exact match to prevent bypass).
             # NOTE: /api/users/login/ is NOT exempt - the portal service signs
             # login requests with HMAC, so we validate portal origin to prevent
@@ -503,11 +517,6 @@ class PortalServiceHMACMiddleware:
                 # Restricted to an explicit allowlist to prevent broad bypass.
                 staff_session_allowed_prefixes = [
                     "/api/customers/",  # Ticket form: fetch customer services
-                    "/billing/invoices/",  # Staff billing UI: invoice list & detail
-                    "/billing/proformas/",  # Staff billing UI: proforma management
-                    "/billing/payments/",  # Staff billing UI: payment list
-                    "/billing/reports/",  # Staff billing UI: billing reports
-                    "/billing/e-factura/",  # Staff billing UI: e-Factura dashboard
                 ]
                 if (
                     getattr(request, "user", None)
