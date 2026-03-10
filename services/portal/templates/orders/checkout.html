@@ -18,7 +18,7 @@
   <!-- Trust Signals -->
   {% include "orders/partials/trust_signals.html" %}
 
-  <div class="grid lg:grid-cols-3 gap-8" x-data="{ paymentMethod: 'stripe' }">
+  <div class="grid lg:grid-cols-3 gap-8" x-data="{ paymentMethod: 'card' }">
 
     <!-- Order Form -->
     <div class="lg:col-span-2">
@@ -102,7 +102,7 @@
             <div class="grid gap-3">
               <!-- Credit/Debit Card -->
               <label class="relative flex items-start p-4 bg-slate-700/30 rounded-lg border-2 border-slate-600 hover:border-blue-500 transition-colors cursor-pointer">
-                <input type="radio" name="payment_method" value="stripe" class="mt-1 mr-3" checked @change="paymentMethod = 'stripe'">
+                <input type="radio" name="payment_method" value="card" class="mt-1 mr-3" checked @change="paymentMethod = 'card'">
                 <div class="flex-1">
                   <div class="flex items-center">
                     <span class="text-white font-medium">{% icon "credit-card" size="sm" css_class="text-white" %} {% trans "Credit/Debit Card" %}</span>
@@ -287,7 +287,7 @@
           <div class="border-t border-slate-600 pt-4 mt-2">
 
             <!-- Card Payment (Stripe) timeline -->
-            <div x-show="paymentMethod === 'stripe'"
+            <div x-show="paymentMethod === 'card'"
                  x-transition:enter="transition ease-out duration-200"
                  x-transition:enter-start="opacity-0 translate-y-1"
                  x-transition:enter-end="opacity-100 translate-y-0"
@@ -428,7 +428,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateButtonText() {
         const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
         if (buttonText) {
-            if (selectedMethod === 'stripe') {
+            if (selectedMethod === 'card') {
                 buttonText.innerHTML = '{% trans "Continue to Payment" %}';
             } else if (selectedMethod === 'bank_transfer') {
                 buttonText.innerHTML = '{% trans "Create Order for Bank Transfer" %}';
@@ -466,7 +466,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Determine the correct action URL
                 let actionUrl;
-                if (selectedMethod === 'stripe') {
+                if (selectedMethod === 'card') {
                     actionUrl = "{% url 'orders:process_payment' %}";
                 } else if (selectedMethod === 'bank_transfer') {
                     actionUrl = "{% url 'orders:create_order' %}";

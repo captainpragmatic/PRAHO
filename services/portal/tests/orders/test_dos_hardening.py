@@ -181,12 +181,12 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
         # Pre-populate the idempotency cache key
-        cache.set("confirm_payment:42:pi_test_123", "processing", timeout=300)
+        cache.set("confirm_payment:42:pi_test123test1234567890", "processing", timeout=300)
 
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_test_123",
+                "payment_intent_id": "pi_test123test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440000",
             }),
             content_type="application/json",
@@ -210,7 +210,7 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_unique_456",
+                "payment_intent_id": "pi_unique456test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440000",
             }),
             content_type="application/json",
@@ -220,14 +220,14 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
         data = json.loads(response.content)
         self.assertTrue(data["success"])
         # Verify the idempotency key was set in cache
-        self.assertEqual(cache.get("confirm_payment:42:pi_unique_456"), "processing")
+        self.assertEqual(cache.get("confirm_payment:42:pi_unique456test1234567890"), "processing")
 
     def test_different_payment_intents_not_blocked(self) -> None:
         """Different payment_intent_ids are processed independently."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
         # Pre-populate idempotency key for a different PI
-        cache.set("confirm_payment:42:pi_other", "processing", timeout=300)
+        cache.set("confirm_payment:42:pi_other0001234567890abc", "processing", timeout=300)
 
         with patch("apps.orders.views.PlatformAPIClient") as mock_api_class:
             mock_api = mock_api_class.return_value
@@ -237,7 +237,7 @@ class TestConfirmPaymentIdempotency(SimpleTestCase):
             response = self.client.post(
                 "/order/confirm-payment/",
                 data=json.dumps({
-                    "payment_intent_id": "pi_different_789",
+                    "payment_intent_id": "pi_different789test12345",
                     "order_id": "550e8400-e29b-41d4-a716-446655440000",
                 }),
                 content_type="application/json",

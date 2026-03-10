@@ -4,7 +4,7 @@ Regression tests for Portal order flow fixes.
 Covers:
   BACKEND-2: agree_terms validation in create_order
   BACKEND-3: cart version mismatch — AJAX → 400 JSON, non-AJAX → 302 redirect
-  BACKEND-4: payment_method=stripe routes to process_payment
+  BACKEND-4: payment_method=card routes to process_payment
   BUG-2:     product_type field stored in cart items after add_item
   DS-1:      calculate_cart_totals API response includes vat_rate_percent
   UX-5:      calculate_cart_totals API response includes per-item array
@@ -258,12 +258,12 @@ class TestCartVersionMismatch(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# BACKEND-4: payment_method=stripe routes through shared order creation logic
+# BACKEND-4: payment_method=card routes through shared order creation logic
 # ---------------------------------------------------------------------------
 
 @override_settings(**_CACHE_SETTINGS)
-class TestStripePaymentRouting(SimpleTestCase):
-    """BACKEND-4: payment_method=stripe must use the shared order creation path."""
+class TestCardPaymentRouting(SimpleTestCase):
+    """BACKEND-4: payment_method=card must use the shared order creation path."""
 
     def setUp(self) -> None:
         from django.core.cache import cache  # noqa: PLC0415
@@ -288,8 +288,8 @@ class TestStripePaymentRouting(SimpleTestCase):
 
         session.save()
 
-    def test_stripe_payment_method_uses_shared_order_creation(self) -> None:
-        """create_order with payment_method=stripe uses _create_and_process_order (shared path)."""
+    def test_card_payment_method_uses_shared_order_creation(self) -> None:
+        """create_order with payment_method=card uses _create_and_process_order (shared path)."""
         with (
             patch("apps.orders.views.OrderCreationService.preflight_order") as mock_pre,
             patch("apps.orders.views.OrderCreationService.create_draft_order") as mock_create,
@@ -308,7 +308,7 @@ class TestStripePaymentRouting(SimpleTestCase):
                 {
                     "cart_version": self.cart_version,
                     "agree_terms": "on",
-                    "payment_method": "stripe",
+                    "payment_method": "card",
                 },
             )
 
@@ -841,7 +841,7 @@ class TestStripeFailureRedirectsToConfirmation(SimpleTestCase):
             "id": "ord-stripe-001",
             "order_number": "ORD-STRIPE-001",
             "status": "pending",
-            "payment_method": "stripe",
+            "payment_method": "card",
             "total": "100.00",
             "currency_code": "RON",
             "items": [],
@@ -1159,7 +1159,7 @@ class TestBankTransferConfirmationHeader(SimpleTestCase):
 
     def test_non_bank_transfer_shows_generic_message(self) -> None:
         """Non-bank-transfer orders keep the generic success message."""
-        order_data = {**_make_bank_transfer_order(), "payment_method": "stripe"}
+        order_data = {**_make_bank_transfer_order(), "payment_method": "card"}
         response = self._get_confirmation(order_data)
         self.assertEqual(response.status_code, 200)
 
@@ -1209,9 +1209,9 @@ class TestBankTransferInstructionsCard(SimpleTestCase):
         self.assertIn("119.00", content)
         self.assertIn("RON", content)
 
-    def test_bank_details_not_shown_for_stripe_orders(self) -> None:
-        """Stripe orders must NOT show the bank transfer card."""
-        order_data = {**_make_bank_transfer_order(), "payment_method": "stripe"}
+    def test_bank_details_not_shown_for_card_orders(self) -> None:
+        """Card orders must NOT show the bank transfer card."""
+        order_data = {**_make_bank_transfer_order(), "payment_method": "card"}
         response = self._get_confirmation(order_data)
         content = response.content.decode()
         self.assertNotIn("RO49AAAA1B31007593840000", content)
@@ -1257,9 +1257,9 @@ class TestBankTransferContextPassthrough(SimpleTestCase):
         self.assertEqual(bank_details["bank_name"], "Banca Transilvania")
         self.assertEqual(bank_details["beneficiary"], "PragmaticHost SRL")
 
-    def test_bank_details_empty_for_stripe_orders(self) -> None:
+    def test_bank_details_empty_for_card_orders(self) -> None:
         """bank_details must be empty dict when payment_method is not bank_transfer."""
-        order_data = {**_make_bank_transfer_order(), "payment_method": "stripe"}
+        order_data = {**_make_bank_transfer_order(), "payment_method": "card"}
         with patch("apps.orders.views.PlatformAPIClient") as mock_cls:
             mock_instance = MagicMock()
             mock_instance.post.return_value = order_data
@@ -1303,10 +1303,10 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
         src = self._read_template()
         self.assertIn('x-data="{ paymentMethod:', src)
 
-    def test_stripe_radio_has_change_handler(self) -> None:
-        """Stripe radio must set paymentMethod to 'stripe' on change."""
+    def test_card_radio_has_change_handler(self) -> None:
+        """Card radio must set paymentMethod to 'card' on change."""
         src = self._read_template()
-        self.assertIn("@change=\"paymentMethod = 'stripe'\"", src)
+        self.assertIn("@change=\"paymentMethod = 'card'\"", src)
 
     def test_bank_transfer_radio_has_change_handler(self) -> None:
         """Bank transfer radio must set paymentMethod to 'bank_transfer' on change."""
@@ -1315,10 +1315,10 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
 
     # -- x-show toggles -------------------------------------------------------
 
-    def test_stripe_sidebar_panel_has_x_show_stripe(self) -> None:
-        """Stripe Next Steps panel must be conditionally shown for stripe method."""
+    def test_card_sidebar_panel_has_x_show_card(self) -> None:
+        """Card Next Steps panel must be conditionally shown for card method."""
         src = self._read_template()
-        self.assertIn("x-show=\"paymentMethod === 'stripe'\"", src)
+        self.assertIn("x-show=\"paymentMethod === 'card'\"", src)
 
     def test_bank_transfer_sidebar_panel_has_x_show_bank_transfer(self) -> None:
         """Bank Transfer Next Steps panel must be conditionally shown for bank_transfer."""
@@ -1368,15 +1368,15 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
 
     # -- Default state --------------------------------------------------------
 
-    def test_initial_payment_method_is_stripe(self) -> None:
-        """Alpine x-data must initialise paymentMethod to 'stripe' to match pre-checked radio."""
+    def test_initial_payment_method_is_card(self) -> None:
+        """Alpine x-data must initialise paymentMethod to 'card' to match pre-checked radio."""
         src = self._read_template()
-        self.assertIn("paymentMethod: 'stripe'", src)
+        self.assertIn("paymentMethod: 'card'", src)
 
     # -- Both panels present --------------------------------------------------
 
     def test_two_distinct_x_show_panels_present(self) -> None:
-        """The template must have exactly two x-show panels (stripe + bank_transfer)."""
+        """The template must have exactly two x-show panels (card + bank_transfer)."""
         src = self._read_template()
         self.assertEqual(src.count("x-show="), 2)
 

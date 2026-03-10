@@ -550,3 +550,387 @@ class IdempotencyKeyContentValidationTest(TestCase):
             str(response.data.get("error", "")).lower(),
             "Hyphens and underscores must not cause a key-format rejection",
         )
+
+
+# ===============================================================================
+# H1: IntegrityError catch must only handle the idempotency key constraint
+# ===============================================================================
+
+
+class CreateOrderIntegrityErrorScopeTest(TestCase):
+    """H1: IntegrityError on create_order must only catch idempotency race, not check constraints."""
+
+    def setUp(self) -> None:
+        self.user = _make_user("h1-integrity@test.ro")
+        self.currency = _make_currency()
+        self.customer = _make_customer(self.user)
+        self.factory = APIRequestFactory()
+
+    def _make_create_request(self, idempotency_key: str) -> object:
+        request = self.factory.post(
+            "/api/orders/create/",
+            data={"currency": "RON", "items": []},
+            content_type="application/json",
+            HTTP_IDEMPOTENCY_KEY=idempotency_key,
+        )
+        request._portal_authenticated = True
+        request.user = self.user
+        return request
+
+    def test_idempotency_race_returns_existing_order(self) -> None:
+        """When IntegrityError contains idempotency key constraint name, return existing order with duplicate=True."""
+        from apps.api.orders.views import create_order  # noqa: PLC0415
+
+        idempotency_key = "h1-idempotency-race-key1234"
+        existing = _make_order(self.customer, self.currency, idempotency_key=idempotency_key)
+
+        idempotency_exc = IntegrityError(
+            'duplicate key value violates unique constraint "unique_customer_idempotency_key"'
+        )
+
+        request = self._make_create_request(idempotency_key)
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.orders.services.OrderService.create_order", side_effect=idempotency_exc),
+        ):
+            response = create_order(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["duplicate"])
+        self.assertEqual(response.data["order"]["id"], str(existing.id))
+
+    def test_non_idempotency_integrity_error_is_re_raised(self) -> None:
+        """When IntegrityError does NOT contain idempotency constraint name, it must propagate (not be swallowed).
+
+        Patches the serializer and billing address helper to bypass input validation so the code
+        reaches the OrderService.create_order call where the IntegrityError is raised.
+        """
+        from apps.api.orders.views import create_order  # noqa: PLC0415
+
+        idempotency_key = "h1-non-idempotency-key12345"
+
+        check_constraint_exc = IntegrityError(
+            'new row for relation "orders_order" violates check constraint "subtotal_non_negative"'
+        )
+
+        request = self._make_create_request(idempotency_key)
+
+        # Patch serializer validation to pass and billing address to avoid DB call,
+        # so we can reach the OrderService.create_order mock.
+        from apps.api.orders.serializers import OrderCreateInputSerializer  # noqa: PLC0415
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch.object(
+                OrderCreateInputSerializer,
+                "is_valid",
+                return_value=True,
+            ),
+            patch.object(
+                OrderCreateInputSerializer,
+                "validated_data",
+                new_callable=lambda: property(lambda self: {"currency": "RON", "items": [], "notes": "", "meta": {}}),
+                create=True,
+            ),
+            patch(
+                "apps.orders.services.OrderService.build_billing_address_from_customer",
+                return_value={},
+            ),
+            patch("apps.orders.services.OrderService.create_order", side_effect=check_constraint_exc),
+        ):
+            response = create_order(request)
+
+        # A check constraint violation is a server error, not a duplicate — must return 500
+        self.assertEqual(
+            response.status_code,
+            500,
+            "A non-idempotency IntegrityError must not be swallowed as a duplicate — must return 500",
+        )
+
+
+# ===============================================================================
+# H2: PI binding in confirm_order requires payment_method="card" explicitly
+# ===============================================================================
+
+
+class ConfirmOrderPaymentIntentBindingTest(TestCase):
+    """H2: confirm_order must only allow PI binding when payment_method is exactly 'card'."""
+
+    def setUp(self) -> None:
+        self.user = _make_user("h2-pi-binding@test.ro")
+        self.currency = _make_currency()
+        self.customer = _make_customer(self.user)
+        self.factory = APIRequestFactory()
+
+    def _make_confirm_request(self, data: dict) -> object:
+        request = self.factory.post(
+            "/api/orders/confirm/",
+            data=data,
+            content_type="application/json",
+        )
+        request._portal_authenticated = True
+        request.user = self.user
+        return request
+
+    def _make_pending_order(self, payment_method: str = "") -> Order:
+        return Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.company_name,
+            status="pending",
+            payment_method=payment_method,
+        )
+
+    def test_bank_transfer_order_rejects_pi_binding(self) -> None:
+        """An order with payment_method='bank_transfer' must return 400 when a PI is provided."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_order(payment_method="bank_transfer")
+        request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
+
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(
+            response.status_code,
+            400,
+            "PI binding on bank_transfer order must return 400",
+        )
+        self.assertFalse(response.data["success"])
+
+    def test_empty_payment_method_order_promotes_to_card_on_pi_binding(self) -> None:
+        """An order with payment_method='' (portal default) must be promoted to 'card' when a valid PI is provided.
+
+        H2 fix: Portal-created orders have blank payment_method. A valid PI proves card payment,
+        so the view promotes blank → 'card' instead of rejecting with 400.
+        """
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_order(payment_method="")
+        request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.api.orders.views._provision_confirmed_order_item"),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        # Must NOT return 400 — the order should be promoted to card and proceed
+        self.assertNotEqual(
+            response.status_code,
+            400,
+            f"PI binding on blank payment_method must promote to 'card', not return 400. Got: {response.data}",
+        )
+        # Verify the order's payment_method was set to "card"
+        order.refresh_from_db()
+        self.assertEqual(order.payment_method, "card", "Order payment_method must be promoted to 'card'")
+
+    def test_card_payment_method_allows_pi_binding(self) -> None:
+        """An order with payment_method='card' must allow PI binding and proceed."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_order(payment_method="card")
+        request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.api.orders.views._provision_confirmed_order_item"),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        # Must not return 400 for the payment_method check — provisioning/status errors are acceptable
+        self.assertNotEqual(
+            response.status_code,
+            400,
+            f"PI binding on card order must not return 400. Got: {response.data}",
+        )
+
+
+# ===============================================================================
+# M1: payment_intent_id format validation (must match pi_[a-zA-Z0-9]{10,64})
+# ===============================================================================
+
+
+class ConfirmOrderPIFormatValidationTest(TestCase):
+    """M1: confirm_order must reject payment_intent_id values that don't match Stripe's pi_ format."""
+
+    def setUp(self) -> None:
+        self.user = _make_user("m1-pi-format@test.ro")
+        self.currency = _make_currency()
+        self.customer = _make_customer(self.user)
+        self.factory = APIRequestFactory()
+
+    def _make_pending_card_order(self) -> Order:
+        return Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.company_name,
+            status="pending",
+            payment_method="card",
+        )
+
+    def _make_confirm_request(self, data: dict) -> object:
+        request = self.factory.post(
+            "/api/orders/confirm/",
+            data=data,
+            content_type="application/json",
+        )
+        request._portal_authenticated = True
+        request.user = self.user
+        return request
+
+    def test_arbitrary_string_pi_id_is_rejected(self) -> None:
+        """A PI ID that doesn't match pi_[a-zA-Z0-9]+ must return 400."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_card_order()
+        request = self._make_confirm_request({"payment_intent_id": "not_a_pi"})
+
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data["success"])
+        self.assertIn("format", response.data["error"].lower())
+
+    def test_valid_pi_format_passes_validation(self) -> None:
+        """A PI ID matching pi_[a-zA-Z0-9]{10,64} must pass the format check and proceed."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_card_order()
+        request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.api.orders.views._provision_confirmed_order_item"),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        # Must not be rejected due to format — any non-400 is acceptable here
+        self.assertNotEqual(
+            response.status_code,
+            400,
+            f"Valid PI format must not be rejected. Got: {response.data}",
+        )
+
+    def test_pi_with_special_chars_is_rejected(self) -> None:
+        """A PI ID with non-alphanumeric characters after pi_ must return 400."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_card_order()
+        request = self._make_confirm_request({"payment_intent_id": "pi_invalid!@#$%^&*()"})
+
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_pi_too_short_is_rejected(self) -> None:
+        """A PI ID with fewer than 10 characters after pi_ must return 400."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._make_pending_card_order()
+        # Only 5 chars after pi_ — below the minimum of 10
+        request = self._make_confirm_request({"payment_intent_id": "pi_short"})
+
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 400)
+
+
+# ===============================================================================
+# M2: Internal error messages must not be leaked to the client in confirm_order
+# ===============================================================================
+
+
+class ConfirmOrderErrorLeakageTest(TestCase):
+    """M2: confirm_order must return generic error messages, not internal state machine details."""
+
+    def setUp(self) -> None:
+        self.user = _make_user("m2-error-leakage@test.ro")
+        self.currency = _make_currency()
+        self.customer = _make_customer(self.user)
+        self.factory = APIRequestFactory()
+
+    def _make_confirm_request(self, data: dict | None = None) -> object:
+        request = self.factory.post(
+            "/api/orders/confirm/",
+            data=data or {},
+            content_type="application/json",
+        )
+        request._portal_authenticated = True
+        request.user = self.user
+        return request
+
+    def test_already_confirmed_order_returns_409_with_generic_message(self) -> None:
+        """Calling confirm_order on an already-confirmed order must return 409 with no internal state names."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        # An order that is already confirmed cannot be confirmed again
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.company_name,
+            status="confirmed",
+        )
+
+        request = self._make_confirm_request({})
+
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.data["success"])
+
+    def test_status_update_failure_does_not_expose_internal_error_message(self) -> None:
+        """When OrderService.update_order_status returns Err, the response must not contain internal details."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+        from apps.common.types import Err  # noqa: PLC0415
+
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.company_name,
+            status="pending",
+        )
+
+        internal_message = "Invalid status transition: pending -> confirmed (constraint XYZ violated internally)"
+
+        request = self._make_confirm_request({})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch(
+                "apps.api.orders.views.OrderService.update_order_status",
+                return_value=Err(internal_message),
+            ),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.data["success"])
+
+        # The internal message must NOT appear verbatim in the response
+        error_text = response.data.get("error", "")
+        self.assertNotIn(
+            "Invalid status transition",
+            error_text,
+            "Internal state machine error must not be leaked to the client",
+        )
+        self.assertNotIn(
+            "constraint XYZ",
+            error_text,
+            "Internal constraint names must not appear in client-facing error messages",
+        )
+        # Response must be a generic, user-friendly message
+        self.assertIn(
+            "confirmed",
+            error_text.lower(),
+            "Generic error message should mention the action (confirmed) without internal details",
+        )

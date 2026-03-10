@@ -248,7 +248,7 @@
             <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "IBAN" %}</label>
             <div x-data="{ copied: false }" class="flex items-center gap-2">
               <p class="flex-1 text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ bank_details.iban }}</p>
-              <button type="button" x-on:click="navigator.clipboard.writeText('{{ bank_details.iban }}').then(() => { copied = true; setTimeout(() => copied = false, 2000) })" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="copied ? '{% trans "Copied!" %}' : '{% trans "Copy IBAN to clipboard" %}'">
+              <button type="button" x-on:click="navigator.clipboard.writeText('{{ bank_details.iban|escapejs }}').then(() => { copied = true; setTimeout(() => copied = false, 2000) })" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="copied ? '{% trans "Copied!" %}' : '{% trans "Copy IBAN to clipboard" %}'">
                 <span x-show="!copied">{% icon "clipboard" size="sm" %}</span>
                 <span x-show="copied" class="text-green-400">{% icon "check" size="sm" %}</span>
               </button>
@@ -271,7 +271,7 @@
             <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Payment Reference" %}</label>
             <div x-data="{ copied: false }" class="flex items-center gap-2">
               <p class="flex-1 text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ order.order_number }}</p>
-              <button type="button" x-on:click="navigator.clipboard.writeText('{{ order.order_number }}').then(() => { copied = true; setTimeout(() => copied = false, 2000) })" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="copied ? '{% trans "Copied!" %}' : '{% trans "Copy reference to clipboard" %}'">
+              <button type="button" x-on:click="navigator.clipboard.writeText('{{ order.order_number|escapejs }}').then(() => { copied = true; setTimeout(() => copied = false, 2000) })" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="copied ? '{% trans "Copied!" %}' : '{% trans "Copy reference to clipboard" %}'">
                 <span x-show="!copied">{% icon "clipboard" size="sm" %}</span>
                 <span x-show="copied" class="text-green-400">{% icon "check" size="sm" %}</span>
               </button>
@@ -513,7 +513,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         body: JSON.stringify({
           payment_intent_id: paymentIntentId,
-          order_id: '{{ order.id }}',
+          order_id: '{{ order.id|escapejs }}',
           gateway: 'stripe'
         })
       });

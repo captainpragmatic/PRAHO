@@ -23,7 +23,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency
 from apps.common.request_ip import get_safe_client_ip
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.preflight import OrderPreflightValidationService
@@ -691,9 +691,14 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
         # Create order using platform service (idempotency_key set atomically in create_order)
         try:
             result = OrderService.create_order(order_create_data)
-        except IntegrityError:
-            # 🔒 SECURITY: Race condition — concurrent request already created an order
-            # with this idempotency key. Return the existing order instead of failing.
+        except IntegrityError as exc:
+            # 🔒 SECURITY: Only catch idempotency race conditions — not financial check constraints.
+            # The Order model has CheckConstraints (subtotal_non_negative, tax_non_negative, etc.)
+            # that also raise IntegrityError. Re-raise immediately for any non-idempotency violation.
+            if not any(marker in str(exc) for marker in Order._NON_RETRYABLE_CONSTRAINT_MARKERS):
+                raise
+            # Race condition — concurrent request already created an order with this idempotency key.
+            # Return the existing order instead of failing.
             existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
             if existing:
                 logger.info(f"🔄 [API] Idempotency race resolved: returning existing order {existing.order_number}")
@@ -705,7 +710,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     {"success": True, "order": serializer.data, "duplicate": True},
                     status=status.HTTP_200_OK,
                 )
-            # Integrity error but no matching order — re-raise as unexpected
+            # Idempotency constraint but no matching order found — re-raise as unexpected
             raise
 
         if isinstance(result, Ok):
@@ -906,14 +911,27 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
             # Verify PaymentIntent belongs to this order (prevent cross-binding)
             if payment_intent_id:
-                # Reject PI binding for non-stripe orders (e.g. bank_transfer).
-                # Check explicitly for "stripe" — empty payment_method also rejects PI
-                # to prevent cross-binding on orders that haven't set a method yet.
-                if order.payment_method not in ("stripe", "card", ""):
+                # M1: Validate Stripe PI ID format before doing anything with it.
+                # Stripe PI IDs always match pi_[a-zA-Z0-9]{10,64}.
+                # Coerce to str first — DRF may pass non-string types from JSON payloads.
+                if not isinstance(payment_intent_id, str) or not re.match(
+                    r"^pi_[a-zA-Z0-9]{10,64}$", payment_intent_id
+                ):
+                    return Response(
+                        {"success": False, "error": "Invalid payment intent ID format"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # H2: Only allow PI binding on card-compatible orders.
+                # Portal-created orders have blank payment_method (it's not set during creation).
+                # A valid PI proves card payment, so promote blank → "card".
+                # Reject only orders explicitly set to a non-card method (e.g., bank_transfer).
+                if order.payment_method and order.payment_method != "card":
                     return Response(
                         {"success": False, "error": "Order payment method does not accept payment intents"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
+                if not order.payment_method:
+                    order.payment_method = "card"
                 # Reject mismatched PI when order already has one assigned
                 if order.payment_intent_id and payment_intent_id != order.payment_intent_id:
                     return Response(
@@ -928,10 +946,11 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Set payment_intent_id before status change so the audit trail includes it
+            # Set payment_intent_id (and payment_method if promoted above) before
+            # status change so the audit trail includes them.
             if payment_intent_id is not None:
                 order.payment_intent_id = payment_intent_id
-                order.save(update_fields=["payment_intent_id"])
+                order.save(update_fields=["payment_intent_id", "payment_method"])
 
             # Use OrderService.update_order_status() for proper state machine validation
             # and OrderStatusHistory creation (audit trail for this legally-significant transition).
@@ -945,9 +964,14 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 changed_by=audit_user,
             )
             status_result = OrderService.update_order_status(order, status_change)
-            if not status_result.is_ok():
+            if isinstance(status_result, Err):
+                logger.warning(
+                    "⚠️ [API] Status update failed for order %s: %s",
+                    order.order_number,
+                    status_result.error,
+                )
                 return Response(
-                    {"success": False, "error": f"Status update failed: {status_result.err_value}"},
+                    {"success": False, "error": "Order cannot be confirmed in its current state"},
                     status=status.HTTP_409_CONFLICT,
                 )
             order.refresh_from_db()

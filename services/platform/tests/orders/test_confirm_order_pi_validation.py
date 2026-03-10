@@ -77,7 +77,8 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
             self.customer, self.currency,
             payment_method="bank_transfer",
         )
-        request = self._make_request({"payment_intent_id": "pi_attacker_123", "payment_status": "succeeded"})
+        # Use a correctly formatted Stripe PI ID (pi_ + alphanumeric, min 10 chars)
+        request = self._make_request({"payment_intent_id": "pi_attacker1234567890", "payment_status": "succeeded"})
 
         # Bypass HMAC decorator: inject pre-authenticated customer directly
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
@@ -92,10 +93,10 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
 
         order = _make_pending_order(
             self.customer, self.currency,
-            payment_method="stripe",
-            payment_intent_id="pi_original_abc",
+            payment_method="card",
+            payment_intent_id="pi_originalXYZ1234567890",
         )
-        request = self._make_request({"payment_intent_id": "pi_attacker_xyz", "payment_status": "succeeded"})
+        request = self._make_request({"payment_intent_id": "pi_attackerXYZ1234567890", "payment_status": "succeeded"})
 
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
             response = confirm_order(request, str(order.id))
@@ -104,15 +105,15 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         self.assertIn("does not match", response.data["error"])
 
     def test_valid_stripe_pi_accepted(self) -> None:
-        """Valid stripe order with matching PI proceeds to confirmation."""
+        """Valid card order with matching PI proceeds to confirmation."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
         order = _make_pending_order(
             self.customer, self.currency,
-            payment_method="stripe",
-            payment_intent_id="pi_valid_abc",
+            payment_method="card",
+            payment_intent_id="pi_validXYZ1234567890",
         )
-        request = self._make_request({"payment_intent_id": "pi_valid_abc", "payment_status": "succeeded"})
+        request = self._make_request({"payment_intent_id": "pi_validXYZ1234567890", "payment_status": "succeeded"})
 
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
              patch("apps.api.orders.views._provision_confirmed_order_item"):

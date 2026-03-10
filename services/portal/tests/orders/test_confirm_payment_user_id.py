@@ -43,7 +43,7 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_test_456",
+                "payment_intent_id": "pi_test456test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440000",
             }),
             content_type="application/json",
@@ -62,7 +62,7 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_test_789",
+                "payment_intent_id": "pi_test789test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440000",
                 "gateway": "stripe",
             }),
@@ -87,7 +87,7 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_test_int_cast",
+                "payment_intent_id": "pi_testintcast1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440000",
                 "gateway": "stripe",
             }),

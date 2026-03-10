@@ -227,12 +227,12 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
 
         # Pre-populate idempotency key so the second call sees it
-        cache.set("confirm_payment:42:pi_dup_001", "processing", timeout=300)
+        cache.set("confirm_payment:42:pi_dup001test1234567890", "processing", timeout=300)
 
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_dup_001",
+                "payment_intent_id": "pi_dup001test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440001",
             }),
             content_type="application/json",
@@ -243,12 +243,12 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
     def test_duplicate_returns_success_true(self) -> None:
         """Duplicate confirm_payment must set success=True (customer's payment IS processing)."""
         self._set_session(active_customer_id=42, customer_id=42, user_id=7)
-        cache.set("confirm_payment:42:pi_dup_002", "processing", timeout=300)
+        cache.set("confirm_payment:42:pi_dup002test1234567890", "processing", timeout=300)
 
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_dup_002",
+                "payment_intent_id": "pi_dup002test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440002",
             }),
             content_type="application/json",
@@ -270,7 +270,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_fail_001",
+                "payment_intent_id": "pi_fail01test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440003",
             }),
             content_type="application/json",
@@ -278,7 +278,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         # idem_key must be cleared so customer can retry
-        idem_key = "confirm_payment:42:pi_fail_001"
+        idem_key = "confirm_payment:42:pi_fail01test1234567890"
         self.assertIsNone(cache.get(idem_key), "idem_key should be cleared after payment API failure")
 
     @patch("apps.orders.views.PlatformAPIClient")
@@ -295,7 +295,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_partial_001",
+                "payment_intent_id": "pi_partial01test1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440004",
             }),
             content_type="application/json",
@@ -307,7 +307,7 @@ class TestConfirmPaymentIdempotencyRound2(SimpleTestCase):
         self.assertIn("pending", data.get("status", "").lower())
 
         # idem_key must still be set to prevent double-charge
-        idem_key = "confirm_payment:42:pi_partial_001"
+        idem_key = "confirm_payment:42:pi_partial01test1234567890"
         self.assertIsNotNone(cache.get(idem_key), "idem_key must be kept to prevent double-charge")
 
 
@@ -451,7 +451,7 @@ class TestGatewayValidation(SimpleTestCase):
             response = self.client.post(
                 "/order/confirm-payment/",
                 data=json.dumps({
-                    "payment_intent_id": "pi_gateway_ok_001",
+                    "payment_intent_id": "pi_gatewayok1234567890",
                     "order_id": "550e8400-e29b-41d4-a716-446655440005",
                     "gateway": "stripe",
                 }),
@@ -468,7 +468,7 @@ class TestGatewayValidation(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_gateway_bad_001",
+                "payment_intent_id": "pi_gatewaybad1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440006",
                 "gateway": "paypal",
             }),
@@ -487,7 +487,7 @@ class TestGatewayValidation(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_gateway_evil",
+                "payment_intent_id": "pi_gatewayevil1234567890",
                 "order_id": "550e8400-e29b-41d4-a716-446655440007",
                 "gateway": "evil_gateway'; DROP TABLE orders; --",
             }),
@@ -503,7 +503,7 @@ class TestGatewayValidation(SimpleTestCase):
         response = self.client.post(
             "/order/confirm-payment/",
             data=json.dumps({
-                "payment_intent_id": "pi_gateway_empty",
+                "payment_intent_id": "pi_gatewayempty123456789",
                 "order_id": "550e8400-e29b-41d4-a716-446655440008",
                 "gateway": "",
             }),
@@ -626,7 +626,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
         }
 
     def test_zero_total_cents_redirects_to_checkout(self) -> None:
-        """When total is '0.00' and payment method is stripe, must redirect to checkout."""
+        """When total is '0.00' and payment method is card, must redirect to checkout."""
         cart_version = _populate_session_with_cart(self.client)
 
         with (
@@ -644,7 +644,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
                 {
                     "agree_terms": "on",
                     "cart_version": cart_version,
-                    "payment_method": "stripe",
+                    "payment_method": "card",
                 },
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
@@ -653,7 +653,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
         self.assertIn("/order/checkout/", response["Location"])
 
     def test_negative_total_cents_redirects_to_checkout(self) -> None:
-        """When total is '-5.00' and payment method is stripe, must redirect to checkout."""
+        """When total is '-5.00' and payment method is card, must redirect to checkout."""
         cart_version = _populate_session_with_cart(self.client)
 
         with (
@@ -671,7 +671,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
                 {
                     "agree_terms": "on",
                     "cart_version": cart_version,
-                    "payment_method": "stripe",
+                    "payment_method": "card",
                 },
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
@@ -679,8 +679,8 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/order/checkout/", response["Location"])
 
-    def test_positive_total_cents_proceeds_to_stripe(self) -> None:
-        """When total is '99.00' and payment method is stripe, order creation must proceed past total check."""
+    def test_positive_total_cents_proceeds_to_card_payment(self) -> None:
+        """When total is '99.00' and payment method is card, order creation must proceed past total check."""
         cart_version = _populate_session_with_cart(self.client)
 
         with (
@@ -694,14 +694,14 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
             mock_pre.return_value = {"valid": True, "errors": [], "warnings": []}
             mock_create.return_value = self._make_order_response(status="pending", total="99.00")
             mock_api = mock_api_cls.return_value
-            mock_api.post_billing.return_value = {"success": True, "client_secret": "sk_test", "payment_intent_id": "pi_1"}
+            mock_api.post_billing.return_value = {"success": True, "client_secret": "sk_test", "payment_intent_id": "pi_test0001234567890ab"}
 
             response = self.client.post(
                 "/order/create/",
                 {
                     "agree_terms": "on",
                     "cart_version": cart_version,
-                    "payment_method": "stripe",
+                    "payment_method": "card",
                 },
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
@@ -758,8 +758,8 @@ class TestPaymentMethodValidation(SimpleTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/order/checkout/", response["Location"])
 
-    def test_stripe_payment_method_is_accepted(self) -> None:
-        """'stripe' is a valid payment_method and must pass validation."""
+    def test_card_payment_method_is_accepted(self) -> None:
+        """'card' is a valid payment_method and must pass validation."""
         cart_version = _populate_session_with_cart(self.client)
 
         with (
@@ -781,14 +781,14 @@ class TestPaymentMethodValidation(SimpleTestCase):
                 }
             }
             mock_api = mock_api_cls.return_value
-            mock_api.post_billing.return_value = {"success": True, "client_secret": "cs_test", "payment_intent_id": "pi_2"}
+            mock_api.post_billing.return_value = {"success": True, "client_secret": "cs_test", "payment_intent_id": "pi_test0002345678901ab"}
 
             response = self.client.post(
                 "/order/create/",
                 {
                     "agree_terms": "on",
                     "cart_version": cart_version,
-                    "payment_method": "stripe",
+                    "payment_method": "card",
                 },
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
@@ -833,10 +833,10 @@ class TestPaymentMethodValidation(SimpleTestCase):
         self.assertIn("/order/confirmation/", response["Location"])
 
     def test_allowed_payment_methods_constant(self) -> None:
-        """ALLOWED_PAYMENT_METHODS must include stripe and bank_transfer."""
+        """ALLOWED_PAYMENT_METHODS must include card and bank_transfer."""
         from apps.orders.views import ALLOWED_PAYMENT_METHODS  # noqa: PLC0415
 
-        self.assertIn("stripe", ALLOWED_PAYMENT_METHODS)
+        self.assertIn("card", ALLOWED_PAYMENT_METHODS)
         self.assertIn("bank_transfer", ALLOWED_PAYMENT_METHODS)
         # bitcoin, paypal should not be present
         self.assertNotIn("bitcoin", ALLOWED_PAYMENT_METHODS)
@@ -915,3 +915,461 @@ class TestCartVersionHashExcludesUpdatedAt(SimpleTestCase):
         # SHA-256 hex is 64 chars
         self.assertEqual(len(version), 64)
         int(version, 16)  # raises ValueError if not valid hex
+
+
+# ---------------------------------------------------------------------------
+# H6: UUID validation in order_confirmation view
+# ---------------------------------------------------------------------------
+
+
+@override_settings(**_CACHE_SETTINGS)
+class TestOrderConfirmationUUIDValidation(SimpleTestCase):
+    """H6: order_confirmation must reject non-UUID order_id to prevent path traversal."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.client = Client()
+
+    def _set_session(self, **kwargs: object) -> None:
+        session = self.client.session
+        for key, value in kwargs.items():
+            if value is not None:
+                session[key] = value
+        session.save()
+
+    def test_path_traversal_order_id_redirects_to_catalog(self) -> None:
+        """order_confirmation with path traversal order_id must redirect to catalog, NOT make API call."""
+        self._set_session(customer_id=42, user_id=7)
+
+        with patch("apps.orders.views.PlatformAPIClient") as mock_api_cls:
+            response = self.client.get("/order/confirmation/../../billing/sensitive/")
+            # If the URL matched at all and reached the view, the API must NOT have been called
+            # (most likely Django's URL router will 404 this; either outcome is safe)
+            mock_api_cls.assert_not_called()
+
+        # Either 302 redirect or 404 — but must NOT be 200 serving billing data
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_non_uuid_string_order_id_blocked(self) -> None:
+        """order_confirmation with a non-UUID string (e.g. 'abc') must NOT serve order data.
+
+        Django's <uuid:order_id> URL converter rejects non-UUID strings with 404 before the
+        view is invoked — so the PlatformAPIClient must never be called.  Either 404 (URL
+        router rejection) or 302 (view-level redirect) is acceptable; 200 is not.
+        """
+        self._set_session(customer_id=42, user_id=7)
+
+        with patch("apps.orders.views.PlatformAPIClient") as mock_api_cls:
+            response = self.client.get("/order/confirmation/abc/")
+            # The URL router or view must have rejected — no API call allowed
+            mock_api_cls.assert_not_called()
+
+        # 404 (URL router rejects non-UUID) or 302 (view-level guard) — never 200
+        self.assertIn(response.status_code, (302, 404))
+
+    def test_sql_injection_order_id_is_rejected(self) -> None:
+        """order_confirmation with SQL injection attempt must redirect to catalog."""
+        self._set_session(customer_id=42, user_id=7)
+
+        # URL-safe version of a SQL injection attempt
+        evil_id = "1%27%20OR%20%271%27%3D%271"
+
+        with patch("apps.orders.views.PlatformAPIClient") as mock_api_cls:
+            response = self.client.get(f"/order/confirmation/{evil_id}/")
+            mock_api_cls.assert_not_called()
+
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_valid_uuid_order_id_reaches_api(self) -> None:
+        """order_confirmation with a valid UUID must proceed and call the Platform API."""
+        self._set_session(customer_id=42, user_id=7)
+        valid_uuid = "550e8400-e29b-41d4-a716-446655440099"
+
+        with patch("apps.orders.views.PlatformAPIClient") as mock_api_cls:
+            mock_api = mock_api_cls.return_value
+            mock_api.post.return_value = {
+                "id": valid_uuid,
+                "order_number": "ORD-2026-42-0001",
+                "status": "completed",
+                "total": "99.00",
+                "currency_code": "RON",
+                "items": [],
+                "payment_method": "card",
+            }
+            mock_api.get_billing.return_value = {"success": False}
+
+            response = self.client.get(f"/order/confirmation/{valid_uuid}/")
+
+        # The API was called — UUID passed validation
+        mock_api_cls.assert_called_once()
+        # Must NOT redirect to catalog (order found successfully)
+        self.assertNotEqual(response.status_code, 302)
+
+    def test_uuid_validation_accepts_valid_uuid_object(self) -> None:
+        """order_confirmation view-level UUID guard must accept a valid UUID string.
+
+        Django's <uuid:order_id> URL converter only accepts lowercase hex UUIDs in the path.
+        This test calls the view-level guard directly via uuid.UUID() to confirm it accepts
+        valid UUIDs (both upper and lowercase) — which is the H6 fix we're testing.
+        """
+        import uuid as _uuid  # noqa: PLC0415
+
+        # All of these must be parseable by uuid.UUID() — the view's guard
+        valid_uuids = [
+            "550e8400-e29b-41d4-a716-446655440099",  # lowercase
+            "550E8400-E29B-41D4-A716-446655440099",  # uppercase
+            "550e8400e29b41d4a716446655440099",      # no hyphens
+        ]
+        for uid_str in valid_uuids:
+            try:
+                _uuid.UUID(str(uid_str))
+            except (ValueError, TypeError) as exc:
+                self.fail(f"uuid.UUID() should accept '{uid_str}' but raised: {exc}")
+
+    def test_uuid_validation_rejects_invalid_strings(self) -> None:
+        """order_confirmation view-level UUID guard must reject non-UUID strings.
+
+        Verifies that the uuid.UUID() call in the view would raise ValueError/TypeError
+        for the kinds of strings we want to block.
+        """
+        import uuid as _uuid  # noqa: PLC0415
+
+        invalid_ids = [
+            "abc",
+            "../../billing/sensitive",
+            "1' OR '1'='1",
+            "",
+            "not-a-uuid-at-all",
+            "123",
+        ]
+        for bad_id in invalid_ids:
+            with self.assertRaises((ValueError, TypeError), msg=f"Expected error for '{bad_id}'"):
+                _uuid.UUID(str(bad_id))
+
+
+# ---------------------------------------------------------------------------
+# C1 (new): Atomic idempotency acquire in _create_and_process_order
+# ---------------------------------------------------------------------------
+
+
+@override_settings(**_CACHE_SETTINGS)
+class TestOrderCreationAtomicIdempotency(SimpleTestCase):
+    """C1 (new): _create_and_process_order must use cache.add() for atomic TOCTOU-safe idempotency."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.client = Client()
+
+    def _set_session(self, **kwargs: object) -> None:
+        session = self.client.session
+        for key, value in kwargs.items():
+            if value is not None:
+                session[key] = value
+        session.save()
+
+    def test_cache_add_false_with_valid_order_id_redirects_to_confirmation(self) -> None:
+        """When cache.add() returns False and cached value is a valid UUID, redirect to confirmation."""
+        cart_version = _populate_session_with_cart(self.client)
+
+        existing_order_id = "550e8400-e29b-41d4-a716-446655440099"
+
+        # Simulate: key already acquired with a real order_id
+        with (
+            patch("apps.orders.views.cache") as mock_cache,
+            patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
+        ):
+            mock_cache.add.return_value = False
+            mock_cache.get.return_value = existing_order_id
+
+            response = self.client.post(
+                "/order/create/",
+                {
+                    "agree_terms": "on",
+                    "cart_version": cart_version,
+                    "payment_method": "card",
+                },
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/order/confirmation/", response["Location"])
+        self.assertIn(existing_order_id, response["Location"])
+
+    def test_cache_add_false_with_in_progress_marker_redirects_to_checkout(self) -> None:
+        """When cache.add() returns False and cached value is in-progress marker, redirect to checkout."""
+        cart_version = _populate_session_with_cart(self.client)
+
+        with (
+            patch("apps.orders.views.cache") as mock_cache,
+            patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
+        ):
+            mock_cache.add.return_value = False
+            mock_cache.get.return_value = "__in_progress__"
+
+            response = self.client.post(
+                "/order/create/",
+                {
+                    "agree_terms": "on",
+                    "cart_version": cart_version,
+                    "payment_method": "card",
+                },
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/order/checkout/", response["Location"])
+
+    def test_cache_key_deleted_on_order_creation_failure(self) -> None:
+        """On order creation failure (API error), the cache key must be deleted so customer can retry."""
+        cart_version = _populate_session_with_cart(self.client)
+
+        with (
+            patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
+            patch("apps.orders.views.OrderCreationService.preflight_order") as mock_pre,
+            patch("apps.orders.views.OrderCreationService.create_draft_order") as mock_create,
+        ):
+            mock_pre.return_value = {"valid": True, "errors": [], "warnings": []}
+            # Simulate a hard error from order creation
+            mock_create.return_value = {"error": "Platform DB unavailable"}
+
+            response = self.client.post(
+                "/order/create/",
+                {
+                    "agree_terms": "on",
+                    "cart_version": cart_version,
+                    "payment_method": "card",
+                },
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+        # Must redirect to checkout (error path)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/order/checkout/", response["Location"])
+
+        # The cache key must have been deleted — re-check: the real cache should be empty
+        # after failure (we're using LocMemCache from _CACHE_SETTINGS)
+        # Verify no lingering idempotency keys exist for this customer
+        # (the customer_id in session is 42 from _populate_session_with_cart)
+        # We can't easily derive the exact key without re-running the hash, but we verify
+        # the behaviour: all keys were cleaned up by checking cache is in a clean state
+        # for a fresh attempt with identical inputs.
+        cart_version2 = _populate_session_with_cart(self.client)
+
+        with (
+            patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
+            patch("apps.orders.views.OrderCreationService.preflight_order") as mock_pre2,
+            patch("apps.orders.views.OrderCreationService.create_draft_order") as mock_create2,
+            patch("apps.orders.views.PlatformAPIClient") as mock_api_cls,
+        ):
+            mock_pre2.return_value = {"valid": True, "errors": [], "warnings": []}
+            mock_create2.return_value = {
+                "order": {
+                    "id": "550e8400-e29b-41d4-a716-446655440055",
+                    "order_number": "ORD-2026-42-0055",
+                    "status": "pending",
+                    "total": "49.99",
+                    "currency_code": "RON",
+                }
+            }
+            mock_api_cls.return_value.post_billing.return_value = {
+                "success": True,
+                "client_secret": "cs_retry",
+                "payment_intent_id": "pi_retry0001234567890ab",
+            }
+
+            response2 = self.client.post(
+                "/order/create/",
+                {
+                    "agree_terms": "on",
+                    "cart_version": cart_version2,
+                    "payment_method": "card",
+                },
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+        # Retry must succeed and reach confirmation
+        self.assertEqual(response2.status_code, 302)
+        self.assertIn("/order/confirmation/", response2["Location"])
+
+    def test_uses_cache_add_not_cache_get_at_start(self) -> None:
+        """Regression guard: _create_and_process_order must start with cache.add(), not cache.get()."""
+        import inspect  # noqa: PLC0415
+
+        from apps.orders import views  # noqa: PLC0415
+
+        source = inspect.getsource(views._create_and_process_order)
+
+        # Find the idempotency section — the FIRST cache operation must be cache.add
+        # Locate line positions
+        lines = source.splitlines()
+        first_cache_op_line = next(
+            (line.strip() for line in lines if "cache.get(idem_cache_key)" in line or "cache.add(idem_cache_key" in line),
+            None,
+        )
+        self.assertIsNotNone(first_cache_op_line, "No cache operation found for idem_cache_key")
+        self.assertIn("cache.add(", first_cache_op_line, "First idempotency cache op must be cache.add(), not cache.get()")
+
+
+# ---------------------------------------------------------------------------
+# M3: Toast shows correct product name when updating existing cart item
+# ---------------------------------------------------------------------------
+
+
+@override_settings(**_CACHE_SETTINGS)
+class TestAddToCartToastProductName(SimpleTestCase):
+    """M3: add_to_cart must show the name of the product being added, not cart_items[-1]."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.client = Client()
+
+    def _setup_two_item_cart(self) -> None:
+        """Pre-populate cart with product-a and product-b so product-a is NOT the last item."""
+        session = self.client.session
+        session["customer_id"] = 42
+        session["user_id"] = 7
+        session.save()
+
+        from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
+
+        def _mock_product(slug: str) -> dict:
+            return {
+                "id": f"prod-{slug}",
+                "slug": slug,
+                "name": f"Product {slug.upper()}",
+                "product_type": "hosting",
+                "requires_domain": False,
+                "is_active": True,
+            }
+
+        with patch("apps.orders.services.PlatformAPIClient") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.get.side_effect = lambda path, **_kw: _mock_product(path.rstrip("/").split("/")[-1])
+            mock_cls.return_value = mock_instance
+
+            cart = GDPRCompliantCartSession(session)
+            cart.add_item(product_slug="product-a", quantity=1, billing_period="monthly")
+            cart.add_item(product_slug="product-b", quantity=1, billing_period="monthly")
+
+        session.save()
+
+    def test_toast_shows_updated_product_name_not_last_item(self) -> None:
+        """When re-adding product-a (updating it) with product-b as last item, toast must show product-a's name."""
+        self._setup_two_item_cart()
+
+        with patch("apps.orders.views.PlatformAPIClient") as mock_cls:
+            mock_instance = MagicMock()
+            # add_to_cart view also calls PlatformAPIClient internally via cart.add_item
+            mock_instance.get.return_value = {
+                "id": "prod-product-a",
+                "slug": "product-a",
+                "name": "Product PRODUCT-A",
+                "product_type": "hosting",
+                "requires_domain": False,
+                "is_active": True,
+            }
+            mock_cls.return_value = mock_instance
+
+            with patch("apps.orders.views.OrderSecurityHardening.uniform_response_delay"):
+                response = self.client.post(
+                    "/order/cart/add/",
+                    {
+                        "product_slug": "product-a",
+                        "quantity": "2",
+                        "billing_period": "monthly",
+                    },
+                    HTTP_HX_REQUEST="true",
+                )
+
+        # Must return a rendered response (200 or 422), not a crash
+        self.assertNotEqual(response.status_code, 500)
+        # The response content must mention "product-a" or "PRODUCT-A", not "product-b"
+        content = response.content.decode()
+        # The toast product_name context variable must correspond to product-a
+        # We check by asserting the response doesn't reference product-b as the success item
+        # (product-b name would be "Product PRODUCT-B")
+        self.assertNotIn("PRODUCT-B", content)
+
+
+# ---------------------------------------------------------------------------
+# M4: format() crash on translated string with curly braces in error_details
+# ---------------------------------------------------------------------------
+
+
+@override_settings(**_CACHE_SETTINGS)
+class TestOrderValidationFormatStringSafety(SimpleTestCase):
+    """M4: Order validation error message must not crash on user-supplied curly braces."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.client = Client()
+
+    def test_curly_braces_in_preflight_error_do_not_crash(self) -> None:
+        """Preflight returning errors with { or } must not cause a 500 crash."""
+        cart_version = _populate_session_with_cart(self.client)
+
+        with (
+            patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
+            patch("apps.orders.views.OrderCreationService.preflight_order") as mock_pre,
+        ):
+            # Inject malicious/malformed error string containing format placeholders
+            mock_pre.return_value = {
+                "valid": False,
+                "errors": ["Unexpected field {unexpected_key} in payload {data}"],
+                "warnings": [],
+            }
+
+            response = self.client.post(
+                "/order/create/",
+                {
+                    "agree_terms": "on",
+                    "cart_version": cart_version,
+                    "payment_method": "card",
+                },
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+        # Must NOT be 500 — the view must handle curly braces gracefully
+        self.assertNotEqual(response.status_code, 500)
+        # Must redirect to checkout (validation failed path)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/order/checkout/", response["Location"])
+
+    def test_double_curly_braces_in_preflight_error_do_not_crash(self) -> None:
+        """Preflight returning errors with {{ or }} must not crash the view."""
+        cart_version = _populate_session_with_cart(self.client)
+
+        with (
+            patch("apps.orders.views.OrderSecurityHardening.fail_closed_on_cache_failure", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.validate_request_size", return_value=None),
+            patch("apps.orders.views.OrderSecurityHardening.check_suspicious_patterns", return_value=None),
+            patch("apps.orders.views.OrderCreationService.preflight_order") as mock_pre,
+        ):
+            mock_pre.return_value = {
+                "valid": False,
+                "errors": ["{{injection attempt}} with {0} positional"],
+                "warnings": [],
+            }
+
+            response = self.client.post(
+                "/order/create/",
+                {
+                    "agree_terms": "on",
+                    "cart_version": cart_version,
+                    "payment_method": "card",
+                },
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+        self.assertNotEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 302)

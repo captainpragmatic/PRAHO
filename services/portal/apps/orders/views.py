@@ -10,6 +10,7 @@ import hashlib
 import hmac as _hmac_module
 import json
 import logging
+import re
 import time as _time_module
 import uuid
 from collections.abc import Callable
@@ -150,7 +151,7 @@ def _parse_total_cents(order_total: str) -> int:
         return 0
 
 
-ALLOWED_PAYMENT_METHODS = frozenset({"bank_transfer", "stripe", "card"})
+ALLOWED_PAYMENT_METHODS = frozenset({"bank_transfer", "card"})
 
 
 @dataclasses.dataclass
@@ -265,143 +266,181 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
 
-        # Check idempotency — return existing order if already processed
-        cached_order_id = cache.get(idem_cache_key)
-        if cached_order_id:
+        # 🔒 SECURITY: Atomic idempotency acquire — prevents TOCTOU race where two concurrent
+        # requests both pass a non-atomic cache.get() check and create duplicate orders.
+        # cache.add() is atomic: returns False if the key already exists, True if acquired.
+        if not cache.add(idem_cache_key, "__in_progress__", timeout=300):
+            # Key already held — check if it carries a real order_id or an in-progress marker
+            cached_order_id = cache.get(idem_cache_key)
+            if cached_order_id and cached_order_id != "__in_progress__":
+                try:
+                    uuid.UUID(str(cached_order_id))
+                    return redirect("orders:confirmation", order_id=cached_order_id)
+                except (ValueError, TypeError):
+                    # Sentinel value like "__processed__" — order was created but ID missing.
+                    messages.info(request, _("Your order is being processed. Please check your orders list."))
+            elif cached_order_id == "__in_progress__":
+                messages.info(request, _("Your order is being processed. Please wait a moment."))
+            return redirect("orders:checkout")
+
+        # We hold the idempotency lock — track if order was created on Platform so the
+        # finally block can clean up the lock on failure (but preserve it if order exists).
+        order_created_on_platform = False
+        try:
+            # Always run preflight validation — no bypass
+            preflight_result = OrderCreationService.preflight_order(
+                ctx.cart,
+                ctx.customer_id,
+                ctx.user_id,
+                api_client_factory=PlatformAPIClient,
+            )
+
+            if not preflight_result.get("valid", False):
+                errors = preflight_result.get("errors", [])
+                logger.warning(
+                    "🔒 [Orders] Blocking order creation for customer %s - validation failed: %s",
+                    ctx.customer_id,
+                    errors,
+                )
+                if any(_is_profile_error(e) for e in errors):
+                    messages.error(request, _("We need more information to complete your order."))
+                else:
+                    error_details = " ".join(str(e) for e in errors[:3])
+                    # Use %s substitution instead of .format() to avoid crashes when
+                    # error_details contains curly braces (e.g. from untrusted API responses).
+                    messages.error(request, _("Order validation failed: %s") % error_details)
+                return redirect("orders:checkout")
+
+            # Create order with auto-pending (promotes to pending if validation passes)
+            result = OrderCreationService.create_draft_order(
+                ctx.cart,
+                ctx.customer_id,
+                ctx.user_id,
+                ctx.notes,
+                auto_pending=True,
+                idempotency_key=ctx.idempotency_key or None,
+                api_client_factory=PlatformAPIClient,
+            )
+
+            if result.get("error"):
+                messages.error(request, result["error"])
+                return redirect("orders:checkout")
+
+            # Order exists on Platform — protect the idempotency lock from here on.
+            # Even if Stripe/messages/cache fail below, the order is real.
+            order_created_on_platform = True
+
+            order_data = result.get("order", {})
+            if not order_data and result.get("order_id"):
+                order_data = {
+                    "id": result.get("order_id"),
+                    "order_number": result.get("order_id"),
+                    "status": result.get("status", "draft"),
+                }
+
+            order_id = order_data.get("id")
+            order_number = order_data.get("order_number")
+            order_status = order_data.get("status", "draft")
+
+            # Promote the in-progress marker to the real order_id immediately after
+            # extracting order data.  This must happen BEFORE any early-return path
+            # (e.g. total_cents <= 0) so the lock always carries the real order_id.
+            # Wrap in try/except: if cache.set() fails, the lock stays as "__processing__"
+            # which would block retries until TTL expiry.  On failure, delete the lock
+            # so the customer can retry (the order already exists on platform, and the
+            # idempotency key on the platform side will return the existing order).
             try:
-                uuid.UUID(str(cached_order_id))
-                return redirect("orders:confirmation", order_id=cached_order_id)
+                cache.set(idem_cache_key, order_id or "__processed__", timeout=300)
+            except Exception:
+                logger.warning("⚠️ [Orders] cache.set failed promoting idempotency lock: %s", idem_cache_key)
+                try:
+                    cache.delete(idem_cache_key)
+                except Exception:
+                    logger.error("🔥 [Orders] cache.delete also failed for idempotency lock: %s", idem_cache_key)
+
+            # Create Stripe PaymentIntent only for card payment method
+            payment_intent_result = None
+            if order_status == "pending" and ctx.payment_method == "card":
+                order_total = order_data.get("total", "0")
+                order_currency = order_data.get("currency_code", "RON")
+                total_cents = _parse_total_cents(str(order_total))
+
+                if total_cents <= 0:
+                    logger.error(
+                        "❌ Cannot create payment intent with total_cents=%d for order %s",
+                        total_cents,
+                        order_id,
+                    )
+                    messages.error(request, _("Unable to process payment. Please contact support."))
+                    return redirect("orders:checkout")
+                else:
+                    try:
+                        platform_api = PlatformAPIClient()
+                        payment_intent_result = platform_api.post_billing(
+                            "create-payment-intent/",
+                            data={
+                                "order_id": str(order_id),
+                                "amount_cents": total_cents,
+                                "currency": order_currency,
+                                "customer_id": ctx.customer_id,
+                                "order_number": order_number,
+                                "gateway": "stripe",
+                                "metadata": {
+                                    "order_number": order_number,
+                                    "customer_id": str(ctx.customer_id),
+                                    "created_via": "portal_checkout",
+                                },
+                            },
+                            user_id=int(ctx.user_id) if ctx.user_id and str(ctx.user_id).isdigit() else 0,
+                        )
+
+                        if payment_intent_result and payment_intent_result.get("success"):
+                            logger.info("✅ Created payment intent for order %s", order_number)
+                            request.session[f"payment_intent_{order_id}"] = {
+                                "client_secret": payment_intent_result.get("client_secret"),
+                                "payment_intent_id": payment_intent_result.get("payment_intent_id"),
+                            }
+                        else:
+                            logger.error("❌ Failed to create payment intent: %s", payment_intent_result)
+                    except Exception as e:
+                        logger.error("🔥 Error creating payment intent for order %s: %s", order_id, e)
+
+            # Set user-facing success/warning message
+            if order_status == "pending":
+                if ctx.payment_method == "bank_transfer":
+                    messages.success(
+                        request,
+                        _("Order #%s was created successfully. Please complete bank transfer to activate it.")
+                        % order_number,
+                    )
+                elif payment_intent_result and payment_intent_result.get("success"):
+                    messages.info(request, _("Please complete your payment to activate your order."))
+                else:
+                    messages.warning(
+                        request,
+                        _("Order #%s was created successfully, but payment processing is temporarily unavailable.")
+                        % order_number,
+                    )
+            else:
+                messages.success(
+                    request,
+                    _("Order #%s was created successfully! You can view it in your orders list.") % order_number,
+                )
+
+            try:
+                uuid.UUID(str(order_id))
+                return redirect("orders:confirmation", order_id=order_id)
             except (ValueError, TypeError):
                 return redirect("orders:checkout")
 
-        # Always run preflight validation — no bypass
-        preflight_result = OrderCreationService.preflight_order(
-            ctx.cart,
-            ctx.customer_id,
-            ctx.user_id,
-            api_client_factory=PlatformAPIClient,
-        )
-
-        if not preflight_result.get("valid", False):
-            errors = preflight_result.get("errors", [])
-            logger.warning(
-                "🔒 [Orders] Blocking order creation for customer %s - validation failed: %s",
-                ctx.customer_id,
-                errors,
-            )
-            if any(_is_profile_error(e) for e in errors):
-                messages.error(request, _("We need more information to complete your order."))
-            else:
-                error_details = " ".join(str(e) for e in errors[:3])
-                messages.error(request, _("Order validation failed: {}").format(error_details))
-            return redirect("orders:checkout")
-
-        # Create order with auto-pending (promotes to pending if validation passes)
-        result = OrderCreationService.create_draft_order(
-            ctx.cart,
-            ctx.customer_id,
-            ctx.user_id,
-            ctx.notes,
-            auto_pending=True,
-            idempotency_key=ctx.idempotency_key or None,
-            api_client_factory=PlatformAPIClient,
-        )
-
-        if result.get("error"):
-            messages.error(request, result["error"])
-            return redirect("orders:checkout")
-
-        order_data = result.get("order", {})
-        if not order_data and result.get("order_id"):
-            order_data = {
-                "id": result.get("order_id"),
-                "order_number": result.get("order_id"),
-                "status": result.get("status", "draft"),
-            }
-
-        order_id = order_data.get("id")
-        order_number = order_data.get("order_number")
-        order_status = order_data.get("status", "draft")
-
-        # Create Stripe PaymentIntent only for explicit stripe payment method
-        payment_intent_result = None
-        if order_status == "pending" and ctx.payment_method == "stripe":
-            order_total = order_data.get("total", "0")
-            order_currency = order_data.get("currency_code", "RON")
-            total_cents = _parse_total_cents(str(order_total))
-
-            if total_cents <= 0:
-                logger.error(
-                    "❌ Cannot create payment intent with total_cents=%d for order %s",
-                    total_cents,
-                    order_id,
-                )
-                messages.error(request, _("Unable to process payment. Please contact support."))
-                return redirect("orders:checkout")
-            else:
+        finally:
+            # On failure, release the idempotency lock so the customer can retry.
+            # On success the lock now holds the real order_id — do not delete it.
+            if not order_created_on_platform:
                 try:
-                    platform_api = PlatformAPIClient()
-                    payment_intent_result = platform_api.post_billing(
-                        "create-payment-intent/",
-                        data={
-                            "order_id": str(order_id),
-                            "amount_cents": total_cents,
-                            "currency": order_currency,
-                            "customer_id": ctx.customer_id,
-                            "order_number": order_number,
-                            "gateway": "stripe",
-                            "metadata": {
-                                "order_number": order_number,
-                                "customer_id": str(ctx.customer_id),
-                                "created_via": "portal_checkout",
-                            },
-                        },
-                        user_id=int(ctx.user_id) if ctx.user_id and str(ctx.user_id).isdigit() else 0,
-                    )
-
-                    if payment_intent_result and payment_intent_result.get("success"):
-                        logger.info("✅ Created payment intent for order %s", order_number)
-                        request.session[f"payment_intent_{order_id}"] = {
-                            "client_secret": payment_intent_result.get("client_secret"),
-                            "payment_intent_id": payment_intent_result.get("payment_intent_id"),
-                        }
-                    else:
-                        logger.error("❌ Failed to create payment intent: %s", payment_intent_result)
-                except Exception as e:
-                    logger.error("🔥 Error creating payment intent for order %s: %s", order_id, e)
-
-        # Set user-facing success/warning message
-        if order_status == "pending":
-            if ctx.payment_method == "bank_transfer":
-                messages.success(
-                    request,
-                    _("Order #{} was created successfully. Please complete bank transfer to activate it.").format(
-                        order_number
-                    ),
-                )
-            elif payment_intent_result and payment_intent_result.get("success"):
-                messages.info(request, _("Please complete your payment to activate your order."))
-            else:
-                messages.warning(
-                    request,
-                    _("Order #{} was created successfully, but payment processing is temporarily unavailable.").format(
-                        order_number
-                    ),
-                )
-        else:
-            messages.success(
-                request,
-                _("Order #{} was created successfully! You can view it in your orders list.").format(order_number),
-            )
-
-        # Cache idempotency key to prevent duplicate submission
-        cache.set(idem_cache_key, order_id or "__processed__", timeout=300)
-
-        try:
-            uuid.UUID(str(order_id))
-            return redirect("orders:confirmation", order_id=order_id)
-        except (ValueError, TypeError):
-            return redirect("orders:checkout")
+                    cache.delete(idem_cache_key)
+                except Exception:
+                    logger.warning("⚠️ [Orders] Failed to release idempotency lock: %s", idem_cache_key)
 
     except Exception as e:
         logger.error("🔥 [Orders] Unexpected error creating order: %s", e)
@@ -612,6 +651,10 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         if cart_items:
             # Item was successfully added — fire cartAdded event so Alpine auto-opens mini-cart
             just_added_slug = product_slug
+            # Find the item by slug rather than using cart_items[-1], which is wrong when
+            # add_item() updates an existing item in-place instead of appending.
+            added_item = next((i for i in cart_items if i["product_slug"] == product_slug), None)
+            product_name = added_item["product_name"] if added_item else product_slug
             response = render(
                 request,
                 "orders/partials/cart_updated.html",
@@ -619,7 +662,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
                     "cart_count": cart.get_item_count(),
                     "cart_total_quantity": cart.get_total_quantity(),
                     "success_message": _("Product added to cart successfully!"),
-                    "product_name": cart_items[-1]["product_name"],  # Last added item
+                    "product_name": product_name,
                     "just_added_slug": just_added_slug,
                 },
             )
@@ -983,6 +1026,15 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
     """
     Order confirmation page showing order details.
     """
+    # 🔒 SECURITY: Validate order_id is a UUID before constructing any API path.
+    # Django's <uuid:order_id> URL converter already rejects non-UUIDs with 404,
+    # but this explicit check defends against future URL pattern changes and provides
+    # a user-friendly redirect instead of a bare 404.
+    try:
+        uuid.UUID(str(order_id))
+    except (ValueError, TypeError):
+        messages.error(request, _("Invalid order identifier."))
+        return redirect("orders:catalog")
 
     try:
         platform_api = PlatformAPIClient()
@@ -1219,6 +1271,11 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
             uuid.UUID(str(order_id))
         except (ValueError, AttributeError):
             return JsonResponse({"success": False, "error": "Invalid order identifier"}, status=400)
+
+        # 🔒 SECURITY: Validate PI format before sending to any Platform endpoint.
+        # Matches Platform's confirm_order regex — defense-in-depth at the Portal boundary.
+        if not re.match(r"^pi_[a-zA-Z0-9]{10,64}$", str(payment_intent_id)):
+            return JsonResponse({"success": False, "error": "Invalid payment reference"}, status=400)
 
         # Get customer context
         customer_id = getattr(request, "customer_id", None) or request.session.get("active_customer_id")
