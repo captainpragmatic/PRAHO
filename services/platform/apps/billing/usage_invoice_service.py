@@ -201,8 +201,8 @@ class UsageInvoiceService:
 
                     # Link aggregation to invoice line
                     agg.invoice_line = line
-                    agg.status = "invoiced"
-                    agg.save(update_fields=["invoice_line", "status"])
+                    agg.mark_invoiced()
+                    agg.save()
 
             # Add discount line if applicable
             if discount_cents > 0:
@@ -238,10 +238,9 @@ class UsageInvoiceService:
 
             # Update billing cycle
             billing_cycle.invoice = invoice
-            billing_cycle.invoiced_at = timezone.now()
-            billing_cycle.status = "invoiced"
             billing_cycle.total_cents = total_cents
             billing_cycle.tax_cents = tax_cents
+            billing_cycle.mark_invoiced()  # FSM transition sets invoiced_at
             billing_cycle.save()
 
             # Log invoice creation

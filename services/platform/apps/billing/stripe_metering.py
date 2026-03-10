@@ -583,8 +583,7 @@ class StripeMeterWebhookHandler:
                 if billing_cycle:
                     billing_cycle.meta["stripe_invoice_id"] = invoice_data.id
                     billing_cycle.meta["stripe_invoice_total"] = invoice_data.total
-                    billing_cycle.finalized_at = timezone.now()
-                    billing_cycle.status = "finalized"
+                    billing_cycle.finalize()  # FSM transition sets finalized_at
                     billing_cycle.save()
 
             except Subscription.DoesNotExist:

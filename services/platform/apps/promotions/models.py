@@ -26,9 +26,10 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 from apps.settings.services import SettingsService
 
@@ -168,7 +169,7 @@ class PromotionCampaign(models.Model):
         ("completed", "Completed"),
         ("cancelled", "Cancelled"),
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="draft", protected=True, db_index=True)
     is_active = models.BooleanField(default=True, help_text=_("Master switch for campaign"))
 
     # Tracking
@@ -201,9 +202,33 @@ class PromotionCampaign(models.Model):
             models.Index(fields=["start_date", "end_date"]),
             models.Index(fields=["campaign_type", "status"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(status__in=["draft", "scheduled", "active", "paused", "completed", "cancelled"]),
+                name="campaign_valid_status",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True)."""
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
 
     @property
     def is_within_dates(self) -> bool:
@@ -226,6 +251,28 @@ class PromotionCampaign(models.Model):
         if self.budget_cents is None:
             return None
         return max(0, self.budget_cents - self.spent_cents)
+
+    # --- FSM Status Transitions ---
+
+    @transition(field=status, source="draft", target="scheduled")
+    def schedule(self) -> None:
+        """Schedule campaign for future activation."""
+
+    @transition(field=status, source=["draft", "scheduled", "paused"], target="active")
+    def activate(self) -> None:
+        """Activate the campaign."""
+
+    @transition(field=status, source="active", target="paused")
+    def pause(self) -> None:
+        """Pause an active campaign."""
+
+    @transition(field=status, source=["active", "paused", "scheduled"], target="completed")
+    def complete(self) -> None:
+        """Mark campaign as completed."""
+
+    @transition(field=status, source=["draft", "scheduled", "active", "paused"], target="cancelled")
+    def cancel(self) -> None:
+        """Cancel the campaign."""
 
     def can_apply(self) -> bool:
         """Check if campaign can currently be applied."""
@@ -788,7 +835,7 @@ class CouponRedemption(models.Model):
 
     def mark_applied(self, discount_cents: int) -> None:
         """Mark redemption as successfully applied."""
-        self.status = "applied"
+        self.status = "applied"  # fsm-bypass: CouponRedemption uses CharField, not FSMField
         self.discount_cents = discount_cents
         self.applied_at = timezone.now()
         self.save(update_fields=["status", "discount_cents", "applied_at"])
@@ -807,7 +854,7 @@ class CouponRedemption(models.Model):
 
     def mark_failed(self, reason: str) -> None:
         """Mark redemption as failed."""
-        self.status = "failed"
+        self.status = "failed"  # fsm-bypass: CouponRedemption uses CharField, not FSMField
         self.failure_reason = reason
         self.save(update_fields=["status", "failure_reason"])
 
@@ -816,7 +863,7 @@ class CouponRedemption(models.Model):
         if self.status != "applied":
             return
 
-        self.status = "reversed"
+        self.status = "reversed"  # fsm-bypass: CouponRedemption uses CharField, not FSMField
         self.reversed_at = timezone.now()
         self.save(update_fields=["status", "reversed_at"])
 

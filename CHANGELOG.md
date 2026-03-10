@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **django-fsm-2 migration (ADR-0034)** — migrated 10 status-driven models to `FSMField(protected=True)` with `@transition` decorators: Order, OrderItem, Invoice, ProformaInvoice, Payment, Refund, Subscription, Service, Domain, Ticket; `ConcurrentTransitionMixin` on Order and Service for race-sensitive paths
+- **`TaxService`** — centralized Romanian VAT calculation consolidating 5 scattered tax snippets into one stateless service with VAT-compliant banker's rounding
+- **`apps.common.financial_arithmetic`** — shared cents-based financial helpers (`cents_to_decimal`, `decimal_to_cents`, `allocate_proportional`) replacing ad-hoc Decimal arithmetic across billing
+- **DB CHECK constraints** — 22 new constraints across orders/billing/provisioning/domains/tickets enforcing valid status values and non-negative financial amounts at the database level
+- **FSM guardrail lint** (`make lint-fsm`) — AST-hybrid script detecting 5 bypass patterns (direct `.status =`, `QuerySet.update(status=)`, `bulk_update`, `__dict__` bypass, side effects in `@transition` methods); integrated into `make lint` pipeline and pre-commit
+- **FSM transition smoke tests** — 106 tests across all 10 models verifying valid transitions, invalid transition rejection (`TransitionNotAllowed`), and protected field blocks (`AttributeError` on direct assignment)
+- **`force_status()` test helper** — `tests/helpers/fsm_helpers.py` bypasses FSM protection via `__dict__` for test setup; only allowed path for direct status manipulation in tests
+- **`_TICKET_VALID_TRANSITIONS` graph** — static FSM transition map derived from `@transition` decorators, used by `get_allowed_transitions()` to show only valid UI options per source status
+
+### Fixed
+
+- **TRANSITION_MAP dispatch by target only** — `_ORDER_TRANSITION_MAP` now keyed by `(source, target)` tuple; fixes ambiguous dispatch where `failed→pending` (retry) and `draft→pending` (submit) shared the same target key
+- **Silent `contextlib.suppress(TransitionNotAllowed)`** in `refund_service.py` — replaced with explicit try/except that logs warning and returns `Err()` instead of silently leaving invoice in wrong status
+- **Phantom audit logs** in `payment_service.py` — `log_security_event("payment_status_changed")` now only emits after successful FSM transition, not on failure or unmapped status
+- **Issue-after-failure** in `usage_invoice_service.py` — `TransitionNotAllowed` on `invoice.issue()` now returns `Err()` instead of proceeding to set `issued_at`/`locked_at`
+- **`refresh_from_db` field loss** on all 10 FSM models — added `fields` parameter guard so FSM fields are only popped from `__dict__` when they'll actually be refreshed; prevents losing in-memory status when refreshing unrelated fields
+- **Provisioning webhook FSM bypass** — `provisioning/webhooks.py` changed from `service.status = "active"` to `service.complete_provisioning()` FSM transition method
+- **Ticket `get_allowed_transitions()`** — now returns only FSM-valid targets per source status instead of all map keys minus current (was showing invalid options like "in_progress" from "closed")
+
+### Changed
+
+- **`Result` class deduplication** — consolidated 3 identical `Result` implementations into `apps.common.types.Result` with `Ok`/`Err` constructors
+- **Pre-commit pipeline** — added `fsm-guardrail-check` hook after `code-health-check`
+- **README test badge** — updated from 5,000+ to 7,000+
+
 ### Security
 
 - **Order idempotency hardening** — DB-backed unique constraint per customer with atomic `cache.add` and stuck-lock recovery; `IntegrityError` catch narrowed to only handle idempotency race conditions, not financial check constraints

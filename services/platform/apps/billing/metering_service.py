@@ -426,20 +426,21 @@ class AggregationService:
         except BillingCycle.DoesNotExist:
             return Err(f"Billing cycle not found: {billing_cycle_id}")
 
-        if billing_cycle.status not in ("active", "upcoming"):
+        if billing_cycle.status not in ("active", "closing"):
             return Err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
 
         with transaction.atomic():
             # Process any remaining pending events
             self.process_pending_events(customer_id=str(billing_cycle.subscription.customer_id))
 
-            # Update all aggregations to pending_rating
+            # Bulk-update aggregations to pending_rating (bypasses FSM — intentional for performance)
             UsageAggregation.objects.filter(billing_cycle=billing_cycle, status="accumulating").update(
                 status="pending_rating"
             )
 
-            # Close the billing cycle
+            # Close the billing cycle (FSM transition sets closed_at)
             billing_cycle.close()
+            billing_cycle.save()
 
             # Log the closure
             AuditService.log_simple_event(
@@ -575,7 +576,7 @@ class RatingEngine:
             aggregation.overage_value = overage_value
             aggregation.charge_cents = charge_cents
             aggregation.charge_calculated_at = timezone.now()
-            aggregation.status = "rated"
+            aggregation.rate()
             aggregation.save()
 
             # Log the rating

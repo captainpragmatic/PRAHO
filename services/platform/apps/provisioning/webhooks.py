@@ -309,7 +309,7 @@ class ServerWebhookView(View):
             if new_status not in valid_statuses:
                 return False, f"Invalid server status: {new_status}"
 
-            server.status = new_status
+            server.status = new_status  # fsm-bypass: Server uses CharField, not FSMField
             server.save(update_fields=["status", "updated_at"])
 
             # Log security event for critical status changes

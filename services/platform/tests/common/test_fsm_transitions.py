@@ -1,5 +1,5 @@
 """
-FSM transition smoke tests for all 10 django-fsm-2 protected models.
+FSM transition smoke tests for all 15 django-fsm-2 protected models.
 
 Verifies that:
 1. Every @transition method succeeds from its declared source state(s)
@@ -27,6 +27,10 @@ from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
 from apps.provisioning.service_models import Server, Service, ServicePlan
 from apps.tickets.models import Ticket
+from apps.billing.efactura.models import EFacturaDocument
+from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
+from apps.promotions.models import PromotionCampaign
+from apps.provisioning.relationship_models import ServiceGroup
 from tests.helpers.fsm_helpers import force_status
 
 
@@ -1011,3 +1015,461 @@ class OrderFSMTests(FSMTestMixin, TestCase):
         order = self._make_order("draft")
         with self.assertRaises(AttributeError):
             order.status = "completed"
+
+
+# ---------------------------------------------------------------------------
+# 11. EFacturaDocument FSM (7 transitions)
+# ---------------------------------------------------------------------------
+
+
+class EFacturaDocumentFSMTests(FSMTestMixin, TestCase):
+    """Smoke tests for EFacturaDocument status transitions."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_efactura(self, status: str = "draft") -> EFacturaDocument:
+
+        inv = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"FSM-EF-{Invoice.objects.count() + 1:04d}",
+        )
+        doc = EFacturaDocument.objects.create(invoice=inv)
+        if status != "draft":
+            force_status(doc, status)
+        return doc
+
+    def test_mark_queued_from_draft(self) -> None:
+        doc = self._make_efactura("draft")
+        doc.mark_queued()
+        doc.save()
+        self.assertEqual(doc.status, "queued")
+
+    def test_mark_queued_from_error(self) -> None:
+        doc = self._make_efactura("error")
+        doc.mark_queued()
+        doc.save()
+        self.assertEqual(doc.status, "queued")
+
+    def test_mark_submitted_from_queued(self) -> None:
+        doc = self._make_efactura("queued")
+        doc.mark_submitted("IDX-123")
+        doc.save()
+        self.assertEqual(doc.status, "submitted")
+        self.assertEqual(doc.anaf_upload_index, "IDX-123")
+
+    def test_mark_processing_from_submitted(self) -> None:
+        doc = self._make_efactura("submitted")
+        doc.mark_processing()
+        doc.save()
+        self.assertEqual(doc.status, "processing")
+
+    def test_mark_accepted_from_processing(self) -> None:
+        doc = self._make_efactura("processing")
+        doc.mark_accepted("DL-456")
+        doc.save()
+        self.assertEqual(doc.status, "accepted")
+
+    def test_mark_rejected_from_processing(self) -> None:
+        doc = self._make_efactura("processing")
+        doc.mark_rejected([{"message": "test error"}])
+        doc.save()
+        self.assertEqual(doc.status, "rejected")
+
+    def test_mark_error_from_submitted(self) -> None:
+        doc = self._make_efactura("submitted")
+        doc.mark_error("network error")
+        doc.save()
+        self.assertEqual(doc.status, "error")
+
+    def test_cannot_accept_from_draft(self) -> None:
+        doc = self._make_efactura("draft")
+        with self.assertRaises(TransitionNotAllowed):
+            doc.mark_accepted("DL-456")
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        doc = self._make_efactura("draft")
+        with self.assertRaises(AttributeError):
+            doc.status = "accepted"
+
+
+# ---------------------------------------------------------------------------
+# 12. BillingCycle FSM (5 transitions)
+# ---------------------------------------------------------------------------
+
+
+class BillingCycleFSMTests(FSMTestMixin, TestCase):
+    """Smoke tests for BillingCycle status transitions."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_billing_cycle(self, status: str = "upcoming") -> BillingCycle:
+
+        product = Product.objects.create(
+            name=f"FSM-BC-Prod-{Product.objects.count() + 1}",
+            slug=f"fsm-bc-prod-{Product.objects.count() + 1}",
+            product_type="shared_hosting",
+        )
+        now = timezone.now()
+        sub = Subscription.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            product=product,
+            subscription_number=f"SUB-BC-{Subscription.objects.count() + 1:04d}",
+            unit_price_cents=5000,
+            current_period_start=now,
+            current_period_end=now + timezone.timedelta(days=30),
+            next_billing_date=now + timezone.timedelta(days=30),
+        )
+        bc = BillingCycle.objects.create(
+            subscription=sub,
+            period_start=timezone.now(),
+            period_end=timezone.now() + timezone.timedelta(days=30),
+        )
+        if status != "upcoming":
+            force_status(bc, status)
+        return bc
+
+    def test_activate_from_upcoming(self) -> None:
+        bc = self._make_billing_cycle("upcoming")
+        bc.activate()
+        bc.save()
+        self.assertEqual(bc.status, "active")
+
+    def test_close_from_active(self) -> None:
+        bc = self._make_billing_cycle("active")
+        bc.close()
+        bc.save()
+        self.assertEqual(bc.status, "closed")
+
+    def test_mark_invoiced_from_closed(self) -> None:
+        bc = self._make_billing_cycle("closed")
+        bc.mark_invoiced()
+        bc.save()
+        self.assertEqual(bc.status, "invoiced")
+
+    def test_finalize_from_invoiced(self) -> None:
+        bc = self._make_billing_cycle("invoiced")
+        bc.finalize()
+        bc.save()
+        self.assertEqual(bc.status, "finalized")
+
+    def test_cannot_close_from_upcoming(self) -> None:
+        bc = self._make_billing_cycle("upcoming")
+        with self.assertRaises(TransitionNotAllowed):
+            bc.close()
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        bc = self._make_billing_cycle("upcoming")
+        with self.assertRaises(AttributeError):
+            bc.status = "active"
+
+
+# ---------------------------------------------------------------------------
+# 13. UsageAggregation FSM (4 transitions)
+# ---------------------------------------------------------------------------
+
+
+class UsageAggregationFSMTests(FSMTestMixin, TestCase):
+    """Smoke tests for UsageAggregation status transitions."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_aggregation(self, status: str = "accumulating") -> UsageAggregation:
+
+        product = Product.objects.create(
+            name=f"FSM-UA-Prod-{Product.objects.count() + 1}",
+            slug=f"fsm-ua-prod-{Product.objects.count() + 1}",
+            product_type="shared_hosting",
+        )
+        now = timezone.now()
+        sub = Subscription.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            product=product,
+            subscription_number=f"SUB-UA-{Subscription.objects.count() + 1:04d}",
+            unit_price_cents=5000,
+            current_period_start=now,
+            current_period_end=now + timezone.timedelta(days=30),
+            next_billing_date=now + timezone.timedelta(days=30),
+        )
+        bc = BillingCycle.objects.create(
+            subscription=sub,
+            period_start=now,
+            period_end=now + timezone.timedelta(days=30),
+        )
+        meter_num = UsageMeter.objects.count() + 1
+        meter = UsageMeter.objects.create(
+            name=f"fsm_meter_{meter_num}",
+            display_name=f"FSM Meter {meter_num}",
+            unit="count",
+        )
+        agg = UsageAggregation.objects.create(
+            billing_cycle=bc,
+            meter=meter,
+            customer=self.customer,
+            subscription=sub,
+            period_start=now,
+            period_end=now + timezone.timedelta(days=30),
+        )
+        if status != "accumulating":
+            force_status(agg, status)
+        return agg
+
+    def test_close_for_rating(self) -> None:
+        agg = self._make_aggregation("accumulating")
+        agg.close_for_rating()
+        agg.save()
+        self.assertEqual(agg.status, "pending_rating")
+
+    def test_rate_from_pending(self) -> None:
+        agg = self._make_aggregation("pending_rating")
+        agg.rate()
+        agg.save()
+        self.assertEqual(agg.status, "rated")
+
+    def test_rate_from_accumulating(self) -> None:
+        agg = self._make_aggregation("accumulating")
+        agg.rate()
+        agg.save()
+        self.assertEqual(agg.status, "rated")
+
+    def test_mark_invoiced_from_rated(self) -> None:
+        agg = self._make_aggregation("rated")
+        agg.mark_invoiced()
+        agg.save()
+        self.assertEqual(agg.status, "invoiced")
+
+    def test_finalize_from_invoiced(self) -> None:
+        agg = self._make_aggregation("invoiced")
+        agg.finalize()
+        agg.save()
+        self.assertEqual(agg.status, "finalized")
+
+    def test_cannot_invoice_from_accumulating(self) -> None:
+        agg = self._make_aggregation("accumulating")
+        with self.assertRaises(TransitionNotAllowed):
+            agg.mark_invoiced()
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        agg = self._make_aggregation("accumulating")
+        with self.assertRaises(AttributeError):
+            agg.status = "rated"
+
+
+# ---------------------------------------------------------------------------
+# 14. Customer FSM (5 transitions)
+# ---------------------------------------------------------------------------
+
+
+class CustomerFSMTests(FSMTestMixin, TestCase):
+    """Smoke tests for Customer status transitions."""
+
+    def _make_customer(self, status: str = "prospect") -> Customer:
+        cust = Customer.objects.create(
+            name=f"FSM-Cust-{Customer.objects.count() + 1}",
+            primary_email=f"fsm-cust-{Customer.objects.count() + 1}@test.ro",
+        )
+        if status != "prospect":
+            force_status(cust, status)
+        return cust
+
+    def test_activate_from_prospect(self) -> None:
+        cust = self._make_customer("prospect")
+        cust.activate()
+        cust.save()
+        self.assertEqual(cust.status, "active")
+
+    def test_deactivate_from_active(self) -> None:
+        cust = self._make_customer("active")
+        cust.deactivate()
+        cust.save()
+        self.assertEqual(cust.status, "inactive")
+
+    def test_reactivate_from_inactive(self) -> None:
+        cust = self._make_customer("inactive")
+        cust.reactivate()
+        cust.save()
+        self.assertEqual(cust.status, "active")
+
+    def test_suspend_from_active(self) -> None:
+        cust = self._make_customer("active")
+        cust.suspend()
+        cust.save()
+        self.assertEqual(cust.status, "suspended")
+
+    def test_unsuspend_from_suspended(self) -> None:
+        cust = self._make_customer("suspended")
+        cust.unsuspend()
+        cust.save()
+        self.assertEqual(cust.status, "active")
+
+    def test_cannot_suspend_from_prospect(self) -> None:
+        cust = self._make_customer("prospect")
+        with self.assertRaises(TransitionNotAllowed):
+            cust.suspend()
+
+    def test_cannot_deactivate_from_prospect(self) -> None:
+        cust = self._make_customer("prospect")
+        with self.assertRaises(TransitionNotAllowed):
+            cust.deactivate()
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        cust = self._make_customer("prospect")
+        with self.assertRaises(AttributeError):
+            cust.status = "active"
+
+
+# ---------------------------------------------------------------------------
+# 15. PromotionCampaign FSM (5 transitions)
+# ---------------------------------------------------------------------------
+
+
+class PromotionCampaignFSMTests(TestCase):
+    """Smoke tests for PromotionCampaign status transitions."""
+
+    def _make_campaign(self, status: str = "draft") -> PromotionCampaign:
+
+        campaign = PromotionCampaign.objects.create(
+            name=f"FSM-Camp-{PromotionCampaign.objects.count() + 1}",
+            slug=f"fsm-camp-{PromotionCampaign.objects.count() + 1}",
+            start_date=timezone.now(),
+        )
+        if status != "draft":
+            force_status(campaign, status)
+        return campaign
+
+    def test_schedule_from_draft(self) -> None:
+        camp = self._make_campaign("draft")
+        camp.schedule()
+        camp.save()
+        self.assertEqual(camp.status, "scheduled")
+
+    def test_activate_from_draft(self) -> None:
+        camp = self._make_campaign("draft")
+        camp.activate()
+        camp.save()
+        self.assertEqual(camp.status, "active")
+
+    def test_activate_from_scheduled(self) -> None:
+        camp = self._make_campaign("scheduled")
+        camp.activate()
+        camp.save()
+        self.assertEqual(camp.status, "active")
+
+    def test_pause_from_active(self) -> None:
+        camp = self._make_campaign("active")
+        camp.pause()
+        camp.save()
+        self.assertEqual(camp.status, "paused")
+
+    def test_activate_from_paused(self) -> None:
+        camp = self._make_campaign("paused")
+        camp.activate()
+        camp.save()
+        self.assertEqual(camp.status, "active")
+
+    def test_complete_from_active(self) -> None:
+        camp = self._make_campaign("active")
+        camp.complete()
+        camp.save()
+        self.assertEqual(camp.status, "completed")
+
+    def test_cancel_from_draft(self) -> None:
+        camp = self._make_campaign("draft")
+        camp.cancel()
+        camp.save()
+        self.assertEqual(camp.status, "cancelled")
+
+    def test_cannot_schedule_from_active(self) -> None:
+        camp = self._make_campaign("active")
+        with self.assertRaises(TransitionNotAllowed):
+            camp.schedule()
+
+    def test_cannot_pause_from_draft(self) -> None:
+        camp = self._make_campaign("draft")
+        with self.assertRaises(TransitionNotAllowed):
+            camp.pause()
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        camp = self._make_campaign("draft")
+        with self.assertRaises(AttributeError):
+            camp.status = "active"
+
+
+# ---------------------------------------------------------------------------
+# 16. ServiceGroup FSM (4 transitions)
+# ---------------------------------------------------------------------------
+
+
+class ServiceGroupFSMTests(FSMTestMixin, TestCase):
+    """Smoke tests for ServiceGroup status transitions."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+
+    def _make_service_group(self, status: str = "pending") -> ServiceGroup:
+
+        sg = ServiceGroup.objects.create(
+            name=f"FSM-SG-{ServiceGroup.objects.count() + 1}",
+            group_type="package",
+            customer=self.customer,
+        )
+        if status != "pending":
+            force_status(sg, status)
+        return sg
+
+    def test_activate_from_pending(self) -> None:
+        sg = self._make_service_group("pending")
+        sg.activate()
+        sg.save()
+        self.assertEqual(sg.status, "active")
+
+    def test_suspend_from_active(self) -> None:
+        sg = self._make_service_group("active")
+        sg.suspend()
+        sg.save()
+        self.assertEqual(sg.status, "suspended")
+
+    def test_resume_from_suspended(self) -> None:
+        sg = self._make_service_group("suspended")
+        sg.resume()
+        sg.save()
+        self.assertEqual(sg.status, "active")
+
+    def test_cancel_from_active(self) -> None:
+        sg = self._make_service_group("active")
+        sg.cancel()
+        sg.save()
+        self.assertEqual(sg.status, "cancelled")
+
+    def test_cancel_from_pending(self) -> None:
+        sg = self._make_service_group("pending")
+        sg.cancel()
+        sg.save()
+        self.assertEqual(sg.status, "cancelled")
+
+    def test_cannot_activate_from_cancelled(self) -> None:
+        sg = self._make_service_group("cancelled")
+        with self.assertRaises(TransitionNotAllowed):
+            sg.activate()
+
+    def test_cannot_suspend_from_pending(self) -> None:
+        sg = self._make_service_group("pending")
+        with self.assertRaises(TransitionNotAllowed):
+            sg.suspend()
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        sg = self._make_service_group("pending")
+        with self.assertRaises(AttributeError):
+            sg.status = "active"

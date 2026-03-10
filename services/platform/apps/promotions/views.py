@@ -1023,7 +1023,7 @@ class GiftCardCreateView(StaffRequiredMixin, CreateView):
     def form_valid(self, form: Any) -> HttpResponse:
         form.instance.code = GiftCard.generate_code()
         form.instance.current_balance_cents = form.instance.initial_value_cents
-        form.instance.status = "pending"
+        form.instance.status = "pending"  # fsm-bypass: GiftCard uses CharField, not FSMField
         messages.success(self.request, f"Gift card created with code: {form.instance.code}")
         return super().form_valid(form)
 

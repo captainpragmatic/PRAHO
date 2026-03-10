@@ -23,6 +23,7 @@ from django.db import models
 from django.db.models import Max, Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 from .currency_models import Currency
 
@@ -396,7 +397,7 @@ class UsageAggregation(models.Model):
         ("invoiced", _("Invoiced")),
         ("finalized", _("Finalized")),
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="accumulating")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="accumulating", protected=True)
 
     # Invoice link
     invoice_line = models.ForeignKey(
@@ -440,6 +441,42 @@ class UsageAggregation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.meter.name} - {self.customer} ({self.period_start.date()} to {self.period_end.date()})"
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True)."""
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    # --- FSM Transition Methods (ADR-0034) ---
+
+    @transition(field=status, source="accumulating", target="pending_rating")
+    def close_for_rating(self) -> None:
+        """Close accumulation period, ready for rating."""
+
+    @transition(field=status, source=["accumulating", "pending_rating"], target="rated")
+    def rate(self) -> None:
+        """Mark as rated after charge calculation."""
+
+    @transition(field=status, source="rated", target="invoiced")
+    def mark_invoiced(self) -> None:
+        """Mark as included in an invoice."""
+
+    @transition(field=status, source="invoiced", target="finalized")
+    def finalize(self) -> None:
+        """Mark as finalized (invoice paid/closed)."""
 
     @property
     def charge(self) -> Decimal:
@@ -504,7 +541,7 @@ class BillingCycle(models.Model):
     period_end = models.DateTimeField()
 
     # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="upcoming")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="upcoming", protected=True)
 
     # Totals (calculated during closing)
     base_charge_cents = models.BigIntegerField(default=0, help_text=_("Fixed subscription charge for this period"))
@@ -546,6 +583,24 @@ class BillingCycle(models.Model):
     def __str__(self) -> str:
         return f"{self.subscription} - {self.period_start.date()} to {self.period_end.date()}"
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True)."""
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
     @property
     def base_charge(self) -> Decimal:
         return Decimal(self.base_charge_cents) / 100
@@ -576,11 +631,30 @@ class BillingCycle(models.Model):
         now = timezone.now()
         return self.period_start <= now < self.period_end
 
+    # --- FSM Transition Methods (ADR-0034) ---
+
+    @transition(field=status, source="upcoming", target="active")
+    def activate(self) -> None:
+        """Activate the billing cycle."""
+
+    @transition(field=status, source="active", target="closing")
+    def start_closing(self) -> None:
+        """Begin closing the billing cycle."""
+
+    @transition(field=status, source=["active", "closing"], target="closed")
     def close(self) -> None:
-        """Close the billing cycle for new events"""
-        self.status = "closed"
+        """Close the billing cycle for new events."""
         self.closed_at = timezone.now()
-        self.save(update_fields=["status", "closed_at", "updated_at"])
+
+    @transition(field=status, source="closed", target="invoiced")
+    def mark_invoiced(self) -> None:
+        """Mark as invoiced after invoice generation."""
+        self.invoiced_at = timezone.now()
+
+    @transition(field=status, source="invoiced", target="finalized")
+    def finalize(self) -> None:
+        """Mark as finalized (complete lifecycle)."""
+        self.finalized_at = timezone.now()
 
 
 # ===============================================================================
@@ -886,20 +960,20 @@ class UsageAlert(models.Model):
 
     def mark_sent(self, channel: str = "email") -> None:
         """Mark alert as sent"""
-        self.status = "sent"
+        self.status = "sent"  # fsm-bypass: UsageAlert uses CharField, not FSMField
         self.notified_at = timezone.now()
         self.notification_channel = channel
         self.save(update_fields=["status", "notified_at", "notification_channel", "updated_at"])
 
     def mark_failed(self, error: str) -> None:
         """Mark alert as failed"""
-        self.status = "failed"
+        self.status = "failed"  # fsm-bypass: UsageAlert uses CharField, not FSMField
         self.notification_error = error
         self.save(update_fields=["status", "notification_error", "updated_at"])
 
     def resolve(self, user: Any = None, notes: str = "") -> None:
         """Mark alert as resolved"""
-        self.status = "resolved"
+        self.status = "resolved"  # fsm-bypass: UsageAlert uses CharField, not FSMField
         self.resolved_at = timezone.now()
         self.resolved_by = user
         self.resolution_notes = notes

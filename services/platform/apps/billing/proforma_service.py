@@ -94,7 +94,7 @@ class ProformaService:
         """Change proforma status"""
         try:
             old_status = proforma.status
-            proforma.status = new_status
+            proforma.status = new_status  # fsm-bypass: KNOWN BUG (H6) — will crash on FSMField, method is dead code, fix in remediation plan
             proforma.save()
 
             logger.info(

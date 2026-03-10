@@ -17,6 +17,7 @@ from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -101,8 +102,7 @@ class TestServiceProvisioningWorkflow(TestCase):
         )
 
         # Confirm order
-        order.status = 'confirmed'
-        order.save()
+        force_status(order, 'confirmed')
         assert order.status == 'confirmed'
 
         # Step 2: Create invoice
@@ -134,13 +134,11 @@ class TestServiceProvisioningWorkflow(TestCase):
         assert payment.status == 'succeeded'
 
         # Step 4: Update invoice status
-        invoice.status = 'paid'
-        invoice.save()
+        force_status(invoice, 'paid')
         assert invoice.status == 'paid'
 
         # Step 5: Order ready for provisioning
-        order.status = 'processing'
-        order.save()
+        force_status(order, 'processing')
         assert order.status == 'processing'
 
     def test_hosting_product_provisioning_requirements(self):
@@ -275,23 +273,19 @@ class TestProvisioningStatusWorkflow(TestCase):
         )
 
         # Draft -> Pending
-        order.status = 'pending'
-        order.save()
+        force_status(order, 'pending')
         assert order.status == 'pending'
 
         # Pending -> Confirmed
-        order.status = 'confirmed'
-        order.save()
+        force_status(order, 'confirmed')
         assert order.status == 'confirmed'
 
         # Confirmed -> Processing (payment received)
-        order.status = 'processing'
-        order.save()
+        force_status(order, 'processing')
         assert order.status == 'processing'
 
         # Processing -> Completed (services provisioned)
-        order.status = 'completed'
-        order.save()
+        force_status(order, 'completed')
         assert order.status == 'completed'
 
 

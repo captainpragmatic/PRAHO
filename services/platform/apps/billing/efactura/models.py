@@ -23,6 +23,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 if TYPE_CHECKING:
     pass
@@ -106,10 +107,11 @@ class EFacturaDocument(models.Model):
         help_text=_("Type of e-Factura document"),
     )
 
-    status = models.CharField(
+    status = FSMField(
         max_length=20,
         choices=EFacturaStatus.choices(),
         default=EFacturaStatus.DRAFT.value,
+        protected=True,
         db_index=True,
         help_text=_("Current status in the submission lifecycle"),
     )
@@ -249,6 +251,11 @@ class EFacturaDocument(models.Model):
         constraints = [
             # Ensure only one document per invoice
             models.UniqueConstraint(fields=["invoice"], name="unique_efactura_per_invoice"),
+            # FSM: valid status values
+            models.CheckConstraint(
+                condition=Q(status__in=[s.value for s in EFacturaStatus]),
+                name="efactura_valid_status",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -260,6 +267,27 @@ class EFacturaDocument(models.Model):
             self.xml_hash = self._compute_xml_hash()
         super().save(*args, **kwargs)
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See orders.Order.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
     def _compute_xml_hash(self) -> str:
         """Compute SHA-256 hash of XML content."""
         return hashlib.sha256(self.xml_content.encode("utf-8")).hexdigest()
@@ -270,56 +298,54 @@ class EFacturaDocument(models.Model):
             return False
         return self._compute_xml_hash() == self.xml_hash
 
-    # --- Status Transition Methods ---
+    # --- FSM Status Transition Methods (ADR-0034) ---
 
-    def mark_queued(self, save: bool = True) -> None:
-        """Mark document as queued for submission."""
-        self.status = EFacturaStatus.QUEUED.value
-        if save:
-            self.save(update_fields=["status", "updated_at"])
+    @transition(
+        field=status,
+        source=[EFacturaStatus.DRAFT.value, EFacturaStatus.ERROR.value],
+        target=EFacturaStatus.QUEUED.value,
+    )
+    def mark_queued(self) -> None:
+        """Queue document for submission. Also used for retry from error state."""
 
-    def mark_submitted(self, upload_index: str, save: bool = True) -> None:
+    @transition(field=status, source=EFacturaStatus.QUEUED.value, target=EFacturaStatus.SUBMITTED.value)
+    def mark_submitted(self, upload_index: str) -> None:
         """Mark document as submitted to ANAF."""
-        self.status = EFacturaStatus.SUBMITTED.value
         self.anaf_upload_index = upload_index
         self.submitted_at = timezone.now()
-        if save:
-            self.save(update_fields=["status", "anaf_upload_index", "submitted_at", "updated_at"])
 
-    def mark_processing(self, save: bool = True) -> None:
+    @transition(field=status, source=EFacturaStatus.SUBMITTED.value, target=EFacturaStatus.PROCESSING.value)
+    def mark_processing(self) -> None:
         """Mark document as being processed by ANAF."""
-        self.status = EFacturaStatus.PROCESSING.value
-        if save:
-            self.save(update_fields=["status", "updated_at"])
 
-    def mark_accepted(self, download_id: str, response: dict[str, Any] | None = None, save: bool = True) -> None:
+    @transition(field=status, source=EFacturaStatus.PROCESSING.value, target=EFacturaStatus.ACCEPTED.value)
+    def mark_accepted(self, download_id: str, response: dict[str, Any] | None = None) -> None:
         """Mark document as accepted by ANAF."""
-        self.status = EFacturaStatus.ACCEPTED.value
         self.anaf_download_id = download_id
         self.response_at = timezone.now()
         if response:
             self.anaf_response = response
-        if save:
-            self.save(update_fields=["status", "anaf_download_id", "response_at", "anaf_response", "updated_at"])
 
-        # Update invoice fields
-        self._update_invoice_on_acceptance()
-
-    def mark_rejected(
-        self, errors: list[dict[str, Any]], response: dict[str, Any] | None = None, save: bool = True
-    ) -> None:
+    @transition(field=status, source=EFacturaStatus.PROCESSING.value, target=EFacturaStatus.REJECTED.value)
+    def mark_rejected(self, errors: list[dict[str, Any]], response: dict[str, Any] | None = None) -> None:
         """Mark document as rejected by ANAF."""
-        self.status = EFacturaStatus.REJECTED.value
         self.validation_errors = errors
         self.response_at = timezone.now()
         if response:
             self.anaf_response = response
-        if save:
-            self.save(update_fields=["status", "validation_errors", "response_at", "anaf_response", "updated_at"])
 
-    def mark_error(self, error_message: str, save: bool = True) -> None:
+    @transition(
+        field=status,
+        source=[
+            EFacturaStatus.DRAFT.value,
+            EFacturaStatus.QUEUED.value,
+            EFacturaStatus.SUBMITTED.value,
+            EFacturaStatus.PROCESSING.value,
+        ],
+        target=EFacturaStatus.ERROR.value,
+    )
+    def mark_error(self, error_message: str) -> None:
         """Mark document as having an error, schedule retry if possible."""
-        self.status = EFacturaStatus.ERROR.value
         self.last_error = error_message
         self.retry_count += 1
 
@@ -330,9 +356,6 @@ class EFacturaDocument(models.Model):
             self.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
         else:
             self.next_retry_at = None  # No more retries
-
-        if save:
-            self.save(update_fields=["status", "last_error", "retry_count", "next_retry_at", "updated_at"])
 
     def _update_invoice_on_acceptance(self) -> None:
         """Update the related invoice when e-Factura is accepted."""

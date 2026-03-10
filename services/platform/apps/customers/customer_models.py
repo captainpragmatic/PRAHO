@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, transaction
+from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -227,8 +229,13 @@ class Customer(SoftDeleteModel):
     customer_type = models.CharField(
         max_length=20, choices=CustomerType, default=CustomerType.INDIVIDUAL, verbose_name=_("Tip client")
     )
-    status = models.CharField(
-        max_length=20, choices=CustomerStatus, default=CustomerStatus.PROSPECT, verbose_name=_("Status")
+    status = FSMField(
+        max_length=20,
+        choices=CustomerStatus,
+        default=CustomerStatus.PROSPECT,
+        protected=True,
+        db_index=True,
+        verbose_name=_("Status"),
     )
 
     # Company Fields (when customer_type = 'company')
@@ -298,6 +305,12 @@ class Customer(SoftDeleteModel):
                 name="customers_type_active_idx",
             ),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(status__in=["active", "inactive", "suspended", "prospect"]),
+                name="customer_valid_status",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.get_display_name()
@@ -318,6 +331,46 @@ class Customer(SoftDeleteModel):
                 {"meta": "meta must be a JSON object (dict), not %(type)s"},
                 params={"type": type(self.meta).__name__},
             )
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True)."""
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    # --- FSM Status Transitions ---
+
+    @transition(field=status, source="prospect", target="active")
+    def activate(self) -> None:
+        """Activate a prospect customer (e.g. first paid service)."""
+
+    @transition(field=status, source="active", target="inactive")
+    def deactivate(self) -> None:
+        """Mark customer inactive (no active paid services)."""
+
+    @transition(field=status, source="inactive", target="active")
+    def reactivate(self) -> None:
+        """Reactivate an inactive customer (new paid service)."""
+
+    @transition(field=status, source=["active", "inactive"], target="suspended")
+    def suspend(self) -> None:
+        """Suspend the customer account."""
+
+    @transition(field=status, source="suspended", target="active")
+    def unsuspend(self) -> None:
+        """Unsuspend and reactivate the customer account."""
 
     def get_display_name(self) -> str:
         """Get customer display name"""

@@ -10,11 +10,14 @@ Uses a hybrid approach:
 - Inline `# fsm-bypass:` comments for one-off suppressions
 
 Checks:
-1. No direct .status = in app code (must use @transition methods)
+1. No direct .status = in app code (must use @transition methods) — catches variable AND literal assignments
 2. No QuerySet.update(status=) bypassing model methods
 3. No bulk_update with status fields
 4. No __dict__['status'] outside test helpers
 5. No side effects (HTTP/email) inside @transition methods
+6. No objects.create(status="non-default") bypassing FSM lifecycle
+7. No datetime.now() in production code (use timezone.now())
+8. FSM transition calls must be followed by .save() within 5 lines
 
 Exit codes:
   0 - No violations found
@@ -48,6 +51,8 @@ FSM_APPS = frozenset(
         "apps/provisioning",
         "apps/domains",
         "apps/tickets",
+        "apps/customers",
+        "apps/promotions",
     }
 )
 
@@ -57,9 +62,6 @@ FSM_APPS = frozenset(
 # like VirtualminTask, PaymentRetryAttempt, CollectionRun, UsageAggregation, etc.
 NON_FSM_SERVICE_FILES = frozenset(
     {
-        "billing/metering_service.py",
-        "billing/stripe_metering.py",
-        "billing/usage_invoice_service.py",
         "billing/tasks.py",
         "provisioning/virtualmin_service.py",
         "provisioning/virtualmin_views.py",
@@ -266,29 +268,48 @@ def _has_fsm_bypass_comment(line: str) -> bool:
 
 
 def check_direct_status_assignment(path: Path, lines: list[str], result: ScanResult) -> None:
-    """Check 1: No direct .status = in app code (FSM-relevant files only)."""
+    """Check 1: No direct .status = in app code (FSM-relevant files only).
+
+    Catches both literal and variable assignments:
+      .status = "active"        (literal)
+      .status = new_status      (variable)
+      .status = SomeEnum.VALUE  (enum)
+
+    Excludes:
+      .status == "active"       (comparison)
+      .status += ...            (augmented — unlikely but safe)
+      status = FSMField(...)    (field definition)
+      status = models.CharField (non-FSM field definition)
+    """
     str_path = str(path)
     if not _should_check_status_patterns(str_path):
         return
 
     for field_name in FSM_STATUS_FIELDS:
-        pattern = re.compile(rf"\.{field_name}\s*=\s*[\"']")
+        # Match .status = <anything> but NOT == (comparison) or FSMField/models.* (definition)
+        pattern = re.compile(rf"\.{field_name}\s*=\s*(?!=)")
+        # Exclusion patterns for field definitions (class-level, not instance assignment)
+        definition_pattern = re.compile(rf"^\s+{field_name}\s*=\s*(FSMField|models\.)")
         for i, line in enumerate(lines):
-            if pattern.search(line) and not _has_fsm_bypass_comment(line):
-                # Allow inside @transition methods (they set the field via descriptor)
-                if _is_in_transition_method(lines, i):
-                    continue
-                # Allow in refresh_from_db overrides
-                if REFRESH_OVERRIDE_PATTERN.search(repr(lines[max(0, i - 10) : i + 1])):
-                    continue
-                result.violations.append(
-                    Violation(
-                        file=str_path,
-                        line=i + 1,
-                        check="direct-assignment",
-                        message=f"Direct .{field_name} = assignment. Use FSM transition method instead.",
-                    )
+            if not pattern.search(line) or _has_fsm_bypass_comment(line):
+                continue
+            # Skip field definitions (class body: `status = FSMField(...)`)
+            if definition_pattern.search(line):
+                continue
+            # Allow inside @transition methods (they set the field via descriptor)
+            if _is_in_transition_method(lines, i):
+                continue
+            # Allow in refresh_from_db overrides
+            if REFRESH_OVERRIDE_PATTERN.search(repr(lines[max(0, i - 10) : i + 1])):
+                continue
+            result.violations.append(
+                Violation(
+                    file=str_path,
+                    line=i + 1,
+                    check="direct-assignment",
+                    message=f"Direct .{field_name} = assignment. Use FSM transition method instead.",
                 )
+            )
 
 
 def check_queryset_update(path: Path, lines: list[str], result: ScanResult) -> None:
@@ -403,6 +424,261 @@ def check_side_effects_in_transition(path: Path, lines: list[str], result: ScanR
                     )
 
 
+def check_create_with_status(path: Path, lines: list[str], result: ScanResult) -> None:
+    """Check 6: No objects.create(status=...) bypassing FSM lifecycle.
+
+    Django Model.__init__ accepts any status kwarg, completely bypassing FSM
+    protected field guards. Invoices born as 'issued' skip the draft→issued
+    transition and any side effects (locked_at, issued_at, audit logging).
+
+    Catches:
+      Invoice.objects.create(status="issued")
+      Model.objects.get_or_create(..., defaults={"status": "active"})
+      Model.objects.update_or_create(..., defaults={"status": "active"})
+
+    Allows:
+      - Default status values (status="draft", status="pending", status="prospect", etc.)
+      - Test files (already excluded by _should_check_status_patterns)
+    """
+    str_path = str(path)
+    if not _should_check_status_patterns(str_path):
+        return
+
+    # Default/initial statuses that are safe to use in create() (match model defaults)
+    safe_initial_statuses = frozenset(
+        {
+            "draft",
+            "pending",
+            "prospect",
+            "upcoming",
+            "accumulating",
+            "new",
+            "open",
+        }
+    )
+
+    for field_name in FSM_STATUS_FIELDS:
+        # Match create/get_or_create/update_or_create with status kwarg
+        create_pattern = re.compile(
+            rf"\.(?:create|get_or_create|update_or_create)\([^)]*{field_name}\s*=\s*[\"'](\w+)[\"']"
+        )
+        # Match defaults dict with status
+        defaults_pattern = re.compile(rf"defaults\s*=\s*\{{[^}}]*[\"']{field_name}[\"']\s*:\s*[\"'](\w+)[\"']")
+        for i, line in enumerate(lines):
+            if _has_fsm_bypass_comment(line):
+                continue
+            for pat in (create_pattern, defaults_pattern):
+                match = pat.search(line)
+                if match:
+                    status_value = match.group(1)
+                    if status_value not in safe_initial_statuses:
+                        result.violations.append(
+                            Violation(
+                                file=str_path,
+                                line=i + 1,
+                                check="create-with-status",
+                                message=(
+                                    f'objects.create({field_name}="{status_value}") bypasses FSM lifecycle. '
+                                    f"Create with default status, then call transition method."
+                                ),
+                                severity="warning",
+                            )
+                        )
+
+
+def check_naive_datetime(path: Path, lines: list[str], result: ScanResult) -> None:
+    """Check 7: No datetime.now() in production code — use timezone.now().
+
+    Django requires timezone-aware datetimes. Using datetime.now() produces
+    naive datetimes that cause subtle bugs in USE_TZ=True projects.
+    """
+    str_path = str(path)
+    if _is_test_file(str_path):
+        return
+
+    pattern = re.compile(r"\bdatetime\.now\(\)")
+    for i, line in enumerate(lines):
+        if pattern.search(line) and not _has_fsm_bypass_comment(line):
+            result.violations.append(
+                Violation(
+                    file=str_path,
+                    line=i + 1,
+                    check="naive-datetime",
+                    message="datetime.now() produces naive datetime. Use django.utils.timezone.now() instead.",
+                    severity="warning",
+                )
+            )
+
+
+def check_transition_without_save(path: Path, lines: list[str], result: ScanResult) -> None:
+    """Check 8: FSM transition calls should be followed by .save().
+
+    django-fsm transitions mutate in-memory state but do NOT auto-save.
+    Forgetting .save() means the database is never updated — silent data loss.
+
+    Looks for patterns like:
+        obj.activate()
+        # ... no obj.save() within next 5 lines
+
+    Only checks in FSM app files (not tests, not models).
+    Uses only unambiguous transition names to minimize false positives.
+    """
+    str_path = str(path)
+    if _is_test_file(str_path):
+        return
+    if not _is_fsm_app_file(str_path):
+        return
+    # Skip model files — transition methods are defined there, not called
+    if "model" in Path(str_path).name:
+        return
+    # Skip admin files — admin.register() false positive
+    if Path(str_path).name == "admin.py":
+        return
+
+    # Build set of known transition method names from all FSM models
+    known_transitions = _get_known_transition_names()
+    if not known_transitions:
+        return
+
+    transition_call_pattern = re.compile(rf"(\w+)\.({'|'.join(re.escape(t) for t in known_transitions)})\(")
+
+    # Names that are obviously NOT model instances (classes, modules, services)
+    non_instance_prefixes = frozenset(
+        {
+            "self",
+            "cls",
+            "admin",
+            "executor",
+            "gateway",
+            "RefundService",
+            "ServiceManagementService",
+            "IdempotencyManager",
+            "AuditService",
+        }
+    )
+
+    for i, line in enumerate(lines):
+        match = transition_call_pattern.search(line.strip())
+        if not match or _has_fsm_bypass_comment(line):
+            continue
+
+        obj_name = match.group(1)
+        method_name = match.group(2)
+
+        # Skip non-instance callers (classes, modules, self.*)
+        if obj_name in non_instance_prefixes:
+            continue
+        # Skip if caller is PascalCase (class name, not instance)
+        if obj_name[0].isupper():
+            continue
+
+        # Check if .save() appears within the next 5 lines for the same object
+        save_found = False
+        for j in range(i + 1, min(i + 6, len(lines))):
+            if f"{obj_name}.save(" in lines[j]:
+                save_found = True
+                break
+            # Also accept return/raise (control flow exits before save needed here)
+            stripped_next = lines[j].strip()
+            if stripped_next.startswith(("return ", "raise ", "except ", "finally:")):
+                save_found = True  # Different control flow — don't flag
+                break
+
+        if not save_found:
+            result.violations.append(
+                Violation(
+                    file=str_path,
+                    line=i + 1,
+                    check="transition-no-save",
+                    message=(
+                        f"{obj_name}.{method_name}() — no .save() within 5 lines. FSM transitions don't auto-save."
+                    ),
+                    severity="warning",
+                )
+            )
+
+
+def _get_known_transition_names() -> frozenset[str]:
+    """Return all known FSM transition method names across the codebase.
+
+    Built from AST cache. Falls back to a hardcoded set if cache is empty
+    (e.g., when scanning a single file).
+    """
+    # Only UNAMBIGUOUS transition names — names that are unlikely to collide
+    # with non-FSM methods (e.g., `register()` and `close()` are too common).
+    # Kept in sync with @transition methods across models.
+    known_transitions = frozenset(
+        {
+            # Order
+            "confirm",
+            "start_processing",
+            "refund_order",
+            "start_provisioning",
+            "complete_provisioning",
+            # Invoice
+            "mark_as_paid",
+            "mark_overdue",
+            "refund_invoice",
+            "mark_partially_refunded",
+            # Payment
+            "succeed",
+            "fail_payment",
+            "refund_payment",
+            "partially_refund",
+            "complete_refund",
+            "dispute_payment",
+            "cancel_payment",
+            # Subscription
+            "activate",
+            "cancel_subscription",
+            "mark_past_due",
+            # Service
+            "suspend",
+            "terminate",
+            "decommission",
+            # Domain
+            "transfer_in",
+            "expire_domain",
+            "delete_domain",
+            # Ticket
+            "start_work",
+            "wait_on_customer",
+            "reopen",
+            # EFactura
+            "mark_queued",
+            "mark_submitted",
+            "mark_processing",
+            "mark_accepted",
+            "mark_rejected",
+            "mark_error",
+            # BillingCycle
+            "start_closing",
+            "mark_invoiced",
+            "finalize",
+            # UsageAggregation
+            "close_for_rating",
+            # Customer
+            "deactivate",
+            "reactivate",
+            "unsuspend",
+            # Proforma
+            "send_proforma",
+            "accept_proforma",
+            "reject_proforma",
+            "expire_proforma",
+            # Refund
+            "process_refund",
+            "complete_refund_processing",
+            "reject_refund",
+            # OrderItem
+            "start_item_provisioning",
+            "complete_item_provisioning",
+            "fail_item_provisioning",
+        }
+    )
+    return known_transitions
+
+
 # ---------------------------------------------------------------------------
 # Scanning
 # ---------------------------------------------------------------------------
@@ -422,6 +698,9 @@ def scan_file(path: Path, result: ScanResult) -> None:
     check_bulk_update(path, lines, result)
     check_dict_bypass(path, lines, result)
     check_side_effects_in_transition(path, lines, result)
+    check_create_with_status(path, lines, result)
+    check_naive_datetime(path, lines, result)
+    check_transition_without_save(path, lines, result)
 
 
 def scan_directory(root: Path) -> ScanResult:
