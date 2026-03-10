@@ -35,10 +35,9 @@ class OrderSecurityTestCase(TestCase):
         self.client = Client()
 
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         # Create test customer

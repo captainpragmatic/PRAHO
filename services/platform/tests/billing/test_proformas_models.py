@@ -21,7 +21,7 @@ class ProformaInvoiceTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -174,7 +174,7 @@ class ProformaLineTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -196,6 +196,7 @@ class ProformaLineTestCase(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='Test Service',
             username='testuser',
             price=Decimal('99.99'),
@@ -318,7 +319,7 @@ class ProformaIntegrationTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Integration Test SRL',
@@ -337,6 +338,7 @@ class ProformaIntegrationTestCase(TestCase):
         self.hosting_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.hosting_plan,
+            currency=self.currency,
             service_name='Integration Test Hosting',
             username='inttest_hosting',
             price=Decimal('49.99'),
@@ -345,6 +347,7 @@ class ProformaIntegrationTestCase(TestCase):
         self.domain_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.domain_plan,
+            currency=self.currency,
             service_name='Integration Test Domain',
             username='inttest_domain',
             price=Decimal('12.99'),

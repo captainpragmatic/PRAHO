@@ -33,7 +33,7 @@ class TestBillingAuditService(TestCase):
     def setUp(self):
         """Set up test fixtures"""
         # Create test currency
-        self.currency = Currency.objects.create(code='RON', symbol='RON', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'RON', 'decimals': 2})
 
         # Create test customer
         from apps.customers.models import Customer, CustomerTaxProfile
@@ -216,7 +216,8 @@ class TestOrdersAuditService:
     @pytest.fixture
     def currency(self):
         """Create test currency"""
-        return Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        return currency
 
     @pytest.fixture
     def customer(self):
@@ -559,7 +560,7 @@ class TestAuditEventPerformance:
         from apps.billing.models import Currency, Invoice
 
         # Setup
-        currency = Currency.objects.create(code='USD', symbol='$', decimals=2)
+        currency, _ = Currency.objects.get_or_create(code='USD', defaults={'symbol': '$', 'decimals': 2})
         customer = Customer.objects.create(
             company_name='Performance Test Co',
             customer_type='business',

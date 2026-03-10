@@ -19,7 +19,7 @@ class PaymentTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -198,7 +198,7 @@ class PaymentIntegrationTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Integration Test SRL',

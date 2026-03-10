@@ -36,10 +36,9 @@ class RefundServiceComprehensiveTestCase(TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures with proper Romanian business data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='RON',
-            symbol='RON',
-            decimals=2
+            defaults={'symbol': 'RON', 'decimals': 2}
         )
 
         self.customer = Customer.objects.create(
@@ -171,10 +170,9 @@ class RefundQueryServiceTestCase(TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='RON',
-            symbol='RON',
-            decimals=2
+            defaults={'symbol': 'RON', 'decimals': 2}
         )
 
         self.customer = Customer.objects.create(

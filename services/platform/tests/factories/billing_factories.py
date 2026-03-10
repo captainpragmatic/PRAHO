@@ -32,7 +32,8 @@ class PaymentCreationRequest:
 
 def create_currency(code: str = 'RON') -> Currency:
     """Create a simple currency for tests."""
-    return Currency.objects.create(code=code, symbol='€' if code == 'EUR' else 'L', decimals=2)
+    currency, _ = Currency.objects.get_or_create(code=code, defaults={'symbol': '€' if code == 'EUR' else 'L', 'decimals': 2})
+    return currency
 
 
 def create_customer(company_name: str = 'Test Co') -> Customer:
@@ -84,10 +85,9 @@ def CurrencyFactory(**kwargs: object) -> Currency:  # noqa: N802
     code = str(kwargs.pop("code", "RON"))
     symbol = str(kwargs.pop("symbol", "€" if code == "EUR" else "L"))
     decimals = int(kwargs.pop("decimals", 2))
-    kwargs["code"] = code
-    kwargs["symbol"] = symbol
-    kwargs["decimals"] = decimals
-    return Currency.objects.create(**kwargs)
+    defaults = {"symbol": symbol, "decimals": decimals, **kwargs}
+    currency, _ = Currency.objects.get_or_create(code=code, defaults=defaults)
+    return currency
 
 
 def CustomerFactory(**kwargs: object) -> Customer:  # noqa: N802

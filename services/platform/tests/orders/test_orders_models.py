@@ -20,10 +20,9 @@ class OrderModelTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -208,10 +207,9 @@ class OrderItemModelTestCase(TestCase):
             primary_email="contact@testcompany.ro"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.product = Product.objects.create(
@@ -341,10 +339,9 @@ class OrderStatusHistoryModelTestCase(TestCase):
             primary_email="contact@testcompany.ro"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.order = Order.objects.create(

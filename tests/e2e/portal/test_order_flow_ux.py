@@ -194,7 +194,7 @@ def test_ux3_empty_cart_shows_empty_state(page: Page) -> None:
     with ComprehensivePageMonitor(
         page,
         "empty cart review",
-        check_console=False,
+        check_console=False,  # Cart may have residual console warnings from previous test session state
         check_network=True,
         check_html=True,
         check_css=True,

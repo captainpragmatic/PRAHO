@@ -15,6 +15,7 @@ from django.contrib.messages import get_messages
 from django.test import TestCase, Client
 from django.urls import reverse
 
+from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
 from apps.provisioning.models import ServicePlan, Server, Service
 from apps.users.models import CustomerMembership
@@ -145,6 +146,7 @@ class ServiceListViewTestCase(TestCase):
         self.customer_user = create_test_user('customer@test.ro')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         # Create customer membership
         CustomerMembership.objects.create(
@@ -157,6 +159,7 @@ class ServiceListViewTestCase(TestCase):
         self.active_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency=self.currency,
             service_name='Active Service',
             domain='active.example.com',
             username='active_user',
@@ -168,6 +171,7 @@ class ServiceListViewTestCase(TestCase):
         self.pending_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency=self.currency,
             service_name='Pending Service',
             domain='pending.example.com',
             username='pending_user',
@@ -215,6 +219,7 @@ class ServiceDetailViewTestCase(TestCase):
         self.customer_user = create_test_user('customer@test.ro')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         # Create customer membership
         CustomerMembership.objects.create(
@@ -226,6 +231,7 @@ class ServiceDetailViewTestCase(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency=self.currency,
             service_name='Test Service',
             domain='test.example.com',
             username='test_user',
@@ -362,6 +368,7 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         self.customer_user = create_test_user('customer@test.ro')
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         # Create customer membership
         CustomerMembership.objects.create(
@@ -373,6 +380,7 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         self.active_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency=self.currency,
             service_name='Active Service',
             domain='active.example.com',
             username='active_user',
@@ -384,6 +392,7 @@ class ServiceSuspendActivateViewTestCase(TestCase):
         self.suspended_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency=self.currency,
             service_name='Suspended Service',
             domain='suspended.example.com',
             username='suspended_user',
@@ -418,7 +427,7 @@ class ServiceSuspendActivateViewTestCase(TestCase):
     def test_service_activate_success(self):
         """Test successful service activation"""
         self.client.force_login(self.admin_user)
-        response = self.client.get(reverse('provisioning:service_activate', args=[self.suspended_service.pk]))
+        response = self.client.post(reverse('provisioning:service_activate', args=[self.suspended_service.pk]))
 
         # Should redirect to service detail
         self.assertEqual(response.status_code, 302)

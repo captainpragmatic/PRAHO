@@ -52,10 +52,9 @@ class ProductViewAccessControlTests(TestCase):
         )
 
         # Create test currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON"
+            defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
     def test_product_list_requires_staff(self):
@@ -152,10 +151,9 @@ class ProductViewCSRFProtectionTests(TestCase):
             product_type="shared_hosting"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON"
+            defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
     def test_product_create_csrf_protected(self):
@@ -237,10 +235,9 @@ class ProductViewSecurityLoggingTests(TestCase):
             product_type="shared_hosting"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON"
+            defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
     @patch('apps.products.views.log_security_event')
@@ -377,10 +374,9 @@ class ProductViewValidationTests(TestCase):
             product_type="shared_hosting",
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON",
+            defaults={"name": "Romanian Leu", "symbol": "RON"},
         )
 
     @patch('apps.products.views.log_security_event')

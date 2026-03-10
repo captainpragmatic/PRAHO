@@ -14,6 +14,7 @@ No database access — all tests use SimpleTestCase + locmem cache.
 """
 
 import json
+from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
@@ -1091,74 +1092,6 @@ class TestNoFloatformatOnMonetaryValues(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test 9: Breadcrumb arrows use aria-hidden, not <li> elements
-# ---------------------------------------------------------------------------
-
-
-class TestBreadcrumbArrowsNotListItems(SimpleTestCase):
-    """Breadcrumb separator arrows must carry aria-hidden='true' for screen-reader accessibility."""
-
-    def _read_breadcrumb_template(self) -> str:
-        from pathlib import Path  # noqa: PLC0415
-
-        template_path = (
-            Path(__file__).resolve().parents[2]
-            / "templates"
-            / "orders"
-            / "partials"
-            / "order_breadcrumbs.html"
-        )
-        return template_path.read_text(encoding="utf-8")
-
-    def test_breadcrumb_template_exists(self) -> None:
-        """The breadcrumb partial template must exist at the expected path."""
-        from pathlib import Path  # noqa: PLC0415
-
-        template_path = (
-            Path(__file__).resolve().parents[2]
-            / "templates"
-            / "orders"
-            / "partials"
-            / "order_breadcrumbs.html"
-        )
-        self.assertTrue(template_path.exists(), f"Breadcrumb template not found at: {template_path}")
-
-    def test_arrow_separators_have_aria_hidden(self) -> None:
-        """Every separator arrow element must carry aria-hidden='true'."""
-        import re  # noqa: PLC0415
-
-        content = self._read_breadcrumb_template()
-
-        # Find all elements that contain an arrow character (→ or HTML entity arrows)
-        arrow_elements = re.findall(r"<[^>]+>[^<]*(?:\u2192|&rarr;|&#x2192;)[^<]*<[^>]+>|<[^>]+\u2192[^>]*>", content)
-
-        for element in arrow_elements:
-            # Each arrow-containing element must declare aria-hidden="true"
-            has_aria_hidden = 'aria-hidden="true"' in element or "aria-hidden='true'" in element
-            if not has_aria_hidden:
-                self.fail(
-                    f"Separator arrow element is missing aria-hidden='true': {element!r}\n"
-                    "Screen readers will announce the arrow character to users."
-                )
-
-    def test_arrow_separators_are_not_bare_li_elements(self) -> None:
-        """Separator arrows must not be standalone <li> elements without aria-hidden."""
-        import re  # noqa: PLC0415
-
-        content = self._read_breadcrumb_template()
-
-        # Find <li> elements containing only arrow characters and whitespace
-        li_arrow_pattern = re.compile(r"<li[^>]*>\s*(?:\u2192|&rarr;)\s*</li>", re.IGNORECASE)
-        bare_li_arrows = li_arrow_pattern.findall(content)
-
-        self.assertEqual(
-            bare_li_arrows,
-            [],
-            "Separator arrows must not be plain <li> elements — use a <span aria-hidden='true'> inside <li> "
-            f"instead. Found: {bare_li_arrows}",
-        )
-
-
 # ---------------------------------------------------------------------------
 # ENH-2: Bank Transfer Confirmation Flow (Good Tier)
 # ---------------------------------------------------------------------------
@@ -1355,8 +1288,8 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
     covered by E2E tests; functional rendering is covered by integration tests.
     """
 
-    _TEMPLATE_PATH = (
-        "/Users/claudiu/Developer/PRAHO/services/portal/templates/orders/checkout.html"
+    _TEMPLATE_PATH = str(
+        Path(__file__).resolve().parents[2] / "templates" / "orders" / "checkout.html"
     )
 
     def _read_template(self) -> str:

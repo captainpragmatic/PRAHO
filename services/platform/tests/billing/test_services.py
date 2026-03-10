@@ -46,10 +46,9 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
     def setUp(self) -> None:
         """Set up test data with proper relationships."""
         # Create Currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='RON',
-            symbol='lei',
-            decimals=2
+            defaults={'symbol': 'lei', 'decimals': 2}
         )
 
         # Create test users
@@ -766,7 +765,7 @@ class RefundQueryServiceComprehensiveCoverageTestCase(TestCase):
 
     def setUp(self) -> None:
         """Set up test data."""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             name='Test Company',
             customer_type='company',

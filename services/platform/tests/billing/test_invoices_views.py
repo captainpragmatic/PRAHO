@@ -37,7 +37,7 @@ class InvoiceDetailViewTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -142,7 +142,7 @@ class ProformaToInvoiceViewTestCase(TestCase):
         from apps.billing.models import ProformaInvoice, ProformaLine
 
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -248,7 +248,7 @@ class InvoiceEditViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -325,7 +325,7 @@ class InvoiceSendViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',

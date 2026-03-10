@@ -22,10 +22,9 @@ class OrderViewsAuthenticationTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.client = Client()
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
             name="Test Company SRL",
@@ -70,10 +69,9 @@ class OrderListViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         # Create staff user
@@ -202,10 +200,9 @@ class OrderDetailViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.staff_user = User.objects.create_user(
@@ -341,10 +338,9 @@ class OrderStatusChangeViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.staff_user = User.objects.create_user(
@@ -459,10 +455,9 @@ class OrderCancelViewTestCase(TestCase):
         """Set up test data"""
         self.client = Client()
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.staff_user = User.objects.create_user(

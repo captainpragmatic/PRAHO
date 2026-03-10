@@ -36,7 +36,7 @@ class CurrencyModelAdditionalTestCase(TestCase):
 
     def test_currency_str_representation(self):
         """Test Currency __str__ method"""
-        currency = Currency.objects.create(code='GBP', symbol='£', decimals=2)
+        currency, _ = Currency.objects.get_or_create(code='GBP', defaults={'symbol': '£', 'decimals': 2})
         expected = "GBP (£)"
         self.assertEqual(str(currency), expected)
 
@@ -50,7 +50,7 @@ class CurrencyModelAdditionalTestCase(TestCase):
 
     def test_currency_primary_key_constraint(self):
         """Test Currency primary key uniqueness"""
-        Currency.objects.create(code='USD', symbol='$', decimals=2)
+        Currency.objects.get_or_create(code='USD', defaults={'symbol': '$', 'decimals': 2})
 
         with self.assertRaises(IntegrityError):
             Currency.objects.create(code='USD', symbol='$', decimals=2)
@@ -65,10 +65,9 @@ class CurrencyModelAdditionalTestCase(TestCase):
         ]
 
         for code, symbol, decimals in currencies:
-            currency = Currency.objects.create(
+            currency, _ = Currency.objects.get_or_create(
                 code=code,
-                symbol=symbol,
-                decimals=decimals
+                defaults={'symbol': symbol, 'decimals': decimals}
             )
             self.assertEqual(currency.decimals, decimals)
 
@@ -78,9 +77,9 @@ class FXRateModelAdditionalTestCase(TestCase):
 
     def setUp(self):
         """Setup test currencies"""
-        self.usd = Currency.objects.create(code='USD', symbol='$', decimals=2)
-        self.eur = Currency.objects.create(code='EUR', symbol='€', decimals=2)
-        self.gbp = Currency.objects.create(code='GBP', symbol='£', decimals=2)
+        self.usd, _ = Currency.objects.get_or_create(code='USD', defaults={'symbol': '$', 'decimals': 2})
+        self.eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self.gbp, _ = Currency.objects.get_or_create(code='GBP', defaults={'symbol': '£', 'decimals': 2})
 
     def test_fx_rate_str_representation(self):
         """Test FXRate __str__ method"""
@@ -443,7 +442,7 @@ class PaymentRetryAttemptModelAdditionalTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Retry Test SRL',
@@ -575,7 +574,7 @@ class ModelRelationshipTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Relationship Test SRL',
@@ -657,7 +656,7 @@ class ModelValidationTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Validation Test SRL',
@@ -704,18 +703,17 @@ class ModelValidationTestCase(TestCase):
     def test_currency_code_length_validation(self):
         """Test Currency code length validation"""
         # Should accept 3-character codes
-        currency = Currency.objects.create(
+        currency, _ = Currency.objects.get_or_create(
             code='USD',
-            symbol='$',
-            decimals=2
+            defaults={'symbol': '$', 'decimals': 2}
         )
         self.assertEqual(len(currency.code), 3)
 
     def test_decimal_field_precision(self):
         """Test decimal field precision handling"""
         # Test high precision rate
-        base_currency = Currency.objects.create(code='USD', symbol='$', decimals=2)
-        quote_currency = Currency.objects.create(code='BTC', symbol='₿', decimals=8)
+        base_currency, _ = Currency.objects.get_or_create(code='USD', defaults={'symbol': '$', 'decimals': 2})
+        quote_currency, _ = Currency.objects.get_or_create(code='BTC', defaults={'symbol': '₿', 'decimals': 8})
 
         fx_rate = FXRate.objects.create(
             base_code=base_currency,
@@ -732,7 +730,7 @@ class ModelPropertyTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Property Test SRL',
@@ -795,7 +793,7 @@ class ModelManagerTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Manager Test SRL',

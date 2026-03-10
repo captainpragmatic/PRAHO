@@ -416,11 +416,7 @@
   </div>
 </div>
 
-{# DS-6: This script block is intentionally kept inline. It references 6+ Django template
-   constructs ({% url %}, {% trans %}, {% if can_submit %}, {{ escapejs }}) that would require
-   data-* shims on a container element for every string/URL if extracted. The complexity of
-   that indirection outweighs the static-asset benefit for a single-page script this small.
-   Revisit if the block grows beyond ~120 lines or needs to be shared across templates. #}
+{% comment %}DS-6: This script block is intentionally kept inline. It references 6+ Django template constructs (url, trans, if can_submit, escapejs) that would require data-* shims on a container element for every string/URL if extracted. The complexity of that indirection outweighs the static-asset benefit for a single-page script this small. Revisit if the block grows beyond ~120 lines or needs to be shared across templates.{% endcomment %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const orderForm = document.querySelector('form[action="{% url 'orders:create_order' %}"]');

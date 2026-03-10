@@ -27,10 +27,9 @@ class WebhookSignatureSecurityTests(TestCase):
     """🔒 Tests for webhook signature hashing security fixes"""
 
     def setUp(self):
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='USD',
-            name='US Dollar',
-            symbol='$'
+            defaults={'name': 'US Dollar', 'symbol': '$'}
         )
 
     def test_webhook_signature_hashing(self):
@@ -136,10 +135,9 @@ class RetryTimingSecurityTests(TestCase):
     """🔒 Tests for retry timing jitter security fixes"""
 
     def setUp(self):
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='USD',
-            name='US Dollar',
-            symbol='$'
+            defaults={'name': 'US Dollar', 'symbol': '$'}
         )
 
     @patch('secrets.SystemRandom.uniform')
@@ -676,10 +674,9 @@ class ComprehensiveSecurityTests(TestCase):
     """🔒 Comprehensive security tests covering edge cases"""
 
     def setUp(self):
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='USD',
-            name='US Dollar',
-            symbol='$'
+            defaults={'name': 'US Dollar', 'symbol': '$'}
         )
 
     def test_webhook_event_model_security_comprehensive(self):
