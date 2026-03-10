@@ -348,8 +348,8 @@ class TicketStatusServiceTest(TestCase):
         }
 
         for status, expected_display in status_displays.items():
-            ticket.status = status
-            ticket.save()
+            # Bypass FSM for test setup — we're testing display labels, not transitions
+            Ticket.objects.filter(pk=ticket.pk).update(status=status)
             ticket.refresh_from_db()
             self.assertEqual(ticket.get_status_display(), expected_display)
 
@@ -373,7 +373,7 @@ class TicketStatusServiceTest(TestCase):
             # Note: The actual display might be translated, so we just check the key exists
 
     def test_only_valid_statuses_allowed(self):
-        """Test that only valid status values are accepted."""
+        """Test that FSMField restricts direct status assignment and invalid choices fail validation."""
         ticket = TicketStatusService.create_ticket(
             customer=self.customer,
             title='Test Ticket',
@@ -384,13 +384,12 @@ class TicketStatusServiceTest(TestCase):
             contact_email='customer@example.com'
         )
 
-        # Valid statuses should work
-        valid_statuses = ['open', 'in_progress', 'waiting_on_customer', 'closed']
-        for status in valid_statuses:
-            ticket.status = status
-            ticket.save()  # Should not raise
+        # FSMField(protected=True) blocks direct status assignment
+        with self.assertRaises(AttributeError):
+            ticket.status = 'in_progress'
 
-        # Invalid status should raise error when validated
-        ticket.status = 'invalid_status'
+        # Invalid status should raise error when set at DB level and validated
+        Ticket.objects.filter(pk=ticket.pk).update(status='invalid_status')
+        ticket.refresh_from_db()
         with self.assertRaises(Exception):  # Django validation error
             ticket.full_clean()

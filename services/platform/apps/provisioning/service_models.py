@@ -3,6 +3,9 @@ Core provisioning models for PRAHO Platform
 Service plans, servers, services, and provisioning tasks.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any, ClassVar
 
@@ -11,6 +14,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
 
@@ -268,7 +272,7 @@ class Server(models.Model):
         usage_values = [self.cpu_usage_percent or 0, self.ram_usage_percent or 0, self.disk_usage_percent or 0]
         return sum(float(v) for v in usage_values) / len(usage_values)
 
-    def can_host_service(self, service_plan: "ServicePlan") -> bool:
+    def can_host_service(self, service_plan: ServicePlan) -> bool:
         """Check if server can host a new service"""
         if not self.is_active or self.status != "active":
             return False
@@ -283,7 +287,7 @@ class Server(models.Model):
         return not (service_plan.cpu_cores and self.cpu_cores < service_plan.cpu_cores)
 
 
-class Service(models.Model):
+class Service(ConcurrentTransitionMixin, models.Model):
     """Customer services (hosting accounts, domains, etc.)"""
 
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -330,10 +334,13 @@ class Service(models.Model):
     setup_fee_paid = models.BooleanField(default=False, verbose_name=_("Setup Fee Paid"))
 
     # Service lifecycle
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", verbose_name=_("Status"))
+    status = FSMField(
+        max_length=20, choices=STATUS_CHOICES, default="pending", protected=True, verbose_name=_("Status")
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
     activated_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Activated At"))
     suspended_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Suspended At"))
+    terminated_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Terminated At"))
     expires_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Expires At"))
 
     # Provisioning details
@@ -414,21 +421,63 @@ class Service(models.Model):
         delta = self.expires_at - timezone.now()
         return max(0, delta.days)
 
-    def suspend(self, reason: str = "") -> None:
-        """Suspend service"""
-        self.status = "suspended"
-        self.suspended_at = timezone.now()
-        self.suspension_reason = reason
-        self.save(update_fields=["status", "suspended_at", "suspension_reason"])
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Service] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
 
+        See orders.Order.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["status"]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=status, source="pending", target="provisioning")
+    def start_provisioning(self) -> None:
+        """Begin provisioning."""
+
+    @transition(field=status, source=["pending", "provisioning"], target="failed")
+    def fail_provisioning(self) -> None:
+        """Mark provisioning as failed."""
+
+    @transition(field=status, source="provisioning", target="active")
+    def complete_provisioning(self) -> None:
+        """Mark provisioning as complete and activate."""
+        self.activated_at = timezone.now()
+
+    @transition(field=status, source=["suspended", "failed"], target="active")
     def activate(self) -> None:
-        """Activate service"""
-        self.status = "active"
+        """Activate the service."""
         if not self.activated_at:
             self.activated_at = timezone.now()
         self.suspended_at = None
         self.suspension_reason = ""
-        self.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason"])
+
+    @transition(field=status, source=["active"], target="suspended")
+    def suspend(self, reason: str = "") -> None:
+        """Suspend the service."""
+        self.suspended_at = timezone.now()
+        self.suspension_reason = reason
+
+    @transition(field=status, source=["active", "suspended", "failed"], target="terminated")
+    def terminate(self) -> None:
+        """Terminate the service."""
+        self.terminated_at = timezone.now()
+
+    @transition(field=status, source=["active", "suspended"], target="expired")
+    def expire(self) -> None:
+        """Mark service as expired."""
+
+    @transition(field=status, source="failed", target="pending")
+    def retry(self) -> None:
+        """Retry failed provisioning."""
 
     def requires_hosting_account(self) -> bool:
         """

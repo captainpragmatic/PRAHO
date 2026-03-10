@@ -169,7 +169,7 @@ class RegistrarWebhookView(View):
         """✅ Handle domain registration completion"""
         try:
             # Update domain status and details from registrar
-            domain.status = "active"
+            domain.activate()
             domain.registrar_domain_id = webhook_data.get("registrar_domain_id", domain.registrar_domain_id)
             raw_epp = webhook_data.get("epp_code")
             if raw_epp:
@@ -245,7 +245,7 @@ class RegistrarWebhookView(View):
         """📥 Handle domain transfer completion"""
         try:
             # Update domain status
-            domain.status = "active"
+            domain.activate()
 
             # Update registrar domain ID and EPP code if provided
             if "registrar_domain_id" in webhook_data:
@@ -294,7 +294,7 @@ class RegistrarWebhookView(View):
         """🔴 Handle domain expiration"""
         try:
             # Update domain status
-            domain.status = "expired"
+            domain.expire()
             domain.save()
 
             # Log audit event
@@ -319,7 +319,7 @@ class RegistrarWebhookView(View):
         """⏸️ Handle domain suspension"""
         try:
             # Update domain status
-            domain.status = "suspended"
+            domain.suspend()
             domain.save()
 
             # Log security event for suspension

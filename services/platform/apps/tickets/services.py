@@ -15,6 +15,14 @@ from .models import Ticket
 
 logger = logging.getLogger(__name__)
 
+# FSM transition dispatch map: new_status -> method_name on Ticket
+_TICKET_TRANSITION_MAP: dict[str, str] = {
+    "in_progress": "start_work",
+    "waiting_on_customer": "wait_on_customer",
+    "closed": "close",
+    "open": "reopen",
+}
+
 
 class TicketStatusService:
     """
@@ -25,15 +33,10 @@ class TicketStatusService:
     - in_progress: Agent actively working/owning it
     - waiting_on_customer: Paused; waiting for customer input
     - closed: Final state with resolution code
-    """
 
-    # Valid status transitions
-    VALID_TRANSITIONS: ClassVar[dict[str, list[str]]] = {
-        "open": ["in_progress", "waiting_on_customer", "closed"],
-        "in_progress": ["waiting_on_customer", "closed", "open"],
-        "waiting_on_customer": ["in_progress", "open", "closed"],
-        "closed": [],  # Closed tickets cannot transition (would need reopening)
-    }
+    Status transitions are enforced by the FSMField on Ticket; this service
+    adds business rules on top (auto-assignment, resolution code requirement, etc.).
+    """
 
     # Status transition rules
     AUTO_ASSIGN_ACTIONS: ClassVar[list[str]] = ["reply", "reply_and_wait"]
@@ -86,16 +89,16 @@ class TicketStatusService:
             if not resolution_code:
                 raise ValueError("Resolution code required when closing ticket")
             ticket.resolution_code = resolution_code
-            ticket.closed_at = timezone.now()
+            # closed_at is set by the FSM close() transition side effect
 
         # Reset customer replied indicators when agent responds (except for internal notes)
         if reply_action != "internal_note":
             ticket.has_customer_replied = False
             ticket.customer_replied_at = None
 
-        # Validate and apply transition
-        cls._validate_status_transition(ticket.status, new_status)
-        ticket.status = new_status
+        # Apply FSM transition (close() sets closed_at as side effect)
+        if new_status != ticket.status:
+            cls._apply_fsm_transition(ticket, new_status)
         ticket.save()
 
         logger.info(
@@ -131,15 +134,14 @@ class TicketStatusService:
                 raise ValueError("Resolution code required when closing ticket")
             new_status = "closed"
             ticket.resolution_code = resolution_code
-            ticket.closed_at = timezone.now()
+            # closed_at is set by the FSM close() transition side effect
 
         else:
             raise ValueError(f"Invalid reply action: {reply_action}")
 
-        # Validate and apply transition
+        # Apply FSM transition (close() sets closed_at as side effect)
         if new_status != current_status:
-            cls._validate_status_transition(current_status, new_status)
-            ticket.status = new_status
+            cls._apply_fsm_transition(ticket, new_status)
 
         # Ensure ticket is assigned if agent is replying (but not for internal notes)
         if reply_action != "internal_note" and not ticket.assigned_to:
@@ -175,16 +177,13 @@ class TicketStatusService:
         # Auto-transition logic
         if current_status == "waiting_on_customer":
             if ticket.assigned_to:
-                new_status = "in_progress"
+                ticket.start_work()
                 logger.info(
                     f"📝 [TicketStatus] Customer replied to {ticket.ticket_number}: resuming work (assigned agent)"
                 )
             else:
-                new_status = "open"
+                ticket.back_to_queue()
                 logger.info(f"📝 [TicketStatus] Customer replied to {ticket.ticket_number}: back to queue (unassigned)")
-
-            cls._validate_status_transition(current_status, new_status)
-            ticket.status = new_status
 
         else:
             # For other statuses, just log the customer reply
@@ -203,14 +202,9 @@ class TicketStatusService:
         if not resolution_code:
             raise ValueError("Resolution code is required when closing ticket")
 
-        current_status = ticket.status
-        new_status = "closed"
-
-        cls._validate_status_transition(current_status, new_status)
-
-        ticket.status = new_status
+        # close() FSM transition sets closed_at as a side effect
+        ticket.close()
         ticket.resolution_code = resolution_code
-        ticket.closed_at = timezone.now()
         ticket.save()
 
         logger.info(f"✅ [TicketStatus] Closed ticket {ticket.ticket_number} with resolution: {resolution_code}")
@@ -224,17 +218,19 @@ class TicketStatusService:
         if ticket.status != "closed":
             raise ValueError("Only closed tickets can be reopened")
 
-        # Determine reopened status based on assignment
-        new_status = "in_progress" if ticket.assigned_to else "open"
-
-        ticket.status = new_status
+        # reopen() FSM transition sets closed_at = None and goes to "open"
+        ticket.reopen()
         ticket.resolution_code = ""
-        ticket.closed_at = None
         ticket.has_customer_replied = False
         ticket.customer_replied_at = None
+
+        # If assigned, immediately move to in_progress
+        if ticket.assigned_to:
+            ticket.start_work()
+
         ticket.save()
 
-        logger.info(f"🔄 [TicketStatus] Reopened ticket {ticket.ticket_number} as {new_status}")
+        logger.info(f"🔄 [TicketStatus] Reopened ticket {ticket.ticket_number} as {ticket.status}")
         return ticket
 
     @classmethod
@@ -249,26 +245,27 @@ class TicketStatusService:
         else:
             return default
 
-    @classmethod
-    def _validate_status_transition(cls, from_status: str, to_status: str) -> None:
+    @staticmethod
+    def _apply_fsm_transition(ticket: Ticket, new_status: str) -> None:
         """
-        Validate that a status transition is allowed.
+        Apply the FSM transition for the given target status.
 
-        Raises ValueError if transition is invalid.
+        django-fsm enforces valid transitions at the model level;
+        invalid transitions raise TransitionNotAllowed.
         """
-        if from_status == to_status:
-            return  # No transition needed
-
-        if from_status not in cls.VALID_TRANSITIONS:
-            raise ValueError(f"Invalid source status: {from_status}")
-
-        if to_status not in cls.VALID_TRANSITIONS[from_status]:
-            raise ValueError(f"Invalid transition from {from_status} to {to_status}")
+        transition_method_name = _TICKET_TRANSITION_MAP.get(new_status)
+        if transition_method_name is None:
+            raise ValueError(f"No FSM transition mapped for target status: {new_status}")
+        getattr(ticket, transition_method_name)()
 
     @classmethod
     def get_allowed_transitions(cls, current_status: str) -> list[str]:
-        """Get list of allowed status transitions for current status."""
-        return cls.VALID_TRANSITIONS.get(current_status, [])
+        """Get list of allowed status transitions for current status.
+
+        Returns all mapped target statuses that differ from the current status.
+        The FSMField on Ticket enforces actual validity at transition time.
+        """
+        return [target for target in _TICKET_TRANSITION_MAP if target != current_status]
 
     @classmethod
     def get_queue_tickets(cls, queue_type: str, assigned_to: User | None = None) -> QuerySet[Ticket]:

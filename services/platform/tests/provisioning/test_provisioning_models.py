@@ -483,8 +483,14 @@ class ServiceModelTestCase(TestCase):
 
     def test_suspend_method(self):
         """Test suspend method updates status and timestamps"""
+        # Service starts as 'pending'; use DB update to put it in 'active' state for test
+        from apps.provisioning.models import Service  # noqa: PLC0415
+        Service.objects.filter(pk=self.service.pk).update(status='active')
+        self.service.refresh_from_db()
+
         reason = "Payment overdue"
         self.service.suspend(reason)
+        self.service.save(update_fields=["status", "suspended_at", "suspension_reason"])
 
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, 'suspended')
@@ -493,7 +499,13 @@ class ServiceModelTestCase(TestCase):
 
     def test_activate_method_first_time(self):
         """Test activate method for first-time activation"""
+        # Service starts as 'pending'; put it in 'failed' state so activate() is valid
+        from apps.provisioning.models import Service  # noqa: PLC0415
+        Service.objects.filter(pk=self.service.pk).update(status='failed')
+        self.service.refresh_from_db()
+
         self.service.activate()
+        self.service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason"])
 
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, 'active')
@@ -503,13 +515,18 @@ class ServiceModelTestCase(TestCase):
 
     def test_activate_method_reactivation(self):
         """Test activate method for reactivation after suspension"""
-        # First suspend
+        from apps.provisioning.models import Service  # noqa: PLC0415
+        # Put service in 'active' state first, then suspend via FSM
         original_activation = timezone.now() - timezone.timedelta(days=10)
-        self.service.activated_at = original_activation
+        Service.objects.filter(pk=self.service.pk).update(status='active', activated_at=original_activation)
+        self.service.refresh_from_db()
+
         self.service.suspend("Test suspension")
+        self.service.save(update_fields=["status", "suspended_at", "suspension_reason"])
 
         # Then reactivate
         self.service.activate()
+        self.service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason"])
 
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, 'active')

@@ -57,32 +57,40 @@ class ServiceManagementService:
             previous_status = service.status
 
             if action == "start":
-                service.status = "active"
-                service.save(update_fields=["status", "updated_at"])
+                service.activate()
+                service.save(
+                    update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
+                )
                 logger.info(f"⚙️ [ServiceMgmt] Started service {service_id}")
 
             elif action == "stop":
-                service.status = "stopped"
-                service.save(update_fields=["status", "updated_at"])
-                logger.info(f"⚙️ [ServiceMgmt] Stopped service {service_id}")
+                # "stop" maps to suspend — there is no terminal "stopped" state
+                service.suspend(reason="manual_stop")
+                service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+                logger.info(f"⚙️ [ServiceMgmt] Stopped (suspended) service {service_id}")
 
             elif action == "restart":
-                service.status = "restarting"
-                service.save(update_fields=["status", "updated_at"])
-                service.status = "active"
-                service.save(update_fields=["status", "updated_at"])
+                # suspend then re-activate
+                service.suspend(reason="restart")
+                service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+                service.activate()
+                service.save(
+                    update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
+                )
                 logger.info(f"⚙️ [ServiceMgmt] Restarted service {service_id}")
 
             elif action == "suspend":
-                service.status = "suspended"
-                service.save(update_fields=["status", "updated_at"])
+                service.suspend()
+                service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
                 logger.info(f"⚙️ [ServiceMgmt] Suspended service {service_id}")
 
             elif action == "resume":
                 if service.status != "suspended":
                     return Err(f"Service {service_id} is not suspended")
-                service.status = "active"
-                service.save(update_fields=["status", "updated_at"])
+                service.activate()
+                service.save(
+                    update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
+                )
                 logger.info(f"⚙️ [ServiceMgmt] Resumed service {service_id}")
 
             elif action == "check_status":
@@ -127,8 +135,11 @@ class ServiceManagementService:
             return Err(f"Service {service_id} not found")
 
         try:
-            service.status = "pending_review"
-            service.save(update_fields=["status", "updated_at"])
+            # "pending_review" is not a formal FSM status; record the review request
+            # in admin_notes and log an audit event without changing the FSM state.
+            review_note = f"[REVIEW REQUESTED] {reason or 'No reason specified'}"
+            service.admin_notes = f"{review_note}\n{service.admin_notes}".strip()
+            service.save(update_fields=["admin_notes", "updated_at"])
 
             AuditService.log_simple_event(
                 event_type="service_marked_for_review",
@@ -148,7 +159,8 @@ class ServiceManagementService:
             return Ok(
                 {
                     "service_id": str(service.id),
-                    "status": "pending_review",
+                    "status": service.status,
+                    "review_requested": True,
                     "reason": reason,
                     "success": True,
                 }
@@ -193,12 +205,20 @@ class ServiceGroupService:
             for service in services:
                 try:
                     if action == "suspend_all":
-                        service.status = "suspended"
-                        service.save(update_fields=["status", "updated_at"])
+                        service.suspend()
+                        service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
                     elif action == "resume_all":
                         if service.status == "suspended":
-                            service.status = "active"
-                            service.save(update_fields=["status", "updated_at"])
+                            service.activate()
+                            service.save(
+                                update_fields=[
+                                    "status",
+                                    "activated_at",
+                                    "suspended_at",
+                                    "suspension_reason",
+                                    "updated_at",
+                                ]
+                            )
                     elif action in ("check_all", "sync_status"):
                         pass  # Just checking status
 
