@@ -545,7 +545,10 @@ class SubscriptionService:
                 return Err("Subscription is not cancelled")
 
             with transaction.atomic():
-                subscription.status = "active"
+                # Use FSM transition for cancelled → active; for cancel_at_period_end
+                # the status is still active/other, so just clear the flag.
+                if subscription.status == "cancelled":
+                    subscription._reactivate_now()
                 subscription.cancel_at_period_end = False
                 subscription.cancelled_at = None
                 subscription.cancellation_reason = ""
@@ -996,8 +999,8 @@ class RecurringBillingService:
                         at_period_end=False,
                     )
                 else:
-                    # Suspend services but keep subscription
-                    subscription.status = "paused"
+                    # Suspend services but keep subscription — use FSM transition.
+                    subscription._pause_now()
                     subscription.paused_at = now
                     subscription.save()
 

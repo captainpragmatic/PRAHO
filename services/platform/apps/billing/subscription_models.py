@@ -25,6 +25,7 @@ from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 if TYPE_CHECKING:
     pass
@@ -150,11 +151,12 @@ class Subscription(models.Model):
         help_text=_("Unique subscription identifier (e.g., SUB-000001)"),
     )
 
-    # Status
-    status = models.CharField(
+    # Status — protected FSMField; use lifecycle methods to transition.
+    status = FSMField(
         max_length=20,
         choices=STATUS_CHOICES,
         default="pending",
+        protected=True,
         db_index=True,
     )
 
@@ -490,15 +492,79 @@ class Subscription(models.Model):
         return BILLING_CYCLE_DAYS.get(self.billing_cycle, 30)
 
     # =========================================================================
-    # LIFECYCLE METHODS
+    # FSM TRANSITION METHODS (private — called by public lifecycle methods)
     # =========================================================================
+
+    @transition(field=status, source="pending", target="active")
+    def _activate_now(self) -> None:
+        """FSM: pending → active."""
+
+    @transition(field=status, source="trialing", target="active")
+    def _convert_trial_now(self) -> None:
+        """FSM: trialing → active (trial conversion)."""
+
+    @transition(field=status, source="pending", target="trialing")
+    def _start_trial_now(self) -> None:
+        """FSM: pending → trialing."""
+
+    @transition(
+        field=status,
+        source=["pending", "trialing", "active", "past_due", "paused"],
+        target="cancelled",
+    )
+    def _cancel_now(self) -> None:
+        """FSM: any active state → cancelled (immediate cancellation)."""
+
+    @transition(field=status, source=["active", "past_due"], target="paused")
+    def _pause_now(self) -> None:
+        """FSM: active or past_due → paused."""
+
+    @transition(field=status, source=["paused", "past_due"], target="active")
+    def _resume_now(self) -> None:
+        """FSM: paused or past_due → active."""
+
+    @transition(field=status, source="active", target="past_due")
+    def _go_past_due(self) -> None:
+        """FSM: active → past_due (first payment failure)."""
+
+    @transition(field=status, source=["active", "past_due", "trialing"], target="expired")
+    def expire(self) -> None:
+        """Expire the subscription."""
+
+    @transition(field=status, source="cancelled", target="active")
+    def _reactivate_now(self) -> None:
+        """FSM: cancelled → active (reactivation)."""
+
+    # =========================================================================
+    # LIFECYCLE METHODS (public API — preserve existing signatures)
+    # =========================================================================
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Temporarily
+        removing the protected field from __dict__ lets Django's setattr path bypass
+        the descriptor guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
 
     def activate(self, user: Any = None) -> None:
         """Activate the subscription."""
         now = timezone.now()
 
         with transaction.atomic():
-            self.status = "active"
+            self._activate_now()
             self.started_at = self.started_at or now
             self.current_period_start = now
             self.current_period_end = now + timedelta(days=self.cycle_days)
@@ -522,7 +588,7 @@ class Subscription(models.Model):
         now = timezone.now()
 
         with transaction.atomic():
-            self.status = "trialing"
+            self._start_trial_now()
             self.trial_start = now
             self.trial_end = now + timedelta(days=trial_days)
             self.current_period_start = now
@@ -547,7 +613,13 @@ class Subscription(models.Model):
 
         with transaction.atomic():
             self.trial_converted = True
-            self.activate(user)
+            self._convert_trial_now()
+            now = timezone.now()
+            self.started_at = self.started_at or now
+            self.current_period_start = now
+            self.current_period_end = now + timedelta(days=self.cycle_days)
+            self.next_billing_date = self.current_period_end
+            self.save()
 
             log_security_event(
                 event_type="subscription_trial_converted",
@@ -565,19 +637,26 @@ class Subscription(models.Model):
         feedback: str = "",
         user: Any = None,
     ) -> None:
-        """Cancel the subscription."""
+        """Cancel the subscription.
+
+        If at_period_end=True, schedules cancellation for end of billing period
+        without changing status immediately.
+        If at_period_end=False, cancels immediately via FSM transition.
+        """
         with transaction.atomic():
             self.cancelled_at = timezone.now()
             self.cancellation_reason = reason
             self.cancellation_feedback = feedback
 
             if at_period_end:
+                # Scheduled cancellation — only flag, don't change status.
                 self.cancel_at_period_end = True
+                self.save()
             else:
-                self.status = "cancelled"
+                # Immediate cancellation via FSM transition.
+                self._cancel_now()
                 self.ended_at = timezone.now()
-
-            self.save()
+                self.save()
 
             log_security_event(
                 event_type="subscription_cancelled",
@@ -594,7 +673,7 @@ class Subscription(models.Model):
     def pause(self, resume_date: Any = None, user: Any = None) -> None:
         """Pause the subscription."""
         with transaction.atomic():
-            self.status = "paused"
+            self._pause_now()
             self.paused_at = timezone.now()
             self.resume_at = resume_date
             self.save()
@@ -614,7 +693,7 @@ class Subscription(models.Model):
             raise ValidationError(_("Can only resume paused subscriptions"))
 
         with transaction.atomic():
-            self.status = "active"
+            self._resume_now()
 
             # Extend period by paused duration (must happen before clearing paused_at)
             if self.paused_at:
@@ -659,9 +738,9 @@ class Subscription(models.Model):
             self.save(update_fields=["failed_payment_count", "updated_at"])
             self.refresh_from_db()
 
-            # Enter past due status if first failure
+            # Enter past due status if first failure — use FSM transition.
             if self.status == "active":
-                self.status = "past_due"
+                self._go_past_due()
                 self.grace_period_ends_at = timezone.now() + timedelta(days=self.grace_period_days)
                 self.save(update_fields=["status", "grace_period_ends_at", "updated_at"])
 
@@ -685,7 +764,7 @@ class Subscription(models.Model):
             self.grace_period_ends_at = None
 
             if self.status == "past_due":
-                self.status = "active"
+                self._resume_now()
 
             self.save()
 

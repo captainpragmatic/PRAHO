@@ -387,7 +387,7 @@ class InvoiceIntegrationTestCase(TestCase):
             currency=self.currency,
             number='INV-PAYMENT',
             total_cents=10000,
-            status='sent'
+            status='issued'
         )
 
         # Mark as paid

@@ -15,6 +15,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 from .currency_models import Currency
 
@@ -39,6 +40,15 @@ class _PaymentSnapshot(TypedDict, total=False):
 
     status: str
     amount_cents: int
+
+
+# Maps internal payment status names to FSM transition method names on Payment.
+_GATEWAY_TRANSITION_MAP: dict[str, str] = {
+    "succeeded": "succeed",
+    "failed": "fail_payment",
+    "refunded": "refund_payment",
+    "partially_refunded": "partially_refund",
+}
 
 
 # ===============================================================================
@@ -75,7 +85,7 @@ class Payment(models.Model):
     )
 
     # Payment details
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)
     payment_method = models.CharField(max_length=20, choices=METHOD_CHOICES, default="stripe")
     amount_cents = models.BigIntegerField(validators=[MinValueValidator(1)], default=0)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
@@ -145,6 +155,34 @@ class Payment(models.Model):
         """Get Stripe customer ID from metadata"""
         return self.meta.get("stripe_customer_id") if self.payment_method == "stripe" else None
 
+    # =========================================================================
+    # FSM TRANSITION METHODS
+    # =========================================================================
+
+    @transition(field=status, source="pending", target="succeeded")
+    def succeed(self) -> None:
+        """Mark payment as succeeded."""
+
+    @transition(field=status, source="pending", target="failed")
+    def fail_payment(self) -> None:
+        """Mark payment as failed."""
+
+    @transition(field=status, source="succeeded", target="refunded")
+    def refund_payment(self) -> None:
+        """Mark payment as fully refunded."""
+
+    @transition(field=status, source="succeeded", target="partially_refunded")
+    def partially_refund(self) -> None:
+        """Mark payment as partially refunded."""
+
+    @transition(field=status, source="partially_refunded", target="refunded")
+    def complete_refund(self) -> None:
+        """Complete refund on partially refunded payment."""
+
+    # =========================================================================
+    # STRIPE / GATEWAY INTEGRATION
+    # =========================================================================
+
     def update_from_stripe_payment_intent(self, payment_intent: dict[str, Any]) -> None:
         """Update payment from Stripe PaymentIntent data"""
         if self.payment_method != "stripe":
@@ -161,14 +199,15 @@ class Payment(models.Model):
             }
         )
 
-        # Map Stripe status to our status
+        # Map Stripe status to our status via FSM transitions.
+        # pending → pending is a no-op (Stripe "processing" / "requires_*" keep us in pending).
         stripe_status = payment_intent.get("status")
-        if stripe_status == "succeeded":
-            self.status = "succeeded"
-        elif stripe_status in ["requires_payment_method", "requires_confirmation", "requires_action", "processing"]:
-            self.status = "pending"
-        elif stripe_status in ["canceled"]:
-            self.status = "failed"
+        if stripe_status == "succeeded" and self.status == "pending":
+            self.succeed()
+        elif stripe_status in ["canceled"] and self.status == "pending":
+            self.fail_payment()
+        # requires_payment_method / requires_confirmation / requires_action / processing
+        # all map to "pending" which is already the default — no transition needed.
 
     def is_stripe_payment(self) -> bool:
         """Check if this is a Stripe payment"""
@@ -183,11 +222,42 @@ class Payment(models.Model):
         """
         if self.status in TERMINAL_PAYMENT_STATUSES:
             return False
-        self.status = new_status
+
+        method_name = _GATEWAY_TRANSITION_MAP.get(new_status)
+        if method_name:
+            transition_fn = getattr(self, method_name)
+            transition_fn()
+
         if meta_update:
             self.meta = {**(self.meta or {}), **meta_update}
         self.save(update_fields=["status", "meta", "updated_at"])
         return True
+
+    # =========================================================================
+    # UTILITY METHODS
+    # =========================================================================
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Django's
+        refresh_from_db uses setattr internally, which would raise AttributeError
+        if the field is already in __dict__. Temporarily removing the protected
+        field from __dict__ lets Django's setattr path bypass the descriptor
+        guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
 
     @classmethod
     def generate_idempotency_key(cls, prefix: str = "pay") -> str:

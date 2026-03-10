@@ -33,6 +33,7 @@ from tests.factories.billing_factories import (
     create_invoice,
     create_payment,
 )
+from tests.helpers.fsm_helpers import force_status
 
 # ===============================================================================
 # HELPERS
@@ -233,8 +234,7 @@ class UpdateCustomerMetricsTest(TestCase):
 
     def test_paid_invoice_count_tracked(self) -> None:
         inv = create_invoice(self.customer, self.currency, number="INV-M004", total_cents=5000)
-        inv.status = "paid"
-        inv.save(update_fields=["status"])
+        force_status(inv, "paid")
 
         result = BillingAnalyticsService.update_customer_metrics(self.customer, inv)
 
@@ -771,7 +771,7 @@ class GenerateVatSummaryTest(TestCase):
         invoice = create_invoice(self.customer, self.currency, number=number, total_cents=total)
         invoice.subtotal_cents = subtotal_cents
         invoice.tax_cents = tax_cents
-        invoice.status = status
+        force_status(invoice, status, save=False)
         invoice.save(update_fields=["subtotal_cents", "tax_cents", "status"])
         return invoice
 

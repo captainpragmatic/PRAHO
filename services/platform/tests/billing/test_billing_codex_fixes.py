@@ -16,6 +16,7 @@ from apps.billing.models import Payment
 from apps.billing.proforma_service import generate_proforma_pdf, send_proforma_email
 from apps.billing.refund_service import RefundService
 from tests.factories.billing_factories import create_currency, create_customer, create_invoice
+from tests.helpers.fsm_helpers import force_status
 
 # ===============================================================================
 # 1. Invoice amount_due Tests
@@ -58,8 +59,7 @@ class InvoiceAmountDueTests(TestCase):
 
     def test_paid_status_fast_path_skips_db(self):
         """Invoice with status='paid' returns 0 without DB query"""
-        self.invoice.status = "paid"
-        self.invoice.save()
+        force_status(self.invoice, "paid")
         with self.assertNumQueries(0):
             self.assertEqual(self.invoice.amount_due, 0)
 
@@ -107,8 +107,7 @@ class UpdateStatusFromPaymentsTests(TestCase):
 
     def test_terminal_status_not_modified(self):
         """'void' invoice is never changed by payments"""
-        self.invoice.status = "void"
-        self.invoice.save()
+        force_status(self.invoice, "void")
         Payment.objects.create(
             customer=self.customer,
             invoice=self.invoice,

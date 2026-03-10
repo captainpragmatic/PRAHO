@@ -20,6 +20,7 @@ from apps.billing.pdf_generators import (
     RomanianProformaPDFGenerator,
 )
 from apps.customers.models import Customer
+from tests.helpers.fsm_helpers import force_status
 
 
 class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
@@ -335,9 +336,9 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
 
     def test_render_status_information_paid(self):
         """Test _render_status_information for paid invoice"""
-        self.invoice.status = 'paid'
+        force_status(self.invoice, "paid", save=False)
         self.invoice.paid_at = timezone.now()
-        self.invoice.save()
+        self.invoice.save(update_fields=["status", "paid_at"])
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
@@ -346,9 +347,8 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
 
     def test_render_status_information_paid_without_date(self):
         """Test _render_status_information for paid invoice without paid_at date"""
-        self.invoice.status = 'paid'
+        force_status(self.invoice, "paid")
         # Don't set paid_at to test the hasattr condition
-        self.invoice.save()
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
@@ -815,8 +815,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
 
     def test_paid_invoice_without_paid_at_attribute(self):
         """Test paid invoice status without paid_at attribute"""
-        self.invoice.status = 'paid'
-        self.invoice.save()
+        force_status(self.invoice, "paid")
 
         # This tests the hasattr condition in the code
         generator = RomanianInvoicePDFGenerator(self.invoice)

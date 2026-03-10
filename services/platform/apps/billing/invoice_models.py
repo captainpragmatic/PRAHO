@@ -6,8 +6,9 @@ Romanian compliant invoice model with address snapshots and immutable ledger.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -15,6 +16,7 @@ from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, TransitionNotAllowed, transition
 
 from apps.billing.validators import (
     MAX_ADDRESS_FIELD_LENGTH,
@@ -22,6 +24,7 @@ from apps.billing.validators import (
     validate_financial_json,
     validate_financial_text_field,
 )
+from apps.common.financial_arithmetic import calculate_line_totals
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
@@ -93,6 +96,7 @@ class Invoice(models.Model):
         ("overdue", _("Overdue")),
         ("void", _("Void")),  # Changed from 'cancelled' to 'void'
         ("refunded", _("Refunded")),
+        ("partially_refunded", _("Partially Refunded")),
     )
 
     # Core identification
@@ -102,7 +106,7 @@ class Invoice(models.Model):
         related_name="invoices",
     )
     number = models.CharField(max_length=50, unique=True, default="TMP-000")  # From InvoiceSequence
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="draft", protected=True)
 
     # Currency and amounts (cents for precision)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
@@ -296,11 +300,30 @@ class Invoice(models.Model):
         )
         return max(0, self.total_cents - paid_amount)
 
+    @transition(field=status, source="draft", target="issued")
+    def issue(self) -> None:
+        """Issue the invoice."""
+
+    @transition(field=status, source=["issued", "overdue"], target="paid")
     def mark_as_paid(self) -> None:
-        """Mark invoice as paid"""
-        self.status = "paid"
+        """Mark invoice as paid."""
         self.paid_at = timezone.now()
-        self.save()
+
+    @transition(field=status, source="issued", target="overdue")
+    def mark_overdue(self) -> None:
+        """Mark invoice as overdue."""
+
+    @transition(field=status, source=["draft", "issued", "overdue"], target="void")
+    def void(self) -> None:
+        """Void the invoice."""
+
+    @transition(field=status, source="paid", target="refunded")
+    def refund_invoice(self) -> None:
+        """Mark invoice as fully refunded."""
+
+    @transition(field=status, source=["issued", "overdue", "paid"], target="partially_refunded")
+    def mark_partially_refunded(self) -> None:
+        """Mark invoice as partially refunded."""
 
     @property
     def amount_due(self) -> int:
@@ -309,6 +332,28 @@ class Invoice(models.Model):
             return 0  # Fast path: skip DB aggregate for paid invoices
         return self.get_remaining_amount()
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Invoice] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Django's
+        refresh_from_db uses setattr internally, which would raise AttributeError
+        if the field is already in __dict__. Temporarily removing the protected
+        field from __dict__ lets Django's setattr path bypass the descriptor
+        guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
     def update_status_from_payments(self) -> None:
         """Update invoice status based on associated payments."""
         if self.status in ("paid", "void", "refunded"):
@@ -316,7 +361,11 @@ class Invoice(models.Model):
 
         remaining = self.amount_due
         if remaining <= 0:
-            self.mark_as_paid()
+            try:
+                self.mark_as_paid()
+                self.save(update_fields=["status", "paid_at"])
+            except TransitionNotAllowed:
+                logger.warning(f"⚠️ [Invoice] Cannot transition {self.number} to paid from status '{self.status}'")
         elif remaining < self.total_cents:
             logger.info(
                 f"💰 [Invoice] {self.number} partially paid: {self.total_cents - remaining}/{self.total_cents} cents"
@@ -372,13 +421,10 @@ class InvoiceLine(models.Model):
         super().save(*args, **kwargs)
 
     def calculate_totals(self) -> int:
-        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-
-        subtotal = self.subtotal_cents
-        # Use banker's rounding for VAT compliance (same as OrderItem)
-        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
-        self.line_total_cents = subtotal + self.tax_cents
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""
+        totals = calculate_line_totals(self.subtotal_cents, self.tax_rate)
+        self.tax_cents = totals.tax_cents
+        self.line_total_cents = totals.line_total_cents
         return self.line_total_cents
 
     @property

@@ -6,8 +6,9 @@ Proforma invoices - estimates/quotes before actual invoicing.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 from typing import Any, ClassVar, TypedDict
 
 from django.core.exceptions import ValidationError
@@ -15,6 +16,7 @@ from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 from apps.billing.validators import (
     MAX_ADDRESS_FIELD_LENGTH,
@@ -22,6 +24,7 @@ from apps.billing.validators import (
     validate_financial_json,
     validate_financial_text_field,
 )
+from apps.common.financial_arithmetic import calculate_line_totals
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
@@ -111,8 +114,9 @@ class ProformaInvoice(models.Model):
         ("sent", _("Sent")),
         ("accepted", _("Accepted")),
         ("expired", _("Expired")),
+        ("converted", _("Converted")),
     ]
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="draft", protected=True)
     valid_until = models.DateTimeField(default=timezone.now, help_text=_("Proforma expires after this date"))
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -188,6 +192,44 @@ class ProformaInvoice(models.Model):
 
         # Total = subtotal + tax (no discount handling for now)
         self.total_cents = self.subtotal_cents + self.tax_cents
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[ProformaInvoice] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Django's
+        refresh_from_db uses setattr internally, which would raise AttributeError
+        if the field is already in __dict__. Temporarily removing the protected
+        field from __dict__ lets Django's setattr path bypass the descriptor
+        guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=status, source="draft", target="sent")
+    def send_proforma(self) -> None:
+        """Send the proforma to the customer."""
+
+    @transition(field=status, source="sent", target="accepted")
+    def accept(self) -> None:
+        """Accept the proforma."""
+
+    @transition(field=status, source="sent", target="expired")
+    def expire(self) -> None:
+        """Mark proforma as expired."""
+
+    @transition(field=status, source=["draft", "sent", "accepted"], target="converted")
+    def convert(self) -> None:
+        """Mark proforma as converted to an invoice."""
 
     def clean(self) -> None:
         """🔒 Validate proforma data and log security events"""
@@ -296,11 +338,8 @@ class ProformaLine(models.Model):
         return Decimal(self.subtotal_cents) / 100
 
     def calculate_totals(self) -> int:
-        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-
-        subtotal = self.subtotal_cents
-        # Use banker's rounding for VAT compliance (same as OrderItem)
-        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
-        self.line_total_cents = subtotal + self.tax_cents
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""
+        totals = calculate_line_totals(self.subtotal_cents, self.tax_rate)
+        self.tax_cents = totals.tax_cents
+        self.line_total_cents = totals.line_total_cents
         return self.line_total_cents

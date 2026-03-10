@@ -38,6 +38,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
+from django_fsm import TransitionNotAllowed
 
 from apps.billing.config import get_invoice_payment_terms_days
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
@@ -908,9 +909,13 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 created_by=request.user,
             )
 
-            # Mark invoice as paid
-            invoice.status = "paid"
-            invoice.paid_at = timezone.now()
+            # Mark invoice as paid via FSM transition
+            try:
+                invoice.mark_as_paid()
+            except TransitionNotAllowed:
+                logger.warning(
+                    f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
+                )
             invoice.save()
 
             messages.success(
@@ -1212,7 +1217,12 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
 
         email_sent = send_proforma_email(proforma)
         if email_sent:
-            proforma.status = "sent"
+            try:
+                proforma.send_proforma()
+            except TransitionNotAllowed:
+                logger.warning(
+                    f"⚠️ [Billing] Cannot transition proforma {proforma.number} to sent from status '{proforma.status}'"
+                )
             proforma.save(update_fields=["status"])
             messages.success(
                 request,
@@ -1411,10 +1421,14 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
             created_by=request.user,
         )
 
-        # Update invoice status if fully paid
+        # Update invoice status if fully paid via FSM transition
         if invoice.get_remaining_amount() <= 0:
-            invoice.status = "paid"
-            invoice.paid_at = timezone.now()
+            try:
+                invoice.mark_as_paid()
+            except TransitionNotAllowed:
+                logger.warning(
+                    f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
+                )
             invoice.save()
 
         messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))

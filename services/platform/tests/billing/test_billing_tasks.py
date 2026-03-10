@@ -65,6 +65,7 @@ from tests.factories.billing_factories import (
     create_invoice,
     create_payment,
 )
+from tests.helpers.fsm_helpers import force_status
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,7 +76,7 @@ def _make_invoice(status: str = "pending", due_days: int = -5) -> Invoice:
     customer = create_customer()
     currency = create_currency()
     invoice = create_invoice(customer=customer, currency=currency)
-    invoice.status = status
+    force_status(invoice, status, save=False)
     invoice.due_at = timezone.now() + timedelta(days=due_days)
     invoice.save(update_fields=["status", "due_at"])
     return invoice

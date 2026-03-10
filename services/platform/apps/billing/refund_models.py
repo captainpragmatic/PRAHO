@@ -13,6 +13,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 from .currency_models import Currency
 from .validators import validate_financial_amount, validate_financial_json, validate_financial_text_field
@@ -69,7 +70,7 @@ class Refund(models.Model):
     )
 
     # Refund details
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)
     refund_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default="full")
     reason = models.CharField(max_length=50, choices=REASON_CHOICES, default="customer_request")
 
@@ -164,6 +165,58 @@ class Refund(models.Model):
 
         # Validate metadata
         validate_financial_json(self.metadata, "Refund metadata")
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Temporarily
+        removing the protected field from __dict__ lets Django's setattr path bypass
+        the descriptor guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    # =========================================================================
+    # FSM TRANSITION METHODS
+    # =========================================================================
+
+    @transition(field=status, source="pending", target="processing")
+    def start_processing(self) -> None:
+        """Move refund into processing."""
+
+    @transition(field=status, source="pending", target="cancelled")
+    def cancel(self) -> None:
+        """Cancel the refund request."""
+
+    @transition(field=status, source="processing", target="approved")
+    def approve(self) -> None:
+        """Approve the refund."""
+
+    @transition(field=status, source="processing", target="rejected")
+    def reject(self) -> None:
+        """Reject the refund."""
+
+    @transition(field=status, source="processing", target="failed")
+    def mark_failed(self) -> None:
+        """Mark refund processing as failed."""
+
+    @transition(field=status, source="approved", target="completed")
+    def complete(self) -> None:
+        """Mark refund as completed."""
+
+    @transition(field=status, source="failed", target="pending")
+    def retry(self) -> None:
+        """Retry a failed refund."""
 
     @property
     def amount(self) -> Decimal:

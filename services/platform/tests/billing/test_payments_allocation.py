@@ -35,5 +35,6 @@ class PaymentAllocationTests(TestCase):
 
         # Mark as paid using model helper and assert status change
         self.invoice.mark_as_paid()
+        self.invoice.save(update_fields=["status", "paid_at"])
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.status, 'paid')

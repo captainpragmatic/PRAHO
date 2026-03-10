@@ -32,6 +32,7 @@ from django.utils import timezone as tz
 from apps.billing.currency_models import Currency as CurrencyModel
 from apps.billing.models import Currency, Invoice, InvoiceLine, InvoiceSequence
 from apps.common.tax_service import TaxService
+from apps.common.types import Err, Ok, Result
 
 # Add imports to fix PLC0415 linting issues
 # Ensure refund service uses the same log_security_event function for testing
@@ -70,7 +71,6 @@ from .refund_service import (
     RefundService,
     RefundStatus,
     RefundType,
-    Result,
 )
 from .stripe_metering import (
     StripeMeterEventService,
@@ -84,7 +84,7 @@ from .usage_invoice_service import (
     UsageInvoiceService,
 )
 
-# Result class is imported from refund_service.py - no need to redefine here
+# Result types imported from apps.common.types (ADR-0003)
 
 # ===============================================================================
 # REFUND SERVICE RE-EXPORTS
@@ -189,10 +189,10 @@ class InvoiceService:
                     },
                 )
 
-                return Result.ok(invoice)
+                return Ok(invoice)
 
         except Exception as e:
-            return Result.err(f"Failed to create invoice from order: {e!s}")
+            return Err(f"Failed to create invoice from order: {e!s}")
 
 
 _services_logger = logging.getLogger(__name__)
@@ -213,26 +213,26 @@ class PaymentRetryService:
         try:
             payment = Payment.objects.select_related("customer").get(id=payment_id)
         except Payment.DoesNotExist:
-            return Result.err(f"Payment not found: {payment_id}")
+            return Err(f"Payment not found: {payment_id}")
 
         if payment.status == "succeeded":
-            return Result.ok(True)  # Already succeeded
+            return Ok(True)  # Already succeeded
 
         # Find applicable retry policy (customer-specific or default)
         policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
         if not policy:
             _services_logger.warning(f"⚠️ [Retry] No active retry policy for payment {payment_id}")
-            return Result.err("No retry policy configured")
+            return Err("No retry policy configured")
 
         # Check if max attempts reached
         existing_attempts = PaymentRetryAttempt.objects.filter(payment=payment).count()
         if existing_attempts >= policy.max_attempts:
-            return Result.err(f"Max retry attempts ({policy.max_attempts}) reached")
+            return Err(f"Max retry attempts ({policy.max_attempts}) reached")
 
         # Schedule next retry
         next_retry_date = policy.get_next_retry_date(tz.now(), existing_attempts)
         if not next_retry_date:
-            return Result.err("No more retry dates available")
+            return Err("No more retry dates available")
 
         PaymentRetryAttempt.objects.create(
             payment=payment,
@@ -244,7 +244,7 @@ class PaymentRetryService:
         _services_logger.info(
             f"✅ [Retry] Scheduled retry #{existing_attempts + 1} for payment {payment_id} at {next_retry_date}"
         )
-        return Result.ok(True)
+        return Ok(True)
 
 
 class EFacturaService:
@@ -261,14 +261,14 @@ class EFacturaService:
         try:
             invoice = InvoiceModel.objects.get(id=invoice_id)
         except InvoiceModel.DoesNotExist:
-            return Result.err(f"Invoice not found: {invoice_id}")
+            return Err(f"Invoice not found: {invoice_id}")
 
         service = EFacturaSubmissionService()
         result = service.submit_invoice(invoice)
         if result.success:
             _services_logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number}")
-            return Result.ok(True)
-        return Result.err(result.message or "e-Factura submission failed")
+            return Ok(True)
+        return Err(result.message or "e-Factura submission failed")
 
 
 class InvoiceNumberingService:
@@ -292,10 +292,10 @@ class ProformaConversionService:
         try:
             proforma = ProformaInvoice.objects.select_related("customer", "currency").get(id=proforma_id)
         except ProformaInvoice.DoesNotExist:
-            return Result.err(f"Proforma not found: {proforma_id}")
+            return Err(f"Proforma not found: {proforma_id}")
 
-        if proforma.status not in ("draft", "issued"):
-            return Result.err(f"Proforma {proforma.number} cannot be converted (status: {proforma.status})")
+        if proforma.status not in ("draft", "sent", "accepted"):
+            return Err(f"Proforma {proforma.number} cannot be converted (status: {proforma.status})")
 
         try:
             with transaction.atomic():
@@ -343,8 +343,8 @@ class ProformaConversionService:
                         line_total_cents=line.line_total_cents,
                     )
 
-                # Update proforma status
-                proforma.status = "converted"
+                # Update proforma status via FSM transition
+                proforma.convert()
                 proforma.meta = {
                     **(proforma.meta or {}),
                     "invoice_id": str(invoice.id),
@@ -365,11 +365,11 @@ class ProformaConversionService:
                 )
 
                 _services_logger.info(f"✅ [Conversion] Proforma {proforma.number} → Invoice {invoice.number}")
-                return Result.ok(invoice)
+                return Ok(invoice)
 
         except Exception as e:
             _services_logger.error(f"🔥 [Conversion] Failed to convert proforma {proforma_id}: {e}")
-            return Result.err(f"Conversion failed: {e!s}")
+            return Err(f"Conversion failed: {e!s}")
 
 
 # Expose all services in __all__ for explicit imports

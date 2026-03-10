@@ -24,6 +24,7 @@ from django.core.files.storage import default_storage
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import (
     AuditContext,
@@ -1127,8 +1128,14 @@ def _handle_payment_success(payment: Payment) -> None:
         if payment.invoice:
             remaining_amount = payment.invoice.get_remaining_amount()
             if remaining_amount <= 0:
-                payment.invoice.status = "paid"
-                payment.invoice.paid_at = timezone.now()
+                try:
+                    payment.invoice.mark_as_paid()
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Invoice Signal] Cannot mark invoice %s as paid from status '%s'",
+                        payment.invoice.number,
+                        payment.invoice.status,
+                    )
                 payment.invoice.save(update_fields=["status", "paid_at"])
 
                 # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
@@ -1163,7 +1170,14 @@ def _handle_payment_refund(payment: Payment) -> None:
         if payment.invoice:
             refunded_amount = sum(p.amount_cents for p in payment.invoice.payments.filter(status="refunded"))
             if refunded_amount >= payment.invoice.total_cents:
-                payment.invoice.status = "refunded"
+                try:
+                    payment.invoice.refund_invoice()
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Invoice Signal] Cannot mark invoice %s as refunded from status '%s'",
+                        payment.invoice.number,
+                        payment.invoice.status,
+                    )
                 payment.invoice.save(update_fields=["status"])
 
         _send_payment_refund_email(payment)
