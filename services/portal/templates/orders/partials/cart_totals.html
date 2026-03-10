@@ -16,9 +16,9 @@
       </span>
     </div>
 
-  <!-- VAT (21% Romanian) -->
+  <!-- VAT (Romanian) -->
     <div class="flex justify-between items-center">
-      <span class="text-slate-400">{% trans "VAT (21%)" %}</span>
+      <span class="text-slate-400">{% trans "VAT" %} ({{ calculation.vat_rate_percent|default:"21" }}%)</span>
       <span class="text-white font-mono">
         {{ calculation.tax_cents|cents_to_currency|romanian_currency:calculation.currency }}
       </span>
