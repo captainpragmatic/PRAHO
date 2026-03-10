@@ -496,6 +496,8 @@ else
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
 	@echo "📋 Phase 5: Code health scan"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
+	@echo "📋 Phase 6: FSM guardrail lint (ADR-0034)"
+	@$(VENV_DIR)/bin/python scripts/lint_fsm_guardrails.py
 	@echo "🎉 All services linting complete!"
 endif
 

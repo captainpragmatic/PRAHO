@@ -23,6 +23,15 @@ _TICKET_TRANSITION_MAP: dict[str, str] = {
     "open": "reopen",
 }
 
+# Valid FSM transitions by source status (derived from @transition decorators on Ticket model).
+# Used by get_allowed_transitions() to show only actually-valid targets in the UI.
+_TICKET_VALID_TRANSITIONS: dict[str, list[str]] = {
+    "open": ["in_progress", "waiting_on_customer", "closed"],
+    "in_progress": ["waiting_on_customer", "closed"],
+    "waiting_on_customer": ["in_progress", "closed", "open"],
+    "closed": ["open"],
+}
+
 
 class TicketStatusService:
     """
@@ -262,10 +271,10 @@ class TicketStatusService:
     def get_allowed_transitions(cls, current_status: str) -> list[str]:
         """Get list of allowed status transitions for current status.
 
-        Returns all mapped target statuses that differ from the current status.
-        The FSMField on Ticket enforces actual validity at transition time.
+        Returns only targets that are valid from the given source status,
+        based on the FSM transition graph defined on the Ticket model.
         """
-        return [target for target in _TICKET_TRANSITION_MAP if target != current_status]
+        return _TICKET_VALID_TRANSITIONS.get(current_status, [])
 
     @classmethod
     def get_queue_tickets(cls, queue_type: str, assigned_to: User | None = None) -> QuerySet[Ticket]:

@@ -450,12 +450,12 @@ class OrderStatusChangeViewTestCase(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-        # Check error response — "draft" has no FSM transition mapping so the service
-        # returns "Unknown target status"; accept either message form
+        # Check error response — (completed, draft) is not in the TRANSITION_MAP
         data = response.json()
         self.assertFalse(data['success'])
         self.assertTrue(
-            'Invalid status transition' in data['message'] or 'Unknown target status' in data['message'],
+            'No transition from' in data['message']
+            or 'Invalid status transition' in data['message'],
             f"Expected transition error, got: {data['message']}",
         )
 

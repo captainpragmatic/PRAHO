@@ -254,15 +254,29 @@ class OrderNumberingService:
 # ===============================================================================
 
 # FSM transition dispatch map: target status → method name on Order model
-_ORDER_TRANSITION_MAP: dict[str, str] = {
-    "pending": "submit",
-    "confirmed": "confirm",
-    "processing": "start_processing",
-    "completed": "complete",
-    "cancelled": "cancel",
-    "failed": "fail",
-    "refunded": "refund_order",
-    "partially_refunded": "partial_refund",
+# FSM transition dispatch map: (source, target) → method name on Order model.
+# Keyed by (source, target) because different source states may need different
+# methods to reach the same target (e.g., draft→pending via submit vs failed→pending via retry).
+_ORDER_TRANSITION_MAP: dict[tuple[str, str], str] = {
+    # Happy path
+    ("draft", "pending"): "submit",
+    ("pending", "confirmed"): "confirm",
+    ("confirmed", "processing"): "start_processing",
+    ("processing", "completed"): "complete",
+    # Cancellation (multiple sources)
+    ("draft", "cancelled"): "cancel",
+    ("pending", "cancelled"): "cancel",
+    ("confirmed", "cancelled"): "cancel",
+    ("processing", "cancelled"): "cancel",
+    ("failed", "cancelled"): "cancel",
+    # Failure + retry
+    ("pending", "failed"): "fail",
+    ("processing", "failed"): "fail",
+    ("failed", "pending"): "retry",
+    # Refunds
+    ("completed", "refunded"): "refund_order",
+    ("completed", "partially_refunded"): "partial_refund",
+    ("partially_refunded", "refunded"): "complete_refund",
 }
 
 
@@ -503,10 +517,10 @@ class OrderService:
                     )
                     return Err(f"Preflight validation failed: {e!s}")
 
-            # Look up FSM transition method
-            method_name = _ORDER_TRANSITION_MAP.get(status_data.new_status)
+            # Look up FSM transition method by (source, target) tuple
+            method_name = _ORDER_TRANSITION_MAP.get((old_status, status_data.new_status))
             if not method_name:
-                return Err(f"Unknown target status: {status_data.new_status}")
+                return Err(f"No transition from '{old_status}' to '{status_data.new_status}'")
 
             # Execute FSM transition
             try:

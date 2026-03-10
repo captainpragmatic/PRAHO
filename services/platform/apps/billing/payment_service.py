@@ -318,10 +318,29 @@ class PaymentService:
                             old_status = payment.status
                             # Use FSM transition dispatch instead of direct assignment
                             method_name = _PAYMENT_TRANSITION_MAP.get(new_status)
-                            if method_name:
+                            if not method_name:
+                                logger.warning(
+                                    "⚠️ [PaymentService] confirm_payment: no FSM transition mapped "
+                                    "for target status '%s' on payment %s",
+                                    new_status,
+                                    payment.id,
+                                )
+                            else:
                                 try:
                                     getattr(payment, method_name)()
                                     payment.save(update_fields=["status"])
+                                    logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
+
+                                    log_security_event(
+                                        "payment_status_changed",
+                                        {
+                                            "payment_id": str(payment.id),
+                                            "old_status": old_status,
+                                            "new_status": new_status,
+                                            "gateway_intent_id": payment_intent_id,
+                                            "critical_financial_operation": True,
+                                        },
+                                    )
                                 except TransitionNotAllowed:
                                     logger.warning(
                                         "⚠️ [PaymentService] confirm_payment: transition %s → %s not allowed "
@@ -331,19 +350,6 @@ class PaymentService:
                                         payment.id,
                                         payment.status,
                                     )
-
-                            logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
-
-                            log_security_event(
-                                "payment_status_changed",
-                                {
-                                    "payment_id": str(payment.id),
-                                    "old_status": old_status,
-                                    "new_status": new_status,
-                                    "gateway_intent_id": payment_intent_id,
-                                    "critical_financial_operation": True,
-                                },
-                            )
 
                 except Payment.DoesNotExist:
                     logger.warning(f"⚠️ Payment not found for intent {payment_intent_id}")

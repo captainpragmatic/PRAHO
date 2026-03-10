@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import logging
 import uuid
 from decimal import Decimal
 from typing import Any, TypedDict
@@ -19,6 +20,8 @@ from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFa
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
 from apps.common.types import Err, Ok, Result
 from apps.orders.models import Order
+
+logger = logging.getLogger(__name__)
 
 _FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing order total
 _FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
@@ -902,12 +905,21 @@ class RefundService:
                 current_amount = refund_data.get("amount_cents", 0) if refund_data else 0
 
                 # Check if this refund makes it fully refunded
-                if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
-                    with contextlib.suppress(TransitionNotAllowed):
+                try:
+                    if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
                         invoice.refund_invoice()
-                else:
-                    with contextlib.suppress(TransitionNotAllowed):
+                    else:
                         invoice.mark_partially_refunded()
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Refund] FSM transition blocked for invoice %s (status=%s, refund_type=%s)",
+                        getattr(invoice, "invoice_number", "unknown"),
+                        getattr(invoice, "status", "unknown"),
+                        refund_type,
+                    )
+                    return Err(
+                        f"Cannot transition invoice from '{getattr(invoice, 'status', 'unknown')}' to refund status"
+                    )
                 invoice.save()
                 return Ok(None)
 

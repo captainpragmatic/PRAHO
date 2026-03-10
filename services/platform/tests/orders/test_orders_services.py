@@ -350,12 +350,12 @@ class OrderServiceTestCase(TestCase):
 
         result = OrderService.update_order_status(order, status_data)
 
-        # Verify failure — "draft" is not a valid target (no FSM transition goes TO draft),
-        # so the service returns "Unknown target status" rather than "Invalid status transition"
+        # Verify failure — (completed, draft) is not in the TRANSITION_MAP
         self.assertTrue(result.is_err())
         error_message = result.unwrap_err()  # type: ignore[union-attr]
         self.assertTrue(
-            "Invalid status transition" in error_message or "Unknown target status" in error_message,
+            "No transition from" in error_message
+            or "Invalid status transition" in error_message,
             f"Expected a transition error, got: {error_message}",
         )
 

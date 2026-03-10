@@ -878,3 +878,136 @@ class OrderItemFSMTests(FSMTestMixin, TestCase):
         item = self._make_order_item("pending")
         with self.assertRaises(AttributeError):
             item.provisioning_status = "completed"
+
+
+# ---------------------------------------------------------------------------
+# 10. Order FSM (10 transitions)
+# ---------------------------------------------------------------------------
+
+
+class OrderFSMTests(FSMTestMixin, TestCase):
+    """Smoke tests for Order status transitions."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+        cls.product = Product.objects.create(
+            slug="fsm-order-product",
+            name="FSM Order Product",
+            product_type="hosting",
+            is_active=True,
+        )
+
+    def _make_order(self, status: str = "draft", *, with_items: bool = False) -> Order:
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            status="draft",
+        )
+        if with_items:
+            OrderItem.objects.create(
+                order=order,
+                product=self.product,
+                product_name=self.product.name,
+                product_type=self.product.product_type,
+                quantity=1,
+                unit_price_cents=5000,
+            )
+        if status != "draft":
+            force_status(order, status)
+        return order
+
+    def test_submit_from_draft_with_items(self) -> None:
+        order = self._make_order("draft", with_items=True)
+        order.submit()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "pending")
+
+    def test_confirm_from_pending(self) -> None:
+        order = self._make_order("pending")
+        order.confirm()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "confirmed")
+
+    def test_start_processing_from_confirmed(self) -> None:
+        order = self._make_order("confirmed")
+        order.start_processing()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "processing")
+
+    def test_complete_from_processing(self) -> None:
+        order = self._make_order("processing")
+        order.complete()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "completed")
+
+    def test_cancel_from_draft(self) -> None:
+        order = self._make_order("draft")
+        order.cancel()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "cancelled")
+
+    def test_cancel_from_pending(self) -> None:
+        order = self._make_order("pending")
+        order.cancel()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "cancelled")
+
+    def test_fail_from_processing(self) -> None:
+        order = self._make_order("processing")
+        order.fail()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "failed")
+
+    def test_retry_from_failed(self) -> None:
+        order = self._make_order("failed")
+        order.retry()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "pending")
+
+    def test_refund_from_completed(self) -> None:
+        order = self._make_order("completed")
+        order.refund_order()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "refunded")
+
+    def test_partial_refund_from_completed(self) -> None:
+        order = self._make_order("completed")
+        order.partial_refund()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "partially_refunded")
+
+    def test_complete_refund_from_partially_refunded(self) -> None:
+        order = self._make_order("partially_refunded")
+        order.complete_refund()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "refunded")
+
+    # Invalid transitions
+    def test_cannot_confirm_from_draft(self) -> None:
+        order = self._make_order("draft")
+        with self.assertRaises(TransitionNotAllowed):
+            order.confirm()
+
+    def test_cannot_complete_from_pending(self) -> None:
+        order = self._make_order("pending")
+        with self.assertRaises(TransitionNotAllowed):
+            order.complete()
+
+    def test_cannot_cancel_from_completed(self) -> None:
+        order = self._make_order("completed")
+        with self.assertRaises(TransitionNotAllowed):
+            order.cancel()
+
+    def test_cannot_refund_from_pending(self) -> None:
+        order = self._make_order("pending")
+        with self.assertRaises(TransitionNotAllowed):
+            order.refund_order()
+
+    def test_protected_field_blocks_direct_assignment(self) -> None:
+        order = self._make_order("draft")
+        with self.assertRaises(AttributeError):
+            order.status = "completed"

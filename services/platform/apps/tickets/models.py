@@ -218,6 +218,9 @@ class Ticket(models.Model):
         See orders.Order.refresh_from_db for the full explanation.
         """
         fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
         saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
         try:
             super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
