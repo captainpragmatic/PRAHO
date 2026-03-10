@@ -152,10 +152,9 @@ class ProductPriceSecurityTests(TestCase):
             product_type="shared_hosting"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON"
+            defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
     def test_negative_prices_blocked(self):

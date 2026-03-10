@@ -23,7 +23,7 @@ class InvoiceTestCase(TestCase):
 
     def setUp(self):
         """Create test data for invoice tests"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -197,7 +197,7 @@ class InvoiceLineTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -320,6 +320,7 @@ class InvoiceLineTestCase(TestCase):
             service_name='Basic Hosting Plan',
             username='testuser123',
             price=Decimal('50.00'),
+            currency=self.currency,
             status='active'
         )
 
@@ -341,7 +342,7 @@ class InvoiceIntegrationTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Integration Test SRL',

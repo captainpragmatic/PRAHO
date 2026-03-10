@@ -39,8 +39,8 @@ class CouponCustomerRestrictionsTests(TestCase):
         from apps.customers.models import Customer
         from apps.orders.models import Order
 
-        self.currency = Currency.objects.create(
-            code="RON", name="Romanian Leu", symbol="lei"
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -248,8 +248,8 @@ class CouponStackingRulesTests(TestCase):
         from apps.orders.models import Order, OrderItem
         from apps.products.models import Product
 
-        self.currency = Currency.objects.create(
-            code="RON", name="Romanian Leu", symbol="lei"
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -416,8 +416,8 @@ class CouponDiscountEdgeCasesTests(TestCase):
         from apps.orders.models import Order, OrderItem
         from apps.products.models import Product
 
-        self.currency = Currency.objects.create(
-            code="RON", name="Romanian Leu", symbol="lei"
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -529,8 +529,8 @@ class CampaignBudgetTests(TestCase):
         from apps.orders.models import Order, OrderItem
         from apps.products.models import Product
 
-        self.currency = Currency.objects.create(
-            code="RON", name="Romanian Leu", symbol="lei"
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -639,8 +639,8 @@ class LoyaltyTierUpgradeTests(TestCase):
         from apps.customers.models import Customer
         from apps.orders.models import Order
 
-        self.currency = Currency.objects.create(
-            code="RON", name="Romanian Leu", symbol="lei"
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -819,8 +819,8 @@ class CouponRedemptionReveralTests(TestCase):
         from apps.orders.models import Order, OrderItem
         from apps.products.models import Product
 
-        self.currency = Currency.objects.create(
-            code="RON", name="Romanian Leu", symbol="lei"
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
         self.customer = Customer.objects.create(
             name="Test Customer",

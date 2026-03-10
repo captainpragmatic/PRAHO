@@ -328,7 +328,7 @@ class InvoiceImmutabilityTests(TestCase):
     """
 
     def setUp(self) -> None:
-        self.currency = Currency.objects.create(code="RON", symbol="lei", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             customer_type="company",
             company_name="Test SRL",
@@ -882,7 +882,7 @@ class ProformaInvoiceTaxTests(TestCase):
     """Test that ProformaInvoice stores VAT rate per line."""
 
     def setUp(self) -> None:
-        self.currency = Currency.objects.create(code="RON", symbol="lei", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             customer_type="company",
             company_name="Proforma Test SRL",

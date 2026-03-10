@@ -136,10 +136,9 @@ class BillingModelSecurityTests(TestCase):
     """🔒 Tests for billing model security enhancements"""
 
     def setUp(self):
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="RON",
-            decimals=2
+            defaults={"symbol": "RON", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -270,10 +269,9 @@ class BillingAccessControlTests(TestCase):
     """🔒 Tests for billing access control enhancements"""
 
     def setUp(self):
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="RON",
-            decimals=2
+            defaults={"symbol": "RON", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -494,7 +492,7 @@ class BillingSecurityLoggingTests(TestCase):
     @patch('apps.billing.proforma_models.log_security_event')
     def test_model_validation_triggers_logging(self, mock_log):
         """🔒 Test that model validation triggers security logging"""
-        currency = Currency.objects.create(code="RON", symbol="RON", decimals=2)
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "RON", "decimals": 2})
         customer = Customer.objects.create(
             name="Test Customer",
             company_name="Test Customer Ltd",

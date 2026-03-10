@@ -38,6 +38,9 @@ class PriceData(TypedDict):
 PRICE_SEAL_TTL_SECONDS = 60  # 🔒 SECURITY: 1 minute window - prices must be used within this tight window
 HMAC_ALGORITHM = "sha256"
 
+# Module-level flag to emit the dev-mode warning only once per process (B4/BUG-9)
+_SEALING_SECRET_WARNING_ISSUED = False
+
 
 class PriceSealingService:
     """
@@ -61,12 +64,14 @@ class PriceSealingService:
                     "python manage.py generate_price_sealing_secret"
                 )
             else:
-                # Development mode - allow fallback with warning
-                logger = logging.getLogger(__name__)
-                logger.warning(
-                    "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
-                    "Configure PRICE_SEALING_SECRET environment variable for production deployment."
-                )
+                # Development mode - allow fallback with once-only warning
+                global _SEALING_SECRET_WARNING_ISSUED  # noqa: PLW0603
+                if not _SEALING_SECRET_WARNING_ISSUED:
+                    logging.getLogger(__name__).warning(
+                        "🚨 [Security] Using Django SECRET_KEY for price sealing in development. "
+                        "Configure PRICE_SEALING_SECRET environment variable for production deployment."
+                    )
+                    _SEALING_SECRET_WARNING_ISSUED = True
                 return str(settings.SECRET_KEY)  # noqa: SECRET_KEY — fallback for dev
 
         # Validate secret key length for security

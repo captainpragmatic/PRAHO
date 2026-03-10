@@ -291,6 +291,7 @@ def order_list(request: HttpRequest) -> HttpResponse:
         "total": Order.objects.filter(customer_id__in=customer_ids).count(),
         "draft": Order.objects.filter(customer_id__in=customer_ids, status="draft").count(),
         "pending": Order.objects.filter(customer_id__in=customer_ids, status="pending").count(),
+        "confirmed": Order.objects.filter(customer_id__in=customer_ids, status="confirmed").count(),
         "processing": Order.objects.filter(customer_id__in=customer_ids, status="processing").count(),
         "completed": Order.objects.filter(customer_id__in=customer_ids, status="completed").count(),
     }

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import NotSupportedError, models, transaction
+from django.db import IntegrityError, NotSupportedError, models, transaction
 from django.utils import timezone
 
 from apps.billing.models import Currency
@@ -90,6 +90,7 @@ class OrderCreateData:
     currency: str = "RON"
     notes: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
+    idempotency_key: str = ""
 
 
 @dataclass
@@ -229,7 +230,7 @@ class OrderNumberingService:
             created_at__year=current_year,
         ).order_by("-order_number")
         try:
-            latest_order = qs.select_for_update().first()
+            latest_order = qs.select_for_update(of=("self",)).first()
         except NotSupportedError:
             # SQLite doesn't support SELECT FOR UPDATE — fall back to plain query
             latest_order = qs.first()
@@ -327,13 +328,14 @@ class OrderService:
             # Get currency instance (Currency already imported at top)
             currency_instance = Currency.objects.get(code=data.currency)
 
-            # Create order
+            # Create order (idempotency_key set atomically to prevent race conditions)
             order = Order.objects.create(
                 order_number=order_number,
                 customer=data.customer,
                 currency=currency_instance,
                 notes=data.notes,
                 meta=data.meta,
+                idempotency_key=data.idempotency_key,
                 # Customer snapshot fields
                 customer_email=data.customer.primary_email,
                 customer_name=data.customer.name,
@@ -453,6 +455,10 @@ class OrderService:
 
             return Ok(order)
 
+        except IntegrityError:
+            # Let IntegrityError propagate — idempotency race conditions must be
+            # handled at the view level where the existing order can be returned.
+            raise
         except Exception as e:
             logger.exception(f"Failed to create order: {e}")
             return Err(f"Failed to create order: {e!s}")
@@ -623,11 +629,12 @@ class OrderServiceCreationService:
                 service = Service.objects.create(
                     customer=order.customer,
                     service_plan=service_plan,
+                    currency=order.currency,
                     service_name=service_name,
                     domain=item.domain_name or "",
                     username=username,  # Temporary unique username
                     billing_cycle=billing_cycle,
-                    price=item.unit_price / 100,  # Convert from cents to decimal
+                    price=item.unit_price,  # Already converted from cents by property
                     status="pending",  # Key status - visible to customer
                     # Link to order for tracking
                     admin_notes=f"Created from order {order.order_number}",

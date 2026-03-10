@@ -42,10 +42,11 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
-    # 🔒 SECURITY: Rate limiting before sessions to prevent DoS
+    # 🔒 SECURITY: Auth rate limiting before sessions (IP-only, no session needed)
     "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
-    "apps.common.rate_limiting.APIRateLimitMiddleware",  # API rate limiting
     "django.contrib.sessions.middleware.SessionMiddleware",  # Cache-only sessions
+    # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
+    "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
     "django.middleware.locale.LocaleMiddleware",  # After sessions
     "apps.users.middleware.SessionLanguageMiddleware",  # Activate session language
     "django.middleware.common.CommonMiddleware",  # After locale
@@ -135,6 +136,11 @@ PLATFORM_API_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "http://localhos
 # 🔒 SECURITY: No fallback secrets in base config - must be set in environment
 PLATFORM_API_SECRET = os.environ.get("PLATFORM_API_SECRET")
 PLATFORM_API_TIMEOUT = int(os.environ.get("PLATFORM_API_TIMEOUT", "30"))
+
+# Company bank details for bank transfer payment instructions
+COMPANY_BANK_IBAN = os.environ.get("COMPANY_BANK_IBAN", "")
+COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "")
+COMPANY_BANK_BENEFICIARY = os.environ.get("COMPANY_BANK_BENEFICIARY", "PragmaticHost SRL")
 
 
 # ===============================================================================

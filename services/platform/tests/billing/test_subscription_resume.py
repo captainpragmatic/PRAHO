@@ -21,7 +21,7 @@ class SubscriptionResumeTestCase(TransactionTestCase):
     """Test Subscription.resume() paused duration handling."""
 
     def setUp(self):
-        self.currency = Currency.objects.create(code="RON", symbol="lei", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Test Customer",
             customer_type="company",

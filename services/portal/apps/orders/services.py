@@ -11,14 +11,12 @@ from typing import Any, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-from apps.common.request_ip import get_safe_client_ip
 
-from .validators import OrderInputValidator
+from .validators import MAX_CART_ITEMS, OrderInputValidator
 
 logger = logging.getLogger(__name__)
 
@@ -113,13 +111,13 @@ class HMACPriceSealer:
         # Verify body hash
         canonical_body = json.dumps(price_data, sort_keys=True, separators=(",", ":"))
         expected_body_hash = hashlib.sha256(canonical_body.encode("utf-8")).hexdigest()
-        if sealed_data.get("body_hash") != expected_body_hash:
+        if not hmac_mod.compare_digest(sealed_data.get("body_hash", ""), expected_body_hash):
             logger.warning("🔒 [HMAC] Body hash mismatch")
             return False
 
         # Verify IP binding
         expected_ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
-        if sealed_data.get("ip_hash") != expected_ip_hash:
+        if not hmac_mod.compare_digest(sealed_data.get("ip_hash", ""), expected_ip_hash):
             logger.warning("🔒 [HMAC] IP binding mismatch")
             return False
 
@@ -134,19 +132,16 @@ class HMACPriceSealer:
             logger.warning("🔒 [HMAC] Signature mismatch")
             return False
 
-        # Check nonce for replay protection
+        # Check nonce for replay protection — atomic check-and-set prevents race condition
         nonce_cache_key = f"hmac_nonce:{nonce}"
-        if cache.get(nonce_cache_key):
+        if not cache.add(nonce_cache_key, True, timeout=max_age_seconds * 2):
             logger.warning("🔒 [HMAC] Replay detected - nonce already used")
             return False
-
-        # Mark nonce as used
-        cache.set(nonce_cache_key, True, timeout=max_age_seconds * 2)
 
         return True
 
     @staticmethod
-    def verify_seal_metadata(  # noqa: PLR0911
+    def verify_seal_metadata(
         sealed_data: dict[str, Any],
         client_ip: str = "127.0.0.1",
         max_age_seconds: int = 61,
@@ -175,7 +170,7 @@ class HMACPriceSealer:
             return False
 
         expected_ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
-        if sealed_data.get("ip_hash") != expected_ip_hash:
+        if not hmac_mod.compare_digest(sealed_data.get("ip_hash", ""), expected_ip_hash):
             return False
 
         body_hash = str(sealed_data.get("body_hash", ""))
@@ -189,114 +184,7 @@ class HMACPriceSealer:
             return False
 
         nonce_cache_key = f"hmac_nonce:{nonce}"
-        if cache.get(nonce_cache_key):
-            return False
-
-        cache.set(nonce_cache_key, True, timeout=max_age_seconds * 2)
-        return True
-
-
-class CartRateLimiter:
-    """🔒 Enhanced rate limiting for cart operations with per-IP sliding windows"""
-
-    # Per-session limits (existing)
-    OPERATIONS_LIMIT = 30  # operations per minute per session
-    TIME_WINDOW = 60  # seconds
-
-    # Per-IP limits (new - stricter)
-    IP_OPERATIONS_LIMIT_MINUTE = 60  # operations per minute per IP
-    IP_OPERATIONS_LIMIT_HOUR = 300  # operations per hour per IP
-    IP_TIME_WINDOW_MINUTE = 60  # 1 minute window
-    IP_TIME_WINDOW_HOUR = 3600  # 1 hour window
-
-    @staticmethod
-    def check_rate_limit(session_key: str, client_ip: str | None = None) -> bool:
-        """
-        🔒 SECURITY: Check both session and IP-based rate limits
-
-        Args:
-            session_key: Django session key
-            client_ip: Client IP address for broader abuse prevention
-
-        Returns:
-            True if within limits, False if rate limited
-        """
-        if not session_key:
-            return True  # Allow if no session yet
-
-        # Check per-session rate limit (existing logic)
-        session_cache_key = f"cart_rate_limit:{session_key}"
-        session_count = cache.get(session_cache_key, 0)
-
-        if session_count >= CartRateLimiter.OPERATIONS_LIMIT:
-            logger.warning(f"🚨 [Cart] Session rate limit exceeded for {session_key[:8]}...")
-            return False
-
-        # 🔒 SECURITY: Check per-IP rate limits (new)
-        if client_ip:
-            # IP hash for privacy
-            import hashlib  # noqa: PLC0415
-
-            ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
-
-            # Check per-minute IP limit
-            ip_minute_key = f"cart_ip_minute:{ip_hash}"
-            ip_minute_count = cache.get(ip_minute_key, 0)
-
-            if ip_minute_count >= CartRateLimiter.IP_OPERATIONS_LIMIT_MINUTE:
-                logger.warning(f"🚨 [Cart] IP rate limit (minute) exceeded for IP hash {ip_hash}")
-                return False
-
-            # Check per-hour IP limit
-            ip_hour_key = f"cart_ip_hour:{ip_hash}"
-            ip_hour_count = cache.get(ip_hour_key, 0)
-
-            if ip_hour_count >= CartRateLimiter.IP_OPERATIONS_LIMIT_HOUR:
-                logger.warning(f"🚨 [Cart] IP rate limit (hour) exceeded for IP hash {ip_hash}")
-                return False
-
-        # Backward-compatible behavior for legacy call sites/tests:
-        # when no client_ip is supplied, check acts as "consume one slot".
-        if client_ip is None:
-            CartRateLimiter.record_operation(session_key)
-
-        return True
-
-    @staticmethod
-    def record_operation(session_key: str, client_ip: str | None = None) -> None:
-        """
-        🔒 SECURITY: Record cart operation with both session and IP tracking
-
-        Args:
-            session_key: Django session key
-            client_ip: Client IP address for broader tracking
-        """
-        if session_key:
-            # Record session-based operation
-            session_cache_key = f"cart_rate_limit:{session_key}"
-            session_count = cache.get(session_cache_key, 0)
-            cache.set(session_cache_key, session_count + 1, CartRateLimiter.TIME_WINDOW)
-
-        # 🔒 SECURITY: Record IP-based operations
-        if client_ip:
-            import hashlib  # noqa: PLC0415
-
-            ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
-
-            # Record per-minute IP operation
-            ip_minute_key = f"cart_ip_minute:{ip_hash}"
-            ip_minute_count = cache.get(ip_minute_key, 0)
-            cache.set(ip_minute_key, ip_minute_count + 1, CartRateLimiter.IP_TIME_WINDOW_MINUTE)
-
-            # Record per-hour IP operation
-            ip_hour_key = f"cart_ip_hour:{ip_hash}"
-            ip_hour_count = cache.get(ip_hour_key, 0)
-            cache.set(ip_hour_key, ip_hour_count + 1, CartRateLimiter.IP_TIME_WINDOW_HOUR)
-
-    @staticmethod
-    def get_client_ip(request: HttpRequest) -> str:
-        """Extract client IP address safely using validated proxy trust list."""
-        return get_safe_client_ip(request)
+        return cache.add(nonce_cache_key, True, timeout=max_age_seconds * 2)
 
 
 class GDPRCompliantCartSession:
@@ -411,7 +299,7 @@ class GDPRCompliantCartSession:
                 "slug": product_slug,
                 "name": product_slug.replace("-", " ").title(),
                 "product_type": "",
-                "requires_domain": False,
+                "requires_domain": True,  # Fail-safe: assume domain required during outage
                 "is_active": True,
             }
 
@@ -430,6 +318,7 @@ class GDPRCompliantCartSession:
                 "item_id": self._generate_item_id(product_slug, billing_period),
                 "product_slug": product_slug,
                 "product_name": product_data.get("name") or product_slug,
+                "product_type": product_data.get("product_type", ""),
                 "quantity": quantity,
                 "billing_period": billing_period,
                 "domain_name": domain_name,
@@ -448,6 +337,8 @@ class GDPRCompliantCartSession:
             self.cart["items"][existing_index] = item
             logger.info(f"🔄 [Cart] Updated existing item: {product_slug}")
         else:
+            if len(self.cart["items"]) >= MAX_CART_ITEMS:
+                raise ValidationError(_("Cart cannot contain more than %(max)s items") % {"max": MAX_CART_ITEMS})
             self.cart["items"].append(item)
             logger.info(f"➕ [Cart] Added new item: {product_slug}")  # noqa: RUF001
 
@@ -589,7 +480,7 @@ class GDPRCompliantCartSession:
         Version changes when cart contents, quantities, or configuration changes.
         """
         # Create canonical representation of cart state
-        version_data = {"items": [], "currency": cart.get("currency", "RON"), "updated_at": cart.get("updated_at", "")}
+        version_data = {"items": [], "currency": cart.get("currency", "RON")}
 
         # Include essential item data that affects pricing/checkout
         for item in cart.get("items", []):
@@ -787,9 +678,6 @@ class OrderCreationService:
             if getattr(e, "is_rate_limited", False):
                 raise  # Let view handle rate-limit UX
             logger.error(f"🔥 [Orders] Preflight validation failed: {e}")
-
-            # Try to extract specific error message from the exception
-            str(e)
 
             # Check if this is an API response with error details
             if hasattr(e, "response") and e.response:

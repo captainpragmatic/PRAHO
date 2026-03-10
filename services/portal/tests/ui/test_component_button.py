@@ -84,9 +84,9 @@ class ButtonVariantTests(SimpleTestCase):
     def _button(self, variant: str) -> str:
         return _render(f'{{% button "Test" variant="{variant}" %}}')
 
-    def test_primary_variant_uses_red_bg(self) -> None:
-        """Primary buttons use brand red (PragmaticHost brand colour)."""
-        self.assertIn("bg-red-600", self._button("primary"))
+    def test_primary_variant_uses_blue_bg(self) -> None:
+        """Primary buttons use brand blue per design system (HSL 220, 90%, 56%)."""
+        self.assertIn("bg-blue-600", self._button("primary"))
 
     def test_secondary_variant_uses_slate_bg(self) -> None:
         self.assertIn("bg-slate-600", self._button("secondary"))
@@ -104,9 +104,9 @@ class ButtonVariantTests(SimpleTestCase):
         self.assertIn("bg-blue-600", self._button("info"))
 
     def test_default_variant_is_primary(self) -> None:
-        """ButtonConfig.variant defaults to 'primary', which uses bg-red-600."""
+        """ButtonConfig.variant defaults to 'primary', which uses bg-blue-600."""
         result = _render('{% button "Default" %}')
-        self.assertIn("bg-red-600", result)
+        self.assertIn("bg-blue-600", result)
 
     def test_unknown_variant_falls_back_to_slate(self) -> None:
         """An unrecognized variant string falls through to the else/slate branch."""

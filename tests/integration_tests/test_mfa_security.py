@@ -206,7 +206,7 @@ class MFAAttackPreventionTests(TestCase):
         for test_code in test_cases:
             start_time = time.perf_counter()
 
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(ValueError, TypeError):
                 mfa_service.verify_mfa_code(self.user, test_code)
 
             end_time = time.perf_counter()

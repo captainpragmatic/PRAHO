@@ -27,7 +27,7 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -235,7 +235,7 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -388,7 +388,7 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -487,7 +487,7 @@ class PDFGenerationErrorHandlingTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -584,7 +584,7 @@ class PDFContentValidationTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -701,7 +701,7 @@ class PDFGenerationPerformanceTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -779,7 +779,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
 
     def setUp(self):
         """Setup test data for edge cases"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -967,7 +967,7 @@ class PDFGeneratorMockingTestCase(TestCase):
 
     def setUp(self):
         """Setup test data for mocking tests"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -1075,7 +1075,7 @@ class PDFGeneratorIntegrationTestCase(TestCase):
 
     def setUp(self):
         """Setup realistic test scenario"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',

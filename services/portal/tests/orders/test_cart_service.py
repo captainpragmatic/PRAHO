@@ -196,3 +196,76 @@ class CartServiceGetApiItemsTestCase(SimpleTestCase):
         self.assertEqual(len(api_items), 1)
         self.assertNotIn('product_id', api_items[0])
         self.assertEqual(api_items[0]['product_slug'], 'old-product')
+
+
+@override_settings(
+    SESSION_ENGINE='django.contrib.sessions.backends.cache',
+    CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}},
+)
+class CartServiceProductTypeTestCase(SimpleTestCase):
+    """Test that add_item() stores product_type from platform product data (BUG-2 regression)."""
+
+    def setUp(self) -> None:
+        self.session = SessionStore()
+        self.session.create()
+
+    def _make_mock_api(self, product_type: str = 'hosting') -> MagicMock:
+        mock_instance = MagicMock()
+        mock_instance.get.return_value = {
+            'id': 'prod-uuid-002',
+            'slug': 'shared-hosting-basic',
+            'name': 'Shared Hosting Basic',
+            'product_type': product_type,
+            'requires_domain': False,
+            'is_active': True,
+        }
+        return mock_instance
+
+    @patch('apps.orders.services.PlatformAPIClient')
+    def test_add_item_stores_product_type(self, mock_cls: MagicMock) -> None:
+        """add_item() must store product_type in the cart item (BUG-2: was missing, caused empty badge)."""
+        mock_cls.return_value = self._make_mock_api(product_type='hosting')
+
+        cart = GDPRCompliantCartSession(self.session)
+        cart.add_item(
+            product_slug='shared-hosting-basic',
+            quantity=1,
+            billing_period='monthly',
+        )
+
+        items = cart.get_items()
+        self.assertEqual(len(items), 1)
+        self.assertIn('product_type', items[0])
+        self.assertEqual(items[0]['product_type'], 'hosting')
+
+    @patch('apps.orders.services.PlatformAPIClient')
+    def test_add_item_stores_product_type_vps(self, mock_cls: MagicMock) -> None:
+        """add_item() stores product_type for VPS products."""
+        mock_cls.return_value = self._make_mock_api(product_type='vps')
+
+        cart = GDPRCompliantCartSession(self.session)
+        cart.add_item(
+            product_slug='vps-standard',
+            quantity=1,
+            billing_period='monthly',
+        )
+
+        items = cart.get_items()
+        self.assertIn('product_type', items[0])
+        self.assertEqual(items[0]['product_type'], 'vps')
+
+    @patch('apps.orders.services.PlatformAPIClient')
+    def test_add_item_stores_product_type_fallback_empty_string(self, mock_cls: MagicMock) -> None:
+        """add_item() stores empty string for product_type when API fallback dict is used."""
+        mock_cls.return_value = self._make_mock_api(product_type='')
+
+        cart = GDPRCompliantCartSession(self.session)
+        cart.add_item(
+            product_slug='unknown-product',
+            quantity=1,
+            billing_period='monthly',
+        )
+
+        items = cart.get_items()
+        self.assertIn('product_type', items[0])
+        self.assertEqual(items[0]['product_type'], '')

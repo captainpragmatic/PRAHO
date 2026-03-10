@@ -44,10 +44,9 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
     def setUp(self) -> None:
         """Set up test data for PDF generation."""
         # Create Currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='RON',
-            symbol='lei',
-            decimals=2
+            defaults={'symbol': 'lei', 'decimals': 2}
         )
 
         # Create test users

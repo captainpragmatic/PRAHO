@@ -5,7 +5,9 @@ Tests Romanian VAT compliance, audit trails, and model relationships.
 
 import uuid
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.db import transaction
 from django.test import TestCase
 
 from apps.billing.models import Currency
@@ -20,10 +22,9 @@ class OrderModelTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -208,10 +209,9 @@ class OrderItemModelTestCase(TestCase):
             primary_email="contact@testcompany.ro"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.product = Product.objects.create(
@@ -341,10 +341,9 @@ class OrderStatusHistoryModelTestCase(TestCase):
             primary_email="contact@testcompany.ro"
         )
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.order = Order.objects.create(
@@ -474,3 +473,253 @@ class OrderStatusHistoryModelTestCase(TestCase):
 
         expected_str = "ORD-2024-HISTORY-0001: draft → pending"
         self.assertEqual(str(history), expected_str)
+
+
+# ---------------------------------------------------------------------------
+# M5: save() only wraps creation in transaction.atomic, not plain updates
+# ---------------------------------------------------------------------------
+
+
+class OrderSaveTransactionTestCase(TestCase):
+    """M5: Order.save() must only use transaction.atomic for new objects, not updates."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="contact@testcompany.ro",
+        )
+
+    def test_update_does_not_invoke_transaction_atomic(self) -> None:
+        """Saving an existing order (update_fields) must NOT call transaction.atomic.
+
+        M5 fix: the retry loop and its savepoint wrap should only apply when
+        _state.adding is True.  A plain field update must call super().save()
+        directly — no savepoint overhead.
+        """
+        order = Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-20240101-000001",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        # At this point order._state.adding is False (already persisted)
+        order.status = "pending"
+
+        with patch("apps.orders.models.transaction.atomic") as mock_atomic:
+            order.save(update_fields=["status"])
+
+        mock_atomic.assert_not_called()
+
+    def test_creation_invokes_transaction_atomic(self) -> None:
+        """Saving a new order (adding=True) MUST enter transaction.atomic savepoint."""
+        order = Order(
+            customer=self.customer,
+            order_number="ORD-20240101-000099",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        # order._state.adding is True — first save triggers the retry loop
+
+        real_atomic = transaction.atomic
+
+        atomic_called = []
+
+        def tracking_atomic(*args: object, **kwargs: object) -> object:
+            atomic_called.append(True)
+            return real_atomic(*args, **kwargs)
+
+        with patch("apps.orders.models.transaction.atomic", side_effect=tracking_atomic):
+            order.save()
+
+        self.assertTrue(atomic_called, "transaction.atomic must be called at least once during creation")
+
+    def test_update_via_update_fields_succeeds_without_retry(self) -> None:
+        """update_fields save on existing order should complete without any IntegrityError retry."""
+        order = Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-20240101-000002",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        order.status = "pending"
+        # Should not raise; no collision retry loop involved
+        order.save(update_fields=["status"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, "pending")
+
+
+# ---------------------------------------------------------------------------
+# H3: _regenerate_order_number_sequence uses select_for_update
+# ---------------------------------------------------------------------------
+
+
+class OrderRegenerateSequenceLockTestCase(TestCase):
+    """H3: _regenerate_order_number_sequence must use select_for_update to avoid TOCTOU."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="contact@testcompany.ro",
+        )
+
+    def test_locked_helper_contains_select_for_update(self) -> None:
+        """_locked_latest_order_number helper must contain select_for_update.
+
+        H3 fix: the shared helper wraps select_for_update(of=('self',)) in its
+        own transaction.atomic() so it works even in autocommit mode on PostgreSQL.
+        Both generate_order_number and _regenerate_order_number_sequence delegate to it.
+        """
+        import inspect  # noqa: PLC0415
+
+        source = inspect.getsource(Order._locked_latest_order_number)
+        self.assertIn(
+            "select_for_update",
+            source,
+            "_locked_latest_order_number must call select_for_update to prevent TOCTOU",
+        )
+        self.assertIn(
+            "transaction.atomic",
+            source,
+            "_locked_latest_order_number must wrap in transaction.atomic for autocommit safety",
+        )
+
+    def test_generate_and_regenerate_use_locked_helper(self) -> None:
+        """Both order number methods must delegate to _locked_latest_order_number.
+
+        Ensures the DRY refactor is maintained and neither method bypasses the lock.
+        """
+        import inspect  # noqa: PLC0415
+
+        for method in (Order.generate_order_number, Order._regenerate_order_number_sequence):
+            source = inspect.getsource(method)
+            self.assertIn(
+                "_locked_latest_order_number",
+                source,
+                f"{method.__name__} must delegate to _locked_latest_order_number",
+            )
+
+    def test_regenerate_produces_higher_sequence(self) -> None:
+        """After regeneration the new order_number sequence must be higher than any existing one."""
+        # Create a persisted order so the queryset finds something
+        Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-20240101-0003",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+
+        order = Order(
+            customer=self.customer,
+            order_number="ORD-20240101-0003",  # intentional collision
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        order._regenerate_order_number_sequence()
+
+        # New sequence must be strictly greater than 3
+        seq = int(order.order_number.rsplit("-", 1)[-1])
+        self.assertGreater(seq, 3)
+
+
+# ---------------------------------------------------------------------------
+# H4: save() retry only fires on creation, not on update
+# ---------------------------------------------------------------------------
+
+
+class OrderSaveRetryOnCreationOnlyTestCase(TestCase):
+    """H4 (model-level): The IntegrityError retry loop must not run on updates."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Test Company SRL",
+            customer_type="company",
+            status="active",
+            primary_email="contact@testcompany.ro",
+        )
+
+    def test_status_update_propagates_integrity_error_immediately(self) -> None:
+        """Updating status on an existing order bypasses the retry loop entirely.
+
+        We mock super().save() to raise IntegrityError once, but because _state.adding
+        is False the retry loop code is never reached — the call goes straight to
+        super().save() and the mock error propagates immediately (not silently retried).
+        """
+        from django.db import IntegrityError  # noqa: PLC0415
+
+        order = Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-20240101-000010",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        order.status = "pending"
+
+        # Patch Model.save (the super()) to raise IntegrityError
+        with patch("django.db.models.Model.save", side_effect=IntegrityError("simulated")), self.assertRaises(IntegrityError):
+            order.save()
+
+    def test_creation_retries_on_order_number_collision(self) -> None:
+        """During creation, an order_number collision triggers _regenerate_order_number_sequence."""
+        from contextlib import suppress  # noqa: PLC0415
+
+        from django.db import IntegrityError  # noqa: PLC0415
+
+        order = Order(
+            customer=self.customer,
+            order_number="",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+
+        call_count = {"n": 0}
+
+        def fake_super_save(*args: object, **kwargs: object) -> None:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # Simulate order_number unique constraint violation (SQLite marker)
+                raise IntegrityError("UNIQUE constraint failed: orders.order_number")
+            # Second attempt succeeds — but we need an actual DB call, so re-raise to
+            # exit the test safely before a real write; we just verify regenerate fired.
+
+        regenerate_calls: list[bool] = []
+
+        def fake_regenerate(self_order: Order) -> None:
+            regenerate_calls.append(True)
+            # Give the order a new unique number so the loop can exit
+            self_order.order_number = "ORD-20240101-099999"
+
+        with (
+            patch("django.db.models.Model.save", side_effect=fake_super_save),
+            patch.object(Order, "_regenerate_order_number_sequence", fake_regenerate),
+            suppress(Exception),
+        ):
+            # Second attempt may fail due to mock; we only care regenerate was called
+            order.save()
+
+        self.assertTrue(
+            regenerate_calls,
+            "_regenerate_order_number_sequence must be called on order_number collision during creation",
+        )

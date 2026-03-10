@@ -4,13 +4,15 @@ DRF views for product catalog, order management, and cart calculations.
 """
 
 import logging
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
 
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
@@ -19,10 +21,9 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
-from apps.audit.services import AuditService
 from apps.billing.models import Currency
 from apps.common.request_ip import get_safe_client_ip
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.preflight import OrderPreflightValidationService
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 # Constants
 ISO_COUNTRY_CODE_LENGTH = 2
 IDEMPOTENCY_KEY_MIN_LENGTH = 16
-IDEMPOTENCY_KEY_MAX_LENGTH = 128
+IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
 
 # 🔒 SECURITY: Custom throttle classes for order endpoints
@@ -83,7 +84,9 @@ class ProductCatalogThrottle(ScopedRateThrottle):
 @public_api_endpoint
 def product_list(request: Request) -> Response:
     """
-    Public product catalog listing -- intentionally public.
+    Public endpoint — intentionally accessible without HMAC authentication.
+    Product catalog information is not sensitive and must be accessible
+    for the portal to display products to unauthenticated visitors.
 
     Supports filtering by product type and featured status.
     """
@@ -115,7 +118,11 @@ def product_list(request: Request) -> Response:
 @throttle_classes([ProductCatalogThrottle])
 @public_api_endpoint
 def product_detail(request: Request, slug: str) -> Response:
-    """Public product details by slug -- intentionally public."""
+    """
+    Public endpoint — intentionally accessible without HMAC authentication.
+    Product catalog information is not sensitive and must be accessible
+    for the portal to display products to unauthenticated visitors.
+    """
 
     try:
         product = Product.objects.prefetch_related("prices").get(slug=slug, is_active=True, is_public=True)
@@ -193,9 +200,13 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
                     continue
 
                 # Build order item data (include setup fee for accurate totals)
+                # Include product_slug + billing_period as stable identifiers so callers
+                # can map per-item totals deterministically (not by list index).
                 order_items.append(
                     {
                         "product_id": product.id,
+                        "product_slug": product.slug,
+                        "billing_period": item_data.get("billing_period", "monthly"),
                         "quantity": item_data["quantity"],
                         "unit_price_cents": int(product_price.effective_monthly_price_cents),
                         "setup_cents": int(product_price.setup_cents),
@@ -211,7 +222,7 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
         # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
         try:
-            customer_obj = Customer.objects.get(id=customer_id)
+            customer_obj = customer  # Already injected by @require_customer_authentication
             customer_country = getattr(customer_obj, "country", "RO") or "RO"
             is_business = bool(getattr(customer_obj, "company_name", ""))
             vat_number = (
@@ -251,9 +262,21 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
             "subtotal_cents": totals["subtotal_cents"],
             "tax_cents": totals["tax_cents"],
             "total_cents": totals["total_cents"],
+            "vat_rate_percent": round(vat_result.vat_rate),
             "currency": currency_code,
             "warnings": warnings,
-            "items": [],  # Could include per-item calculations if needed
+            "items": [
+                {
+                    "product_name": item["description"],
+                    "product_slug": item["product_slug"],
+                    "billing_period": item["billing_period"],
+                    "quantity": item["quantity"],
+                    "unit_price_cents": item["unit_price_cents"],
+                    "setup_cents": item["setup_cents"],
+                    "line_total_cents": item["unit_price_cents"] * item["quantity"] + item["setup_cents"],
+                }
+                for item in order_items
+            ],
         }
 
         # Validate output
@@ -419,8 +442,10 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
             total_cents=int(vat_result.total_cents),
         )
 
-        # Mark as preflight order so validation uses our computed subtotal
+        # Mark as preflight order so validation uses our computed subtotal and cached VAT result.
+        # Caching vat_result avoids a duplicate OrderVATCalculator.calculate_vat call inside validate().
         temp_order._preflight_subtotal_cents = subtotal_cents
+        temp_order._preflight_vat_result = vat_result
 
         # Run preflight validation on the temporary order
         logger.info(
@@ -453,12 +478,12 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
             }
         )
 
-    except Exception as e:
-        logger.exception(f"🔥 [API] Preflight validation failed: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Preflight validation failed for customer %s", customer.id)
         return Response(
             {
                 "success": False,
-                "errors": [f"Preflight validation failed: {e!s}"],
+                "errors": [str(_("Order validation encountered an unexpected error. Please try again."))],
                 "warnings": [],
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -486,7 +511,14 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 
     if len(idempotency_key) < IDEMPOTENCY_KEY_MIN_LENGTH or len(idempotency_key) > IDEMPOTENCY_KEY_MAX_LENGTH:
         return Response(
-            {"error": "Idempotency key must be between 16-128 characters"}, status=status.HTTP_400_BAD_REQUEST
+            {"error": "Idempotency key must be between 16-64 characters"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 🔒 SECURITY: Validate key content to prevent cache key injection (M10)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", idempotency_key):
+        return Response(
+            {"error": "Idempotency key must contain only alphanumeric characters, hyphens, and underscores"},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     # 🔒 SECURITY: Check for existing order with this idempotency key
@@ -510,7 +542,26 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             # Order was deleted, clear cache and continue with creation
             cache.delete(cache_key)
 
-    # Validate input
+    # DB fallback: check database for existing order when cache misses.
+    # Runs BEFORE input validation so that retries with slightly different payloads
+    # still return the existing order (correct idempotency semantics).
+    if idempotency_key:
+        db_existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
+        if db_existing:
+            logger.info(f"🔄 [API] DB fallback: found existing order for idempotency key: {idempotency_key[:8]}...")
+            # Re-warm the cache for future lookups
+            cache.set(cache_key, str(db_existing.id), timeout=3600)
+            serializer = OrderDetailSerializer(db_existing)
+            return Response(
+                {
+                    "success": True,
+                    "order": serializer.data,
+                    "duplicate": True,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+    # Validate input after idempotency checks
     input_serializer = OrderCreateInputSerializer(data=request.data)
     if not input_serializer.is_valid():
         return Response(
@@ -634,10 +685,33 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             currency=validated_data["currency"],
             notes=validated_data.get("notes", ""),
             meta=validated_data.get("meta", {}),
+            idempotency_key=idempotency_key,
         )
 
-        # Create order using platform service
-        result = OrderService.create_order(order_create_data)
+        # Create order using platform service (idempotency_key set atomically in create_order)
+        try:
+            result = OrderService.create_order(order_create_data)
+        except IntegrityError as exc:
+            # 🔒 SECURITY: Only catch idempotency race conditions — not financial check constraints.
+            # The Order model has CheckConstraints (subtotal_non_negative, tax_non_negative, etc.)
+            # that also raise IntegrityError. Re-raise immediately for any non-idempotency violation.
+            if not any(marker in str(exc) for marker in Order._NON_RETRYABLE_CONSTRAINT_MARKERS):
+                raise
+            # Race condition — concurrent request already created an order with this idempotency key.
+            # Return the existing order instead of failing.
+            existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
+            if existing:
+                logger.info(f"🔄 [API] Idempotency race resolved: returning existing order {existing.order_number}")
+                serializer = OrderDetailSerializer(existing)
+                # Re-warm cache for future lookups
+                cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
+                cache.set(cache_key, str(existing.id), timeout=3600)
+                return Response(
+                    {"success": True, "order": serializer.data, "duplicate": True},
+                    status=status.HTTP_200_OK,
+                )
+            # Idempotency constraint but no matching order found — re-raise as unexpected
+            raise
 
         if isinstance(result, Ok):
             order = result.value
@@ -664,9 +738,9 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 except Exception as e:
                     logger.warning(f"⚠️ [API] Auto-pending failed for {order.order_number}: {e}")
 
-            # 🔒 SECURITY: Store idempotency key to prevent duplicate orders
+            # 🔒 SECURITY: Store idempotency key in cache to prevent duplicate orders
             cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
-            cache.set(cache_key, order.id, timeout=3600)  # Store for 1 hour
+            cache.set(cache_key, str(order.id), timeout=3600)  # Store for 1 hour
 
             logger.info(
                 f"📦 [API] Order created: {order.order_number} for customer {customer_id} (idempotency: {idempotency_key[:8]}...)"
@@ -783,12 +857,13 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
         service = Service.objects.create(
             customer=customer,
             service_plan=item.product.default_service_plan,
+            currency=order.currency,
             status="pending",
             service_name=item.product_name,
             domain=item.domain_name or "",
             username=username,
             billing_cycle="monthly",
-            price=Decimal(str(item.unit_price_cents / 100)),
+            price=Decimal(item.unit_price_cents) / Decimal(100),
             setup_fee_paid=item.setup_cents > 0,
             server=server,
             provisioning_data={
@@ -809,14 +884,14 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
         }
     except Exception as e:
         logger.error(f"❌ Failed to provision service for {item.product.name}: {e}")
-        return {"product": item.product.name, "error": str(e)}
+        return {"product": item.product.name, "error": "Provisioning failed"}
 
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:
+def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911
     """
     Confirm order after successful payment and trigger service provisioning.
     """
@@ -826,48 +901,81 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
         # Use atomic transaction for order confirmation and service creation
         with transaction.atomic():
-            # Get order with row-level lock to prevent double-confirmation
+            # Get order with row-level lock to prevent double-confirmation.
+            # of=("self",) locks only the Order row, not related tables.
             order = (
-                Order.objects.select_for_update().prefetch_related("items").get(id=order_id, customer_id=customer.id)
+                Order.objects.select_for_update(of=("self",))
+                .prefetch_related("items")
+                .get(id=order_id, customer_id=customer.id)
             )
 
+            # Verify PaymentIntent belongs to this order (prevent cross-binding)
+            if payment_intent_id:
+                # M1: Validate Stripe PI ID format before doing anything with it.
+                # Stripe PI IDs always match pi_[a-zA-Z0-9]{10,64}.
+                # Coerce to str first — DRF may pass non-string types from JSON payloads.
+                if not isinstance(payment_intent_id, str) or not re.match(
+                    r"^pi_[a-zA-Z0-9]{10,64}$", payment_intent_id
+                ):
+                    return Response(
+                        {"success": False, "error": "Invalid payment intent ID format"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # H2: Only allow PI binding on card-compatible orders.
+                # Portal-created orders have blank payment_method (it's not set during creation).
+                # A valid PI proves card payment, so promote blank → "card".
+                # Reject only orders explicitly set to a non-card method (e.g., bank_transfer).
+                if order.payment_method and order.payment_method != "card":
+                    return Response(
+                        {"success": False, "error": "Order payment method does not accept payment intents"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if not order.payment_method:
+                    order.payment_method = "card"
+                # Reject mismatched PI when order already has one assigned
+                if order.payment_intent_id and payment_intent_id != order.payment_intent_id:
+                    return Response(
+                        {"success": False, "error": "Payment intent does not match this order"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
             # Idempotency guard — prevent double-processing
-            if order.status not in ["pending", "payment_processing"]:
+            if order.status not in ["pending"]:
                 return Response(
                     {"success": False, "error": "Order already processed"},
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Update order status to confirmed
-            old_status = order.status
-            order.status = "confirmed"
-            order.payment_intent_id = payment_intent_id
-            order.save(update_fields=["status", "payment_intent_id"])
+            # Set payment_intent_id (and payment_method if promoted above) before
+            # status change so the audit trail includes them.
+            if payment_intent_id is not None:
+                order.payment_intent_id = payment_intent_id
+                order.save(update_fields=["payment_intent_id", "payment_method"])
 
-            logger.info(f"✅ Order {order.order_number} confirmed after payment")
-
-            # Log audit event
-            # API requests don't have a real user, just pass None
+            # Use OrderService.update_order_status() for proper state machine validation
+            # and OrderStatusHistory creation (audit trail for this legally-significant transition).
             audit_user = None
             if hasattr(request, "user") and request.user.is_authenticated:
                 audit_user = request.user
 
-            AuditService.log_simple_event(
-                event_type="order_confirmed",
-                user=audit_user,
-                content_object=order,
-                description=f"Order {order.order_number} confirmed after payment",
-                old_values={"status": old_status},
-                new_values={"status": "confirmed", "payment_status": payment_status},
-                actor_type="customer",
-                metadata={
-                    "order_id": str(order.id),
-                    "order_number": order.order_number,
-                    "customer_id": str(customer.id),
-                    "payment_intent_id": payment_intent_id,
-                    "source_app": "api",
-                },
+            status_change = StatusChangeData(
+                new_status="confirmed",
+                notes=f"Payment confirmed (PI: {payment_intent_id or 'N/A'}, status: {payment_status})",
+                changed_by=audit_user,
             )
+            status_result = OrderService.update_order_status(order, status_change)
+            if isinstance(status_result, Err):
+                logger.warning(
+                    "⚠️ [API] Status update failed for order %s: %s",
+                    order.order_number,
+                    status_result.error,
+                )
+                return Response(
+                    {"success": False, "error": "Order cannot be confirmed in its current state"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            order.refresh_from_db()
+            logger.info(f"✅ Order {order.order_number} confirmed after payment")
 
             # Collect provisionable items inside the atomic block, but dispatch outside
             provisionable_items = [
@@ -895,6 +1003,6 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
     except Exception as e:
         logger.exception(f"🔥 [API] Order confirmation failed: {e}")
         return Response(
-            {"success": False, "error": f"Failed to confirm order: {e!s}"},
+            {"success": False, "error": "Failed to confirm order"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

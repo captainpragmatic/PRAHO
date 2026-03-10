@@ -3,14 +3,11 @@ Basic functionality tests for orders system
 Tests core components without complex integration.
 """
 
-import json
-from datetime import timedelta
-from django.test import SimpleTestCase, Client, override_settings
-from django.contrib.sessions.backends.cache import SessionStore
-from django.utils import timezone
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
-from apps.orders.services import CartRateLimiter
+from django.contrib.sessions.backends.cache import SessionStore
+from django.test import Client, SimpleTestCase, override_settings
+from django.utils import timezone
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -51,50 +48,6 @@ class TestBasicOrderFunctionality(SimpleTestCase):
         response = self.client.post('/order/create/')
         self.assertEqual(response.status_code, 302)
         self.assertIn('/login/', response.url)
-
-    def test_cart_rate_limiter_basic_functionality(self):
-        """Test basic rate limiting functionality"""
-
-        session_key = 'test_basic_rate_limit'
-
-        # Should allow normal operations
-        for i in range(20):  # Well under limit
-            self.assertTrue(CartRateLimiter.check_rate_limit(session_key))
-
-        # Exhaust the rate limit
-        for i in range(11):  # Remaining to reach 30 + 1 extra
-            result = CartRateLimiter.check_rate_limit(session_key)
-            if i < 10:  # Should allow up to 30 total
-                self.assertTrue(result)
-            else:  # Should block the 31st
-                self.assertFalse(result)
-
-    def test_cart_rate_limiter_session_isolation(self):
-        """Test rate limiting isolates sessions properly"""
-
-        session1 = 'test_session_basic_1'
-        session2 = 'test_session_basic_2'
-
-        # Exhaust limit for session1
-        for i in range(30):
-            self.assertTrue(CartRateLimiter.check_rate_limit(session1))
-
-        # session1 blocked
-        self.assertFalse(CartRateLimiter.check_rate_limit(session1))
-
-        # session2 still allowed
-        self.assertTrue(CartRateLimiter.check_rate_limit(session2))
-
-    def test_cart_rate_limiter_handles_none_session(self):
-        """Test rate limiter handles None session gracefully"""
-
-        # Should allow operations without session key
-        self.assertTrue(CartRateLimiter.check_rate_limit(None))
-        self.assertTrue(CartRateLimiter.check_rate_limit(''))
-
-        # Record operation should handle None gracefully
-        CartRateLimiter.record_operation(None)
-        CartRateLimiter.record_operation('')
 
     def test_order_urls_accessible_when_authenticated(self):
         """Test that order URLs are accessible with authentication"""
@@ -242,9 +195,11 @@ class TestOrderServiceIntegration(SimpleTestCase):
         }
         mock_api_client.return_value = mock_api
 
-        # Create a mock cart
+        # Create a mock cart with all attributes calculate_cart_totals uses
         mock_cart = Mock()
-        mock_cart.get_items.return_value = [
+        mock_cart.has_items.return_value = True
+        mock_cart.currency = 'RON'
+        mock_cart.get_api_items.return_value = [
             {
                 'product_id': 'test-123',
                 'quantity': 1,
@@ -253,11 +208,6 @@ class TestOrderServiceIntegration(SimpleTestCase):
         ]
         mock_cart.cart = {'currency': 'RON'}
 
-        # Test calculation
-        try:
-            result = CartCalculationService.calculate_cart_totals(mock_cart, 123)
-            # Should either succeed or fail gracefully
-            self.assertIsInstance(result, dict)
-        except Exception as e:
-            # Any exception should be handled gracefully in real usage
-            self.assertIsInstance(e, Exception)
+        # Test calculation — verify it returns a dict or raises a specific exception
+        result = CartCalculationService.calculate_cart_totals(mock_cart, "123", 456)
+        self.assertIsInstance(result, dict)

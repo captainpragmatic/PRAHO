@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.test import TestCase
 
 from apps.api.customers import views
+from apps.billing.models import Currency
 from apps.customers import customer_views
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Server, Service, ServicePlan
@@ -19,6 +20,9 @@ class CustomerServicesApiDataTests(TestCase):
     """C1: customer services API returns real Service objects"""
 
     def setUp(self):
+        self.currency = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
+        )[0]
         self.customer = Customer.objects.create(
             name="API Test SRL", customer_type="company",
         )
@@ -41,6 +45,7 @@ class CustomerServicesApiDataTests(TestCase):
         """Customer with active services gets them via queryset"""
         Service.objects.create(
             customer=self.customer, service_plan=self.plan, server=self.server,
+            currency=self.currency,
             service_name="test.example.com", username="testuser1",
             status="active", domain="test.example.com",
             price=Decimal("29.99"),
@@ -70,6 +75,7 @@ class CustomerServicesApiDataTests(TestCase):
         """customer_views.py customer_services_api returns real services"""
         Service.objects.create(
             customer=self.customer, service_plan=self.plan, server=self.server,
+            currency=self.currency,
             service_name="web.example.com", username="webuser",
             status="active", domain="web.example.com",
             price=Decimal("29.99"),

@@ -35,7 +35,7 @@
           {% for code in backup_codes %}
           <div class="bg-slate-700 p-4 rounded-lg border border-slate-600 flex items-center justify-between">
             <code class="text-green-400 font-mono text-lg">{{ code }}</code>
-            <button type="button" onclick="copyCode('{{ code }}')"
+            <button type="button" onclick="copyCode('{{ code|escapejs }}')"
                     class="ml-2 text-slate-400 hover:text-white transition-colors"
                     title="{% trans 'Copy code' %}">
               {% icon "clipboard" size="sm" %}
@@ -143,7 +143,7 @@ function copyCode(code) {
 }
 
 function copyAllCodes() {
-  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+  const codes = [{% for code in backup_codes %}'{{ code|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
   const allCodes = codes.join('\n');
 
   navigator.clipboard.writeText(allCodes).then(function() {
@@ -157,7 +157,7 @@ function copyAllCodes() {
 
 function printCodes() {
   const printWindow = window.open('', '_blank');
-  const codes = [{% for code in backup_codes %}'{{ code }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+  const codes = [{% for code in backup_codes %}'{{ code|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
 
   printWindow.document.write(`
     <html>

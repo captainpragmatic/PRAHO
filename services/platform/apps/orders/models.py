@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from apps.provisioning.models import Service
 
 from django.core.validators import MinValueValidator
-from django.db import IntegrityError, models
+from django.db import DatabaseError, IntegrityError, NotSupportedError, connection, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -148,6 +148,14 @@ class Order(models.Model):
         help_text=_("Generated invoice for this order"),
     )
 
+    # Idempotency key for preventing duplicate orders
+    idempotency_key = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=_("Client-provided idempotency key to prevent duplicate orders"),
+    )
+
     # Metadata
     meta = models.JSONField(default=dict, blank=True, help_text=_("Additional order metadata"))
 
@@ -174,7 +182,7 @@ class Order(models.Model):
             models.Index(fields=["customer", "status"]),
         )
         # DB-level guards against negative financial values (#71)
-        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
             models.CheckConstraint(
                 condition=models.Q(subtotal_cents__gte=0),
                 name="order_subtotal_non_negative",
@@ -191,31 +199,66 @@ class Order(models.Model):
                 condition=models.Q(total_cents__gte=0),
                 name="order_total_non_negative",
             ),
+            models.UniqueConstraint(
+                fields=["customer", "idempotency_key"],
+                condition=models.Q(idempotency_key__gt=""),
+                name="unique_customer_idempotency_key",
+            ),
         )
 
     def __str__(self) -> str:
         return f"Order {self.order_number} - {self.customer_email}"
 
+    # Markers to identify order_number uniqueness violations in IntegrityError messages.
+    # PostgreSQL uses the constraint name; SQLite uses "column_name".
+    _ORDER_NUMBER_COLLISION_MARKERS = ("orders_order_number_key", "orders.order_number")
+    # Markers for non-retryable IntegrityErrors (e.g., idempotency key constraint).
+    # If these appear in the exception string, re-raise immediately instead of retrying.
+    _NON_RETRYABLE_CONSTRAINT_MARKERS = ("unique_customer_idempotency_key",)
+
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate order number before saving, with retry on collision."""
+        """Auto-generate order number before saving, with retry on collision.
+
+        The retry loop (with savepoints via transaction.atomic) is only engaged
+        during initial creation (_state.adding=True).  Plain updates bypass it
+        entirely to avoid unnecessary savepoint overhead and to avoid accidentally
+        swallowing non-retryable constraint errors on existing rows.
+
+        Each creation retry is wrapped in a savepoint because PostgreSQL aborts
+        the entire transaction on IntegrityError — without a savepoint, subsequent
+        save() calls would fail with InFailedSqlTransaction.
+        """
         if not self.order_number:
             self.generate_order_number()
-        # Retry up to 3 times on order_number collision (parallel execution race)
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                super().save(*args, **kwargs)
-                return
-            except IntegrityError as exc:
-                if "order_number" not in str(exc) or attempt >= max_retries - 1:
-                    raise
-                # Regenerate with collision-resistant suffix
-                logger.warning(
-                    "⚠️ [Order] order_number collision on attempt %d, regenerating",
-                    attempt + 1,
-                )
-                self.order_number = ""
-                self.generate_order_number()
+
+        # Only retry on creation (order_number collision is only possible on INSERT)
+        if self._state.adding:
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Savepoint: PostgreSQL aborts the transaction on IntegrityError,
+                    # so each attempt needs its own savepoint to allow retry.
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError as exc:
+                    exc_str = str(exc)
+                    # Never retry non-order-number constraints (e.g., idempotency key)
+                    if any(m in exc_str for m in self._NON_RETRYABLE_CONSTRAINT_MARKERS):
+                        raise
+                    is_order_number_collision = any(m in exc_str for m in self._ORDER_NUMBER_COLLISION_MARKERS)
+                    if not is_order_number_collision or attempt >= max_retries - 1:
+                        raise
+                    # Regenerate sequence only, preserving the original prefix format.
+                    # This prevents split-brain between model format (ORD-{date}-{seq})
+                    # and service format (ORD-{year}-{customer}-{seq}).
+                    logger.warning(
+                        "⚠️ [Order] order_number collision on attempt %d, regenerating sequence",
+                        attempt + 1,
+                    )
+                    self._regenerate_order_number_sequence()
+        else:
+            super().save(*args, **kwargs)
 
     @property
     def subtotal(self) -> Decimal:
@@ -261,23 +304,38 @@ class Order(models.Model):
         """Get list of fields that can be edited in current status"""
         return self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
 
+    @staticmethod
+    def _locked_latest_order_number(qs: models.QuerySet["Order"]) -> str | None:
+        """Attempt select_for_update inside its own savepoint; fall back on unsupported backends.
+
+        Wrapping in transaction.atomic() ensures the lock works even when the
+        caller is in autocommit mode (PostgreSQL raises TransactionManagementError
+        for select_for_update outside a transaction, not NotSupportedError).
+        """
+        try:
+            with transaction.atomic():
+                return qs.select_for_update(of=("self",)).values_list("order_number", flat=True).first()
+        except (NotSupportedError, DatabaseError):
+            if connection.vendor != "sqlite":
+                logger.error(
+                    "⚠️ [Order] select_for_update failed on %s — TOCTOU race possible",
+                    connection.vendor,
+                )
+            return qs.values_list("order_number", flat=True).first()
+
     def generate_order_number(self) -> None:
         """Generate a unique order number based on date and sequence.
 
-        Uses MAX(order_number) instead of COUNT to avoid TOCTOU race conditions
-        in parallel execution. The retry in save() handles the remaining edge case
-        where two processes read the same MAX simultaneously.
+        Uses MAX(order_number) with select_for_update to reduce TOCTOU races.
+        The retry in save() handles the remaining edge case where two processes
+        read the same MAX simultaneously.  SQLite does not support FOR UPDATE,
+        so the lock is skipped via _locked_latest_order_number fallback.
         """
         if not self.order_number:
             date_part = timezone.now().strftime("%Y%m%d")
             prefix = f"ORD-{date_part}-"
-            # Use MAX to find the highest existing sequence (not count, which races)
-            latest = (
-                Order.objects.filter(order_number__startswith=prefix)
-                .order_by("-order_number")
-                .values_list("order_number", flat=True)
-                .first()
-            )
+            qs = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number")
+            latest = self._locked_latest_order_number(qs)
             if latest:
                 try:
                     last_seq = int(latest.split("-")[-1])
@@ -287,6 +345,37 @@ class Order(models.Model):
             else:
                 next_seq = 1
             self.order_number = f"{prefix}{next_seq:06d}"
+
+    def _regenerate_order_number_sequence(self) -> None:
+        """Regenerate just the sequence part of an existing order number.
+
+        Preserves the prefix format (whether from model or service generator)
+        to prevent format split-brain on collision retry.
+        """
+        if not self.order_number:
+            self.generate_order_number()
+            return
+        # Split on last dash to extract prefix and sequence
+        parts = self.order_number.rsplit("-", 1)
+        expected_parts = 2  # prefix + sequence
+        if len(parts) != expected_parts:
+            # Can't determine format — fall back to full regeneration
+            self.order_number = ""
+            self.generate_order_number()
+            return
+        prefix = parts[0] + "-"
+        seq_width = len(parts[1])  # Preserve zero-padding width (4 or 6)
+        qs = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number")
+        latest = self._locked_latest_order_number(qs)
+        if latest:
+            try:
+                last_seq = int(latest.rsplit("-", 1)[-1])
+                next_seq = last_seq + 1
+            except (ValueError, IndexError):
+                next_seq = 1
+        else:
+            next_seq = 1
+        self.order_number = f"{prefix}{next_seq:0{seq_width}d}"
 
     def calculate_totals(self) -> None:
         """

@@ -308,6 +308,11 @@ class Service(models.Model):
         "customers.Customer", on_delete=models.CASCADE, related_name="services", verbose_name=_("Customer")
     )
     service_plan = models.ForeignKey(ServicePlan, on_delete=models.PROTECT, verbose_name=_("Service Plan"))
+    currency = models.ForeignKey(
+        "billing.Currency",
+        on_delete=models.PROTECT,
+        verbose_name=_("Currency"),
+    )
     server = models.ForeignKey(
         Server, on_delete=models.SET_NULL, null=True, blank=True, related_name="services", verbose_name=_("Server")
     )
@@ -321,7 +326,7 @@ class Service(models.Model):
     billing_cycle = models.CharField(
         max_length=20, choices=BILLING_CYCLE_CHOICES, default="monthly", verbose_name=_("Billing Cycle")
     )
-    price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price (RON)"))
+    price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price"))
     setup_fee_paid = models.BooleanField(default=False, verbose_name=_("Setup Fee Paid"))
 
     # Service lifecycle

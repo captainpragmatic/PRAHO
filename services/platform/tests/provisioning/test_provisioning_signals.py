@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
+from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
 from apps.provisioning.models import ServicePlan, Server, Service
 # Handle missing ProvisioningTask
@@ -309,6 +310,7 @@ class ServiceSignalTestCase(TestCase):
         """Set up test data"""
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Signal Test Customer', self.admin_user)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.plan = ServicePlan.objects.create(
             name='Signal Test Plan',
             plan_type='shared_hosting',
@@ -341,6 +343,7 @@ class ServiceSignalTestCase(TestCase):
         service_data = {
             'customer': self.customer,
             'service_plan': self.plan,
+            'currency': self.currency,
             'server': self.server,
             'service_name': 'Signal Test Service',
             'domain': 'signal-test.example.com',
@@ -377,6 +380,7 @@ class ServiceSignalTestCase(TestCase):
         service = Service.objects.create(
             customer=self.customer,
             service_plan=auto_plan,
+            currency=self.currency,
             server=self.server,
             service_name='Auto Provision Service',
             domain='auto-provision.example.com',
@@ -397,6 +401,7 @@ class ServiceSignalTestCase(TestCase):
                 service = Service.objects.create(
                     customer=self.customer,
                     service_plan=self.plan,
+                    currency=self.currency,
                     server=self.server,
                     service_name='Exception Service',
                     domain='exception.example.com',
@@ -421,6 +426,7 @@ class SignalIntegrationTestCase(TestCase):
         """Set up test data"""
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Integration Customer', self.admin_user)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
     def test_service_plan_to_service_signal_integration(self):
         """Test signal integration from plan creation to service creation"""
@@ -457,6 +463,7 @@ class SignalIntegrationTestCase(TestCase):
             service = Service.objects.create(
                 customer=self.customer,
                 service_plan=plan,
+                currency=self.currency,
                 server=server,
                 service_name='Integration Service',
                 domain='integration-test.example.com',
@@ -543,6 +550,7 @@ class SignalIntegrationTestCase(TestCase):
             service = Service.objects.create(
                 customer=self.customer,
                 service_plan=plan,
+                currency=self.currency,
                 server=server,
                 service_name=f'Concurrent Service {i}',
                 domain=f'concurrent{i}.example.com',
@@ -585,9 +593,12 @@ class VirtualminAccountSignalsTest(TestCase):
             price_monthly=Decimal("29.99")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
@@ -750,9 +761,12 @@ class VirtualminProvisioningJobSignalsTest(TestCase):
             price_monthly=Decimal("29.99")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
@@ -912,9 +926,12 @@ class ProvisioningCompletionSignalsTest(TestCase):
             price_monthly=Decimal("29.99")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",

@@ -52,7 +52,7 @@ class BillingViewsTestBase(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
         self.client = Client()
-        self.currency = Currency.objects.create(code="RON", symbol="L", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})
 
         # Staff user with billing role
         self.staff_user = User.objects.create_user(

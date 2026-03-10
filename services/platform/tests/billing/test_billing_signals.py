@@ -18,10 +18,9 @@ class BillingSignalsTest(TestCase):
     def setUp(self):
         """Set up test data"""
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='EUR',
-            symbol='€',
-            decimals=2
+            defaults={'symbol': '€', 'decimals': 2}
         )
 
         # Create customer

@@ -80,10 +80,9 @@ class OrderNumberingServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -161,10 +160,9 @@ class OrderServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -393,10 +391,9 @@ class OrderQueryServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -532,7 +529,7 @@ class OrderServiceCreationTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         # Create currency
-        self.currency = Currency.objects.create(code="RON", name="Romanian Leu")
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"name": "Romanian Leu"})
 
         # Create customer
         self.customer = Customer.objects.create(
@@ -631,7 +628,6 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(order.status, 'pending')
 
         # Manually trigger service creation (signals may not work in test environment)
-        from apps.orders.services import OrderServiceCreationService
         creation_result = OrderServiceCreationService.create_pending_services(order)
         self.assertTrue(creation_result.is_ok(), f"Service creation failed: {creation_result}")
 

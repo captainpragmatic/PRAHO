@@ -33,7 +33,8 @@ Features:
 
 {% load i18n ui_components %}
 
-{# Always show pagination for now #}
+{# Hide pagination when there is only a single page #}
+{% if page_obj.paginator.num_pages > 1 %}
 
 {# Pagination Container with Left/Right Layout #}
 <div class="flex items-center justify-between py-4 px-4 {{ css_class|default:'' }}">
@@ -173,3 +174,4 @@ Features:
   </nav>
 
 </div>
+{% endif %}

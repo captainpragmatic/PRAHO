@@ -42,10 +42,9 @@ class CouponServiceTests(TestCase):
         from apps.products.models import Product
 
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="lei",
+            defaults={"name": "Romanian Leu", "symbol": "lei"},
         )
 
         # Create customer
@@ -330,10 +329,9 @@ class GiftCardServiceTests(TestCase):
         from apps.customers.models import Customer
         from apps.orders.models import Order
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="lei",
+            defaults={"name": "Romanian Leu", "symbol": "lei"},
         )
 
         self.customer = Customer.objects.create(
@@ -422,10 +420,9 @@ class LoyaltyServiceTests(TestCase):
         from apps.customers.models import Customer
         from apps.orders.models import Order
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="lei",
+            defaults={"name": "Romanian Leu", "symbol": "lei"},
         )
 
         self.customer = Customer.objects.create(
@@ -532,10 +529,9 @@ class PromotionRuleServiceTests(TestCase):
         from apps.orders.models import Order, OrderItem
         from apps.products.models import Product
 
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="lei",
+            defaults={"name": "Romanian Leu", "symbol": "lei"},
         )
 
         self.customer = Customer.objects.create(

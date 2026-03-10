@@ -225,9 +225,9 @@ class BankDetailsSecurityTests(TestCase):
             primary_email='customer@example.com',
             customer_type='business'
         )
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='RON',
-            symbol='lei'
+            defaults={'symbol': 'lei'}
         )
 
     def test_bank_details_validation_function(self):

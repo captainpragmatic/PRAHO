@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load i18n ui_components formatting %}
 
 {% block title %}{{ product.name }}{% endblock %}
 
@@ -20,7 +20,7 @@
     <div class="p-6 grid gap-6 md:grid-cols-3">
       <div class="md:col-span-2 space-y-4">
         {% if product.meta.features %}
-        <h2 class="text-lg font-medium text-white">{% trans "Caracteristici" %}</h2>
+        <h2 class="text-lg font-medium text-white">{% trans "Features" %}</h2>
         <ul class="grid sm:grid-cols-2 gap-2">
           {% for feature in product.meta.features %}
           <li class="text-slate-300 flex items-center"><span class="mr-2">{% icon "check" size="sm" css_class="text-green-400" %}</span>{{ feature }}</li>
@@ -31,13 +31,25 @@
 
       <div class="md:col-span-1">
         <div class="bg-slate-900/40 border border-slate-700 rounded-lg p-4">
+          {% if product.prices %}
+          <div class="text-center mb-4 p-3 bg-slate-700/50 rounded-lg">
+            <div class="text-2xl font-bold text-green-400">
+              {{ product.prices.0.monthly_price|romanian_currency }} /{% trans "mo" %}
+            </div>
+            {% if product.prices.0.setup_fee and product.prices.0.setup_fee != "0.00" %}
+            <div class="text-xs text-slate-500 mt-1">
+              + {{ product.prices.0.setup_fee|romanian_currency }} {% trans "setup fee" %}
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
           <form hx-post="{% url 'orders:add_to_cart' %}" hx-target="#cart-widget" hx-swap="outerHTML"
                 hx-on::after-request="if(event.detail.successful){document.body.dispatchEvent(new CustomEvent('cartUpdated'));}"
           >
             {% csrf_token %}
             <input type="hidden" name="product_slug" value="{{ product.slug }}">
             <div class="mb-3">
-              <label class="block text-sm text-slate-300 mb-1">{% trans "Perioadă de facturare" %}</label>
+              <label class="block text-sm text-slate-300 mb-1">{% trans "Billing period" %}</label>
               <select name="billing_period" class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2">
                 {% for price in product.prices %}
                 <option value="{{ price.billing_period }}">{{ price.billing_period_display }}</option>
@@ -53,7 +65,7 @@
               {% input_field "domain_name" label="Domain name (required)" placeholder="example.ro" required=True icon_left="globe" %}
             </div>
             {% endif %}
-            {% trans "Add to Cart" as bt1 %}{% button bt1 variant="primary" size="md" type="submit" class="w-full" %}
+            {% trans "Add to Cart" as bt1 %}{% button bt1 variant="success" size="md" type="submit" class="w-full" %}
           </form>
         </div>
       </div>
@@ -62,7 +74,7 @@
 
   <div class="mt-6">
     <a href="{% url 'orders:catalog' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700 border border-slate-600 rounded-lg hover:bg-slate-600 transition-colors">
-      ← {% trans 'Înapoi la catalog' %}
+      ← {% trans "Back to catalog" %}
     </a>
   </div>
 </div>
