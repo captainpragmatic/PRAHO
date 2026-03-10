@@ -117,7 +117,7 @@
               <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
             </div>
             <div class="flex justify-between text-slate-400">
-              <span>{% trans "VAT" %} ({{ order.vat_rate_percent|default:"21" }}%)</span>
+              <span>{% trans "VAT" %} ({{ order.vat_rate_percent }}%)</span>
               <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
             </div>
             <div class="border-t border-slate-600 pt-2">
@@ -200,7 +200,7 @@
               <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
             </div>
             <div class="flex justify-between text-slate-300">
-              <span>{% trans "VAT" %} ({{ order.vat_rate_percent|default:"21" }}%)</span>
+              <span>{% trans "VAT" %} ({{ order.vat_rate_percent }}%)</span>
               <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
             </div>
             <div class="border-t border-slate-600 pt-3">

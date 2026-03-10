@@ -49,6 +49,26 @@ class OrderHMACSecurityTestCase(SimpleTestCase):
             'billing_period': 'monthly'
         }
 
+        # Mock Platform API so add_item() doesn't fail with M8 fallback
+        # (requires_domain=True). Tests here don't test M8 behaviour.
+        _mock_api_instance = Mock()
+        _mock_api_instance.get.return_value = {
+            "id": "shared-hosting-basic",
+            "slug": "shared-hosting-basic",
+            "name": "Shared Hosting Basic",
+            "product_type": "hosting",
+            "requires_domain": False,
+            "is_active": True,
+        }
+        self._platform_patcher = patch(
+            "apps.orders.services.PlatformAPIClient",
+            Mock(return_value=_mock_api_instance),
+        )
+        self._platform_patcher.start()
+
+    def tearDown(self):
+        self._platform_patcher.stop()
+
     def _generate_valid_hmac_seal(self, price_data: dict, client_ip: str = '127.0.0.1') -> dict:
         """Helper to generate valid HMAC price seal"""
         return HMACPriceSealer.seal_price_data(price_data, client_ip)
@@ -406,6 +426,26 @@ class OrderDosHardeningTestCase(SimpleTestCase):
         session['user_id'] = 456
         session.save()
 
+        # Mock Platform API so add_item() reaches uniform_response_delay()
+        # instead of short-circuiting via M8 ValidationError on missing domain.
+        _mock_api_instance = Mock()
+        _mock_api_instance.get.return_value = {
+            "id": "generic-product",
+            "slug": "generic-product",
+            "name": "Generic Product",
+            "product_type": "hosting",
+            "requires_domain": False,
+            "is_active": True,
+        }
+        self._platform_patcher = patch(
+            "apps.orders.services.PlatformAPIClient",
+            Mock(return_value=_mock_api_instance),
+        )
+        self._platform_patcher.start()
+
+    def tearDown(self):
+        self._platform_patcher.stop()
+
     @override_settings(RATE_LIMITING_ENABLED=True)
     def test_per_ip_rate_limiting_via_middleware(self):
         """🔒 Rate limiting enforced by APIRateLimitMiddleware (burst: 20/10s)"""
@@ -569,6 +609,25 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
         session['customer_id'] = 123
         session['user_id'] = 456
         session.save()
+
+        # Mock Platform API so add_item() doesn't trigger M8 fallback.
+        _mock_api_instance = Mock()
+        _mock_api_instance.get.return_value = {
+            "id": "generic-product",
+            "slug": "generic-product",
+            "name": "Generic Product",
+            "product_type": "hosting",
+            "requires_domain": False,
+            "is_active": True,
+        }
+        self._platform_patcher = patch(
+            "apps.orders.services.PlatformAPIClient",
+            Mock(return_value=_mock_api_instance),
+        )
+        self._platform_patcher.start()
+
+    def tearDown(self):
+        self._platform_patcher.stop()
 
     @patch('apps.orders.views.GDPRCompliantCartSession')
     def test_stale_cart_version_detection(self, mock_cart_class):

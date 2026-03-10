@@ -535,6 +535,13 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             # Order was deleted, clear cache and continue with creation
             cache.delete(cache_key)
 
+    # Validate input before any DB queries (M9: avoid unnecessary DB hits on invalid requests)
+    input_serializer = OrderCreateInputSerializer(data=request.data)
+    if not input_serializer.is_valid():
+        return Response(
+            {"error": "Invalid input", "details": input_serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+        )
+
     # DB fallback: check database for existing order when cache misses (S3)
     if idempotency_key:
         db_existing = Order.objects.filter(customer=customer, idempotency_key=idempotency_key).first()
@@ -551,13 +558,6 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 },
                 status=status.HTTP_200_OK,
             )
-
-    # Validate input
-    input_serializer = OrderCreateInputSerializer(data=request.data)
-    if not input_serializer.is_valid():
-        return Response(
-            {"error": "Invalid input", "details": input_serializer.errors}, status=status.HTTP_400_BAD_REQUEST
-        )
 
     validated_data = input_serializer.validated_data
     # customer parameter is injected by decorator and already validated
@@ -895,12 +895,20 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 .get(id=order_id, customer_id=customer.id)
             )
 
-            # Verify PaymentIntent belongs to this order (prevent cross-binding — S2)
-            if payment_intent_id and order.payment_intent_id and payment_intent_id != order.payment_intent_id:
-                return Response(
-                    {"success": False, "error": "Payment intent does not match this order"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            # Verify PaymentIntent belongs to this order (prevent cross-binding)
+            if payment_intent_id:
+                # Reject PI binding for non-stripe orders (e.g. bank_transfer)
+                if order.payment_method and order.payment_method != "stripe":
+                    return Response(
+                        {"success": False, "error": "Order payment method does not accept payment intents"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # Reject mismatched PI when order already has one assigned
+                if order.payment_intent_id and payment_intent_id != order.payment_intent_id:
+                    return Response(
+                        {"success": False, "error": "Payment intent does not match this order"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             # Idempotency guard — prevent double-processing
             if order.status not in ["pending"]:
@@ -912,8 +920,11 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             # Update order status to confirmed
             old_status = order.status
             order.status = "confirmed"
-            order.payment_intent_id = payment_intent_id
-            order.save(update_fields=["status", "payment_intent_id"])
+            update_fields = ["status"]
+            if payment_intent_id is not None:
+                order.payment_intent_id = payment_intent_id
+                update_fields.append("payment_intent_id")
+            order.save(update_fields=update_fields)
 
             logger.info(f"✅ Order {order.order_number} confirmed after payment")
 

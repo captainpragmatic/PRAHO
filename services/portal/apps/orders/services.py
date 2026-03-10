@@ -16,7 +16,7 @@ from django.utils.translation import gettext as _
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
-from .validators import OrderInputValidator
+from .validators import MAX_CART_ITEMS, OrderInputValidator
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +299,7 @@ class GDPRCompliantCartSession:
                 "slug": product_slug,
                 "name": product_slug.replace("-", " ").title(),
                 "product_type": "",
-                "requires_domain": False,
+                "requires_domain": True,  # Fail-safe: assume domain required during outage
                 "is_active": True,
             }
 
@@ -337,6 +337,8 @@ class GDPRCompliantCartSession:
             self.cart["items"][existing_index] = item
             logger.info(f"🔄 [Cart] Updated existing item: {product_slug}")
         else:
+            if len(self.cart["items"]) >= MAX_CART_ITEMS:
+                raise ValidationError(_("Cart cannot contain more than %(max)s items") % {"max": MAX_CART_ITEMS})
             self.cart["items"].append(item)
             logger.info(f"➕ [Cart] Added new item: {product_slug}")  # noqa: RUF001
 

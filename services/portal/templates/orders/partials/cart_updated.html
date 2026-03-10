@@ -19,7 +19,7 @@
 
   <!-- Mini Cart Dropdown (auto-open after successful add) -->
   <div id="mini-cart" class="absolute right-0 mt-2 w-80 z-50" x-show="miniCartOpen" x-cloak>
-    <div hx-get="{% url 'orders:mini_cart_content' %}{% if just_added_slug %}?just_added={{ just_added_slug }}{% endif %}"
+    <div hx-get="{% url 'orders:mini_cart_content' %}{% if just_added_slug %}?just_added={{ just_added_slug|urlencode }}{% endif %}"
          hx-trigger="load, cartUpdated from:body"
          hx-target="this"
          hx-swap="innerHTML"

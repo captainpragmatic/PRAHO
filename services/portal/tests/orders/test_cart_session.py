@@ -13,14 +13,39 @@ from unittest.mock import patch, Mock
 from apps.orders.services import GDPRCompliantCartSession
 
 
+def _make_mock_platform_api(requires_domain: bool = False) -> Mock:
+    """Return a PlatformAPIClient mock whose .get() returns a generic product."""
+    mock_instance = Mock()
+    mock_instance.get.return_value = {
+        "id": "generic-product",
+        "slug": "generic-product",
+        "name": "Generic Product",
+        "product_type": "hosting",
+        "requires_domain": requires_domain,
+        "is_active": True,
+    }
+    mock_cls = Mock(return_value=mock_instance)
+    return mock_cls
+
+
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
 class TestGDPRCompliantCartSession(SimpleTestCase):
     """Test the GDPR-compliant cart session implementation"""
 
     def setUp(self):
-        """Set up test session"""
+        """Set up test session with PlatformAPIClient mocked (no real API call)."""
         self.session = SessionStore()
         self.session.create()
+        # Mock Platform API so add_item() doesn't hit the real server.
+        # Use requires_domain=False so tests that don't supply domain_name still work.
+        self._platform_patcher = patch(
+            "apps.orders.services.PlatformAPIClient",
+            _make_mock_platform_api(requires_domain=False),
+        )
+        self._platform_patcher.start()
+
+    def tearDown(self):
+        self._platform_patcher.stop()
 
     def test_create_empty_cart(self):
         """Test creating an empty cart with proper structure"""

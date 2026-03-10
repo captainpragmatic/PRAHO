@@ -230,7 +230,7 @@ class OrderNumberingService:
             created_at__year=current_year,
         ).order_by("-order_number")
         try:
-            latest_order = qs.select_for_update().first()
+            latest_order = qs.select_for_update(of=("self",)).first()
         except NotSupportedError:
             # SQLite doesn't support SELECT FOR UPDATE — fall back to plain query
             latest_order = qs.first()

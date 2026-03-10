@@ -150,6 +150,9 @@ def _parse_total_cents(order_total: str) -> int:
         return 0
 
 
+ALLOWED_PAYMENT_METHODS = frozenset({"bank_transfer", "stripe", "card"})
+
+
 @dataclasses.dataclass
 class CheckoutContext:
     """Validated checkout request data extracted from a POST request."""
@@ -164,7 +167,7 @@ class CheckoutContext:
     agree_terms: bool
 
 
-def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpResponse":
+def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpResponse":  # noqa: PLR0911
     """Validate a checkout POST request.
 
     Returns a CheckoutContext on success, or an HttpResponse (redirect/JsonResponse) on failure.
@@ -195,6 +198,12 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
         messages.error(request, _("Your cart was updated. Please review and try again."))
         return redirect("orders:checkout")
 
+    # Validate payment method against allowlist
+    payment_method = request.POST.get("payment_method", "")
+    if payment_method and payment_method not in ALLOWED_PAYMENT_METHODS:
+        messages.error(request, _("Invalid payment method selected."))
+        return redirect("orders:checkout")
+
     # Validate EU compliance terms acceptance
     agree_terms = request.POST.get("agree_terms", "") == "on"
     if not agree_terms:
@@ -205,7 +214,7 @@ def _validate_checkout_request(request: HttpRequest) -> "CheckoutContext | HttpR
         cart=cart,
         customer_id=customer_id,
         user_id=user_id,
-        payment_method=request.POST.get("payment_method", ""),
+        payment_method=payment_method,
         cart_version=cart_version,
         notes=request.POST.get("notes", "").strip(),
         idempotency_key=request.POST.get("idempotency_key", "").strip(),
@@ -227,6 +236,24 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
     Handles idempotency, preflight, order creation, optional Stripe PaymentIntent,
     and redirects to confirmation.
     """
+    # 🔒 SECURITY: DoS hardening — fail closed if cache is unavailable
+    cache_failure = OrderSecurityHardening.fail_closed_on_cache_failure("order_create", "create_order")
+    if cache_failure:
+        messages.error(request, _("Service temporarily unavailable. Please try again later."))
+        return redirect("orders:checkout")
+
+    # 🔒 SECURITY: Reject oversized payloads
+    size_check = OrderSecurityHardening.validate_request_size(request)
+    if size_check:
+        messages.error(request, _("Request is too large."))
+        return redirect("orders:checkout")
+
+    # 🔒 SECURITY: Reject suspicious field patterns
+    pattern_check = OrderSecurityHardening.check_suspicious_patterns(request)
+    if pattern_check:
+        messages.error(request, _("Invalid request."))
+        return redirect("orders:checkout")
+
     try:
         # Idempotency key fallback — includes session key + timestamp to prevent
         # same-cart collisions across separate checkout attempts.
@@ -1164,7 +1191,7 @@ def payment_success_webhook(request: HttpRequest) -> JsonResponse:
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912
+def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR0912, C901
     """
     Confirm payment and trigger service creation.
     Called after successful Stripe payment from frontend.
@@ -1193,6 +1220,14 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
 
         if not user_id:
             return JsonResponse({"success": False, "error": "User authentication required"}, status=401)
+
+        # 🔒 SECURITY: Idempotency guard — prevent double-processing of same payment
+        idem_key = f"confirm_payment:{customer_id}:{payment_intent_id}"
+        if not cache.add(idem_key, "processing", timeout=300):
+            logger.warning("⚠️ [Orders] Duplicate confirm_payment blocked: %s", idem_key)
+            return JsonResponse(
+                {"success": True, "status": "already_processing", "message": "Payment is already being processed"},
+            )
 
         logger.info(f"💳 Confirming payment {payment_intent_id} for order {order_id}")
 

@@ -19,7 +19,8 @@ MAX_CONFIG_KEYS = 50
 MAX_DOMAIN_LENGTH = 253
 MAX_CONFIG_VALUE_LENGTH = 100
 MAX_QUANTITY = 1000
-MAX_PROMO_CODE_LENGTH = 500
+MAX_CART_ITEMS = 50
+MAX_NOTES_LENGTH = 500
 
 
 class OrderInputValidator:
@@ -164,7 +165,7 @@ class OrderInputValidator:
 
         # Trim whitespace and limit length
         notes = notes.strip()
-        if len(notes) > MAX_PROMO_CODE_LENGTH:
+        if len(notes) > MAX_NOTES_LENGTH:
             raise ValidationError(_("Notes cannot exceed 500 characters"))
 
         # Basic security check — reject any HTML markup (catches <script>, <img onerror=...>, etc.)

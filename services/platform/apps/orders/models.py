@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from apps.provisioning.models import Service
 
 from django.core.validators import MinValueValidator
-from django.db import IntegrityError, models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -153,7 +153,6 @@ class Order(models.Model):
         max_length=64,
         blank=True,
         default="",
-        db_index=True,
         help_text=_("Client-provided idempotency key to prevent duplicate orders"),
     )
 
@@ -210,20 +209,34 @@ class Order(models.Model):
     def __str__(self) -> str:
         return f"Order {self.order_number} - {self.customer_email}"
 
+    # Markers to identify order_number uniqueness violations in IntegrityError messages.
+    # PostgreSQL uses the constraint name; SQLite uses "column_name".
+    _ORDER_NUMBER_COLLISION_MARKERS = ("orders_order_number_key", "orders.order_number")
+
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate order number before saving, with retry on collision."""
+        """Auto-generate order number before saving, with retry on collision.
+
+        Each retry attempt is wrapped in a savepoint (transaction.atomic) because
+        PostgreSQL aborts the entire transaction on IntegrityError — without a
+        savepoint, subsequent save() calls would fail with InFailedSqlTransaction.
+        """
         if not self.order_number:
             self.generate_order_number()
         # Retry up to 3 times on order_number collision (parallel execution race)
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                super().save(*args, **kwargs)
+                # Savepoint: PostgreSQL aborts the transaction on IntegrityError,
+                # so each attempt needs its own savepoint to allow retry.
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
                 return
             except IntegrityError as exc:
-                if "order_number" not in str(exc) or attempt >= max_retries - 1:
+                exc_str = str(exc)
+                is_order_number_collision = any(m in exc_str for m in self._ORDER_NUMBER_COLLISION_MARKERS)
+                if not is_order_number_collision or attempt >= max_retries - 1:
                     raise
-                # Regenerate with collision-resistant suffix
+                # Regenerate on collision
                 logger.warning(
                     "⚠️ [Order] order_number collision on attempt %d, regenerating",
                     attempt + 1,

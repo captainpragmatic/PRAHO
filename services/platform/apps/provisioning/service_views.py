@@ -241,8 +241,8 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("provisioning:services")
 
     if request.method == "POST":
-        service.status = "suspended"
-        service.save()
+        reason = request.POST.get("reason", "Staff suspension")
+        service.suspend(reason=reason)
 
         messages.success(request, _("⏸️ Service {domain} has been suspended!").format(domain=service.domain))
         return redirect("provisioning:service_detail", pk=pk)
@@ -263,8 +263,7 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("provisioning:services")
 
     if request.method == "POST":
-        service.status = "active"
-        service.save()
+        service.activate()
 
         messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
         return redirect("provisioning:service_detail", pk=pk)

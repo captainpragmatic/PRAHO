@@ -216,6 +216,26 @@ class OrderSessionSecurityTestCase(SimpleTestCase):
     Tests CSRF protection and session isolation
     """
 
+    def setUp(self):
+        # Mock Platform API so add_item() doesn't trigger M8 fallback.
+        _mock_api_instance = Mock()
+        _mock_api_instance.get.return_value = {
+            "id": "generic-product",
+            "slug": "generic-product",
+            "name": "Generic Product",
+            "product_type": "hosting",
+            "requires_domain": False,
+            "is_active": True,
+        }
+        self._platform_patcher = patch(
+            "apps.orders.services.PlatformAPIClient",
+            Mock(return_value=_mock_api_instance),
+        )
+        self._platform_patcher.start()
+
+    def tearDown(self):
+        self._platform_patcher.stop()
+
     def test_csrf_protection_on_post_endpoints(self):
         """🔒 Test CSRF protection on state-changing operations"""
         # Set up authenticated session with proper timestamp
