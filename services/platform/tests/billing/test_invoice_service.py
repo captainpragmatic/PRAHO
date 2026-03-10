@@ -794,15 +794,15 @@ class GenerateVatSummaryTest(TestCase):
         self.assertGreater(result["total_sales"], Decimal("0"))
         self.assertGreater(result["total_vat"], Decimal("0"))
 
-    def test_sent_invoice_included_in_summary(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-002", status="sent")
+    def test_issued_invoice_included_in_summary(self) -> None:
+        self._create_invoice_for_vat("INV-VAT-002", status="issued")
 
         result = generate_vat_summary("2025-01-01", "2027-01-01")
 
         self.assertGreater(result["invoice_count"], 0)
 
-    def test_issued_invoice_excluded_from_summary(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-003", status="issued")
+    def test_draft_invoice_excluded_from_summary(self) -> None:
+        self._create_invoice_for_vat("INV-VAT-003", status="draft")
 
         result = generate_vat_summary("2025-01-01", "2027-01-01")
 

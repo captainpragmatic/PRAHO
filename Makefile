@@ -65,6 +65,7 @@ help:
 	@echo "  make lint            - Lint all services"
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
+	@echo "  make lint-fsm        - FSM guardrail lint (ADR-0034)"
 	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
 	@echo "  make lint-health     - Code health anti-pattern scan"
 	@echo "  make check-types     - Type check all services"
@@ -517,6 +518,11 @@ lint-health:
 	@echo "🏥 [Health] Code health scan..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=medium --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
+
+lint-fsm:
+	@echo "🔒 [FSM] FSM guardrail lint (ADR-0034)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/lint_fsm_guardrails.py
 
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."

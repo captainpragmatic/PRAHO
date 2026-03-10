@@ -382,6 +382,14 @@ class Service(ConcurrentTransitionMixin, models.Model):
             # 🚀 Performance: Billing cycle reporting
             models.Index(fields=["billing_cycle", "status", "-created_at"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=["pending", "provisioning", "active", "suspended", "failed", "terminated", "expired"]
+                ),
+                name="service_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.service_name} - {self.customer.get_display_name()}"

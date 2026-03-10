@@ -388,8 +388,6 @@ class TicketStatusServiceTest(TestCase):
         with self.assertRaises(AttributeError):
             ticket.status = 'in_progress'
 
-        # Invalid status should raise error when set at DB level and validated
-        Ticket.objects.filter(pk=ticket.pk).update(status='invalid_status')
-        ticket.refresh_from_db()
-        with self.assertRaises(Exception):  # Django validation error
-            ticket.full_clean()
+        # Invalid status should raise error at DB level (CHECK constraint)
+        with self.assertRaises(Exception):
+            Ticket.objects.filter(pk=ticket.pk).update(status='invalid_status')

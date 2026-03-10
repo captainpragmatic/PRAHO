@@ -306,7 +306,7 @@ class TestValidateInvoiceRefund(TestCase):
     def test_invoice_not_eligible_status(self):
         c = _make_customer()
         cur = _make_currency()
-        inv = _make_invoice(c, cur, status="cancelled")
+        inv = _make_invoice(c, cur, status="void")
         r = RefundService._validate_invoice_refund(inv, {"refund_type": "full"})
         assert r.is_err()
         assert "not eligible" in r.unwrap_err().lower()
@@ -1386,10 +1386,10 @@ class TestValidateAndPrepareInvoiceRefund(TestCase):
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False
 
-    def test_pending_invoice(self):
+    def test_issued_invoice(self):
         c = _make_customer()
         cur = _make_currency()
-        inv = _make_invoice(c, cur, status="pending")
+        inv = _make_invoice(c, cur, status="issued")
         r = RefundService._validate_and_prepare_invoice_refund(inv, {"refund_type": "full"})
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False

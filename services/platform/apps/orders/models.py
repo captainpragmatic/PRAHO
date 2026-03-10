@@ -218,6 +218,22 @@ class Order(ConcurrentTransitionMixin, models.Model):
                 condition=models.Q(idempotency_key__gt=""),
                 name="unique_customer_idempotency_key",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "draft",
+                        "pending",
+                        "confirmed",
+                        "processing",
+                        "completed",
+                        "cancelled",
+                        "failed",
+                        "refunded",
+                        "partially_refunded",
+                    ]
+                ),
+                name="order_status_valid_values",
+            ),
         )
 
     def __str__(self) -> str:
@@ -568,7 +584,7 @@ class OrderItem(models.Model):
             models.Index(fields=["product", "provisioning_status"]),
         )
         # DB-level guards against negative financial values (#71)
-        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
             models.CheckConstraint(
                 condition=models.Q(unit_price_cents__gte=0),
                 name="orderitem_unit_price_non_negative",
@@ -584,6 +600,12 @@ class OrderItem(models.Model):
             models.CheckConstraint(
                 condition=models.Q(line_total_cents__gte=0),
                 name="orderitem_line_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    provisioning_status__in=["pending", "in_progress", "completed", "failed", "cancelled"]
+                ),
+                name="orderitem_provisioning_status_valid_values",
             ),
         )
 

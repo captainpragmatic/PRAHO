@@ -174,6 +174,26 @@ class Invoice(models.Model):
             models.Index(fields=["status", "-due_at"]),
             models.Index(fields=["number"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(subtotal_cents__gte=0),
+                name="invoice_subtotal_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="invoice_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_cents__gte=0),
+                name="invoice_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=["draft", "issued", "paid", "overdue", "void", "refunded", "partially_refunded"]
+                ),
+                name="invoice_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
@@ -414,6 +434,20 @@ class InvoiceLine(models.Model):
             models.Index(fields=["service"]),
             models.Index(fields=["invoice", "kind"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(unit_price_cents__gte=0),
+                name="invoiceline_unit_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="invoiceline_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(line_total_cents__gte=0),
+                name="invoiceline_line_total_non_negative",
+            ),
+        ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         # Calculate totals before saving

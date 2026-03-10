@@ -1642,7 +1642,10 @@ def _consider_service_suspension(payment: Payment) -> None:
 def _cancel_payment_retries(payment: Payment) -> None:
     """Cancel any pending payment retries"""
     try:
-        PaymentRetryAttempt.objects.filter(payment=payment, status="pending").update(status="cancelled")
+        PaymentRetryAttempt.objects.filter(
+            payment=payment,
+            status="pending",
+        ).update(status="cancelled")  # fsm-bypass: PaymentRetryAttempt is not FSM-protected
 
         logger.info(f"🚫 [Payment] Cancelled pending retries for payment {payment.id}")
 
@@ -1781,7 +1784,7 @@ def _cancel_invoice_webhooks(invoice: Invoice) -> None:
             customer=invoice.customer,
             event_type__startswith="invoice.",  # invoice.created, invoice.cancelled, etc.
             status="pending",
-        ).update(status="cancelled")
+        ).update(status="cancelled")  # fsm-bypass: WebhookDelivery is not FSM-protected
 
         if cancelled_count > 0:
             logger.info(f"🚫 [Webhook] Cancelled {cancelled_count} pending deliveries for invoice {invoice.number}")

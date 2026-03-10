@@ -169,21 +169,23 @@ class ServerWebhookView(View):
                 logger.warning(f"⚠️ [Server Webhook] Service {service_username} not found on {server.name}")
                 return False, f"Service {service_username} not found"
 
-            # Update service status
-            service.status = "active"
-            service.activated_at = datetime.now()
-
             # Update provisioning data if provided
             if "provisioning_result" in webhook_data:
                 service.provisioning_data = webhook_data["provisioning_result"]
 
+            # Use FSM transition to activate the service
+            service.complete_provisioning()
             service.save()
 
             # Complete any pending provisioning tasks
-            ProvisioningTask.objects.filter(
-                service=service, task_type="create_service", status__in=["pending", "running"]
+            ProvisioningTask.objects.filter(  # fsm-bypass: ProvisioningTask is not FSM-protected
+                service=service,
+                task_type="create_service",
+                status__in=["pending", "running"],
             ).update(
-                status="completed", completed_at=datetime.now(), result=webhook_data.get("provisioning_result", {})
+                status="completed",
+                completed_at=datetime.now(),
+                result=webhook_data.get("provisioning_result", {}),
             )
 
             # Log audit event
@@ -381,7 +383,7 @@ class ServerWebhookView(View):
             # Find and update provisioning task
             try:
                 task = ProvisioningTask.objects.get(id=task_id)
-                task.status = "completed"
+                task.status = "completed"  # fsm-bypass: ProvisioningTask is not FSM-protected
                 task.completed_at = datetime.now()
                 task.result = task_result
                 task.save()
@@ -411,7 +413,7 @@ class ServerWebhookView(View):
             # Find and update provisioning task
             try:
                 task = ProvisioningTask.objects.get(id=task_id)
-                task.status = "failed"
+                task.status = "failed"  # fsm-bypass: ProvisioningTask is not FSM-protected
                 task.error_message = error_message
                 task.save()
 

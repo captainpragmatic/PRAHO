@@ -362,6 +362,14 @@ class Domain(models.Model):
             # 🚀 Performance: Registrar management queries
             models.Index(fields=["registrar", "status", "-expires_at"], name="domain_registrar_expiry_idx"),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=["pending", "active", "expired", "suspended", "transfer_in", "transfer_out", "cancelled"]
+                ),
+                name="domain_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name

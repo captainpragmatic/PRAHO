@@ -255,8 +255,10 @@ def _trigger_service_provisioning(order: Order) -> None:
 def _handle_order_cancellation(order: Order, old_status: str) -> None:
     """Handle order cancellation cleanup"""
     try:
-        # Cancel any pending provisioning
-        order.items.filter(provisioning_status="pending").update(provisioning_status="cancelled")
+        # Cancel any pending provisioning — bulk cancel is intentional for order cancellation
+        order.items.filter(
+            provisioning_status="pending",
+        ).update(provisioning_status="cancelled")  # fsm-bypass: bulk cancel on order cancellation
 
         # Send cancellation email
         _send_order_cancelled_email(order)

@@ -478,7 +478,7 @@ def generate_vat_summary(period_start: str, period_end: str) -> dict[str, Any]:
         invoices = Invoice.objects.filter(
             created_at__gte=start_date,
             created_at__lte=end_date,
-            status__in=["paid", "sent"],
+            status__in=["paid", "issued"],
         )
 
         # Calculate totals

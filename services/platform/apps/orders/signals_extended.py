@@ -386,7 +386,9 @@ def _cancel_order_webhooks(order: Order) -> None:
             status="pending",
         )
 
-        cancelled_count = pending_webhooks.update(status="cancelled")
+        cancelled_count = pending_webhooks.update(
+            status="cancelled"
+        )  # fsm-bypass: WebhookDelivery is not FSM-protected
 
         if cancelled_count > 0:
             logger.info(f"🚫 [Webhook] Cancelled {cancelled_count} pending deliveries for order {order.order_number}")

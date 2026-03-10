@@ -866,19 +866,19 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
         self.assertIsInstance(response, HttpResponse)
         self.assertGreater(len(response.content), 0)
 
-    def test_negative_amount_invoice(self):
-        """Test PDF generation for credit note (negative amounts)"""
-        credit_invoice = Invoice.objects.create(
+    def test_minimal_amount_invoice(self):
+        """Test PDF generation for invoice with minimal (1 cent) amounts"""
+        minimal_invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
-            number='CN-001',  # Credit Note
-            subtotal_cents=-5000,
-            tax_cents=-1050,
-            total_cents=-6050,
+            number='CN-001',
+            subtotal_cents=1,
+            tax_cents=0,
+            total_cents=1,
             status='issued'
         )
 
-        generator = RomanianInvoicePDFGenerator(credit_invoice)
+        generator = RomanianInvoicePDFGenerator(minimal_invoice)
         response = generator.generate_response()
 
         self.assertIsInstance(response, HttpResponse)

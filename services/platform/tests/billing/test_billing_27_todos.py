@@ -172,7 +172,7 @@ class SchedulePaymentRemindersTests(TestCase):
     @patch("apps.billing.tasks.Invoice")
     def test_schedules_reminders(self, mock_inv_cls, mock_audit, mock_async):
         mock_inv = MagicMock(
-            id="i1", number="INV-1", status="pending",
+            id="i1", number="INV-1", status="issued",
             due_date=timezone.now().date() + timedelta(days=14),
         )
         mock_inv.customer = MagicMock(id="c1")
@@ -249,7 +249,7 @@ class ProcessAutoPaymentTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch("apps.billing.tasks.Invoice")
     def test_with_order(self, mock_inv_cls, mock_audit, mock_pay_svc):
-        mock_inv = MagicMock(id="i1", number="INV-1", status="pending", meta={"order_id": "o1"})
+        mock_inv = MagicMock(id="i1", number="INV-1", status="issued", meta={"order_id": "o1"})
         mock_inv.customer = MagicMock(id="c1")
         mock_inv_cls.objects.get.return_value = mock_inv
 
@@ -262,7 +262,7 @@ class ProcessAutoPaymentTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch("apps.billing.tasks.Invoice")
     def test_no_order(self, mock_inv_cls, mock_audit):
-        mock_inv = MagicMock(id="i1", number="INV-1", status="pending", meta={})
+        mock_inv = MagicMock(id="i1", number="INV-1", status="issued", meta={})
         mock_inv.customer = MagicMock(id="c1")
         mock_inv_cls.objects.get.return_value = mock_inv
 

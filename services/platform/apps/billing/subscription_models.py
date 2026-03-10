@@ -368,6 +368,10 @@ class Subscription(models.Model):
                 condition=Q(quantity__gte=1),
                 name="subscription_quantity_positive",
             ),
+            models.CheckConstraint(
+                condition=Q(status__in=["trialing", "active", "past_due", "paused", "cancelled", "expired", "pending"]),
+                name="subscription_status_valid_values",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -983,7 +987,7 @@ class SubscriptionChange(models.Model):
             sub.save()
 
             # Mark change as applied
-            self.status = "applied"
+            self.status = "applied"  # fsm-bypass: SubscriptionChange is not FSM-protected
             self.applied_at = timezone.now()
             self.save()
 

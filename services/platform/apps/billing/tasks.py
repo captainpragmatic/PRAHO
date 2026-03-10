@@ -123,8 +123,8 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status != "pending":
-            logger.info(f"📅 [Reminders] Invoice {invoice.number} is not pending, skipping reminders")
+        if invoice.status != "issued":
+            logger.info(f"📅 [Reminders] Invoice {invoice.number} is not issued/pending, skipping reminders")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
@@ -268,8 +268,8 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status not in ["pending", "overdue"]:
-            logger.info(f"⚠️ [Dunning] Invoice {invoice.number} is not overdue, skipping dunning")
+        if invoice.status not in ["issued", "overdue"]:
+            logger.info(f"⚠️ [Dunning] Invoice {invoice.number} is not issued/overdue, skipping dunning")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
@@ -419,8 +419,8 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status != "pending":
-            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not pending, skipping auto-payment")
+        if invoice.status != "issued":
+            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not issued/pending, skipping auto-payment")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),

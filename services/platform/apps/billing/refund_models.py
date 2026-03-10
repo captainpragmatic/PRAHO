@@ -133,6 +133,20 @@ class Refund(models.Model):
             ),
             # Ensure refund amount is positive
             models.CheckConstraint(condition=models.Q(amount_cents__gt=0), name="refund_amount_positive"),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "pending",
+                        "processing",
+                        "approved",
+                        "completed",
+                        "rejected",
+                        "failed",
+                        "cancelled",
+                    ]
+                ),
+                name="refund_status_valid_values",
+            ),
         ]
 
     def __str__(self) -> str:

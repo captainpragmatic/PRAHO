@@ -150,6 +150,24 @@ class ProformaInvoice(models.Model):
             models.Index(fields=["valid_until"]),
             models.Index(fields=["created_at"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(subtotal_cents__gte=0),
+                name="proformainvoice_subtotal_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="proformainvoice_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_cents__gte=0),
+                name="proformainvoice_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["draft", "sent", "accepted", "expired", "converted"]),
+                name="proformainvoice_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
@@ -318,6 +336,20 @@ class ProformaLine(models.Model):
     class Meta:
         db_table = "proforma_line"
         indexes = (models.Index(fields=["service"]),)
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(unit_price_cents__gte=0),
+                name="proformaline_unit_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="proformaline_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(line_total_cents__gte=0),
+                name="proformaline_line_total_non_negative",
+            ),
+        ]
 
     @property
     def unit_price(self) -> Decimal:

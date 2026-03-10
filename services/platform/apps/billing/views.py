@@ -1642,7 +1642,7 @@ This ticket was automatically created from a customer refund request.
             contact_phone=getattr(request.user, "phone", ""),
             category=billing_category,
             priority="normal",
-            status="new",
+            status="open",
             source="web",
             created_by=request.user,
             # Link to invoice

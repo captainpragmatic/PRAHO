@@ -775,10 +775,9 @@ class TestProformaInvoiceSignal(TestCase):
         force_status(proforma, "sent")
         mock_bas.log_proforma_event.assert_called()
 
-    @patch("apps.billing.signals.ProformaConversionService" if False else "apps.billing.services.ProformaConversionService")
     @patch("apps.billing.signals.BillingAuditService")
-    def test_proforma_paid_triggers_conversion(self, mock_bas, mock_conv):
-        """When proforma status changes to paid, auto-conversion is attempted."""
+    def test_proforma_status_change_triggers_audit(self, mock_bas):
+        """When proforma status changes to accepted, audit signal is fired."""
         proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -787,15 +786,10 @@ class TestProformaInvoiceSignal(TestCase):
             subtotal_cents=5000,
             status="draft",
         )
-        # Change to paid
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_invoice = MagicMock()
-        mock_invoice.number = "INV-FROM-PRO"
-        mock_result.unwrap.return_value = mock_invoice
-        mock_conv.convert_to_invoice.return_value = mock_result
-
-        force_status(proforma, "paid")
+        mock_bas.reset_mock()
+        # "accepted" is a valid proforma status (draft → sent → accepted)
+        force_status(proforma, "accepted")
+        mock_bas.log_proforma_event.assert_called()
 
 
 class TestStoreOriginalProformaValues(TestCase):

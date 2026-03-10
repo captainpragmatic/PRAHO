@@ -66,7 +66,7 @@ class PaymentTestCase(TestCase):
 
     def test_payment_status_choices(self):
         """Test valid status choices"""
-        valid_statuses = ['pending', 'processing', 'succeeded', 'failed', 'cancelled', 'refunded']
+        valid_statuses = ['pending', 'succeeded', 'failed', 'refunded', 'partially_refunded']
 
         for status in valid_statuses:
             payment = Payment.objects.create(

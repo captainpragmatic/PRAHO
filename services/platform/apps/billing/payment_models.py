@@ -129,6 +129,16 @@ class Payment(models.Model):
             models.Index(fields=["payment_method"]),
             models.Index(fields=["gateway_txn_id"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(amount_cents__gte=1),
+                name="payment_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["pending", "succeeded", "failed", "refunded", "partially_refunded"]),
+                name="payment_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"Payment {self.amount} {self.currency.code} for {self.customer}"

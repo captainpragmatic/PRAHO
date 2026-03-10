@@ -191,6 +191,12 @@ class Ticket(models.Model):
             models.Index(fields=["category"]),
             models.Index(fields=["ticket_number"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=["open", "in_progress", "waiting_on_customer", "closed"]),
+                name="ticket_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"#{self.ticket_number}: {self.title}"
