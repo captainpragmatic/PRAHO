@@ -426,7 +426,7 @@ class CustomerMembership(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="granted_memberships")
 
     class Meta:
-        db_table = "customer_membership"  # Match PostgreSQL schema
+        db_table = "user_customer_memberships"
         unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("customer", "user"),)
         verbose_name = _("Customer Membership")
         verbose_name_plural = _("Customer Memberships")

@@ -99,7 +99,7 @@ class TaxRule(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "tax_rules"
+        db_table = "billing_tax_rules"
         verbose_name = _("Tax Rule")
         verbose_name_plural = _("Tax Rules")
         unique_together = (("country_code", "region", "tax_type", "valid_from"),)
@@ -213,7 +213,7 @@ class VATValidation(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True, help_text=_("When validation result expires"))
 
     class Meta:
-        db_table = "vat_validations"
+        db_table = "billing_vat_validations"
         verbose_name = _("VAT Validation")
         verbose_name_plural = _("VAT Validations")
         unique_together = (("country_code", "vat_number"),)

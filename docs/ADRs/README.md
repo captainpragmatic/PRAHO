@@ -76,7 +76,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0008](ADR-0008-mypy-removal.md) | MyPy Removal | Superseded | Replaced by [ADR-0009](ADR-0009-pragmatic-mypy-strategy.md) (pragmatic approach instead of full removal) |
 | [ADR-0018](ADR-0018-django-encryption-key-management.md) | DJANGO_ENCRYPTION_KEY Management for 2FA | Superseded | Replaced by [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) (AES-256-GCM consolidation) |
 | [ADR-0022](ADR-0022-project-structure-strategic-seams.md) | Project Structure - Strategic Seams | Superseded | Described original single-service monolith; platform migrated to two-service split |
-| [ADR-0023](ADR-0023-database-structure.md) | Complete Database Schema | Historical Reference | Pre-implementation design target; actual ORM models have diverged |
+| [ADR-0023](ADR-0023-database-structure.md) | Database Structure — Table Naming Convention | Accepted | Canonical reference for all 118 `db_table` values and schema design decisions |
 | [ADR-0024](ADR-0024-user-role-clarification.md) | User Model Design: is_staff vs admin_role | Superseded | Proposed `admin_role` rename was not implemented; actual field is `staff_role` |
 
 ---

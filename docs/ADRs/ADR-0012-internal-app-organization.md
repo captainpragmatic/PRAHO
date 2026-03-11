@@ -124,6 +124,7 @@ class InvoiceService:
 2. **Django Import Resolution**: Django finds models through main `models.py` file
 3. **No Schema Changes**: Database table structure stays exactly the same
 4. **Model Metadata Preserved**: `app_label`, `db_table`, field definitions all identical
+   (see ADR-0023 for the naming convention that governs all `db_table` values)
 
 ```python
 # ⚡ VERIFICATION: File reorganization is migration-safe

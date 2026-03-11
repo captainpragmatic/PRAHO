@@ -1,8 +1,9 @@
 %% PRAHO Platform - Database Entity Relationship Diagram
-%% Generated: 2026-02-21
-%% Shows core entities and their relationships
-%% Monetary values stored as BigInteger in cents (subtotal_cents, tax_cents, total_cents)
-%% PKs: UUID for Order, OrderItem, Product, ProductPrice, Domain, Subscription; auto-increment for others
+%% Updated: 2026-03-11
+%% Shows core entities and their relationships (model class names, not db_table values)
+%% For db_table naming convention and full table catalog see: docs/ADRs/ADR-0023-database-structure.md
+%% Monetary values stored as INTEGER in cents (subtotal_cents, tax_cents, total_cents)
+%% PKs: UUID for business-facing models; auto-increment for log/junction tables
 
 erDiagram
     %% =========================================================================

@@ -22,7 +22,7 @@ class Currency(models.Model):
     decimals = models.SmallIntegerField(default=2)
 
     class Meta:
-        db_table = "currency"
+        db_table = "billing_currencies"
         verbose_name = _("Currency")
         verbose_name_plural = _("Currencies")
 
@@ -44,7 +44,7 @@ class FXRate(models.Model):
     as_of = models.DateField()
 
     class Meta:
-        db_table = "fx_rate"
+        db_table = "billing_fx_rates"
         unique_together = (("base_code", "quote_code", "as_of"),)
         indexes = (models.Index(fields=["base_code", "quote_code", "-as_of"]),)
 

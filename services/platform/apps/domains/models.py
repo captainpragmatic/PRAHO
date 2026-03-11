@@ -88,6 +88,7 @@ class TLD(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "domain_tlds"
         verbose_name = _("🌐 TLD")
         verbose_name_plural = _("🌐 TLDs")
         ordering: ClassVar[tuple[str, ...]] = ("extension",)
@@ -179,6 +180,7 @@ class Registrar(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "domain_registrars"
         verbose_name = _("🏢 Registrar")
         verbose_name_plural = _("🏢 Registrars")
         ordering: ClassVar[tuple[str, ...]] = ("name",)
@@ -267,6 +269,7 @@ class TLDRegistrarAssignment(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "domain_tld_registrar_assignments"
         verbose_name = _("🔗 TLD-Registrar Assignment")
         verbose_name_plural = _("🔗 TLD-Registrar Assignments")
         unique_together: ClassVar[tuple[tuple[str, ...]]] = (("tld", "registrar"),)
@@ -346,6 +349,7 @@ class Domain(ConcurrentTransitionMixin, models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "domains"
         verbose_name = _("🌍 Domain")
         verbose_name_plural = _("🌍 Domains")
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
@@ -544,6 +548,7 @@ class DomainOrderItem(models.Model):
     _original_order_item_values: dict[str, Any] | None = None
 
     class Meta:
+        db_table = "domain_order_items"
         verbose_name = _("🛒 Domain Order Item")
         verbose_name_plural = _("🛒 Domain Order Items")
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)

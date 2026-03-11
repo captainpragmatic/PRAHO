@@ -485,7 +485,7 @@ class AuditEvent(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        db_table = "audit_event"
+        db_table = "audit_events"
         ordering: ClassVar[tuple[str, ...]] = ("-timestamp",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             # Core performance indexes
@@ -554,7 +554,7 @@ class DataExport(models.Model):
     error_message = models.TextField(blank=True)
 
     class Meta:
-        db_table = "audit_data_export"
+        db_table = "audit_data_exports"
         ordering: ClassVar[tuple[str, ...]] = ("-requested_at",)
 
     def __str__(self) -> str:
@@ -591,7 +591,7 @@ class AuditIntegrityCheck(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        db_table = "audit_integrity_check"
+        db_table = "audit_integrity_checks"
         ordering: ClassVar[tuple[str, ...]] = ("-checked_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["check_type", "-checked_at"]),
@@ -635,7 +635,7 @@ class AuditRetentionPolicy(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
-        db_table = "audit_retention_policy"
+        db_table = "audit_retention_policies"
         ordering: ClassVar[tuple[str, ...]] = ("name",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["category", "severity"]),
@@ -667,7 +667,7 @@ class AuditSearchQuery(models.Model):
     shared_with: models.ManyToManyField = models.ManyToManyField(User, related_name="shared_audit_queries", blank=True)
 
     class Meta:
-        db_table = "audit_search_query"
+        db_table = "audit_search_queries"
         ordering: ClassVar[tuple[str, ...]] = ("-last_used_at", "name")
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["created_by", "-created_at"]),
@@ -743,7 +743,7 @@ class AuditAlert(models.Model):
     remediation_actions = models.JSONField(default=list, blank=True)
 
     class Meta:
-        db_table = "audit_alert"
+        db_table = "audit_alerts"
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["alert_type", "-created_at"]),
@@ -788,7 +788,7 @@ class ComplianceLog(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        db_table = "audit_compliance_log"
+        db_table = "audit_compliance_logs"
         ordering: ClassVar[tuple[str, ...]] = ("-timestamp",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["compliance_type", "-timestamp"]),
@@ -824,7 +824,7 @@ class SIEMHashChainState(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        db_table = "audit_siem_hash_chain_state"
+        db_table = "audit_siem_hash_chain_states"
         ordering: ClassVar[tuple[str, ...]] = ("-updated_at",)
 
     def __str__(self) -> str:
@@ -892,7 +892,7 @@ class ComplianceReportRecord(models.Model):
     violations_summary = models.JSONField(default=list, blank=True)
 
     class Meta:
-        db_table = "audit_compliance_report"
+        db_table = "audit_compliance_reports"
         ordering: ClassVar[tuple[str, ...]] = ("-generated_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["report_type", "-generated_at"]),
@@ -951,7 +951,7 @@ class SIEMExportLog(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        db_table = "audit_siem_export_log"
+        db_table = "audit_siem_export_logs"
         ordering: ClassVar[tuple[str, ...]] = ("-started_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["status", "-started_at"]),
@@ -1005,7 +1005,7 @@ class CookieConsent(models.Model):
     consent_version = models.CharField(max_length=20, default="1.0")
 
     class Meta:
-        db_table = "audit_cookie_consent"
+        db_table = "audit_cookie_consents"
         ordering: ClassVar[tuple[str, ...]] = ("-updated_at",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
             models.Index(fields=["user", "-updated_at"]),

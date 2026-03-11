@@ -95,6 +95,7 @@ class ServiceRelationship(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "provisioning_service_relationships"
         verbose_name = _("🔗 Service Relationship")
         verbose_name_plural = _("🔗 Service Relationships")
         unique_together: ClassVar[list[list[str]]] = [["parent_service", "child_service"]]
@@ -219,6 +220,7 @@ class ServiceDomain(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "provisioning_service_domains"
         verbose_name = _("🌐 Service Domain")
         verbose_name_plural = _("🌐 Service Domains")
         unique_together: ClassVar[list[list[str]]] = [["service", "domain", "subdomain"]]
@@ -316,6 +318,7 @@ class ServiceGroup(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "provisioning_service_groups"
         verbose_name = _("📦 Service Group")
         verbose_name_plural = _("📦 Service Groups")
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
@@ -431,6 +434,7 @@ class ServiceGroupMember(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "provisioning_service_group_members"
         verbose_name = _("👥 Service Group Member")
         verbose_name_plural = _("👥 Service Group Members")
         unique_together: ClassVar[list[list[str]]] = [["group", "service"]]

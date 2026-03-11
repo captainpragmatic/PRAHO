@@ -172,7 +172,7 @@ class EncryptedCredential(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "credential_vault_credentials"
+        db_table = "common_credentials"
         unique_together: ClassVar[list[list[str]]] = [["service_type", "service_identifier"]]
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=["service_type", "service_identifier"]),
@@ -235,7 +235,7 @@ class CredentialAccessLog(models.Model):
     accessed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "credential_vault_access_logs"
+        db_table = "common_credential_access_logs"
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=["credential", "accessed_at"]),
             models.Index(fields=["user", "accessed_at"]),

@@ -52,7 +52,7 @@ class ProformaSequence(models.Model):
     last_value = models.BigIntegerField(default=0)
 
     class Meta:
-        db_table = "proforma_sequence"
+        db_table = "billing_proforma_sequences"
         verbose_name = _("Proforma Sequence")
         verbose_name_plural = _("Proforma Sequences")
 
@@ -142,7 +142,7 @@ class ProformaInvoice(models.Model):
     _original_proforma_values: _ProformaSnapshot | None = None
 
     class Meta:
-        db_table = "proforma_invoice"
+        db_table = "billing_proforma_invoices"
         verbose_name = _("Proforma Invoice")
         verbose_name_plural = _("Proforma Invoices")
         indexes = (
@@ -333,7 +333,7 @@ class ProformaLine(models.Model):
     line_total_cents = models.BigIntegerField(default=0)
 
     class Meta:
-        db_table = "proforma_line"
+        db_table = "billing_proforma_lines"
         indexes = (models.Index(fields=["service"]),)
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(

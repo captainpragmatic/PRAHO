@@ -91,7 +91,7 @@ class VirtualminServer(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "virtualmin_servers"
+        db_table = "provisioning_virtualmin_servers"
         verbose_name = _("Virtualmin Server")
         verbose_name_plural = _("Virtualmin Servers")
         ordering: ClassVar[tuple[str, ...]] = ("name",)
@@ -323,7 +323,7 @@ class VirtualminAccount(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "virtualmin_accounts"
+        db_table = "provisioning_virtualmin_accounts"
         verbose_name = _("Virtualmin Account")
         verbose_name_plural = _("Virtualmin Accounts")
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
@@ -615,7 +615,7 @@ class VirtualminProvisioningJob(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "virtualmin_provisioning_jobs"
+        db_table = "provisioning_virtualmin_jobs"
         verbose_name = _("Virtualmin Provisioning Job")
         verbose_name_plural = _("Virtualmin Provisioning Jobs")
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
@@ -791,7 +791,7 @@ class VirtualminDriftRecord(models.Model):
     detected_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "virtualmin_drift_records"
+        db_table = "provisioning_virtualmin_drift_records"
         verbose_name = _("Virtualmin Drift Record")
         verbose_name_plural = _("Virtualmin Drift Records")
         ordering: ClassVar[tuple[str, ...]] = ("-detected_at",)

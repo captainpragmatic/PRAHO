@@ -1751,7 +1751,7 @@ class TestC1OrderStatusNotEnum(FSMTestMixin, TestCase):
     def test_draft_status_is_string_literal(self) -> None:
         """Draft orders use the string 'draft', not Order.Status.DRAFT."""
         customer = self._create_customer()
-        currency = Currency.objects.get(code="RON")
+        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         order = Order.objects.create(
             customer=customer, currency=currency,
             customer_email=customer.primary_email, customer_name=customer.name,
@@ -1765,7 +1765,7 @@ class TestC2SignalProcessingTrigger(FSMTestMixin, TestCase):
     def test_signal_checks_confirmed_not_pending(self) -> None:
         """The signal handler must check old_status=='confirmed' for the processing transition."""
         customer = self._create_customer()
-        currency = Currency.objects.get(code="RON")
+        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         order = Order.objects.create(
             customer=customer, currency=currency,
             customer_email=customer.primary_email, customer_name=customer.name,
@@ -1781,7 +1781,7 @@ class TestC2SignalProcessingTrigger(FSMTestMixin, TestCase):
     def test_signal_does_not_trigger_from_pending(self) -> None:
         """pending→processing should NOT trigger invoice generation (FSM requires confirmed first)."""
         customer = self._create_customer()
-        currency = Currency.objects.get(code="RON")
+        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         order = Order.objects.create(
             customer=customer, currency=currency,
             customer_email=customer.primary_email, customer_name=customer.name,
@@ -1812,7 +1812,7 @@ class TestC4EFacturaMarkRejectedOnDraft(FSMTestMixin, TestCase):
     def test_mark_rejected_fails_on_draft(self) -> None:
         """Draft EFacturaDocument cannot use mark_rejected (source=processing only)."""
         customer = self._create_customer()
-        currency = Currency.objects.get(code="RON")
+        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         invoice = Invoice.objects.create(
             customer=customer,
             currency=currency,
@@ -1830,7 +1830,7 @@ class TestC4EFacturaMarkRejectedOnDraft(FSMTestMixin, TestCase):
     def test_mark_error_works_on_draft(self) -> None:
         """Draft EFacturaDocument can use mark_error (source includes draft)."""
         customer = self._create_customer()
-        currency = Currency.objects.get(code="RON")
+        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         invoice = Invoice.objects.create(
             customer=customer,
             currency=currency,

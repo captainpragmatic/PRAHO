@@ -148,7 +148,7 @@ class OAuthToken(models.Model):
     objects = OAuthTokenManager()
 
     class Meta:
-        db_table = "billing_efactura_oauth_token"
+        db_table = "billing_efactura_oauth_tokens"
         verbose_name = _("e-Factura OAuth Token")
         verbose_name_plural = _("e-Factura OAuth Tokens")
         ordering = ("-created_at",)
