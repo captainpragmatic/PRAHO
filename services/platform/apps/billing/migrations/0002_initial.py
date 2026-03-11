@@ -5,6 +5,50 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def apply_postgres_event_storage_indexes(apps, schema_editor) -> None:  # type: ignore[no-untyped-def]
+    if schema_editor.connection.vendor != "postgresql":
+        return
+
+    statements = (
+        """
+        CREATE INDEX IF NOT EXISTS billing_usage_events_properties_gin
+        ON billing_usage_events USING GIN (properties);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS billing_invoices_efactura_response_gin
+        ON billing_invoices USING GIN (efactura_response);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS billing_usage_events_pending_cover_idx
+        ON billing_usage_events (is_processed, timestamp DESC)
+        INCLUDE (meter_id, customer_id, subscription_id, aggregation_id, value, source, processed_at)
+        WHERE is_processed = false;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS billing_usage_events_timestamp_brin
+        ON billing_usage_events USING BRIN (timestamp) WITH (pages_per_range = 32);
+        """,
+    )
+    with schema_editor.connection.cursor() as cursor:
+        for statement in statements:
+            cursor.execute(statement)
+
+
+def reverse_postgres_event_storage_indexes(apps, schema_editor) -> None:  # type: ignore[no-untyped-def]
+    if schema_editor.connection.vendor != "postgresql":
+        return
+
+    statements = (
+        "DROP INDEX IF EXISTS billing_usage_events_timestamp_brin;",
+        "DROP INDEX IF EXISTS billing_usage_events_pending_cover_idx;",
+        "DROP INDEX IF EXISTS billing_invoices_efactura_response_gin;",
+        "DROP INDEX IF EXISTS billing_usage_events_properties_gin;",
+    )
+    with schema_editor.connection.cursor() as cursor:
+        for statement in statements:
+            cursor.execute(statement)
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -859,4 +903,5 @@ class Migration(migrations.Migration):
             model_name='usagealert',
             index=models.Index(condition=models.Q(('status__in', ['pending', 'sent'])), fields=['status', 'customer'], name='usage_alert_unresolved'),
         ),
+        migrations.RunPython(apply_postgres_event_storage_indexes, reverse_postgres_event_storage_indexes),
     ]
