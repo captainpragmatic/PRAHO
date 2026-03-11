@@ -27,6 +27,13 @@ def is_database_cache_configured():
     return cache_config.get('BACKEND') == 'django.core.cache.backends.db.DatabaseCache'
 
 
+def get_table_column_names(table_name):
+    """Return table column names using backend-neutral Django introspection."""
+    with connection.cursor() as cursor:
+        description = connection.introspection.get_table_description(cursor, table_name)
+    return [column.name for column in description]
+
+
 # Skip marker for tests that require database cache
 requires_database_cache = pytest.mark.skipif(
     not is_database_cache_configured(),
@@ -64,7 +71,16 @@ class TestDatabaseCacheFunctionality(TestCase):
         ]
         assert cache_config['BACKEND'] in expected_backends, \
             f"Expected one of {expected_backends}, got {cache_config['BACKEND']}"
+        if cache_config['BACKEND'] == 'django.core.cache.backends.db.DatabaseCache':
+            assert cache_config['LOCATION'] == 'django_cache_table'
+            assert cache_config['KEY_PREFIX'] == 'pragmatichost'
 
+            options = cache_config.get('OPTIONS', {})
+            assert 'MAX_ENTRIES' in options
+            assert 'CULL_FREQUENCY' in options
+            assert 'TIMEOUT' in cache_config
+        else:
+            assert cache_config['LOCATION'] == 'integration-test-cache'
     @pytest.mark.cache
     @pytest.mark.django_db
     @requires_database_cache
@@ -74,24 +90,15 @@ class TestDatabaseCacheFunctionality(TestCase):
 
         Note: Only applies to DatabaseCache backend (production).
         """
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='django_cache_table'
-            """)
-            result = cursor.fetchone()
-            assert result is not None, "django_cache_table should exist"
+        assert 'django_cache_table' in connection.introspection.table_names(), (
+            "django_cache_table should exist"
+        )
 
-            # Check table structure
-            cursor.execute("PRAGMA table_info(django_cache_table)")
-            columns = cursor.fetchall()
+        column_names = get_table_column_names('django_cache_table')
+        expected_columns = ['cache_key', 'value', 'expires']
 
-            # Verify expected columns exist
-            column_names = [col[1] for col in columns]
-            expected_columns = ['cache_key', 'value', 'expires']
-
-            for col in expected_columns:
-                assert col in column_names, f"Column {col} should exist in cache table"
+        for col in expected_columns:
+            assert col in column_names, f"Column {col} should exist in cache table"
 
     @pytest.mark.cache
     def test_basic_cache_operations(self):
