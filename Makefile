@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -914,17 +914,53 @@ docker-test:
 	@echo "✅ All services are healthy!"
 	@docker-compose -f deploy/docker-compose.services.yml down
 
-clean:
+clean-cache:
 	@echo "🧹 Cleaning build artifacts across services..."
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+	rm -rf htmlcov/
 	rm -rf services/platform/htmlcov/
 	rm -rf services/portal/htmlcov/
 	rm -rf .coverage
 	rm -rf .pytest_cache/
 	rm -rf .mypy_cache/
+	rm -rf .ruff_cache/
+	rm -rf .cache/
+	rm -rf .playwright-mcp/
+	rm -rf .pre-commit-cache/
+	rm -rf services/platform/.coverage
+	rm -rf services/portal/.coverage
+	rm -rf services/platform/.pytest_cache/
+	rm -rf services/platform/.mypy_cache/
+	rm -rf services/platform/.ruff_cache/
+	rm -rf services/portal/.pytest_cache/
+	rm -rf services/portal/.mypy_cache/
+	rm -rf services/portal/.ruff_cache/
 	rm -rf services/platform/staticfiles/
 	rm -rf services/portal/staticfiles/
+	rm -f services/platform/django_q.log
+
+clean-dist:
+	@echo "🧨 Removing local dependency environments..."
+	find . -type d \( -name ".venv" -o -name ".venv-*" -o -name "node_modules" \) -prune -exec rm -rf {} +
+
+clean-db-and-logs:
+	@echo "🗃️ Removing local databases and logs..."
+	find . -type f \( -name "*.sqlite3" -o -name "*.sqlite3-*" -o -name "*.db" \) -delete
+	find . -type f \( -name "*.log" -o -name "*.log.*" -o -name "*.out" -o -name "*.err" \) -delete
+
+clean-nuke:
+	@echo "⚠️  clean-nuke removes caches, local databases, logs, virtualenvs, and node_modules."
+	@echo "⚠️  It does NOT modify tracked files, .git, or .env files."
+	@printf "Proceed with clean-nuke? [y/N] "; \
+	read answer; \
+	case "$$answer" in \
+		y|Y) ;; \
+		*) echo "Aborted."; exit 1 ;; \
+	esac
+	@$(MAKE) clean-cache
+	@$(MAKE) clean-db-and-logs
+	@$(MAKE) clean-dist
 
 # ===============================================================================
 # PRODUCTION DEPLOYMENT 🚀
