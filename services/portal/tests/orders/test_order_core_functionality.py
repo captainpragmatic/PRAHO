@@ -6,8 +6,16 @@ Tests core components without complex integration.
 from unittest.mock import Mock, patch
 
 from django.contrib.sessions.backends.cache import SessionStore
+from django.core.cache import cache
 from django.test import Client, SimpleTestCase, override_settings
 from django.utils import timezone
+
+from apps.orders.services import (
+    CartCalculationService,
+    GDPRCompliantCartSession,
+    OrderCreationService,
+)
+from apps.orders.validators import OrderInputValidator
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -18,7 +26,6 @@ class TestBasicOrderFunctionality(SimpleTestCase):
         """Set up test client"""
         self.client = Client()
         # Clear any existing cache entries
-        from django.core.cache import cache
         cache.clear()
 
     def test_order_views_require_authentication(self):
@@ -106,7 +113,6 @@ class TestSessionCartBasics(SimpleTestCase):
 
     def test_session_cart_key_structure(self):
         """Test that cart uses proper session key structure"""
-        from apps.orders.services import GDPRCompliantCartSession
 
         # The session key should be namespaced
         self.assertEqual(GDPRCompliantCartSession.SESSION_KEY, 'praho_portal_cart_v1')
@@ -116,7 +122,6 @@ class TestSessionCartBasics(SimpleTestCase):
 
     def test_empty_session_cart_initialization(self):
         """Test creating cart with empty session"""
-        from apps.orders.services import GDPRCompliantCartSession
 
         # Should not raise errors
         cart = GDPRCompliantCartSession(self.session)
@@ -136,7 +141,6 @@ class TestOrderInputValidation(SimpleTestCase):
 
     def test_validator_import(self):
         """Test that validators can be imported and used"""
-        from apps.orders.validators import OrderInputValidator
 
         # Test quantity validation
         self.assertEqual(OrderInputValidator.validate_quantity(1), 1)
@@ -150,7 +154,6 @@ class TestOrderInputValidation(SimpleTestCase):
 
     def test_billing_period_validation(self):
         """Test billing period validation"""
-        from apps.orders.validators import OrderInputValidator
 
         # Valid billing periods
         valid_periods = ['monthly', 'quarterly', 'semiannual', 'annual', 'biennial', 'triennial']
@@ -168,14 +171,12 @@ class TestOrderServiceIntegration(SimpleTestCase):
 
     def test_cart_calculation_service_import(self):
         """Test that cart calculation service can be imported"""
-        from apps.orders.services import CartCalculationService
 
         # Should be able to import the class
         self.assertIsNotNone(CartCalculationService)
 
     def test_order_creation_service_import(self):
         """Test that order creation service can be imported"""
-        from apps.orders.services import OrderCreationService
 
         # Should be able to import the class
         self.assertIsNotNone(OrderCreationService)
@@ -183,7 +184,6 @@ class TestOrderServiceIntegration(SimpleTestCase):
     @patch('apps.orders.services.PlatformAPIClient')
     def test_platform_api_client_usage(self, mock_api_client):
         """Test that services use platform API client correctly"""
-        from apps.orders.services import CartCalculationService
 
         # Mock the API client
         mock_api = Mock()

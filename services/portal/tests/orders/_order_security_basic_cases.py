@@ -3,6 +3,7 @@ Basic Order Security Tests for PRAHO Portal
 Tests the implemented security features: DoS hardening, cart versioning.
 """
 
+from typing import Any
 from unittest.mock import Mock, patch
 
 from django.contrib.sessions.backends.cache import SessionStore
@@ -24,7 +25,7 @@ class OrderDoSHardeningTestCase(SimpleTestCase):
     Tests request validation and fail-closed behavior
     """
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up authenticated session"""
         self.client = Client()
         session = self.client.session
@@ -34,7 +35,7 @@ class OrderDoSHardeningTestCase(SimpleTestCase):
         session.save()
 
     @patch('apps.orders.views.OrderSecurityHardening')
-    def test_request_size_validation_integration(self, mock_hardening):
+    def test_request_size_validation_integration(self, mock_hardening: Any) -> None:
         """🔒 Test request size validation in views"""
         if OrderSecurityHardening is None:
             self.skipTest("OrderSecurityHardening not available")
@@ -54,7 +55,7 @@ class OrderDoSHardeningTestCase(SimpleTestCase):
         self.assertEqual(response.status_code, 413)
 
     @patch('apps.orders.views.OrderSecurityHardening')
-    def test_suspicious_pattern_detection_integration(self, mock_hardening):
+    def test_suspicious_pattern_detection_integration(self, mock_hardening: Any) -> None:
         """🔒 Test suspicious pattern detection in views"""
         if OrderSecurityHardening is None:
             self.skipTest("OrderSecurityHardening not available")
@@ -75,7 +76,7 @@ class OrderDoSHardeningTestCase(SimpleTestCase):
 
     @patch('apps.orders.views.OrderSecurityHardening')
     @patch('django.core.cache.cache')
-    def test_fail_closed_on_cache_failure(self, mock_cache, mock_hardening):
+    def test_fail_closed_on_cache_failure(self, mock_cache: Any, mock_hardening: Any) -> None:
         """🔒 Test fail-closed behavior when cache fails"""
         if OrderSecurityHardening is None:
             self.skipTest("OrderSecurityHardening not available")
@@ -102,7 +103,7 @@ class OrderCartVersioningTestCase(SimpleTestCase):
     Tests cart version generation and stale mutation detection
     """
 
-    def test_cart_version_generation_consistency(self):
+    def test_cart_version_generation_consistency(self) -> None:
         """🔒 Test that cart version generation is consistent for empty cart"""
         session = SessionStore()
         session.create()
@@ -121,7 +122,7 @@ class OrderCartVersioningTestCase(SimpleTestCase):
             "Cart version should contain only hex characters"
         )
 
-    def test_cart_version_changes_on_clear(self):
+    def test_cart_version_changes_on_clear(self) -> None:
         """🔒 Test that cart version changes when cart is cleared"""
         session = SessionStore()
         session.create()
@@ -163,7 +164,7 @@ class OrderEnumerationProtectionTestCase(SimpleTestCase):
     Tests that customer data endpoints are properly protected
     """
 
-    def test_cart_endpoints_require_authentication(self):
+    def test_cart_endpoints_require_authentication(self) -> None:
         """🔒 Test cart endpoints require authentication"""
         protected_endpoints = [
             '/order/cart/add/',
@@ -185,7 +186,7 @@ class OrderEnumerationProtectionTestCase(SimpleTestCase):
                 self.assertIn(response.status_code, [302, 405],
                             f"Endpoint {endpoint} should require authentication")
 
-    def test_order_endpoints_deny_get_requests(self):
+    def test_order_endpoints_deny_get_requests(self) -> None:
         """🔒 Test that state-changing endpoints deny GET requests"""
         # Set up authenticated session with proper timestamp
         session = self.client.session
@@ -216,7 +217,7 @@ class OrderSessionSecurityTestCase(SimpleTestCase):
     Tests CSRF protection and session isolation
     """
 
-    def setUp(self):
+    def setUp(self) -> None:
         # Mock Platform API so add_item() doesn't trigger M8 fallback.
         _mock_api_instance = Mock()
         _mock_api_instance.get.return_value = {
@@ -233,10 +234,10 @@ class OrderSessionSecurityTestCase(SimpleTestCase):
         )
         self._platform_patcher.start()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         self._platform_patcher.stop()
 
-    def test_csrf_protection_on_post_endpoints(self):
+    def test_csrf_protection_on_post_endpoints(self) -> None:
         """🔒 Test CSRF protection on state-changing operations"""
         # Set up authenticated session with proper timestamp
         client = Client(enforce_csrf_checks=True)
@@ -255,7 +256,7 @@ class OrderSessionSecurityTestCase(SimpleTestCase):
         # Should be CSRF failure (403) or redirect due to auth middleware (302)
         self.assertIn(response.status_code, [302, 403], "POST without CSRF should be blocked")
 
-    def test_cart_session_isolation(self):
+    def test_cart_session_isolation(self) -> None:
         """🔒 Test that cart sessions are properly isolated"""
         # Create two different clients with different sessions
         client1 = Client()
@@ -297,7 +298,7 @@ class OrderSecurityTestRunner:
     """Helper class to run all security tests with reporting"""
 
     @staticmethod
-    def run_all_security_tests():
+    def run_all_security_tests() -> None:
         """Run all implemented security tests"""
         print("🔒 Running Order Security Tests...")
         print("✅ Basic security tests available")
