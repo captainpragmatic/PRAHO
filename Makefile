@@ -293,13 +293,13 @@ test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Running integration tests..."
-	@$(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
 	@echo "💾 [Cache] Testing database cache functionality (post Redis removal)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/test_database_cache.py -v -m cache
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/test_database_cache.py -v -m cache
 	@echo "✅ Database cache tests passed!"
 
 test-security:

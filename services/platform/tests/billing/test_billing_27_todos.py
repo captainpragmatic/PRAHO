@@ -402,13 +402,17 @@ class ApiRefundViewTests(TestCase):
 
     @patch("apps.billing.refund_service.RefundService.refund_invoice")
     @patch("apps.billing.views.Payment")
-    def test_processes_refund(self, mock_pay_cls, mock_refund):
-        mock_payment = MagicMock(id="p1", amount_cents=5000, invoice=MagicMock(id="i1"))
+    @patch("apps.billing.views._require_customer_auth_for_portal_api")
+    def test_processes_refund(self, mock_auth, mock_pay_cls, mock_refund):
+        mock_customer = MagicMock(id=1)
+        mock_auth.return_value = (mock_customer, None)
+
+        mock_payment = MagicMock(id="p1", amount_cents=5000, customer_id=1, invoice=MagicMock(id="i1"))
         mock_pay_cls.objects.filter.return_value.select_related.return_value.first.return_value = mock_payment
 
         mock_result = MagicMock()
         mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = MagicMock(refund_id="ref-1")
+        mock_result.unwrap.return_value = {"refund_id": "ref-1"}
         mock_refund.return_value = mock_result
 
         factory = RequestFactory()

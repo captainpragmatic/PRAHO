@@ -84,6 +84,14 @@ jobs:
   integration-test:
     runs-on: ubuntu-latest
 
+    # Override workflow-level settings: integration tests need PostgreSQL + DatabaseCache
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.base
+      DB_NAME: test_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: localhost
+
     services:
       postgres:
         image: postgres:16
@@ -119,6 +127,7 @@ jobs:
       run: |
         cd services/platform
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py migrate --no-input
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py createcachetable
 
     - name: Service isolation security tests (make test-security)
       run: make test-security
