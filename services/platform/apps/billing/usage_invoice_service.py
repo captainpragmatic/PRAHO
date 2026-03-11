@@ -25,6 +25,7 @@ from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import AuditService
+from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 from apps.customers.models import CustomerAddress, CustomerTaxProfile
 
@@ -284,23 +285,26 @@ class UsageInvoiceService:
 
     def _get_customer_vat_rate(self, customer: Any) -> Decimal:
         """Get the applicable VAT rate for a customer."""
-        # Check if customer has tax profile with reverse charge
+        info: CustomerVATInfo = {
+            "country": (getattr(customer, "country", None) or billing_config.DEFAULT_COUNTRY_CODE),
+            "is_business": bool(getattr(customer, "company_name", "")),
+            "vat_number": None,
+            "customer_id": str(getattr(customer, "id", "")),
+            "order_id": None,
+        }
         try:
             tax_profile = CustomerTaxProfile.objects.get(customer=customer)
+            info["vat_number"] = getattr(tax_profile, "vat_number", None)
+            info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
+            info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
+            vat_rate_override = getattr(tax_profile, "vat_rate", None)
+            if vat_rate_override is not None:
+                info["custom_vat_rate"] = vat_rate_override
+        except (ObjectDoesNotExist, AttributeError, TypeError, ValueError):
+            logger.debug("Could not resolve customer VAT profile for usage billing")
 
-            # EU B2B reverse charge - 0% VAT if valid EU VAT number
-            if tax_profile.reverse_charge_eligible and tax_profile.vat_number:
-                country = getattr(customer, "country", billing_config.DEFAULT_COUNTRY_CODE)
-                # Reverse charge applies to EU customers outside provider's country
-                if billing_config.is_eu_country(country) and country != billing_config.DEFAULT_COUNTRY_CODE:
-                    return Decimal("0")
-
-        except (ImportError, ObjectDoesNotExist, AttributeError, TypeError, ValueError):
-            logger.debug("Could not resolve customer reverse-charge VAT profile")
-
-        # Use TaxRule if available, otherwise fall back to default
-        customer_country = getattr(customer, "country", billing_config.DEFAULT_COUNTRY_CODE)
-        return billing_config.get_vat_rate(customer_country)
+        vat_result = TaxService.calculate_vat_for_document(subtotal_cents=10_000, customer_info=info)
+        return vat_result.vat_rate / Decimal("100")
 
     def _get_customer_billing_address(self, customer: Any) -> dict[str, str]:
         """Get customer's billing address."""

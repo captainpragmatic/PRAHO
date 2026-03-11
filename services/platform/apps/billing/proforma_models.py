@@ -24,7 +24,7 @@ from apps.billing.validators import (
     validate_financial_json,
     validate_financial_text_field,
 )
-from apps.common.financial_arithmetic import calculate_line_totals
+from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
@@ -202,14 +202,10 @@ class ProformaInvoice(models.Model):
         Recalculate document totals from line items.
         Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
         """
-        lines = self.lines.all()
-
-        # Calculate subtotals and tax amounts by summing line items
-        self.subtotal_cents = sum(line.subtotal_cents for line in lines)
-        self.tax_cents = sum(line.tax_cents for line in lines)
-
-        # Total = subtotal + tax (no discount handling for now)
-        self.total_cents = self.subtotal_cents + self.tax_cents
+        totals = calculate_document_totals(list(self.lines.all()))
+        self.subtotal_cents = totals.subtotal_cents
+        self.tax_cents = totals.tax_cents
+        self.total_cents = totals.total_cents
 
     def refresh_from_db(
         self,

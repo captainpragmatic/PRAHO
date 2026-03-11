@@ -9,9 +9,8 @@ import hmac
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from decimal import Decimal
 from functools import wraps
-from typing import Any, TypedDict, TypeVar
+from typing import Any, TypeVar
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -22,53 +21,6 @@ from django.utils.translation import gettext_lazy as _
 
 # Type variable for function decorators
 F = TypeVar("F", bound=Callable[..., Any])
-
-# Import for VAT calculation - handle potential circular import gracefully
-new_calculator: Callable[[int, bool], dict[str, float]] | None
-try:
-    from apps.common.types import calculate_romanian_vat as new_calculator
-except ImportError:
-    new_calculator = None
-
-# ===============================================================================
-# ROMANIAN VALIDATION UTILITIES
-# ===============================================================================
-
-
-class VATCalculation(TypedDict):
-    """Type definition for VAT calculation results"""
-
-    amount_without_vat: Decimal
-    vat_amount: Decimal
-    amount_with_vat: Decimal
-    vat_rate: int
-
-
-def calculate_romanian_vat(amount: Decimal, vat_rate: int = 21) -> VATCalculation:
-    """Calculate Romanian VAT breakdown (deprecated - use apps.common.types.calculate_romanian_vat)"""
-    if new_calculator is None:
-        # Fallback implementation in case of circular import
-        # Included VAT extraction based on provided vat_rate (e.g., 21 -> divisor 121)
-        vat_amount = amount * Decimal(vat_rate) / (Decimal(100) + Decimal(vat_rate))
-        amount_without_vat = amount - vat_amount
-        return VATCalculation(
-            amount_without_vat=amount_without_vat,
-            vat_amount=vat_amount,
-            amount_with_vat=amount,
-            vat_rate=vat_rate,
-        )
-
-    # Convert to cents-based calculation for precision
-    amount_cents = int(amount * 100)
-    result = new_calculator(amount_cents, include_vat=True)  # type: ignore[call-arg]
-
-    return VATCalculation(
-        amount_without_vat=Decimal(result["base_amount"]) / 100,
-        vat_amount=Decimal(result["vat_amount"]) / 100,
-        amount_with_vat=Decimal(result["total_amount"]) / 100,
-        vat_rate=vat_rate,
-    )
-
 
 # ===============================================================================
 # SECURITY UTILITIES

@@ -354,31 +354,6 @@ def validate_email(email: str) -> Result[EmailAddress, str]:
     return Ok(EmailAddress(email))
 
 
-def calculate_romanian_vat(amount_cents: int, include_vat: bool = True) -> dict[str, float]:
-    """Calculate Romanian VAT for the given amount using TaxService (ADR-0015)."""
-    from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        TaxService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    vat_rate = float(TaxService.get_vat_rate("RO", as_decimal=True))
-
-    if include_vat:
-        # Amount includes VAT, extract base amount
-        base_amount = int(amount_cents / (1 + vat_rate))
-        vat_amount = amount_cents - base_amount
-    else:
-        # Amount excludes VAT, calculate VAT
-        base_amount = amount_cents
-        vat_amount = int(amount_cents * vat_rate)
-
-    return {
-        "base_amount": base_amount,
-        "vat_amount": vat_amount,
-        "total_amount": base_amount + vat_amount,
-        "vat_rate": vat_rate,
-    }
-
-
 def validate_domain_name(domain: str) -> Result[DomainName, str]:
     """Validate domain name format"""
     if not domain:

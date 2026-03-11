@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from decimal import Decimal
 
 # Re-export all services from feature files
 # ===============================================================================
@@ -32,7 +31,7 @@ from django.utils import timezone as tz
 
 from apps.billing.currency_models import Currency as CurrencyModel
 from apps.billing.models import Currency, Invoice, InvoiceLine, InvoiceSequence
-from apps.common.tax_service import TaxService
+from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
 # Add imports to fix PLC0415 linting issues
@@ -138,20 +137,20 @@ class InvoiceService:
                         # Another process created it - get it with lock
                         sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
 
-                # Calculate totals using current Romanian VAT rate
-                vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-                subtotal_amount = Decimal(order.total_cents) / 100
-                tax_amount = subtotal_amount * vat_rate
-                total_amount = subtotal_amount + tax_amount
+                # Use unified VAT scenario engine for consistent customer-aware behavior.
+                vat_result = TaxService.calculate_vat_for_document(
+                    subtotal_cents=int(order.total_cents),
+                    customer_info=_build_customer_vat_info(order.customer, order_id=str(order.id)),
+                )
 
                 # Create invoice - all within the same atomic block to ensure consistency
                 invoice = Invoice.objects.create(
                     customer=order.customer,
                     number=sequence.get_next_number("INV"),
                     currency=currency,
-                    subtotal_cents=int(subtotal_amount * 100),
-                    tax_cents=int(tax_amount * 100),
-                    total_cents=int(total_amount * 100),
+                    subtotal_cents=vat_result.subtotal_cents,
+                    tax_cents=vat_result.vat_cents,
+                    total_cents=vat_result.total_cents,
                     status="draft",
                     # Copy billing address from customer
                     bill_to_name=order.customer.company_name or order.customer.full_name or "",
@@ -164,7 +163,7 @@ class InvoiceService:
                 )
 
                 # Create invoice lines from order items
-                vat_rate_percent = TaxService.get_vat_rate("RO", as_decimal=False)
+                vat_rate_percent = vat_result.vat_rate
                 for item in order.items.all():
                     InvoiceLine.objects.create(  # type: ignore[misc]
                         invoice=invoice,
@@ -197,6 +196,29 @@ class InvoiceService:
 
 
 _services_logger = logging.getLogger(__name__)
+
+
+def _build_customer_vat_info(customer: Any, order_id: str | None = None) -> CustomerVATInfo:
+    """Build customer VAT context for TaxService.calculate_vat_for_document()."""
+    info: CustomerVATInfo = {
+        "country": (getattr(customer, "country", None) or "RO"),
+        "is_business": bool(getattr(customer, "company_name", "")),
+        "vat_number": None,
+        "customer_id": str(getattr(customer, "id", "")),
+        "order_id": order_id,
+    }
+    try:
+        tax_profile = customer.tax_profile
+    except Exception:
+        return info
+
+    info["vat_number"] = getattr(tax_profile, "vat_number", None)
+    info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
+    info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
+    vat_rate_override = getattr(tax_profile, "vat_rate", None)
+    if vat_rate_override is not None:
+        info["custom_vat_rate"] = vat_rate_override
+    return info
 
 
 class PaymentRetryService:
@@ -310,10 +332,13 @@ class ProformaConversionService:
                     )
 
                 # Recalculate tax
-                vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
                 subtotal_cents = proforma.subtotal_cents or 0
-                tax_cents = int(Decimal(subtotal_cents) * vat_rate)
-                total_cents = subtotal_cents + tax_cents
+                vat_result = TaxService.calculate_vat_for_document(
+                    subtotal_cents=subtotal_cents,
+                    customer_info=_build_customer_vat_info(proforma.customer),
+                )
+                tax_cents = vat_result.vat_cents
+                total_cents = vat_result.total_cents
 
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,

@@ -159,6 +159,7 @@ class CreatePaymentIntentDirectTests(TestCase):
 
     def setUp(self) -> None:
         self.customer = create_customer("Direct Co SRL")
+        self.order = _make_order(self.customer, total_cents=5000)
 
     @patch("apps.billing.payment_service.log_security_event")
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
@@ -167,8 +168,8 @@ class CreatePaymentIntentDirectTests(TestCase):
         create_currency("RON")
 
         result = PaymentService.create_payment_intent_direct(
-            order_id=str(uuid.uuid4()),
-            amount_cents=5000,
+            order_id=str(self.order.id),
+            amount_cents=self.order.total_cents,
             currency="RON",
             customer_id=str(self.customer.id),
             order_number="ORD-DIRECT-001",
@@ -181,38 +182,34 @@ class CreatePaymentIntentDirectTests(TestCase):
         mock_log.assert_called_once()
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_success_without_customer_id(self, mock_create_gw: MagicMock) -> None:
-        """Without customer_id the service passes customer=None which violates Payment.customer
-        NOT NULL, so the DB rejects the row and the service returns a graceful failure."""
+    def test_missing_customer_id_returns_failure(self, mock_create_gw: MagicMock) -> None:
         mock_create_gw.return_value = _make_mock_gateway()
 
         result = PaymentService.create_payment_intent_direct(
-            order_id=str(uuid.uuid4()),
+            order_id=str(self.order.id),
             amount_cents=3000,
             currency="EUR",
             customer_id=None,
         )
 
         self.assertFalse(result["success"])
-        self.assertIn("Payment creation failed", result["error"])
+        self.assertEqual(result["error"], "customer_id is required")
         self.assertEqual(Payment.objects.count(), 0)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_customer_does_not_exist_falls_back_to_null_customer(self, mock_create_gw: MagicMock) -> None:
-        """When customer_id is supplied but not found the service falls back to customer_obj=None,
-        which violates the NOT NULL constraint; the except block returns a graceful failure."""
+    def test_invalid_customer_id_returns_failure(self, mock_create_gw: MagicMock) -> None:
         mock_create_gw.return_value = _make_mock_gateway()
         missing_customer_id = str(uuid.uuid4())
 
         result = PaymentService.create_payment_intent_direct(
-            order_id=str(uuid.uuid4()),
+            order_id=str(self.order.id),
             amount_cents=2500,
             currency="RON",
             customer_id=missing_customer_id,
         )
 
         self.assertFalse(result["success"])
-        self.assertIn("Payment creation failed", result["error"])
+        self.assertEqual(result["error"], "customer_id must be a valid integer")
         self.assertEqual(Payment.objects.count(), 0)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
@@ -222,9 +219,10 @@ class CreatePaymentIntentDirectTests(TestCase):
         )
 
         result = PaymentService.create_payment_intent_direct(
-            order_id=str(uuid.uuid4()),
-            amount_cents=1000,
+            order_id=str(self.order.id),
+            amount_cents=self.order.total_cents,
             currency="RON",
+            customer_id=str(self.customer.id),
         )
 
         self.assertFalse(result["success"])
@@ -235,9 +233,10 @@ class CreatePaymentIntentDirectTests(TestCase):
         mock_create_gw.side_effect = Exception("Unexpected failure")
 
         result = PaymentService.create_payment_intent_direct(
-            order_id=str(uuid.uuid4()),
-            amount_cents=1000,
+            order_id=str(self.order.id),
+            amount_cents=self.order.total_cents,
             currency="RON",
+            customer_id=str(self.customer.id),
         )
 
         self.assertFalse(result["success"])

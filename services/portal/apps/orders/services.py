@@ -556,7 +556,6 @@ class CartCalculationService:
 
             # Prepare API payload - match pattern from working billing APIs
             payload = {
-                "customer_id": customer_id,
                 "action": "calculate_cart_totals",
                 "currency": cart.currency,
                 "items": cart.get_api_items(),
@@ -624,11 +623,9 @@ class OrderCreationService:
 
             # Prepare preflight payload (same as order creation)
             preflight_data = {
-                "customer_id": customer_id,
                 "items": cart.get_api_items(),
                 "currency": cart.currency,
                 "notes": notes,
-                "source": "portal_self_serve",
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
             }
 
@@ -726,12 +723,9 @@ class OrderCreationService:
 
             # Prepare order data
             order_data: dict[str, Any] = {
-                "customer_id": customer_id,
                 "items": cart.get_api_items(),
                 "currency": cart.currency,
-                "status": "draft",
                 "notes": notes,
-                "source": "portal_self_serve",
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
             }
 

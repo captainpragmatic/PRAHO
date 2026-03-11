@@ -21,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
+from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -40,6 +41,29 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_PAYMENT_RETRIES = 5
 MAX_PAYMENT_RETRIES = _DEFAULT_MAX_PAYMENT_RETRIES
+
+
+def _build_customer_vat_info(customer: Any) -> CustomerVATInfo:
+    """Build customer VAT context for TaxService.calculate_vat_for_document()."""
+    info: CustomerVATInfo = {
+        "country": (getattr(customer, "country", None) or "RO"),
+        "is_business": bool(getattr(customer, "company_name", "")),
+        "vat_number": None,
+        "customer_id": str(getattr(customer, "id", "")),
+        "order_id": None,
+    }
+    try:
+        tax_profile = customer.tax_profile
+    except Exception:
+        return info
+
+    info["vat_number"] = getattr(tax_profile, "vat_number", None)
+    info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
+    info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
+    vat_rate_override = getattr(tax_profile, "vat_rate", None)
+    if vat_rate_override is not None:
+        info["custom_vat_rate"] = vat_rate_override
+    return info
 
 
 def get_max_payment_retries() -> int:
@@ -451,13 +475,13 @@ class SubscriptionService:
         except Currency.DoesNotExist:
             currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
-        # Calculate tax using centralized TaxService (ADR-0015)
-        from apps.common.tax_service import TaxService  # noqa: PLC0415  # Deferred: avoids circular import
-
         subtotal_cents = change.proration_amount_cents
-        vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-        tax_cents = int(Decimal(subtotal_cents) * vat_rate)
-        total_cents = subtotal_cents + tax_cents
+        vat_result = TaxService.calculate_vat_for_document(
+            subtotal_cents=subtotal_cents,
+            customer_info=_build_customer_vat_info(subscription.customer),
+        )
+        tax_cents = vat_result.vat_cents
+        total_cents = vat_result.total_cents
 
         # Create invoice as draft, then issue via FSM
         invoice = Invoice.objects.create(
@@ -486,7 +510,7 @@ class SubscriptionService:
             description=f"Proration: {change.change_type.replace('_', ' ').title()} - {subscription.product.name}",
             quantity=Decimal("1"),
             unit_price_cents=subtotal_cents,
-            tax_rate=vat_rate,
+            tax_rate=(vat_result.vat_rate / Decimal("100")),
             line_total_cents=total_cents,
         )
 
@@ -858,13 +882,13 @@ class RecurringBillingService:
         try:
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
-            # Calculate amounts using centralized TaxService (ADR-0015)
-            from apps.common.tax_service import TaxService  # noqa: PLC0415  # Deferred: avoids circular import
-
             subtotal_cents = subscription.total_price_cents
-            tax_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-            tax_cents = int(Decimal(subtotal_cents) * tax_rate)
-            total_cents = subtotal_cents + tax_cents
+            vat_result = TaxService.calculate_vat_for_document(
+                subtotal_cents=subtotal_cents,
+                customer_info=_build_customer_vat_info(subscription.customer),
+            )
+            tax_cents = vat_result.vat_cents
+            total_cents = vat_result.total_cents
 
             # Create invoice as draft, then issue via FSM
             invoice = Invoice.objects.create(
@@ -895,7 +919,7 @@ class RecurringBillingService:
                 description=f"{subscription.product.name} - {subscription.billing_cycle.title()} ({period_desc})",
                 quantity=Decimal(subscription.quantity),
                 unit_price_cents=subscription.effective_price_cents,
-                tax_rate=tax_rate,
+                tax_rate=(vat_result.vat_rate / Decimal("100")),
                 line_total_cents=total_cents,
             )
 

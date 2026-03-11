@@ -1292,7 +1292,7 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
         mock_confirm.return_value = {"success": True, "status": "succeeded"}
         response = self._post_json(
             "/billing/confirm-payment/",
-            {"payment_intent_id": "pi_test123", "gateway": "stripe"},
+            {"payment_intent_id": "pi_test123", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -1303,25 +1303,25 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
         mock_confirm.return_value = {"success": False, "error": "Payment failed"}
         response = self._post_json(
             "/billing/confirm-payment/",
-            {"payment_intent_id": "pi_test123", "gateway": "stripe"},
+            {"payment_intent_id": "pi_test123", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_missing_payment_id(self):
-        response = self._post_json("/billing/confirm-payment/", {"gateway": "stripe"})
+        response = self._post_json("/billing/confirm-payment/", {"gateway": "stripe", "customer_id": self.customer.pk})
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_invalid_stripe_format(self):
         response = self._post_json(
             "/billing/confirm-payment/",
-            {"payment_intent_id": "invalid_id", "gateway": "stripe"},
+            {"payment_intent_id": "invalid_id", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_confirm_invalid_gateway(self):
         response = self._post_json(
             "/billing/confirm-payment/",
-            {"payment_intent_id": "pi_test123", "gateway": "paypal"},
+            {"payment_intent_id": "pi_test123", "gateway": "paypal", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
@@ -1338,14 +1338,14 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
         mock_confirm.side_effect = Exception("Unexpected")
         response = self._post_json(
             "/billing/confirm-payment/",
-            {"payment_intent_id": "pi_test123", "gateway": "stripe"},
+            {"payment_intent_id": "pi_test123", "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 500)
 
     def test_confirm_payment_id_not_string(self):
         response = self._post_json(
             "/billing/confirm-payment/",
-            {"payment_intent_id": 123, "gateway": "stripe"},
+            {"payment_intent_id": 123, "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
 
@@ -1434,14 +1434,14 @@ class ApiProcessRefundTest(BillingViewsTestBase):
         """Refund with invalid payment ID format returns 400"""
         response = self._post_json(
             "/billing/process-refund/",
-            {"payment_id": "pay_123", "amount_cents": 1000, "reason": "Test"},
+            {"payment_id": "pay_123", "customer_id": self.customer.pk, "amount_cents": 1000, "reason": "Test"},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_process_refund_missing_payment_id(self):
         response = self._post_json(
             "/billing/process-refund/",
-            {"amount_cents": 1000},
+            {"customer_id": self.customer.pk, "amount_cents": 1000},
         )
         self.assertEqual(response.status_code, 400)
 
@@ -1461,7 +1461,7 @@ class ApiProcessRefundTest(BillingViewsTestBase):
             json.dumps({"payment_id": "pay_123"}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 400)
 
 
 class ApiStripeConfigTest(BillingViewsTestBase):

@@ -1308,7 +1308,9 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
 
             # Call the billing/confirm-payment endpoint
             payment_result = api_client.post_billing(
-                "confirm-payment/", {"payment_intent_id": payment_intent_id, "gateway": gateway}, user_id=int(user_id)
+                "confirm-payment/",
+                {"payment_intent_id": payment_intent_id, "gateway": gateway, "customer_id": customer_id},
+                user_id=int(user_id),
             )
 
             if not payment_result.get("success"):

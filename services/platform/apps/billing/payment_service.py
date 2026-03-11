@@ -161,7 +161,7 @@ class PaymentService:
     @staticmethod
     def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913  # Business logic parameters
         order_id: str,
-        amount_cents: int,
+        amount_cents: int | None = None,
         currency: str = "RON",
         customer_id: str | int | None = None,
         order_number: str | None = None,
@@ -184,8 +184,53 @@ class PaymentService:
             PaymentIntentResult with client_secret for frontend integration
         """
         try:
+            if not customer_id:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="customer_id is required",
+                )
+
+            try:
+                customer_id_int = int(customer_id)
+            except (TypeError, ValueError):
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="customer_id must be a valid integer",
+                )
+
+            # Security-critical: derive authoritative payment amount from the order.
+            try:
+                order = Order.objects.select_related("customer").get(id=order_id, customer_id=customer_id_int)
+            except Order.DoesNotExist:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="Order not found for this customer",
+                )
+
+            expected_amount_cents = int(order.total_cents)
+            if amount_cents is not None and int(amount_cents) != expected_amount_cents:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="amount_cents does not match order total",
+                )
+
+            resolved_currency = str(order.currency or currency or "RON")
+            resolved_order_number = order_number or order.order_number
+
             logger.info(
-                f"💳 Creating payment intent for Portal order {order_id} ({amount_cents} {currency}) via {gateway}"
+                "💳 Creating payment intent for order %s (%s %s) via %s",
+                order.id,
+                expected_amount_cents,
+                resolved_currency,
+                gateway,
             )
 
             # Get payment gateway
@@ -193,8 +238,8 @@ class PaymentService:
 
             # Prepare metadata
             payment_metadata = {
-                "order_number": order_number or order_id,
-                "customer_id": str(customer_id) if customer_id else "unknown",
+                "order_number": resolved_order_number,
+                "customer_id": str(customer_id_int),
                 "platform": "PRAHO",
                 "source": "portal_api",
                 **(metadata or {}),
@@ -202,28 +247,23 @@ class PaymentService:
 
             # Create payment intent
             result = payment_gateway.create_payment_intent(
-                order_id=str(order_id), amount_cents=amount_cents, currency=currency, metadata=payment_metadata
+                order_id=str(order_id),
+                amount_cents=expected_amount_cents,
+                currency=resolved_currency,
+                metadata=payment_metadata,
             )
 
             if result.get("success", False):
                 # Create Payment record with pending status (without linking to invoice)
                 with transaction.atomic():
-                    # Try to get customer from Platform database if customer_id provided
-                    customer_obj = None
-                    if customer_id:
-                        try:
-                            customer_obj = Customer.objects.get(id=customer_id)
-                        except Customer.DoesNotExist:
-                            logger.warning(f"⚠️ Customer {customer_id} not found in Platform database")
-
                     # Get or create currency object
                     currency_obj = None
-                    if currency:
+                    if resolved_currency:
                         currency_obj, _ = Currency.objects.get_or_create(
-                            code=currency.upper(),
+                            code=resolved_currency.upper(),
                             defaults={
-                                "name": currency.upper(),
-                                "symbol": "RON" if currency.upper() == "RON" else currency.upper(),
+                                "name": resolved_currency.upper(),
+                                "symbol": ("RON" if resolved_currency.upper() == "RON" else resolved_currency.upper()),
                                 "decimals": 2,
                             },
                         )
@@ -233,9 +273,9 @@ class PaymentService:
 
                     payment = Payment.objects.create(  # type: ignore[misc]
                         invoice=None,  # Will be linked when order is processed
-                        customer=customer_obj,  # May be None for cross-service calls
+                        customer=order.customer,
                         payment_method=gateway,
-                        amount_cents=amount_cents,
+                        amount_cents=expected_amount_cents,
                         currency=currency_obj,
                         status="pending",
                         gateway_txn_id=payment_intent_id,
@@ -254,8 +294,8 @@ class PaymentService:
                     {
                         "payment_id": str(payment.id),
                         "order_id": str(order_id),
-                        "amount_cents": amount_cents,
-                        "currency": currency,
+                        "amount_cents": expected_amount_cents,
+                        "currency": resolved_currency,
                         "gateway": gateway,
                         "source": "portal_api",
                         "critical_financial_operation": True,
@@ -271,7 +311,9 @@ class PaymentService:
             )
 
     @staticmethod
-    def confirm_payment(payment_intent_id: str, gateway: str = "stripe") -> PaymentConfirmResult:
+    def confirm_payment(
+        payment_intent_id: str, gateway: str = "stripe", customer_id: str | int | None = None
+    ) -> PaymentConfirmResult:
         """
         Confirm payment status
 
@@ -291,6 +333,22 @@ class PaymentService:
                 try:
                     with transaction.atomic():
                         payment = Payment.objects.select_for_update().get(gateway_txn_id=payment_intent_id)
+
+                        if customer_id is not None:
+                            try:
+                                expected_customer_id = int(customer_id)
+                            except (TypeError, ValueError):
+                                return PaymentConfirmResult(
+                                    success=False,
+                                    status="failed",
+                                    error="customer_id must be a valid integer",
+                                )
+                            if payment.customer_id != expected_customer_id:
+                                return PaymentConfirmResult(
+                                    success=False,
+                                    status="failed",
+                                    error="Payment does not belong to this customer",
+                                )
 
                         # Idempotency guard — skip if already in terminal state
                         if payment.status in TERMINAL_PAYMENT_STATUSES:

@@ -9,8 +9,8 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from apps.common.tax_service import calculate_romanian_vat
 from apps.common.types import CUIString, EmailAddress, VATString
-from apps.common.utils import calculate_romanian_vat
 from apps.common.validators import (
     MAX_CUI_LENGTH,
     MAX_EMAIL_LENGTH,

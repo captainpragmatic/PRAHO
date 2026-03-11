@@ -40,6 +40,15 @@ class VATResult(TypedDict):
     vat_rate_percent: Decimal
 
 
+class RomanianVATBreakdown(TypedDict):
+    """VAT-inclusive Romanian breakdown used by legacy callers/tests."""
+
+    amount_without_vat: Decimal
+    vat_amount: Decimal
+    amount_with_vat: Decimal
+    vat_rate: int
+
+
 class CustomerVATInfo(TypedDict, total=False):
     """Customer VAT information for calculation.
 
@@ -553,3 +562,24 @@ class TaxConfiguration:
 
 # Export main service class
 TaxService = TaxConfiguration
+
+
+def calculate_romanian_vat(amount: Decimal, vat_rate: int | Decimal | None = None) -> RomanianVATBreakdown:
+    """Calculate VAT breakdown for a VAT-inclusive amount."""
+    effective_rate = Decimal(vat_rate) if vat_rate is not None else TaxService.get_vat_rate("RO", as_decimal=False)
+
+    amount_cents = int(amount * 100)
+    rate_decimal = effective_rate / Decimal("100")
+    if rate_decimal == 0:
+        base_amount_cents = amount_cents
+        vat_amount_cents = 0
+    else:
+        base_amount_cents = int(Decimal(amount_cents) / (Decimal("1") + rate_decimal))
+        vat_amount_cents = amount_cents - base_amount_cents
+
+    return RomanianVATBreakdown(
+        amount_without_vat=Decimal(base_amount_cents) / 100,
+        vat_amount=Decimal(vat_amount_cents) / 100,
+        amount_with_vat=Decimal(amount_cents) / 100,
+        vat_rate=int(effective_rate),
+    )
