@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from django.test import TestCase
 from django.utils import timezone
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.currency_models import Currency
 from apps.billing.efactura.models import EFacturaDocument
@@ -1473,3 +1473,259 @@ class ServiceGroupFSMTests(FSMTestMixin, TestCase):
         sg = self._make_service_group("pending")
         with self.assertRaises(AttributeError):
             sg.status = "active"
+
+
+# ---------------------------------------------------------------------------
+# 17. Chaos Monkey Remediation Tests
+# ---------------------------------------------------------------------------
+
+
+class InvoiceTransitionEdgeCaseTests(FSMTestMixin, TestCase):
+    """Tests for Chaos Monkey finding: mark_partially_refunded source restriction."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_invoice(self, status: str = "draft") -> Invoice:
+        inv = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"CM-INV-{Invoice.objects.count() + 1:04d}",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        if status != "draft":
+            force_status(inv, status)
+        return inv
+
+    def test_mark_partially_refunded_from_paid_succeeds(self) -> None:
+        inv = self._make_invoice("paid")
+        inv.mark_partially_refunded()
+        inv.save()
+        self.assertEqual(inv.status, "partially_refunded")
+
+    def test_mark_partially_refunded_from_issued_blocked(self) -> None:
+        """Chaos Monkey fix: issued invoices cannot be partially refunded (unpaid)."""
+        inv = self._make_invoice("issued")
+        with self.assertRaises(TransitionNotAllowed):
+            inv.mark_partially_refunded()
+
+    def test_mark_partially_refunded_from_overdue_blocked(self) -> None:
+        """Chaos Monkey fix: overdue invoices cannot be partially refunded (unpaid)."""
+        inv = self._make_invoice("overdue")
+        with self.assertRaises(TransitionNotAllowed):
+            inv.mark_partially_refunded()
+
+    def test_mark_partially_refunded_chain_to_full_refund(self) -> None:
+        inv = self._make_invoice("paid")
+        inv.mark_partially_refunded()
+        inv.save()
+        inv.refund_invoice()
+        inv.save()
+        self.assertEqual(inv.status, "refunded")
+
+
+class PaymentGatewayEventTests(FSMTestMixin, TestCase):
+    """Tests for Chaos Monkey finding: apply_gateway_event returns False for unmapped."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_payment(self, status: str = "pending") -> Payment:
+        p = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=5000,
+            payment_method="stripe",
+        )
+        if status != "pending":
+            force_status(p, status)
+        return p
+
+    def test_unmapped_status_returns_false(self) -> None:
+        """Chaos Monkey fix: unmapped gateway status should not save or return True."""
+        payment = self._make_payment("pending")
+        result = payment.apply_gateway_event("unknown_status")
+        self.assertFalse(result)
+
+    def test_mapped_status_succeeded_returns_true(self) -> None:
+        payment = self._make_payment("pending")
+        result = payment.apply_gateway_event("succeeded")
+        self.assertTrue(result)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "succeeded")
+
+    def test_terminal_status_returns_false(self) -> None:
+        payment = self._make_payment("succeeded")
+        force_status(payment, "refunded")
+        result = payment.apply_gateway_event("succeeded")
+        self.assertFalse(result)
+
+
+class ServiceActivateSourceTests(FSMTestMixin, TestCase):
+    """Tests for Chaos Monkey finding: Service.activate() missing 'pending' source."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_service(self, status: str = "pending") -> Service:
+        plan = ServicePlan.objects.create(
+            name="CM Test Plan",
+            plan_type="shared_hosting",
+            price_monthly="10.00",
+        )
+        idx = Server.objects.count()
+        server = Server.objects.create(
+            name=f"cm-srv-{idx}.test.ro",
+            hostname=f"cm-srv-{idx}.test.ro",
+            server_type="shared",
+            primary_ip="10.0.0.1",
+            location="Bucharest",
+            datacenter="DC-CM",
+            cpu_model="Test CPU",
+            cpu_cores=4,
+            ram_gb=8,
+            disk_type="SSD",
+            disk_capacity_gb=50,
+        )
+        svc = Service.objects.create(
+            customer=self.customer,
+            service_plan=plan,
+            server=server,
+            currency=self.currency,
+            service_name="CM Test Service",
+            domain=f"cm-test-{Service.objects.count()}.ro",
+            username=f"cm_user_{Service.objects.count()}",
+            price="10.00",
+        )
+        if status != "pending":
+            force_status(svc, status)
+        return svc
+
+    def test_activate_from_pending(self) -> None:
+        """Chaos Monkey fix: Service.activate() now allows 'pending' source."""
+        svc = self._make_service("pending")
+        svc.activate()
+        svc.save()
+        self.assertEqual(svc.status, "active")
+
+    def test_activate_from_suspended(self) -> None:
+        svc = self._make_service("suspended")
+        svc.activate()
+        svc.save()
+        self.assertEqual(svc.status, "active")
+
+    def test_activate_from_failed(self) -> None:
+        svc = self._make_service("failed")
+        svc.activate()
+        svc.save()
+        self.assertEqual(svc.status, "active")
+
+
+class ConcurrentTransitionTests(FSMTestMixin, TestCase):
+    """Tests for Chaos Monkey finding: no concurrent transition tests."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+        cls.product = Product.objects.create(
+            name="CM Concurrent Test",
+            slug="cm-concurrent-test",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+
+    def test_concurrent_order_transition_raises(self) -> None:
+        """ConcurrentTransitionMixin detects stale status on Order."""
+        order = Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-CONC-001",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=5000,
+            line_total_cents=5000,
+        )
+        # Get a stale copy
+        stale_order = Order.objects.get(pk=order.pk)
+
+        # First instance transitions successfully
+        order.submit()
+        order.save()
+        self.assertEqual(order.status, "pending")
+
+        # Stale instance should fail — it still thinks status is "draft"
+        stale_order.submit()
+        with self.assertRaises(ConcurrentTransition):
+            stale_order.save()
+
+
+class SignalTransitionFailureSafetyTests(FSMTestMixin, TestCase):
+    """Tests for Chaos Monkey CRITICAL fix: signal save-after-catch pattern.
+
+    Verifies that _handle_payment_success and _handle_payment_refund do NOT
+    execute post-transition logic when the FSM transition fails.
+    """
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def test_already_paid_invoice_not_saved_on_duplicate_payment(self) -> None:
+        """Verify that a second payment success signal doesn't overwrite paid_at."""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="CM-SIG-001",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        force_status(invoice, "paid")
+        original_paid_at = timezone.now()
+        invoice.paid_at = original_paid_at
+        invoice.save(update_fields=["paid_at"])
+
+        # mark_as_paid should fail — invoice is already paid
+        with self.assertRaises(TransitionNotAllowed):
+            invoice.mark_as_paid()
+
+        # Verify the invoice status and paid_at are unchanged
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "paid")
+        self.assertEqual(invoice.paid_at, original_paid_at)
+
+    def test_already_refunded_invoice_not_saved_on_duplicate_refund(self) -> None:
+        """Verify that a second refund signal doesn't overwrite refunded invoice."""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="CM-SIG-002",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        force_status(invoice, "refunded")
+
+        # refund_invoice should fail — invoice is already refunded
+        with self.assertRaises(TransitionNotAllowed):
+            invoice.refund_invoice()
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "refunded")

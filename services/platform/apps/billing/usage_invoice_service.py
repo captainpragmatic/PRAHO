@@ -383,8 +383,7 @@ class UsageInvoiceService:
             except TransitionNotAllowed:
                 logger.warning("⚠️ [Invoice] Cannot issue invoice %s from status '%s'", invoice.number, invoice.status)
                 return Err(f"Cannot issue invoice {invoice.number} from status '{invoice.status}'")
-            invoice.issued_at = timezone.now()
-            invoice.locked_at = timezone.now()  # Make immutable
+            # Note: issue() FSM transition already sets issued_at and locked_at
             invoice.save()
 
             # Log issuance

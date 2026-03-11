@@ -245,14 +245,25 @@ def _should_check_status_patterns(path: str) -> bool:
 
 
 def _is_in_transition_method(lines: list[str], line_idx: int) -> bool:
-    """Check if the given line is inside an @transition-decorated method."""
-    for i in range(line_idx - 1, max(line_idx - 20, -1), -1):
+    """Check if the given line is inside an @transition-decorated method.
+
+    Scans backwards from line_idx looking for the enclosing def, then
+    continues scanning past it to find @transition among its decorators.
+    Handles stacked decorators (e.g. @transition + @audit_log + def).
+    """
+    found_def = False
+    for i in range(line_idx - 1, max(line_idx - 30, -1), -1):
         stripped = lines[i].strip()
         if stripped.startswith("@transition("):
             return True
-        if stripped.startswith("def ") and not stripped.startswith("@"):
-            break
         if stripped.startswith("class "):
+            break
+        if stripped.startswith("def "):
+            # Found the enclosing def — keep scanning upward for its decorators
+            found_def = True
+            continue
+        if found_def and not stripped.startswith("@") and stripped != "":
+            # Hit a non-decorator, non-blank line above the def — stop
             break
     return False
 
@@ -313,14 +324,33 @@ def check_direct_status_assignment(path: Path, lines: list[str], result: ScanRes
 
 
 def check_queryset_update(path: Path, lines: list[str], result: ScanResult) -> None:
-    """Check 2: No QuerySet.update(status=) bypassing model methods (FSM-relevant files only)."""
+    """Check 2: No QuerySet.update(status=) bypassing model methods (FSM-relevant files only).
+
+    Handles both single-line and multi-line .update() calls by joining
+    continuation lines when an unclosed paren is detected.
+    """
     str_path = str(path)
     if not _should_check_status_patterns(str_path):
         return
 
+    # Also detect setattr(obj, 'status', value) bypass pattern
+    for field_name in FSM_STATUS_FIELDS:
+        setattr_pattern = re.compile(rf"setattr\([^,]+,\s*[\"']{field_name}[\"']")
+        for i, line in enumerate(lines):
+            if setattr_pattern.search(line) and not _has_fsm_bypass_comment(line):
+                result.violations.append(
+                    Violation(
+                        file=str_path,
+                        line=i + 1,
+                        check="setattr-bypass",
+                        message=f"setattr(..., '{field_name}', ...) bypasses FSM. Use transition methods.",
+                    )
+                )
+
     for field_name in FSM_STATUS_FIELDS:
         pattern = re.compile(rf"\.update\([^)]*{field_name}\s*=")
         for i, line in enumerate(lines):
+            # Single-line match
             if pattern.search(line) and not _has_fsm_bypass_comment(line):
                 result.violations.append(
                     Violation(
@@ -330,6 +360,28 @@ def check_queryset_update(path: Path, lines: list[str], result: ScanResult) -> N
                         message=f"QuerySet.update({field_name}=) bypasses FSM. Use model transition methods.",
                     )
                 )
+                continue
+            # Multi-line: if line has .update( with unclosed paren, join next lines.
+            # The `.update(` line may have a trailing comment (e.g. `# fsm-bypass:`),
+            # so strip comments before checking for unclosed paren.
+            code_part = line.split("#")[0].rstrip()
+            if ".update(" in line and code_part.endswith(("(", ",")):
+                if _has_fsm_bypass_comment(line):
+                    continue
+                joined = line
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    joined += " " + lines[j].strip()
+                    if ")" in lines[j]:
+                        break
+                if pattern.search(joined) and not _has_fsm_bypass_comment(joined):
+                    result.violations.append(
+                        Violation(
+                            file=str_path,
+                            line=i + 1,
+                            check="queryset-update",
+                            message=f"QuerySet.update({field_name}=) bypasses FSM (multi-line). Use transition methods.",
+                        )
+                    )
 
 
 def check_bulk_update(path: Path, lines: list[str], result: ScanResult) -> None:
@@ -745,6 +797,17 @@ def main() -> int:
             print(f"  {model_file}: {', '.join(sorted(classes))}")
         print()
 
+    # Checks that should block commits (errors + critical warnings)
+    blocking_checks = {
+        "direct-assignment",
+        "queryset-update",
+        "bulk-update",
+        "dict-bypass",
+        "setattr-bypass",
+        "create-with-status",
+        "transition-no-save",
+    }
+
     if args.json:
         data = [
             {"file": v.file, "line": v.line, "check": v.check, "message": v.message, "severity": v.severity}
@@ -752,15 +815,21 @@ def main() -> int:
         ]
         print(json.dumps(data, indent=2))
     elif all_results.violations:
+        errors = [v for v in all_results.violations if v.check in blocking_checks]
+        warnings = [v for v in all_results.violations if v.check not in blocking_checks]
         print(f"FSM Guardrail Lint: {len(all_results.violations)} violation(s) found\n")
         for v in all_results.violations:
-            icon = "🔥" if v.severity == "error" else "⚠️"
+            icon = "🔥" if v.check in blocking_checks else "⚠️"
             print(f"  {icon} {v.file}:{v.line}: [{v.check}] {v.message}")
-        print(f"\n❌ {len(all_results.violations)} FSM guardrail violation(s)")
+        if errors:
+            print(f"\n❌ {len(errors)} blocking violation(s), {len(warnings)} warning(s)")
+        else:
+            print(f"\n⚠️ {len(warnings)} warning(s) (non-blocking)")
     else:
         print("✅ No FSM guardrail violations found")
 
-    return 1 if any(v.severity == "error" for v in all_results.violations) else 0
+    has_blocking = any(v.check in blocking_checks for v in all_results.violations)
+    return 1 if has_blocking else 0
 
 
 if __name__ == "__main__":

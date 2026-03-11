@@ -269,6 +269,13 @@ class Payment(ConcurrentTransitionMixin, models.Model):
                     self.pk,
                 )
                 return False
+        else:
+            logger.warning(
+                "⚠️ [Payment] Unmapped gateway status '%s' for payment %s — no transition applied",
+                new_status,
+                self.pk,
+            )
+            return False
 
         if meta_update:
             self.meta = {**(self.meta or {}), **meta_update}

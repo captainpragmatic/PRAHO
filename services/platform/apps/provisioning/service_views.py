@@ -13,6 +13,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
+from django_fsm import TransitionNotAllowed
 
 from apps.billing.models import Currency
 from apps.common.decorators import staff_required_strict
@@ -242,7 +243,16 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
 
     if request.method == "POST":
         reason = request.POST.get("reason", "Staff suspension")
-        service.suspend(reason=reason)
+        try:
+            service.suspend(reason=reason)
+        except TransitionNotAllowed:
+            messages.error(
+                request,
+                _("❌ Service {domain} cannot be suspended from status '{status}'.").format(
+                    domain=service.domain, status=service.status
+                ),
+            )
+            return redirect("provisioning:service_detail", pk=pk)
         service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
 
         messages.success(request, _("⏸️ Service {domain} has been suspended!").format(domain=service.domain))
@@ -264,7 +274,16 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("provisioning:services")
 
     if request.method == "POST":
-        service.activate()
+        try:
+            service.activate()
+        except TransitionNotAllowed:
+            messages.error(
+                request,
+                _("❌ Service {domain} cannot be activated from status '{status}'.").format(
+                    domain=service.domain, status=service.status
+                ),
+            )
+            return redirect("provisioning:service_detail", pk=pk)
         service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
 
         messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))

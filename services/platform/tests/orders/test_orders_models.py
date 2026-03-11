@@ -85,7 +85,7 @@ class OrderModelTestCase(TestCase):
         self.assertTrue(len(str(order.id)) == 36)  # Standard UUID format
 
     def test_order_status_choices(self):
-        """Test order status workflow and validation"""
+        """Test order status DB roundtrip for all valid values"""
         order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-STATUS-0001",
@@ -99,10 +99,12 @@ class OrderModelTestCase(TestCase):
         # Test default status
         self.assertEqual(order.status, "draft")
 
-        # Test valid status changes (use force_status to bypass FSMField protected=True)
+        # Test valid status values survive DB roundtrip (verifies CHECK constraint compatibility)
         valid_statuses = ["draft", "pending", "confirmed", "processing", "completed", "cancelled", "failed"]
         for status in valid_statuses:
             force_status(order, status)
+            order.refresh_from_db()
+            self.assertEqual(order.status, status)
 
     def test_romanian_vat_compliance(self):
         """Test Romanian VAT calculation compliance"""
@@ -279,10 +281,12 @@ class OrderItemModelTestCase(TestCase):
             provisioning_status="pending"
         )
 
-        # Test valid provisioning statuses (use force_status to bypass FSMField protected=True)
+        # Test valid provisioning statuses survive DB roundtrip (verifies CHECK constraint)
         valid_statuses = ["pending", "in_progress", "completed", "failed", "cancelled"]
         for status in valid_statuses:
             force_status(item, status, field_name="provisioning_status")
+            item.refresh_from_db()
+            self.assertEqual(item.provisioning_status, status)
 
     def test_order_item_uuid_primary_key(self):
         """Test that order items use UUID as primary key"""

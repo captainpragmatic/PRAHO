@@ -22,6 +22,7 @@ from typing import Any
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.common.types import Err, Ok, Result
 
@@ -583,7 +584,14 @@ class StripeMeterWebhookHandler:
                 if billing_cycle:
                     billing_cycle.meta["stripe_invoice_id"] = invoice_data.id
                     billing_cycle.meta["stripe_invoice_total"] = invoice_data.total
-                    billing_cycle.finalize()  # FSM transition sets finalized_at
+                    try:
+                        billing_cycle.finalize()  # FSM transition sets finalized_at
+                    except TransitionNotAllowed:
+                        logger.warning(
+                            "⚠️ [Stripe] BillingCycle %s cannot finalize from status '%s' (idempotent)",
+                            billing_cycle.pk,
+                            billing_cycle.status,
+                        )
                     billing_cycle.save()
 
             except Subscription.DoesNotExist:

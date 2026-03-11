@@ -463,9 +463,9 @@ class Service(ConcurrentTransitionMixin, models.Model):
         """Mark provisioning as complete and activate."""
         self.activated_at = timezone.now()
 
-    @transition(field=status, source=["suspended", "failed"], target="active")
+    @transition(field=status, source=["pending", "suspended", "failed"], target="active")
     def activate(self) -> None:
-        """Activate the service."""
+        """Activate the service (from pending, suspended, or failed)."""
         if not self.activated_at:
             self.activated_at = timezone.now()
         self.suspended_at = None

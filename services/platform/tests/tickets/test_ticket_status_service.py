@@ -10,6 +10,7 @@ from apps.customers.models import Customer, CustomerTaxProfile
 from apps.tickets.models import Ticket, TicketComment, SupportCategory
 from apps.tickets.services import TicketStatusService
 from apps.users.models import CustomerMembership
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -348,8 +349,8 @@ class TicketStatusServiceTest(TestCase):
         }
 
         for status, expected_display in status_displays.items():
-            # Bypass FSM for test setup — we're testing display labels, not transitions
-            Ticket.objects.filter(pk=ticket.pk).update(status=status)
+            # Use force_status for test setup — we're testing display labels, not transitions
+            force_status(ticket, status)
             ticket.refresh_from_db()
             self.assertEqual(ticket.get_status_display(), expected_display)
 

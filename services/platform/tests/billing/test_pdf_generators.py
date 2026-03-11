@@ -7,6 +7,7 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -883,6 +884,24 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
 
         self.assertIsInstance(response, HttpResponse)
         self.assertGreater(len(response.content), 0)
+
+    def test_negative_amount_invoice_rejected_by_constraint(self):
+        """Test that negative financial amounts are rejected by DB CHECK constraint.
+
+        Credit notes with negative amounts would violate the non-negative CHECK
+        constraints (invoice_subtotal_non_negative, etc.). This test verifies
+        the constraint works as expected.
+        """
+        with self.assertRaises(IntegrityError):
+            Invoice.objects.create(
+                customer=self.customer,
+                currency=self.currency,
+                number='CN-NEG-001',
+                subtotal_cents=-5000,
+                tax_cents=-1050,
+                total_cents=-6050,
+                status='draft',
+            )
 
     def test_invoice_lines_with_zero_quantity(self):
         """Test invoice with zero quantity line items"""

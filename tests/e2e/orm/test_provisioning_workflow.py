@@ -262,7 +262,13 @@ class TestProvisioningStatusWorkflow(TestCase):
         )
 
     def test_order_status_workflow(self):
-        """Test order status transitions for provisioning"""
+        """Test order status transitions for provisioning via FSM methods"""
+        product = Product.objects.create(
+            name='Hosting Status Test',
+            slug='wh-status-test',
+            product_type='shared_hosting',
+            is_active=True,
+        )
         order = Order.objects.create(
             customer=self.customer,
             order_number='ORD-STATUS-001',
@@ -271,21 +277,34 @@ class TestProvisioningStatusWorkflow(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            product_name=product.name,
+            product_type=product.product_type,
+            quantity=1,
+            unit_price_cents=5000,
+            line_total_cents=5000,
+        )
 
-        # Draft -> Pending
-        force_status(order, 'pending')
+        # Draft -> Pending (submit requires items)
+        order.submit()
+        order.save()
         assert order.status == 'pending'
 
         # Pending -> Confirmed
-        force_status(order, 'confirmed')
+        order.confirm()
+        order.save()
         assert order.status == 'confirmed'
 
-        # Confirmed -> Processing (payment received)
-        force_status(order, 'processing')
+        # Confirmed -> Processing
+        order.start_processing()
+        order.save()
         assert order.status == 'processing'
 
-        # Processing -> Completed (services provisioned)
-        force_status(order, 'completed')
+        # Processing -> Completed
+        order.complete()
+        order.save()
         assert order.status == 'completed'
 
 

@@ -30,4 +30,12 @@ class Migration(migrations.Migration):
             model_name='efacturadocument',
             constraint=models.CheckConstraint(condition=models.Q(('status__in', ['draft', 'queued', 'submitted', 'processing', 'accepted', 'rejected', 'error'])), name='efactura_valid_status'),
         ),
+        migrations.AddConstraint(
+            model_name='billingcycle',
+            constraint=models.CheckConstraint(condition=models.Q(('status__in', ['upcoming', 'active', 'closing', 'closed', 'invoiced', 'finalized'])), name='billingcycle_status_valid_values'),
+        ),
+        migrations.AddConstraint(
+            model_name='usageaggregation',
+            constraint=models.CheckConstraint(condition=models.Q(('status__in', ['accumulating', 'pending_rating', 'rated', 'invoiced', 'finalized'])), name='usageaggregation_status_valid_values'),
+        ),
     ]

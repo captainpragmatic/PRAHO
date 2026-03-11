@@ -1136,10 +1136,11 @@ def _handle_payment_success(payment: Payment) -> None:
                         payment.invoice.number,
                         payment.invoice.status,
                     )
-                payment.invoice.save(update_fields=["status", "paid_at"])
+                else:
+                    payment.invoice.save(update_fields=["status", "paid_at"])
 
-                # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
-                _trigger_virtualmin_provisioning_on_payment(payment.invoice)
+                    # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
+                    _trigger_virtualmin_provisioning_on_payment(payment.invoice)
 
         _send_payment_success_email(payment)
         _update_customer_payment_history(payment.customer, "positive")
@@ -1178,7 +1179,8 @@ def _handle_payment_refund(payment: Payment) -> None:
                         payment.invoice.number,
                         payment.invoice.status,
                     )
-                payment.invoice.save(update_fields=["status"])
+                else:
+                    payment.invoice.save(update_fields=["status"])
 
         _send_payment_refund_email(payment)
 

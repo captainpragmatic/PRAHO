@@ -14,6 +14,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django_fsm import TransitionNotAllowed
 
 from apps.api.secure_auth import validate_portal_service_request
 from apps.audit.services import AuditContext, ProvisioningAuditService
@@ -174,15 +175,25 @@ class ServerWebhookView(View):
                 service.provisioning_data = webhook_data["provisioning_result"]
 
             # Use FSM transition to activate the service
-            service.complete_provisioning()
+            try:
+                service.complete_provisioning()
+            except TransitionNotAllowed:
+                if service.status == "active":
+                    logger.info(f"✅ [Server Webhook] Service {service_username} already active (idempotent)")
+                else:
+                    logger.warning(
+                        f"⚠️ [Server Webhook] Cannot complete provisioning for {service_username} "
+                        f"from status '{service.status}'"
+                    )
+                    return False, f"Service {service_username} cannot transition from '{service.status}'"
             service.save()
 
             # Complete any pending provisioning tasks
-            ProvisioningTask.objects.filter(  # fsm-bypass: ProvisioningTask is not FSM-protected
+            ProvisioningTask.objects.filter(
                 service=service,
                 task_type="create_service",
                 status__in=["pending", "running"],
-            ).update(
+            ).update(  # fsm-bypass: ProvisioningTask is not FSM-protected
                 status="completed",
                 completed_at=timezone.now(),
                 result=webhook_data.get("provisioning_result", {}),

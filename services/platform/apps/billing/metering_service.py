@@ -433,8 +433,10 @@ class AggregationService:
             # Process any remaining pending events
             self.process_pending_events(customer_id=str(billing_cycle.subscription.customer_id))
 
-            # Bulk-update aggregations to pending_rating (bypasses FSM — intentional for performance)
-            UsageAggregation.objects.filter(billing_cycle=billing_cycle, status="accumulating").update(
+            # Bulk-update aggregations to pending_rating (intentional for performance — UsageAggregation is not FSM-protected)
+            UsageAggregation.objects.filter(
+                billing_cycle=billing_cycle, status="accumulating"
+            ).update(  # fsm-bypass: UsageAggregation uses plain CharField, not FSMField
                 status="pending_rating"
             )
 

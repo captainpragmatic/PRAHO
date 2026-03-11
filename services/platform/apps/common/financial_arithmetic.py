@@ -17,7 +17,7 @@ from typing import Protocol
 
 
 class HasLineTotals(Protocol):
-    """Protocol for line items with subtotal_cents and tax_rate."""
+    """Protocol for line items with subtotal_cents and tax_cents."""
 
     @property
     def subtotal_cents(self) -> int: ...

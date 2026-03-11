@@ -15,6 +15,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import AuditContext, DomainsAuditService
 from apps.common.request_ip import get_safe_client_ip
@@ -169,7 +170,14 @@ class RegistrarWebhookView(View):
         """✅ Handle domain registration completion"""
         try:
             # Update domain status and details from registrar
-            domain.activate()
+            try:
+                domain.activate()
+            except TransitionNotAllowed:
+                if domain.status == "active":
+                    logger.info(f"✅ [Webhook] Domain {domain.name} already active (idempotent)")
+                else:
+                    logger.warning(f"⚠️ [Webhook] Cannot activate domain {domain.name} from status '{domain.status}'")
+                    return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
             domain.registrar_domain_id = webhook_data.get("registrar_domain_id", domain.registrar_domain_id)
             raw_epp = webhook_data.get("epp_code")
             if raw_epp:
@@ -245,7 +253,14 @@ class RegistrarWebhookView(View):
         """📥 Handle domain transfer completion"""
         try:
             # Update domain status
-            domain.activate()
+            try:
+                domain.activate()
+            except TransitionNotAllowed:
+                if domain.status == "active":
+                    logger.info(f"✅ [Webhook] Domain {domain.name} already active after transfer (idempotent)")
+                else:
+                    logger.warning(f"⚠️ [Webhook] Cannot activate domain {domain.name} from status '{domain.status}'")
+                    return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
 
             # Update registrar domain ID and EPP code if provided
             if "registrar_domain_id" in webhook_data:
@@ -294,7 +309,15 @@ class RegistrarWebhookView(View):
         """🔴 Handle domain expiration"""
         try:
             # Update domain status
-            domain.expire()
+            try:
+                domain.expire()
+            except TransitionNotAllowed:
+                if domain.status == "expired":
+                    logger.info(f"✅ [Webhook] Domain {domain.name} already expired (idempotent)")
+                    return True, "Domain already expired"
+                else:
+                    logger.warning(f"⚠️ [Webhook] Cannot expire domain {domain.name} from status '{domain.status}'")
+                    return False, f"Domain {domain.name} cannot transition from '{domain.status}' to expired"
             domain.save()
 
             # Log audit event
@@ -319,7 +342,15 @@ class RegistrarWebhookView(View):
         """⏸️ Handle domain suspension"""
         try:
             # Update domain status
-            domain.suspend()
+            try:
+                domain.suspend()
+            except TransitionNotAllowed:
+                if domain.status == "suspended":
+                    logger.info(f"✅ [Webhook] Domain {domain.name} already suspended (idempotent)")
+                    return True, "Domain already suspended"
+                else:
+                    logger.warning(f"⚠️ [Webhook] Cannot suspend domain {domain.name} from status '{domain.status}'")
+                    return False, f"Domain {domain.name} cannot transition from '{domain.status}' to suspended"
             domain.save()
 
             # Log security event for suspension

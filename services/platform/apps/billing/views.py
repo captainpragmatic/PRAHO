@@ -914,11 +914,18 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 logger.warning(
                     f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
                 )
-            invoice.save()
-
-            messages.success(
-                request, _("✅ Payment processed and invoice #{number} marked as paid!").format(number=invoice.number)
-            )
+                messages.warning(
+                    request,
+                    _(
+                        "⚠️ Payment recorded but invoice #{number} could not be marked as paid (status: {status})."
+                    ).format(number=invoice.number, status=invoice.status),
+                )
+            else:
+                invoice.save()
+                messages.success(
+                    request,
+                    _("✅ Payment processed and invoice #{number} marked as paid!").format(number=invoice.number),
+                )
             return json_success({"invoice_id": invoice.id}, "Payment processed successfully")
         else:
             return json_error("Failed to convert proforma", status=400)
@@ -1221,11 +1228,20 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
                 logger.warning(
                     f"⚠️ [Billing] Cannot transition proforma {proforma.number} to sent from status '{proforma.status}'"
                 )
-            proforma.save(update_fields=["status"])
-            messages.success(
-                request,
-                _("✅ Proforma #{proforma_number} has been sent successfully!").format(proforma_number=proforma.number),
-            )
+                messages.warning(
+                    request,
+                    _(
+                        "⚠️ Email sent but proforma #{proforma_number} status could not be updated (status: {status})."
+                    ).format(proforma_number=proforma.number, status=proforma.status),
+                )
+            else:
+                proforma.save(update_fields=["status"])
+                messages.success(
+                    request,
+                    _("✅ Proforma #{proforma_number} has been sent successfully!").format(
+                        proforma_number=proforma.number
+                    ),
+                )
             return JsonResponse({"success": True})
         else:
             messages.error(request, _("❌ Failed to send proforma email."))
@@ -1427,9 +1443,17 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 logger.warning(
                     f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
                 )
-            invoice.save()
-
-        messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
+                messages.warning(
+                    request,
+                    _(
+                        "⚠️ Payment registered but invoice #{number} could not be marked as paid (status: {status})."
+                    ).format(number=invoice.number, status=invoice.status),
+                )
+            else:
+                invoice.save()
+                messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
+        else:
+            messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
         return JsonResponse({"success": True})
 
     return JsonResponse({"error": "Invalid method"}, status=405)

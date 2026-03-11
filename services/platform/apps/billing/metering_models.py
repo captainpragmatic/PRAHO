@@ -427,6 +427,10 @@ class UsageAggregation(models.Model):
         ordering = ("-period_start",)
         constraints = (
             models.UniqueConstraint(fields=["meter", "customer", "billing_cycle"], name="unique_meter_customer_cycle"),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["accumulating", "pending_rating", "rated", "invoiced", "finalized"]),
+                name="usageaggregation_status_valid_values",
+            ),
         )
         indexes = (
             models.Index(fields=["customer", "-period_start"]),
@@ -573,6 +577,10 @@ class BillingCycle(models.Model):
         ordering = ("-period_start",)
         constraints = (
             models.UniqueConstraint(fields=["subscription", "period_start"], name="unique_subscription_period"),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["upcoming", "active", "closing", "closed", "invoiced", "finalized"]),
+                name="billingcycle_status_valid_values",
+            ),
         )
         indexes = (
             models.Index(fields=["subscription", "-period_start"]),

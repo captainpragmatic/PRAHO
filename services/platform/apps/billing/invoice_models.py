@@ -352,7 +352,7 @@ class Invoice(models.Model):
     def refund_invoice(self) -> None:
         """Mark invoice as fully refunded."""
 
-    @transition(field=status, source=["issued", "overdue", "paid", "partially_refunded"], target="partially_refunded")
+    @transition(field=status, source=["paid", "partially_refunded"], target="partially_refunded")
     def mark_partially_refunded(self) -> None:
         """Mark invoice as partially refunded."""
 
