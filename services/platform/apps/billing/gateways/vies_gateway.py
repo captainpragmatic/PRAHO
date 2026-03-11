@@ -9,7 +9,7 @@ Django cache for result caching (24h valid, 1h invalid).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from django.core.cache import cache
@@ -58,9 +58,9 @@ class VIESGateway:
         cache_key = f"{VIES_CACHE_PREFIX}{country_code}_{vat_number}"
 
         cached = cache.get(cache_key)
-        if isinstance(cached, VIESResponse):
+        if isinstance(cached, dict):
             logger.debug("[VIES] Cache hit: %s%s", country_code, vat_number)
-            return cached
+            return VIESResponse(**cached)
 
         logger.info("[VIES] Querying API: %s%s", country_code, vat_number)
         try:
@@ -85,7 +85,7 @@ class VIESGateway:
             )
 
             ttl = VIES_CACHE_TTL_VALID if result.is_valid else VIES_CACHE_TTL_INVALID
-            cache.set(cache_key, result, ttl)
+            cache.set(cache_key, asdict(result), ttl)
             return result
 
         except Exception as exc:
