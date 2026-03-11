@@ -230,7 +230,17 @@ def run_mypy_incremental(files: list[str], verbose: bool = False) -> bool:
     normalized_files = [normalize_repo_path(f) for f in files_to_check]
 
     env = os.environ.copy()
-    env["PATH"] = f"{repo_root / '.venv' / 'bin'}:{env.get('PATH', '')}"
+    project_env = env.get("UV_PROJECT_ENVIRONMENT")
+    if project_env:
+        python_bin_dir = Path(project_env) / "bin"
+    else:
+        default_env = ".venv-darwin" if os.uname().sysname.lower() == "darwin" else ".venv-linux"
+        python_bin_dir = repo_root / default_env / "bin"
+        if not python_bin_dir.exists():
+            # Legacy fallback for environments that still use a single .venv.
+            python_bin_dir = repo_root / ".venv" / "bin"
+
+    env["PATH"] = f"{python_bin_dir}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{service_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
 
     # Step 1: Run mypy on current working-tree files
