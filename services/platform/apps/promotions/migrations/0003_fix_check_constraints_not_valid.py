@@ -10,7 +10,7 @@ from django.db import migrations
 
 _CONSTRAINTS = [
     (
-        "promotions_promotioncampaign",
+        "promotion_campaigns",
         "campaign_valid_status",
         "status IN ('draft','scheduled','active','paused','completed','cancelled')",
     ),

@@ -10,7 +10,7 @@ from django.db import migrations
 
 _CONSTRAINTS = [
     (
-        "customers_customer",
+        "customers",
         "customer_valid_status",
         "status IN ('active','inactive','suspended','prospect')",
     ),

@@ -10,12 +10,12 @@ from django.db import migrations
 
 _CONSTRAINTS = [
     (
-        "orders_order",
+        "orders",
         "order_status_valid_values",
         "status IN ('draft','pending','confirmed','processing','completed','cancelled','failed','refunded','partially_refunded')",
     ),
     (
-        "orders_orderitem",
+        "order_items",
         "orderitem_provisioning_status_valid_values",
         "provisioning_status IN ('pending','in_progress','completed','failed','cancelled')",
     ),

@@ -10,7 +10,7 @@ from django.db import migrations
 
 _CONSTRAINTS = [
     (
-        "tickets_ticket",
+        "tickets",
         "ticket_status_valid_values",
         "status IN ('open','in_progress','waiting_on_customer','closed')",
     ),

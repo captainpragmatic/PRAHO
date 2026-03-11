@@ -10,7 +10,7 @@ from django.db import migrations
 
 _CONSTRAINTS = [
     (
-        "provisioning_service",
+        "services",
         "service_status_valid_values",
         "status IN ('pending','provisioning','active','suspended','failed','terminated','expired')",
     ),
