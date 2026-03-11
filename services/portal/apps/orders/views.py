@@ -728,7 +728,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     try:
         product_slug = request.POST.get("product_slug", "").strip()
         billing_period = request.POST.get("billing_period", "monthly")
-        quantity = OrderInputValidator.validate_quantity(int(request.POST.get("quantity", 1)))
+        quantity = OrderInputValidator.validate_quantity(request.POST.get("quantity", 1))
 
         cart = GDPRCompliantCartSession(request.session)
         cart.update_item_quantity(product_slug, billing_period, quantity)

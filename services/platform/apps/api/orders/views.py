@@ -23,7 +23,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency
 from apps.common.request_ip import get_safe_client_ip
-from apps.common.types import Err, Ok
+from apps.common.types import CurrencyCode, Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.preflight import OrderPreflightValidationService
@@ -297,7 +297,7 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -321,8 +321,14 @@ def preflight_order(  # noqa: PLR0915  # Complexity: multi-step business logic
             )
 
         # Create a preview order data structure (without saving to DB)
-        # Get currency (default to RON)
-        currency = Currency.objects.get(code="RON")
+        # Get currency from request (default to RON for Romanian customers)
+        currency_code = request.data.get("currency", "RON")
+        if not CurrencyCode.is_supported(currency_code):
+            return Response(
+                {"success": False, "errors": [f"Unsupported currency: {currency_code}"], "warnings": []},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        currency = Currency.objects.get(code=currency_code)
 
         # Build billing address from customer profile
         billing_address = OrderService.build_billing_address_from_customer(customer)
@@ -851,8 +857,11 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
         username = f"{customer.id}_{username_suffix}"
 
         server, used_fallback = _get_server_for_product_type(item.product.product_type, Server)
-        if server and used_fallback:
-            logger.warning(f"⚠️ Using fallback server {server.name} for {item.product_name}")
+        if server is None:
+            logger.error("No active provisioning server for %s", item.product.product_type)
+            return {"product": item.product.name, "error": "No provisioning server available"}
+        if used_fallback:
+            logger.warning("Using fallback server %s for %s", server.name, item.product_name)
 
         service = Service.objects.create(
             customer=customer,
