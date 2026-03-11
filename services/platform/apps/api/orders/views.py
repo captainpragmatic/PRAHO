@@ -297,7 +297,7 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -322,13 +322,25 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
 
         # Create a preview order data structure (without saving to DB)
         # Get currency from request (default to RON for Romanian customers)
-        currency_code = request.data.get("currency", "RON")
+        currency_code_raw = request.data.get("currency", "RON")
+        if not isinstance(currency_code_raw, str):
+            return Response(
+                {"success": False, "errors": [f"Unsupported currency: {currency_code_raw!r}"], "warnings": []},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        currency_code = currency_code_raw.strip().upper()
         if not CurrencyCode.is_supported(currency_code):
             return Response(
                 {"success": False, "errors": [f"Unsupported currency: {currency_code}"], "warnings": []},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        currency = Currency.objects.get(code=currency_code)
+        try:
+            currency = Currency.objects.get(code=currency_code)
+        except Currency.DoesNotExist:
+            return Response(
+                {"success": False, "errors": [f"Unsupported currency: {currency_code}"], "warnings": []},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Build billing address from customer profile
         billing_address = OrderService.build_billing_address_from_customer(customer)
