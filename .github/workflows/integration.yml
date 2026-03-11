@@ -123,6 +123,28 @@ jobs:
         uv python install
         uv sync --all-groups
 
+    - name: Ruff no-new-debt gate (changed Python files)
+      run: |
+        BASE_REF="${{ github.event.before }}"
+        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
+        fi
+        if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+          echo "Baseline ref not present locally ($BASE_REF); fetching..."
+          git fetch origin "${BASE_REF}" --depth=1 || true
+        fi
+        echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
+
+    - name: Test layout audit (bootstrap non-blocking)
+      run: |
+        echo "Running test layout audit (non-blocking bootstrap pass)..."
+        # TODO: Remove `|| true` after baseline cleanup lands on master.
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/audit_test_layout.py --strict --json > test-layout-audit.json || true
     - name: Set up platform database
       run: |
         cd services/platform
@@ -137,3 +159,14 @@ jobs:
 
     - name: Integration test suite (make test-integration)
       run: make test-integration
+
+    - name: Upload integration test reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: integration-reports
+        path: |
+          tests/integration/reports/
+          htmlcov/
+          test-layout-audit.json
+        if-no-files-found: warn

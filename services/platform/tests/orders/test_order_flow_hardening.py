@@ -29,6 +29,16 @@ from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
 from apps.products.models import Product
 from apps.users.models import User
 
+from ._order_idempotency_cases import (
+    IdempotencyKeyAtomicCreationTests,
+    IdempotencyKeyLengthTests,
+)
+
+_IMPORTED_ORDER_FLOW_CASES = (
+    IdempotencyKeyAtomicCreationTests,
+    IdempotencyKeyLengthTests,
+)
+
 # ===============================================================================
 # SHARED FIXTURE HELPERS
 # ===============================================================================

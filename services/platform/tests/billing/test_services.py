@@ -37,6 +37,25 @@ from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 from tests.helpers.fsm_helpers import force_status
 
+from ._billing_services_basic_cases import (
+    RefundQueryServiceTestCase,
+    RefundServiceComprehensiveTestCase,
+    RefundServiceErrorHandlingTestCase,
+)
+from ._billing_services_focused_cases import (
+    RefundServiceFocusedTestCase,
+    RefundServiceImportCoverageTestCase,
+)
+
+# Keep imported case modules visible to unittest discovery without tripping F401.
+_IMPORTED_SERVICE_CASES = (
+    RefundQueryServiceTestCase,
+    RefundServiceComprehensiveTestCase,
+    RefundServiceErrorHandlingTestCase,
+    RefundServiceFocusedTestCase,
+    RefundServiceImportCoverageTestCase,
+)
+
 
 class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
     """

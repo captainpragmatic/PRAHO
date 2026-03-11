@@ -67,6 +67,43 @@ from tests.factories.billing_factories import (
 )
 from tests.helpers.fsm_helpers import force_status
 
+from ._billing_service_task_cases import (
+    ApiRefundViewTests,
+    CreditNoteSignalTests,
+    EFacturaServiceTests,
+    GenerateEFacturaViewTests,
+    InvoiceNumberingServiceTests,
+    InvoiceRefundViewTests,
+    PaymentCollectionRetryTests,
+    PaymentRetryServiceTests,
+    ProcessRecurringBillingTests,
+    ProformaConversionServiceTests,
+    ProformaModelConvertTests,
+    SendPaymentReminderHelperTests,
+    SubmitEfacturaTaskTests,
+    SubscriptionProcessPaymentTests,
+    UsageAlertEmailTests,
+)
+
+# Keep imported case modules visible to unittest discovery without tripping F401.
+_IMPORTED_TASK_CASES = (
+    ApiRefundViewTests,
+    CreditNoteSignalTests,
+    EFacturaServiceTests,
+    GenerateEFacturaViewTests,
+    InvoiceNumberingServiceTests,
+    InvoiceRefundViewTests,
+    PaymentCollectionRetryTests,
+    PaymentRetryServiceTests,
+    ProcessRecurringBillingTests,
+    ProformaConversionServiceTests,
+    ProformaModelConvertTests,
+    SendPaymentReminderHelperTests,
+    SubmitEfacturaTaskTests,
+    SubscriptionProcessPaymentTests,
+    UsageAlertEmailTests,
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

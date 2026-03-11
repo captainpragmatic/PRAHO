@@ -301,4 +301,4 @@ class OrderSecurityTestRunner:
         """Run all implemented security tests"""
         print("🔒 Running Order Security Tests...")
         print("✅ Basic security tests available")
-        print("📋 Run with: python manage.py test tests.orders.test_security_basic")
+        print("📋 Run with: python manage.py test tests.orders.test_security")

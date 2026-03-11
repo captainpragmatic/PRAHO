@@ -53,7 +53,7 @@ repos:
       # Block only newly-introduced Ruff issues; tolerate historical debt.
       - id: ruff-new-violations
         name: "Ruff: Block New Violations Only"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/ruff_new_violations.py, --staged]
         language: system
         files: \.py$
@@ -64,7 +64,7 @@ repos:
       # Only check modified Python files for performance
       - id: check-types-modified
         name: "Checking type issues on modified files"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [services/platform/scripts/check_types_modified.py, --staged]
         language: system
         files: \.py$
@@ -75,7 +75,7 @@ repos:
       # Prevent new # type: ignore comments to avoid regression
       - id: prevent-type-ignore
         name: "Block New Type Ignore Comments"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [services/platform/scripts/prevent_type_ignore.py, --staged-only]
         language: system
         files: \.py$
@@ -92,7 +92,7 @@ repos:
     hooks:
       - id: django-template-check
         name: "Django Template Syntax Check"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [services/platform/scripts/fix_template_comparisons.py, --check]
         language: system
         files: \.html$
@@ -133,7 +133,7 @@ repos:
       # Audit coverage regression check
       - id: audit-coverage-check
         name: "Security: Audit Coverage Check"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/audit_coverage_scan.py, --min-severity=high, --exclude-tests, services/platform/apps]
         language: system
         files: ^services/platform/apps/.*\.py$
@@ -143,7 +143,7 @@ repos:
       # Code health regression check
       - id: code-health-check
         name: "Health: Code Health Check"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/code_health_scan.py, --min-severity=high, --exclude-tests, --allowlist=scripts/code_health_allowlist.txt, services/platform/apps]
         language: system
         files: ^services/platform/apps/.*\.py$
@@ -180,7 +180,7 @@ repos:
       # Block new direct usage of settings.SECRET_KEY in app code
       - id: secret-key-isolation
         name: "Security: SECRET_KEY Isolation Check"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/check_secret_key_usage.py]
         language: system
         files: ^services/platform/apps/.*\.py$
@@ -195,7 +195,7 @@ repos:
     hooks:
       - id: i18n-coverage-check
         name: "i18n: Check for Unwrapped Strings"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/lint_i18n_coverage.py, --fail-on, high, --allowlist, scripts/i18n_coverage_allowlist.txt]
         language: system
         files: \.(py|html)$
@@ -233,7 +233,7 @@ repos:
     hooks:
       - id: lint-template-components
         name: "Design System: Template Lint (TMPL001-009)"
-        entry: uv run python
+        entry: scripts/run_project_python
         args: [scripts/lint_template_components.py, "--fail-on", ""]
         language: system
         files: \.html$

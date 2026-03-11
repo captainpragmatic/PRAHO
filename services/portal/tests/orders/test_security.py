@@ -16,6 +16,18 @@ from django.test import Client, SimpleTestCase, override_settings
 
 from apps.orders.services import GDPRCompliantCartSession, HMACPriceSealer
 
+from ._order_security_basic_cases import (
+    OrderCartVersioningTestCase,
+    OrderDoSHardeningTestCase,
+    OrderEnumerationProtectionTestCase,
+)
+
+_IMPORTED_ORDER_SECURITY_CASES = (
+    OrderCartVersioningTestCase,
+    OrderDoSHardeningTestCase,
+    OrderEnumerationProtectionTestCase,
+)
+
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
 class OrderHMACSecurityTestCase(SimpleTestCase):

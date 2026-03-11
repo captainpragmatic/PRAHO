@@ -64,6 +64,23 @@ def run_git(args: list[str], *, check: bool = True) -> subprocess.CompletedProce
     )
 
 
+def parse_rename_map(name_status_lines: list[str]) -> dict[str, str]:
+    rename_map: dict[str, str] = {}
+    for raw_line in name_status_lines:
+        if not raw_line.strip():
+            continue
+        parts = raw_line.split("\t")
+        if len(parts) < 3:
+            continue
+        status = parts[0]
+        if not status.startswith("R"):
+            continue
+        old_path = normalize_path(parts[1])
+        new_path = normalize_path(parts[2])
+        rename_map[new_path] = old_path
+    return rename_map
+
+
 def resolve_ruff_binary(explicit: str | None) -> str:
     if explicit:
         return explicit
@@ -133,13 +150,19 @@ def collect_python_candidates(
     since: str | None,
     baseline_ref: str,
     path_prefixes: list[str],
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, dict[str, str]]:
     effective_baseline_ref: str | None = baseline_ref
+    rename_map: dict[str, str] = {}
 
     if explicit_paths:
         raw_files = [normalize_path(p) for p in explicit_paths]
+        if staged:
+            rename_lines = run_git(["diff", "--cached", "--name-status", "-M"]).stdout.splitlines()
+            rename_map = parse_rename_map(rename_lines)
     elif staged:
         raw_files = run_git(["diff", "--cached", "--name-only"]).stdout.splitlines()
+        rename_lines = run_git(["diff", "--cached", "--name-status", "-M"]).stdout.splitlines()
+        rename_map = parse_rename_map(rename_lines)
     elif since:
         raw_files = run_git(["diff", "--name-only", since]).stdout.splitlines()
     else:
@@ -150,6 +173,7 @@ def collect_python_candidates(
 
     result: list[str] = []
     seen: set[str] = set()
+    baseline_path_map: dict[str, str] = {}
     for raw in raw_files:
         normalized = normalize_path(raw)
         if not normalized.endswith(".py"):
@@ -160,8 +184,9 @@ def collect_python_candidates(
             continue
         seen.add(normalized)
         result.append(normalized)
+        baseline_path_map[normalized] = rename_map.get(normalized, normalized)
 
-    return sorted(result), effective_baseline_ref
+    return sorted(result), effective_baseline_ref, baseline_path_map
 
 
 def read_line_from_file(path: Path, line_number: int) -> str:
@@ -243,13 +268,16 @@ def run_ruff_json(
     return issues
 
 
-def build_baseline_tree(*, files: list[str], baseline_ref: str | None, baseline_root: Path) -> list[Path]:
+def build_baseline_tree(
+    *, files: list[str], baseline_ref: str | None, baseline_root: Path, baseline_paths: dict[str, str]
+) -> list[Path]:
     if baseline_ref is None:
         return []
 
     baseline_files: list[Path] = []
     for rel in files:
-        show = run_git(["show", f"{baseline_ref}:{rel}"], check=False)
+        baseline_rel = baseline_paths.get(rel, rel)
+        show = run_git(["show", f"{baseline_ref}:{baseline_rel}"], check=False)
         if show.returncode != 0:
             # File may be newly added or absent at baseline ref.
             continue
@@ -297,7 +325,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ruff_bin = resolve_ruff_binary(args.ruff_bin)
-    candidates, effective_baseline_ref = collect_python_candidates(
+    candidates, effective_baseline_ref, baseline_path_map = collect_python_candidates(
         explicit_paths=args.paths,
         staged=args.staged,
         since=args.since,
@@ -314,7 +342,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="ruff-baseline-") as temp_dir:
         baseline_root = Path(temp_dir)
         baseline_files = build_baseline_tree(
-            files=candidates, baseline_ref=effective_baseline_ref, baseline_root=baseline_root
+            files=candidates,
+            baseline_ref=effective_baseline_ref,
+            baseline_root=baseline_root,
+            baseline_paths=baseline_path_map,
         )
         baseline_violations = run_ruff_json(files=baseline_files, root_for_rel=baseline_root, ruff_bin=ruff_bin)
 

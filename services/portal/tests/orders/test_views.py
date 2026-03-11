@@ -15,6 +15,56 @@ from django.utils import timezone
 from apps.api_client.services import PlatformAPIError
 from apps.orders.views import require_customer_authentication
 
+from ._order_flow_cases import (
+    TestAgreeTermsValidation,
+    TestBankTransferConfirmationHeader,
+    TestBankTransferContextPassthrough,
+    TestBankTransferInstructionsCard,
+    TestBankTransferSkipsStripeIntent,
+    TestCardPaymentRouting,
+    TestCartTotalsPerItemArray,
+    TestCartTotalsVatRatePercent,
+    TestCartVersionMismatch,
+    TestCentsConversionNoFloatingPoint,
+    TestCheckoutReactiveSidebar,
+    TestNoFloatformatOnMonetaryValues,
+    TestNoHardcodedRomanianInOrderTemplates,
+    TestParseOrderTimestamp,
+    TestPriceSealingRequiredKeys,
+    TestProductTypeInCartItem,
+    TestSinglePreflightProducesOneVatAuditEvent,
+    TestStripeFailureRedirectsToConfirmation,
+)
+from ._order_regression_cases import (
+    TestCartRemoveNoDuplicatePost,
+    TestPlatformFallbackFailSafe,
+    TestVatRateNoHardcodedDefault,
+)
+
+_IMPORTED_ORDER_VIEW_CASES = (
+    TestAgreeTermsValidation,
+    TestBankTransferConfirmationHeader,
+    TestBankTransferContextPassthrough,
+    TestBankTransferInstructionsCard,
+    TestBankTransferSkipsStripeIntent,
+    TestCardPaymentRouting,
+    TestCartTotalsPerItemArray,
+    TestCartTotalsVatRatePercent,
+    TestCartVersionMismatch,
+    TestCentsConversionNoFloatingPoint,
+    TestCheckoutReactiveSidebar,
+    TestNoFloatformatOnMonetaryValues,
+    TestNoHardcodedRomanianInOrderTemplates,
+    TestParseOrderTimestamp,
+    TestPriceSealingRequiredKeys,
+    TestProductTypeInCartItem,
+    TestSinglePreflightProducesOneVatAuditEvent,
+    TestStripeFailureRedirectsToConfirmation,
+    TestCartRemoveNoDuplicatePost,
+    TestPlatformFallbackFailSafe,
+    TestVatRateNoHardcodedDefault,
+)
+
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
 class TestOrderViews(SimpleTestCase):
