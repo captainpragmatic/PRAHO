@@ -4,10 +4,9 @@
 **Date:** March 2026 (rewritten from pre-implementation draft)
 **Authors:** Development Team
 
-> **Entity-Relationship Diagram:**
-> [`docs/architecture/diagrams/entity-relationships.mmd`](../architecture/diagrams/entity-relationships.mmd)
-> — visual map of all entities and relationships. This ADR is the authoritative reference for
-> table names; the ER diagram shows model class names and foreign key relationships.
+> **Diagrams:**
+> - [`entity-relationships.mmd`](../architecture/diagrams/entity-relationships.mmd) — ER diagram using db_table names, shows FK relationships
+> - [`database-tables.mmd`](../architecture/diagrams/database-tables.mmd) — flat app-grouped taxonomy of all 118 tables
 
 ## Context
 
