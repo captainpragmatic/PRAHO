@@ -309,4 +309,3 @@ class TestScanDeployment(DriftScannerTestBase):
         result = self.scanner.scan_deployment(self.deployment)
         self.assertTrue(result.is_err())
         self.assertIn("Cannot scan", result.unwrap_err())
-

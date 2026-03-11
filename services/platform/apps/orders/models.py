@@ -6,16 +6,20 @@ Romanian hosting provider specific order processing and configuration.
 
 import logging
 import uuid
-from decimal import ROUND_HALF_EVEN, Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
-
-if TYPE_CHECKING:
-    from apps.provisioning.models import Service
+from collections.abc import Iterable
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
 
 from django.core.validators import MinValueValidator
 from django.db import DatabaseError, IntegrityError, NotSupportedError, connection, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
+
+from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
+
+if TYPE_CHECKING:
+    from apps.provisioning.models import Service
 
 # ===============================================================================
 # ORDER MANAGEMENT MODELS
@@ -24,7 +28,13 @@ from django.utils.translation import gettext_lazy as _
 logger = logging.getLogger(__name__)
 
 
-class Order(models.Model):
+def _order_has_items(instance: models.Model) -> bool:
+    """FSM condition: order must have at least one item before submitting."""
+    order = cast("Order", instance)
+    return bool(order.items.exists())
+
+
+class Order(ConcurrentTransitionMixin, models.Model):
     """
     Customer order for products/services.
     Tracks the entire lifecycle from cart to provisioning.
@@ -52,8 +62,12 @@ class Order(models.Model):
         ("refunded", _("Refunded")),  # Order was refunded
         ("partially_refunded", _("Partially Refunded")),  # Partial refund processed
     )
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="draft", help_text=_("Current order status")
+    status = FSMField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="draft",
+        protected=True,
+        help_text=_("Current order status"),
     )
 
     # Editable fields by status for hybrid editing approach
@@ -204,6 +218,22 @@ class Order(models.Model):
                 condition=models.Q(idempotency_key__gt=""),
                 name="unique_customer_idempotency_key",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "draft",
+                        "pending",
+                        "confirmed",
+                        "processing",
+                        "completed",
+                        "cancelled",
+                        "failed",
+                        "refunded",
+                        "partially_refunded",
+                    ]
+                ),
+                name="order_status_valid_values",
+            ),
         )
 
     def __str__(self) -> str:
@@ -260,6 +290,31 @@ class Order(models.Model):
         else:
             super().save(*args, **kwargs)
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: "models.QuerySet[Order] | None" = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Django's
+        refresh_from_db uses setattr internally, which would raise AttributeError
+        if the field is already in __dict__. Temporarily removing the protected
+        field from __dict__ lets Django's setattr path bypass the descriptor
+        guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
     @property
     def subtotal(self) -> Decimal:
         """Return subtotal in currency units"""
@@ -283,12 +338,12 @@ class Order(models.Model):
     @property
     def is_draft(self) -> bool:
         """Check if order is still in draft state"""
-        return self.status == "draft"
+        return bool(self.status == "draft")
 
     @property
     def is_paid(self) -> bool:
         """Check if order has been paid"""
-        return self.status in ["confirmed", "processing", "completed"]
+        return bool(self.status in ["confirmed", "processing", "completed"])
 
     @property
     def can_be_cancelled(self) -> bool:
@@ -382,30 +437,56 @@ class Order(models.Model):
         Recalculate order totals from line items.
         Should be called after adding/removing/updating items.
         """
-        items = self.items.all()
-
-        # Calculate subtotal from all items
-        self.subtotal_cents = sum(item.quantity * item.unit_price_cents + item.setup_cents for item in items)
-
-        # Calculate total tax
-        self.tax_cents = sum(item.tax_cents for item in items)
-
-        # Apply any order-level discounts
-        # (item-level discounts are already included in their unit prices)
-
-        # Calculate final total
-        self.total_cents = self.subtotal_cents + self.tax_cents - self.discount_cents
-
-        # Ensure total is not negative
-        self.total_cents = max(0, self.total_cents)
-
+        totals = calculate_document_totals(list(self.items.all()), self.discount_cents)
+        self.subtotal_cents = totals.subtotal_cents
+        self.tax_cents = totals.tax_cents
+        self.total_cents = totals.total_cents
         self.save(update_fields=["subtotal_cents", "tax_cents", "total_cents"])
 
-    def mark_as_completed(self) -> None:
-        """Mark order as completed and set completion timestamp"""
-        self.status = "completed"
+    # =========================================================================
+    # FSM TRANSITIONS
+    # =========================================================================
+
+    @transition(field=status, source="draft", target="pending", conditions=[_order_has_items])
+    def submit(self) -> None:
+        """Submit draft order for payment."""
+
+    @transition(field=status, source="pending", target="confirmed")
+    def confirm(self) -> None:
+        """Confirm order after payment verification."""
+
+    @transition(field=status, source="confirmed", target="processing")
+    def start_processing(self) -> None:
+        """Start provisioning the order."""
+
+    @transition(field=status, source="processing", target="completed")
+    def complete(self) -> None:
+        """Mark order as completed."""
         self.completed_at = timezone.now()
-        self.save(update_fields=["status", "completed_at"])
+
+    @transition(field=status, source=["draft", "pending", "confirmed", "processing", "failed"], target="cancelled")
+    def cancel(self) -> None:
+        """Cancel the order."""
+
+    @transition(field=status, source=["pending", "processing"], target="failed")
+    def fail(self) -> None:
+        """Mark order as failed."""
+
+    @transition(field=status, source="failed", target="pending")
+    def retry(self) -> None:
+        """Retry a failed order."""
+
+    @transition(field=status, source="completed", target="refunded")
+    def refund_order(self) -> None:
+        """Fully refund a completed order."""
+
+    @transition(field=status, source="completed", target="partially_refunded")
+    def partial_refund(self) -> None:
+        """Partially refund a completed order."""
+
+    @transition(field=status, source="partially_refunded", target="refunded")
+    def complete_refund(self) -> None:
+        """Complete remaining refund on partially refunded order."""
 
 
 class OrderItem(models.Model):
@@ -475,8 +556,12 @@ class OrderItem(models.Model):
         ("failed", _("Failed")),
         ("cancelled", _("Cancelled")),
     )
-    provisioning_status = models.CharField(
-        max_length=20, choices=PROVISIONING_STATUS, default="pending", help_text=_("Provisioning status for this item")
+    provisioning_status = FSMField(
+        max_length=20,
+        choices=PROVISIONING_STATUS,
+        default="pending",
+        protected=True,
+        help_text=_("Provisioning status for this item"),
     )
     provisioning_notes = models.TextField(blank=True, help_text=_("Provisioning notes and error messages"))
 
@@ -502,7 +587,7 @@ class OrderItem(models.Model):
             models.Index(fields=["product", "provisioning_status"]),
         )
         # DB-level guards against negative financial values (#71)
-        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
             models.CheckConstraint(
                 condition=models.Q(unit_price_cents__gte=0),
                 name="orderitem_unit_price_non_negative",
@@ -518,6 +603,12 @@ class OrderItem(models.Model):
             models.CheckConstraint(
                 condition=models.Q(line_total_cents__gte=0),
                 name="orderitem_line_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    provisioning_status__in=["pending", "in_progress", "completed", "failed", "cancelled"]
+                ),
+                name="orderitem_provisioning_status_valid_values",
             ),
         )
 
@@ -569,6 +660,27 @@ class OrderItem(models.Model):
         self.calculate_totals()
 
         super().save(*args, **kwargs)
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: "models.QuerySet[OrderItem] | None" = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See Order.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["provisioning_status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
 
     @property
     def unit_price(self) -> Decimal:
@@ -635,28 +747,55 @@ class OrderItem(models.Model):
         return Decimal(self.subtotal_cents) / 100
 
     def calculate_totals(self) -> int:
-        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        subtotal = self.subtotal_cents
-        # Use banker's rounding for VAT compliance (same as OrderVATCalculator)
-        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
-        self.line_total_cents = subtotal + self.tax_cents
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""
+        totals = calculate_line_totals(self.subtotal_cents, self.tax_rate)
+        self.tax_cents = totals.tax_cents
+        self.line_total_cents = totals.line_total_cents
         return self.line_total_cents
 
-    def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
-        """Mark this item as successfully provisioned and activate the service"""
-        self.provisioning_status = "completed"
+    # =========================================================================
+    # FSM TRANSITIONS
+    # =========================================================================
+
+    @transition(field=provisioning_status, source="pending", target="in_progress")
+    def start_provisioning(self) -> None:
+        """Start provisioning this item."""
+
+    @transition(field=provisioning_status, source="in_progress", target="completed")
+    def complete_provisioning(self) -> None:
+        """Mark provisioning as completed."""
         self.provisioned_at = timezone.now()
+
+    @transition(field=provisioning_status, source="in_progress", target="failed")
+    def fail_provisioning(self) -> None:
+        """Mark provisioning as failed."""
+
+    @transition(field=provisioning_status, source=["pending", "in_progress"], target="cancelled")
+    def cancel_provisioning(self) -> None:
+        """Cancel provisioning."""
+
+    @transition(field=provisioning_status, source="failed", target="pending")
+    def retry_provisioning(self) -> None:
+        """Retry failed provisioning."""
+
+    def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
+        """Mark this item as successfully provisioned and activate the service.
+
+        The item's ``provisioning_status`` must be ``"in_progress"`` before
+        calling this method (``complete_provisioning()`` requires that source).
+        Callers are responsible for calling ``start_provisioning()`` first when
+        the item is still in ``"pending"`` state.
+        """
+        self.complete_provisioning()  # FSM transition sets provisioned_at
         if service:
             self.service = service
 
         # Update the linked service status to active when provisioning completes
         if self.service and self.service.status == "provisioning":
-            self.service.status = "active"
-            self.service.activated_at = timezone.now()
+            self.service.complete_provisioning()
             self.service.save(update_fields=["status", "activated_at"])
 
-        self.save(update_fields=["provisioning_status", "provisioned_at", "service"])
+        self.save(update_fields=["provisioning_status", "provisioned_at", "service", "updated_at"])
 
 
 class OrderStatusHistory(models.Model):

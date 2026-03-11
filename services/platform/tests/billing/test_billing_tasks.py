@@ -65,17 +65,18 @@ from tests.factories.billing_factories import (
     create_invoice,
     create_payment,
 )
+from tests.helpers.fsm_helpers import force_status
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_invoice(status: str = "pending", due_days: int = -5) -> Invoice:
+def _make_invoice(status: str = "issued", due_days: int = -5) -> Invoice:
     """Create an invoice with a given status and due_at set relative to now."""
     customer = create_customer()
     currency = create_currency()
     invoice = create_invoice(customer=customer, currency=currency)
-    invoice.status = status
+    force_status(invoice, status, save=False)
     invoice.due_at = timezone.now() + timedelta(days=due_days)
     invoice.save(update_fields=["status", "due_at"])
     return invoice
@@ -197,16 +198,16 @@ class SchedulePaymentRemindersTests(TestCase):
     NOTE: The current task code references ``invoice.due_date`` in metadata
     construction (line 134 of tasks.py), but the Invoice model only has
     ``due_at``.  This causes an AttributeError caught by the generic handler,
-    so the pending-invoice success paths currently return ``success=False``.
+    so the issued-invoice success paths currently return ``success=False``.
     Tests reflect this reality.
     """
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_pending_invoice_raises_attribute_error_on_due_date(
+    def test_issued_invoice_raises_attribute_error_on_due_date(
         self, mock_audit: MagicMock
     ) -> None:
         """tasks.py uses invoice.due_date which does not exist → caught exception."""
-        invoice = _make_invoice(status="pending")
+        invoice = _make_invoice(status="issued")
         result = schedule_payment_reminders(str(invoice.id))
 
         # AttributeError is caught by generic handler → success=False
@@ -231,7 +232,7 @@ class SchedulePaymentRemindersTests(TestCase):
     def test_non_pending_invoice_does_not_emit_reminders_scheduled_event(
         self, mock_audit: MagicMock
     ) -> None:
-        invoice = _make_invoice(status="cancelled")
+        invoice = _make_invoice(status="void")
         schedule_payment_reminders(str(invoice.id))
 
         event_types = [c.kwargs.get("event_type") for c in mock_audit.call_args_list]
@@ -284,7 +285,7 @@ class StartDunningProcessTests(TestCase):
     """Tests for start_dunning_process().
 
     NOTE: tasks.py accesses ``invoice.due_date`` for metadata (does not exist
-    on Invoice; only ``due_at`` exists).  The overdue/pending paths therefore
+    on Invoice; only ``due_at`` exists).  The overdue/issued paths therefore
     hit the AttributeError which is caught by the generic handler.
     """
 
@@ -299,10 +300,10 @@ class StartDunningProcessTests(TestCase):
         self.assertIn("due_date", result["error"])
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_pending_invoice_raises_attribute_error_on_due_date(
+    def test_issued_invoice_raises_attribute_error_on_due_date(
         self, mock_audit: MagicMock
     ) -> None:
-        invoice = _make_invoice(status="pending", due_days=-1)
+        invoice = _make_invoice(status="issued", due_days=-1)
         result = start_dunning_process(str(invoice.id))
 
         self.assertFalse(result["success"])
@@ -317,8 +318,8 @@ class StartDunningProcessTests(TestCase):
         self.assertIn("non-overdue", result["message"])
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_cancelled_invoice_skipped(self, mock_audit: MagicMock) -> None:
-        invoice = _make_invoice(status="cancelled")
+    def test_void_invoice_skipped(self, mock_audit: MagicMock) -> None:
+        invoice = _make_invoice(status="void")
         result = start_dunning_process(str(invoice.id))
 
         self.assertTrue(result["success"])
@@ -333,8 +334,8 @@ class StartDunningProcessTests(TestCase):
     def test_non_overdue_status_does_not_emit_dunning_event(
         self, mock_audit: MagicMock
     ) -> None:
-        # 'issued' is not in ["pending", "overdue"] so the early return fires
-        invoice = _make_invoice(status="issued")
+        # 'draft' is not in ["issued", "overdue"] so the early return fires
+        invoice = _make_invoice(status="draft")
         start_dunning_process(str(invoice.id))
 
         event_types = [c.kwargs.get("event_type") for c in mock_audit.call_args_list]
@@ -404,8 +405,8 @@ class ProcessAutoPaymentTests(TestCase):
     """Tests for process_auto_payment()."""
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_success_for_pending_invoice(self, mock_audit: MagicMock) -> None:
-        invoice = _make_invoice(status="pending")
+    def test_success_for_issued_invoice(self, mock_audit: MagicMock) -> None:
+        invoice = _make_invoice(status="issued")
         result = process_auto_payment(str(invoice.id))
 
         self.assertTrue(result["success"])
@@ -437,7 +438,7 @@ class ProcessAutoPaymentTests(TestCase):
                 raise RuntimeError("payment gateway down")
 
         mock_audit.side_effect = _raise_on_autopay
-        invoice = _make_invoice(status="pending")
+        invoice = _make_invoice(status="issued")
         result = process_auto_payment(str(invoice.id))
 
         self.assertFalse(result["success"])
@@ -1011,6 +1012,83 @@ class RunPaymentCollectionTests(TestCase):
 
         run = PaymentCollectionRun.objects.get(id=result["run_id"])
         self.assertEqual(run.total_scheduled, 1)
+
+    @patch("apps.billing.payment_service.PaymentService.confirm_payment")
+    def test_collection_does_not_count_success_when_fsm_transition_fails(self, mock_confirm_payment: MagicMock) -> None:
+        """A failed payment cannot transition to succeeded, so run metrics must not report a recovery."""
+        mock_confirm_payment.return_value = {"success": True, "status": "succeeded"}
+
+        customer = create_customer()
+        currency = create_currency()
+        invoice = create_invoice(customer=customer, currency=currency)
+        payment = create_payment(
+            PaymentCreationRequest(
+                customer=customer,
+                invoice=invoice,
+                currency=currency,
+                amount_cents=5000,
+                status="pending",
+            )
+        )
+        force_status(payment, "failed")
+        payment.gateway_txn_id = "pi_test_retry_failed"
+        payment.save(update_fields=["gateway_txn_id"])
+
+        policy = _make_retry_policy()
+        PaymentRetryAttempt.objects.create(
+            payment=payment,
+            policy=policy,
+            attempt_number=1,
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+            status="pending",
+        )
+
+        result = run_payment_collection()
+
+        run = PaymentCollectionRun.objects.get(id=result["run_id"])
+        self.assertEqual(run.total_successful, 0)
+        self.assertEqual(result["successful"], 0)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "failed")
+
+    @patch("apps.billing.payment_service.PaymentService.confirm_payment")
+    def test_collection_succeeds_for_pending_payment(self, mock_confirm_payment: MagicMock) -> None:
+        """A pending payment should transition to succeeded and count as a successful recovery."""
+        mock_confirm_payment.return_value = {"success": True, "status": "succeeded"}
+
+        customer = create_customer()
+        currency = create_currency()
+        invoice = create_invoice(customer=customer, currency=currency)
+        payment = create_payment(
+            PaymentCreationRequest(
+                customer=customer,
+                invoice=invoice,
+                currency=currency,
+                amount_cents=5000,
+                status="pending",
+            )
+        )
+        payment.gateway_txn_id = "pi_test_retry_pending"
+        payment.save(update_fields=["gateway_txn_id"])
+
+        policy = _make_retry_policy()
+        PaymentRetryAttempt.objects.create(
+            payment=payment,
+            policy=policy,
+            attempt_number=1,
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+            status="pending",
+        )
+
+        result = run_payment_collection()
+
+        run = PaymentCollectionRun.objects.get(id=result["run_id"])
+        self.assertEqual(run.total_successful, 1)
+        self.assertEqual(result["successful"], 1)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "succeeded")
 
     @patch("apps.billing.payment_models.PaymentCollectionRun.objects.create")
     def test_outer_exception_returns_error(self, mock_create: MagicMock) -> None:

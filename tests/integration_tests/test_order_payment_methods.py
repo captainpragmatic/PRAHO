@@ -27,6 +27,7 @@ from django.test import TestCase  # noqa: E402
 from apps.billing.models import Currency  # noqa: E402
 from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
 from apps.orders.models import Order  # noqa: E402
+from tests.helpers.fsm_helpers import force_status  # noqa: E402
 
 User = get_user_model()
 
@@ -136,8 +137,7 @@ class TestOrderPaymentMethodIntegration(TestCase):
     def test_bank_transfer_order_stays_pending(self) -> None:
         """Bank transfer order should remain in pending status after creation."""
         order = self._create_order('bank_transfer')
-        order.status = 'pending'
-        order.save(update_fields=['status'])
+        force_status(order, 'pending')
 
         order.refresh_from_db()
 

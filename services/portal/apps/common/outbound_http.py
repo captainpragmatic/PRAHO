@@ -9,6 +9,7 @@ needed here. For the full SSRF-prevention engine, see Platform's
 from __future__ import annotations
 
 import logging
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -29,7 +30,7 @@ def portal_request(
     url: str,
     *,
     timeout: float | None = None,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> requests.Response:
     """Enforced-safe request for Portal -> Platform communication.
 

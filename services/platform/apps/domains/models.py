@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import uuid
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -7,6 +10,7 @@ from django.db import models
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
 
@@ -197,7 +201,7 @@ class Registrar(models.Model):
     def __str__(self) -> str:
         return self.display_name
 
-    def get_supported_tlds(self) -> QuerySet["TLD"]:
+    def get_supported_tlds(self) -> QuerySet[TLD]:
         """🌐 Get TLDs supported by this registrar"""
         return TLD.objects.filter(registrar_assignments__registrar=self)
 
@@ -278,7 +282,7 @@ class TLDRegistrarAssignment(models.Model):
 # ===============================================================================
 
 
-class Domain(models.Model):
+class Domain(ConcurrentTransitionMixin, models.Model):
     """
     🌍 Complete domain lifecycle management
 
@@ -309,7 +313,7 @@ class Domain(models.Model):
     customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT, related_name="domains")
 
     # Domain status and lifecycle
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)
     registered_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
 
@@ -358,6 +362,14 @@ class Domain(models.Model):
             # 🚀 Performance: Registrar management queries
             models.Index(fields=["registrar", "status", "-expires_at"], name="domain_registrar_expiry_idx"),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=["pending", "active", "expired", "suspended", "transfer_in", "transfer_out", "cancelled"]
+                ),
+                name="domain_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -394,6 +406,55 @@ class Domain(models.Model):
     def set_encrypted_epp_code(self, code: str) -> None:
         """Encrypt and store EPP/Auth code."""
         self.epp_code = encrypt_sensitive_data(code) if code else ""
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Domain] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See orders.Order.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=status, source=["pending", "transfer_in", "expired", "suspended"], target="active")
+    def activate(self) -> None:
+        """Activate the domain (after registration, renewal, transfer-in, or unsuspend)."""
+
+    @transition(field=status, source="active", target="expired")
+    def expire(self) -> None:
+        """Mark domain as expired."""
+
+    @transition(field=status, source="active", target="suspended")
+    def suspend(self) -> None:
+        """Suspend the domain."""
+
+    @transition(field=status, source="active", target="transfer_out")
+    def start_transfer_out(self) -> None:
+        """Start outbound transfer."""
+
+    @transition(field=status, source="pending", target="transfer_in")
+    def start_transfer_in(self) -> None:
+        """Start inbound transfer."""
+
+    @transition(
+        field=status,
+        source=["pending", "expired", "suspended", "transfer_in", "transfer_out"],
+        target="cancelled",
+    )
+    def cancel(self) -> None:
+        """Cancel the domain."""
 
     def clean(self) -> None:
         """🔍 Validate domain data"""

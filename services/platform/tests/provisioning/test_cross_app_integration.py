@@ -40,6 +40,7 @@ from apps.provisioning.virtualmin_signals import (
 )
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer, VirtualminProvisioningJob
 from apps.users.models import User, CustomerMembership
+from tests.helpers.fsm_helpers import force_status
 
 
 class BillingProvisioningIntegrationTest(TestCase):
@@ -150,9 +151,11 @@ class BillingProvisioningIntegrationTest(TestCase):
         self.service.save()
         self.assertFalse(self.service.requires_hosting_account())
 
-        # Test inactive service
+        # Test inactive service — use FSM to reach terminated state
         self.service.domain = "example.com"
-        self.service.status = "terminated"
+        self.service.save()
+        # Transition: active -> terminated via FSM
+        self.service.terminate()
         self.service.save()
         self.assertFalse(self.service.requires_hosting_account())
 
@@ -262,8 +265,8 @@ class DomainsProvisioningIntegrationTest(TestCase):
         """Test that domain status change suspends Virtualmin account via post_save signal"""
         mock_suspend.return_value = Ok(True)
 
-        # Change domain status — post_save signal triggers sync_domain_to_virtualmin
-        self.domain.status = "suspended"
+        # Change domain status via FSM — post_save signal triggers sync_domain_to_virtualmin
+        self.domain.suspend()
         self.domain.save()
 
         # Verify suspension was called (by the signal, not manually)
@@ -282,11 +285,11 @@ class DomainsProvisioningIntegrationTest(TestCase):
         self.virtualmin_account.save()
 
         # Set domain to suspended in DB first (so pre_save captures old_status="suspended")
-        Domain.objects.filter(pk=self.domain.pk).update(status="suspended")
+        force_status(self.domain, "suspended")
         self.domain.refresh_from_db()
 
-        # Change domain status back to active — post_save signal triggers sync
-        self.domain.status = "active"
+        # Change domain status back to active via FSM — post_save signal triggers sync
+        self.domain.activate()
         self.domain.save()
 
         # Verify unsuspension was called (by the signal, not manually)

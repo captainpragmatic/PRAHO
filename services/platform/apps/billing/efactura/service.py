@@ -140,7 +140,8 @@ class EFacturaService:
                 validation = self._validate_xml(xml_content)
                 if not validation.is_valid:
                     error_dicts = [e.to_dict() for e in validation.errors]
-                    document.mark_rejected(error_dicts)
+                    document.mark_error(f"XML validation failed: {len(validation.errors)} errors")
+                    document.save()
                     self._log_audit_event(invoice, document, "efactura_validation_failed")
                     return SubmissionResult.error(
                         f"XML validation failed: {len(validation.errors)} errors",
@@ -152,11 +153,13 @@ class EFacturaService:
 
             if response.success:
                 document.mark_submitted(response.upload_index)
+                document.save()
                 self._log_audit_event(invoice, document, "efactura_submitted")
                 logger.info(f"e-Factura submitted for invoice {invoice.number}: {response.upload_index}")
                 return SubmissionResult.ok(document)
             else:
                 document.mark_error(response.message)
+                document.save()
                 self._log_audit_event(invoice, document, "efactura_submission_failed")
                 return SubmissionResult.error(response.message, [{"message": e} for e in response.errors])
 
@@ -164,24 +167,28 @@ class EFacturaService:
             logger.error(f"XML generation failed for invoice {invoice.number}: {e}")
             if existing:
                 existing.mark_error(str(e))
+                existing.save()
             return SubmissionResult.error(f"XML generation failed: {e}")
 
         except AuthenticationError as e:
             logger.error(f"Authentication failed for invoice {invoice.number}: {e}")
             if existing:
                 existing.mark_error(str(e))
+                existing.save()
             return SubmissionResult.error(f"Authentication failed: {e}")
 
         except NetworkError as e:
             logger.error(f"Network error for invoice {invoice.number}: {e}")
             if existing:
                 existing.mark_error(str(e))
+                existing.save()
             return SubmissionResult.error(f"Network error: {e}")
 
         except Exception as e:
             logger.exception(f"Unexpected error submitting invoice {invoice.number}")
             if existing:
                 existing.mark_error(str(e))
+                existing.save()
             return SubmissionResult.error(f"Unexpected error: {e}")
 
     def check_status(self, document: EFacturaDocument) -> StatusCheckResult:
@@ -201,7 +208,10 @@ class EFacturaService:
             response = self._client.get_upload_status(document.anaf_upload_index)
 
             if response.is_accepted:
-                document.mark_accepted(response.download_id, response.raw_response)
+                with transaction.atomic():
+                    document.mark_accepted(response.download_id, response.raw_response)
+                    document.save()
+                    document._update_invoice_on_acceptance()
                 self._log_audit_event(document.invoice, document, "efactura_accepted")
                 self._record_webhook_event(document, "accepted", response.raw_response)
                 return StatusCheckResult(
@@ -211,7 +221,9 @@ class EFacturaService:
                 )
 
             elif response.is_rejected:
-                document.mark_rejected(response.errors, response.raw_response)
+                with transaction.atomic():
+                    document.mark_rejected(response.errors, response.raw_response)
+                    document.save()
                 self._log_audit_event(document.invoice, document, "efactura_rejected")
                 self._record_webhook_event(document, "rejected", response.raw_response)
                 return StatusCheckResult(
@@ -222,6 +234,7 @@ class EFacturaService:
 
             elif response.is_processing:
                 document.mark_processing()
+                document.save()
                 return StatusCheckResult(status="processing", is_terminal=False)
 
             else:
@@ -272,11 +285,11 @@ class EFacturaService:
         if not document.can_retry:
             return SubmissionResult.error("Document cannot be retried (max retries exceeded or wrong status)")
 
-        # Reset status and resubmit
-        document.status = EFacturaStatus.QUEUED.value
-        document.save(update_fields=["status", "updated_at"])
-
-        return self.submit_invoice(document.invoice, validate_first=True)
+        with transaction.atomic():
+            # Use FSM transition to queue for resubmission
+            document.mark_queued()
+            document.save()
+            return self.submit_invoice(document.invoice, validate_first=True)
 
     # --- Batch Operations ---
 

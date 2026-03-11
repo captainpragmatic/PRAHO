@@ -17,6 +17,7 @@ from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -101,8 +102,7 @@ class TestServiceProvisioningWorkflow(TestCase):
         )
 
         # Confirm order
-        order.status = 'confirmed'
-        order.save()
+        force_status(order, 'confirmed')
         assert order.status == 'confirmed'
 
         # Step 2: Create invoice
@@ -134,13 +134,11 @@ class TestServiceProvisioningWorkflow(TestCase):
         assert payment.status == 'succeeded'
 
         # Step 4: Update invoice status
-        invoice.status = 'paid'
-        invoice.save()
+        force_status(invoice, 'paid')
         assert invoice.status == 'paid'
 
         # Step 5: Order ready for provisioning
-        order.status = 'processing'
-        order.save()
+        force_status(order, 'processing')
         assert order.status == 'processing'
 
     def test_hosting_product_provisioning_requirements(self):
@@ -264,7 +262,13 @@ class TestProvisioningStatusWorkflow(TestCase):
         )
 
     def test_order_status_workflow(self):
-        """Test order status transitions for provisioning"""
+        """Test order status transitions for provisioning via FSM methods"""
+        product = Product.objects.create(
+            name='Hosting Status Test',
+            slug='wh-status-test',
+            product_type='shared_hosting',
+            is_active=True,
+        )
         order = Order.objects.create(
             customer=self.customer,
             order_number='ORD-STATUS-001',
@@ -273,24 +277,33 @@ class TestProvisioningStatusWorkflow(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            product_name=product.name,
+            product_type=product.product_type,
+            quantity=1,
+            unit_price_cents=5000,
+            line_total_cents=5000,
+        )
 
-        # Draft -> Pending
-        order.status = 'pending'
+        # Draft -> Pending (submit requires items)
+        order.submit()
         order.save()
         assert order.status == 'pending'
 
         # Pending -> Confirmed
-        order.status = 'confirmed'
+        order.confirm()
         order.save()
         assert order.status == 'confirmed'
 
-        # Confirmed -> Processing (payment received)
-        order.status = 'processing'
+        # Confirmed -> Processing
+        order.start_processing()
         order.save()
         assert order.status == 'processing'
 
-        # Processing -> Completed (services provisioned)
-        order.status = 'completed'
+        # Processing -> Completed
+        order.complete()
         order.save()
         assert order.status == 'completed'
 

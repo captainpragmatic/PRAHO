@@ -46,9 +46,13 @@ class ProvisioningService:
             previous_status = service.status
 
             with transaction.atomic():
-                service.status = "active"
-                service.activated_at = timezone.now()
-                service.save(update_fields=["status", "activated_at", "updated_at"])
+                if service.status == "provisioning":
+                    service.complete_provisioning()
+                else:
+                    service.activate()
+                service.save(
+                    update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
+                )
 
                 AuditService.log_simple_event(
                     event_type="service_activated",
@@ -181,9 +185,7 @@ class ProvisioningService:
             with transaction.atomic():
                 for service in active_services:
                     try:
-                        service.status = "suspended"
-                        service.suspended_at = timezone.now()
-                        service.suspension_reason = reason
+                        service.suspend(reason=reason)
                         service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
                         results["services_suspended"] += 1
                     except Exception as e:
@@ -247,16 +249,13 @@ class ProvisioningService:
             with transaction.atomic():
                 for service in suspended_services:
                     try:
-                        service.status = "active"
-                        service.suspended_at = None
-                        service.suspension_reason = ""
-                        service.reactivated_at = timezone.now()  # type: ignore[attr-defined]
+                        service.activate()
                         service.save(
                             update_fields=[
                                 "status",
+                                "activated_at",
                                 "suspended_at",
                                 "suspension_reason",
-                                "reactivated_at",
                                 "updated_at",
                             ]
                         )
@@ -303,7 +302,7 @@ class ProvisioningService:
             logger.info(f"🚀 [Provisioning] Provisioning service {service.id} ({service.service_name})")
 
             # Update service status and track provisioning attempt
-            service.status = "provisioning"
+            service.start_provisioning()
             service.last_provisioning_attempt = timezone.now()
             service.provisioning_errors = ""  # Clear previous errors
             service.save(update_fields=["status", "last_provisioning_attempt", "provisioning_errors"])
@@ -349,7 +348,7 @@ class ProvisioningService:
                             # REAL INFRASTRUCTURE FAILURE -> FAILED STATUS
                             error_msg = f"Server unreachable: {health_result.unwrap_err()}"
                             logger.error(f"❌ [Provisioning] {error_msg}")
-                            service.status = "failed"
+                            service.fail_provisioning()
                             service.provisioning_errors = error_msg
                             service.save(update_fields=["status", "provisioning_errors"])
 
@@ -371,7 +370,7 @@ class ProvisioningService:
                         # REAL API/INFRASTRUCTURE FAILURES -> FAILED STATUS
                         error_msg = f"Virtualmin error: {api_error}"
                         logger.error(f"❌ [Provisioning] {error_msg}")
-                        service.status = "failed"
+                        service.fail_provisioning()
                         service.provisioning_errors = error_msg
                         service.save(update_fields=["status", "provisioning_errors"])
 
@@ -422,7 +421,7 @@ class ProvisioningService:
             logger.error(f"🔥 [Provisioning] {error_msg}")
 
             # Update service status to failed with detailed error info for staff
-            service.status = "failed"
+            service.fail_provisioning()
             service.last_provisioning_attempt = timezone.now()
             service.provisioning_errors = error_msg
             service.save(update_fields=["status", "last_provisioning_attempt", "provisioning_errors"])

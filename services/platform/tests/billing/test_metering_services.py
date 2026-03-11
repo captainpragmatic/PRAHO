@@ -42,6 +42,7 @@ from apps.billing.services import (
 )
 from apps.customers.models import Customer
 from apps.products.models import Product
+from tests.helpers.fsm_helpers import force_status
 
 
 class MeteringServiceTestCase(TransactionTestCase):
@@ -861,8 +862,7 @@ class BillingCycleManagerTestCase(TransactionTestCase):
 
     def test_create_billing_cycle_inactive_subscription(self):
         """Test error for inactive subscription."""
-        self.subscription.status = "canceled"
-        self.subscription.save()
+        force_status(self.subscription, "cancelled")
 
         result = self.manager.create_billing_cycle(str(self.subscription.id))
 

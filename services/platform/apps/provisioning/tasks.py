@@ -46,7 +46,7 @@ def provision_service_task(service_id: int, **kwargs: Any) -> dict[str, Any]:
         # Try to update service status to failed if we can access it
         try:
             service = Service.objects.get(id=service_id)
-            service.status = "failed"
+            service.fail_provisioning()
             service.last_provisioning_attempt = timezone.now()
             service.provisioning_errors = error_msg
             service.save(update_fields=["status", "last_provisioning_attempt", "provisioning_errors"])
@@ -63,9 +63,9 @@ def queue_service_provisioning(service: Service, delay_seconds: int = 0) -> str:
     """
     logger.info(f"📋 [Queue] Queueing provisioning for service {service.id} ({service.service_name})")
 
-    # Set service status to pending if not already set
-    if service.status not in ["provisioning", "active", "failed"]:
-        service.status = "pending"
+    # Reset failed service to pending so it can re-enter provisioning
+    if service.status == "failed":
+        service.retry()
         service.save(update_fields=["status"])
 
     # Queue the task
@@ -117,9 +117,9 @@ def retry_failed_provisioning(service_id: int) -> str:
 
         logger.info(f"🔄 [Retry] Retrying provisioning for service {service_id}")
 
-        # Clear previous errors and reset status
+        # Clear previous errors and reset status via FSM transition
         service.provisioning_errors = ""
-        service.status = "pending"
+        service.retry()
         service.save(update_fields=["provisioning_errors", "status"])
 
         # Queue for provisioning

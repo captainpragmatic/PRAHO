@@ -12,18 +12,16 @@ import pytest
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory
+from apps.billing.models import Currency, Invoice, Payment, Refund, RefundStatusHistory
 from apps.billing.refund_service import (
-    Err,
-    Ok,
     RefundData,
     RefundQueryService,
     RefundReason,
     RefundService,
     RefundStatus,
     RefundType,
-    Result,
 )
+from apps.common.types import Err, Ok, Result
 from apps.customers.models import Customer
 from apps.orders.models import Order
 
@@ -71,44 +69,46 @@ def _make_invoice(customer, currency, **kw):
 
 
 # ===========================================================================
-# Result class
+# Ok / Err canonical types (apps.common.types)
 # ===========================================================================
 class TestResultClass(TestCase):
     def test_ok_and_unwrap(self):
-        r = Result.ok(42)
+        r: Result[int, str] = Ok(42)
         assert r.is_ok()
         assert not r.is_err()
         assert r.unwrap() == 42
-        assert r.value == 42
+        assert isinstance(r, Ok) and r.value == 42
 
     def test_err_and_unwrap_err(self):
-        r = Result.err("bad")
+        r: Result[int, str] = Err("bad")
         assert r.is_err()
         assert not r.is_ok()
         assert r.unwrap_err() == "bad"
-        assert r.error == "bad"
+        assert isinstance(r, Err) and r.error == "bad"
 
     def test_unwrap_on_err_raises(self):
-        r = Result.err("fail")
-        with pytest.raises(RuntimeError, match="Called unwrap on error"):
+        r: Result[int, str] = Err("fail")
+        with pytest.raises(ValueError, match="Called unwrap on Err"):
             r.unwrap()
 
     def test_unwrap_err_on_ok_raises(self):
-        r = Result.ok(1)
-        with pytest.raises(RuntimeError, match="Called unwrap_err on success"):
+        r: Result[int, str] = Ok(1)
+        with pytest.raises(ValueError, match="Called unwrap_err on Ok"):
             r.unwrap_err()
 
     def test_error_property_on_ok_raises(self):
-        r = Result.ok(1)
-        with pytest.raises(RuntimeError, match="Called error on success"):
-            _ = r.error
+        # Ok dataclass has no .error attribute
+        ok_result = Ok(1)
+        with pytest.raises(AttributeError):
+            _ = ok_result.error
 
     def test_value_property_on_err_raises(self):
-        r = Result.err("x")
-        with pytest.raises(RuntimeError):
-            _ = r.value
+        # Err dataclass has no .value attribute
+        err_result = Err("x")
+        with pytest.raises(AttributeError):
+            _ = err_result.value
 
-    def test_ok_err_aliases(self):
+    def test_ok_err_construction(self):
         assert Ok(5).is_ok()
         assert Err("e").is_err()
 
@@ -191,7 +191,7 @@ class TestGetInvoice(TestCase):
 
     @patch("apps.billing.refund_service.Invoice.objects")
     def test_invoice_generic_exception(self, mock_qs):
-        mock_qs.select_related.return_value.get.side_effect = RuntimeError("boom")
+        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
         r = RefundService._get_invoice(1)
         assert r.is_err()
         assert "database error" in r.unwrap_err()
@@ -306,7 +306,7 @@ class TestValidateInvoiceRefund(TestCase):
     def test_invoice_not_eligible_status(self):
         c = _make_customer()
         cur = _make_currency()
-        inv = _make_invoice(c, cur, status="cancelled")
+        inv = _make_invoice(c, cur, status="void")
         r = RefundService._validate_invoice_refund(inv, {"refund_type": "full"})
         assert r.is_err()
         assert "not eligible" in r.unwrap_err().lower()
@@ -314,7 +314,7 @@ class TestValidateInvoiceRefund(TestCase):
     def test_invoice_eligibility_err_branch(self):
         """When _validate_invoice_refund_eligibility returns Result.err."""
         with patch.object(RefundService, "_validate_invoice_refund_eligibility") as mock_elig:
-            mock_elig.return_value = Result.err("Failed to validate eligibility")
+            mock_elig.return_value = Err("Failed to validate eligibility")
             c = _make_customer()
             cur = _make_currency()
             inv = _make_invoice(c, cur, status="paid")
@@ -352,7 +352,7 @@ class TestRefundOrder(TestCase):
     def test_refund_order_generic_exception_in_get(self):
         """Exception branch in refund_order where get raises non-DoesNotExist with 'does not exist'."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = Exception("thing does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Exception("thing does not exist")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Order not found" in r.unwrap_err()
@@ -360,7 +360,7 @@ class TestRefundOrder(TestCase):
     def test_refund_order_generic_exception_other(self):
         """Exception branch in refund_order where get raises something else."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = RuntimeError("unrelated")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("unrelated")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "internal error" in r.unwrap_err()
@@ -403,14 +403,14 @@ class TestRefundInvoice(TestCase):
 
     def test_refund_invoice_generic_exception_does_not_exist(self):
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = Exception("does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Exception("does not exist")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Invoice not found" in r.unwrap_err()
 
     def test_refund_invoice_generic_exception_other(self):
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_related.return_value.get.side_effect = RuntimeError("boom")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "internal error" in r.unwrap_err()
@@ -1386,10 +1386,10 @@ class TestValidateAndPrepareInvoiceRefund(TestCase):
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False
 
-    def test_pending_invoice(self):
+    def test_issued_invoice(self):
         c = _make_customer()
         cur = _make_currency()
-        inv = _make_invoice(c, cur, status="pending")
+        inv = _make_invoice(c, cur, status="issued")
         r = RefundService._validate_and_prepare_invoice_refund(inv, {"refund_type": "full"})
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False
@@ -1455,18 +1455,35 @@ class TestProcessPaymentRefund(TestCase):
         }
         return patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gw)
 
+    def _make_succeeded_payment(self, gateway_txn_id: str = "tx_123") -> object:
+        """Create a real Payment instance in 'succeeded' state for FSM-aware tests."""
+
+        c = _make_customer()
+        cur = _make_currency()
+        payment = Payment.objects.create(
+            customer=c,
+            currency=cur,
+            payment_method="stripe",
+            amount_cents=10000,
+            status="succeeded",
+            gateway_txn_id=gateway_txn_id,
+        )
+        return payment
+
     def test_payment_full_refund(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
+        payment = self._make_succeeded_payment(gateway_txn_id="tx_full_refund")
         with self._mock_gateway_success():
             r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
         assert r.is_ok()
+        payment.refresh_from_db()
         assert payment.status == "refunded"
 
     def test_payment_partial_refund(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
+        payment = self._make_succeeded_payment(gateway_txn_id="tx_partial_refund")
         with self._mock_gateway_success():
             r = RefundService._process_payment_refund(payment, {"refund_type": "partial"})
         assert r.is_ok()
+        payment.refresh_from_db()
         assert payment.status == "partially_refunded"
 
     def test_payment_from_kwargs_order(self):
@@ -1486,17 +1503,19 @@ class TestProcessPaymentRefund(TestCase):
         assert r.is_ok()
 
     def test_refund_amount_cents_kwarg_full(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
+        payment = self._make_succeeded_payment(gateway_txn_id="tx_kwarg_full")
         with self._mock_gateway_success():
             r = RefundService._process_payment_refund(payment, None, refund_amount_cents=10000)
         assert r.is_ok()
+        payment.refresh_from_db()
         assert payment.status == "refunded"
 
     def test_refund_amount_cents_kwarg_partial(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
+        payment = self._make_succeeded_payment(gateway_txn_id="tx_kwarg_partial")
         with self._mock_gateway_success(amount=5000):
             r = RefundService._process_payment_refund(payment, None, refund_amount_cents=5000)
         assert r.is_ok()
+        payment.refresh_from_db()
         assert payment.status == "partially_refunded"
 
     def test_exception_path(self):
@@ -1548,7 +1567,7 @@ class TestProcessBidirectionalRefund(TestCase):
         assert r.is_ok()
 
     def test_create_record_fails(self):
-        with patch.object(RefundService, "_create_refund_record", return_value=Result.err("fail")):
+        with patch.object(RefundService, "_create_refund_record", return_value=Err("fail")):
             o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000},
@@ -1556,7 +1575,7 @@ class TestProcessBidirectionalRefund(TestCase):
             assert r.is_err()
 
     def test_entity_updates_fail(self):
-        with patch.object(RefundService, "_process_entity_updates", return_value=Result.err("fail")):
+        with patch.object(RefundService, "_process_entity_updates", return_value=Err("fail")):
             o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000},
@@ -1566,7 +1585,7 @@ class TestProcessBidirectionalRefund(TestCase):
     def test_payment_refund_err(self):
         """Payment refund returns error but overall still succeeds."""
         o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
-        with patch.object(RefundService, "_process_payment_refund_if_exists", return_value=Result.err("payment fail")):
+        with patch.object(RefundService, "_process_payment_refund_if_exists", return_value=Err("payment fail")):
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000, "reason": "test"},
             )
@@ -1603,13 +1622,13 @@ class TestExecuteLegacyWrappers(TestCase):
         assert r.is_ok()
 
     def test_execute_order_refund_error(self):
-        with patch.object(RefundService, "_process_bidirectional_refund", return_value=Result.err("fail")):
+        with patch.object(RefundService, "_process_bidirectional_refund", return_value=Err("fail")):
             o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
             r = RefundService._execute_order_refund_internal(o, {"amount_cents": 10000, "refund_type": "full"})
             assert r.is_err()
 
     def test_execute_invoice_refund_error(self):
-        with patch.object(RefundService, "_process_bidirectional_refund", return_value=Result.err("fail")):
+        with patch.object(RefundService, "_process_bidirectional_refund", return_value=Err("fail")):
             inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
             r = RefundService._execute_invoice_refund_internal(inv, {"amount_cents": 10000, "refund_type": "full"})
             assert r.is_err()

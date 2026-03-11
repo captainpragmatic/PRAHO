@@ -10,6 +10,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
+from django_fsm import TransitionNotAllowed
 
 from apps.common.validators import log_security_event
 from apps.customers.models import (
@@ -22,6 +23,14 @@ from .gateways import PaymentGatewayFactory
 from .gateways.base import PaymentConfirmResult, PaymentIntentResult, SubscriptionResult
 from .models import Payment
 from .payment_models import TERMINAL_PAYMENT_STATUSES
+
+# Maps internal payment status names to the FSM transition method names on Payment.
+_PAYMENT_TRANSITION_MAP: dict[str, str] = {
+    "succeeded": "succeed",
+    "failed": "fail_payment",
+    "refunded": "refund_payment",
+    "partially_refunded": "partially_refund",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +301,7 @@ class PaymentService:
                             )
                             return result
 
-                        # Map gateway status to our status
+                        # Map gateway status to our internal status
                         status_mapping = {
                             "succeeded": "succeeded",
                             "requires_payment_method": "pending",
@@ -307,21 +316,40 @@ class PaymentService:
 
                         if payment.status != new_status:
                             old_status = payment.status
-                            payment.status = new_status
-                            payment.save(update_fields=["status"])
+                            # Use FSM transition dispatch instead of direct assignment
+                            method_name = _PAYMENT_TRANSITION_MAP.get(new_status)
+                            if not method_name:
+                                logger.warning(
+                                    "⚠️ [PaymentService] confirm_payment: no FSM transition mapped "
+                                    "for target status '%s' on payment %s",
+                                    new_status,
+                                    payment.id,
+                                )
+                            else:
+                                try:
+                                    getattr(payment, method_name)()
+                                    payment.save(update_fields=["status"])
+                                    logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
 
-                            logger.info(f"💰 Updated payment {payment.id} status to {new_status}")
-
-                            log_security_event(
-                                "payment_status_changed",
-                                {
-                                    "payment_id": str(payment.id),
-                                    "old_status": old_status,
-                                    "new_status": new_status,
-                                    "gateway_intent_id": payment_intent_id,
-                                    "critical_financial_operation": True,
-                                },
-                            )
+                                    log_security_event(
+                                        "payment_status_changed",
+                                        {
+                                            "payment_id": str(payment.id),
+                                            "old_status": old_status,
+                                            "new_status": new_status,
+                                            "gateway_intent_id": payment_intent_id,
+                                            "critical_financial_operation": True,
+                                        },
+                                    )
+                                except TransitionNotAllowed:
+                                    logger.warning(
+                                        "⚠️ [PaymentService] confirm_payment: transition %s → %s not allowed "
+                                        "for payment %s (already in state %s)",
+                                        old_status,
+                                        new_status,
+                                        payment.id,
+                                        payment.status,
+                                    )
 
                 except Payment.DoesNotExist:
                     logger.warning(f"⚠️ Payment not found for intent {payment_intent_id}")

@@ -5,15 +5,16 @@ Secure webhook processing for server management integrations.
 
 import json
 import logging
-from datetime import datetime
 from typing import Any
 
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django_fsm import TransitionNotAllowed
 
 from apps.api.secure_auth import validate_portal_service_request
 from apps.audit.services import AuditContext, ProvisioningAuditService
@@ -169,21 +170,33 @@ class ServerWebhookView(View):
                 logger.warning(f"⚠️ [Server Webhook] Service {service_username} not found on {server.name}")
                 return False, f"Service {service_username} not found"
 
-            # Update service status
-            service.status = "active"
-            service.activated_at = datetime.now()
-
             # Update provisioning data if provided
             if "provisioning_result" in webhook_data:
                 service.provisioning_data = webhook_data["provisioning_result"]
 
+            # Use FSM transition to activate the service
+            try:
+                service.complete_provisioning()
+            except TransitionNotAllowed:
+                if service.status == "active":
+                    logger.info(f"✅ [Server Webhook] Service {service_username} already active (idempotent)")
+                else:
+                    logger.warning(
+                        f"⚠️ [Server Webhook] Cannot complete provisioning for {service_username} "
+                        f"from status '{service.status}'"
+                    )
+                    return False, f"Service {service_username} cannot transition from '{service.status}'"
             service.save()
 
             # Complete any pending provisioning tasks
             ProvisioningTask.objects.filter(
-                service=service, task_type="create_service", status__in=["pending", "running"]
-            ).update(
-                status="completed", completed_at=datetime.now(), result=webhook_data.get("provisioning_result", {})
+                service=service,
+                task_type="create_service",
+                status__in=["pending", "running"],
+            ).update(  # fsm-bypass: ProvisioningTask is not FSM-protected
+                status="completed",
+                completed_at=timezone.now(),
+                result=webhook_data.get("provisioning_result", {}),
             )
 
             # Log audit event
@@ -219,7 +232,17 @@ class ServerWebhookView(View):
             except Service.DoesNotExist:
                 return False, f"Service {service_username} not found"
 
-            service.suspend(reason=suspension_reason)
+            try:
+                service.suspend(reason=suspension_reason)
+            except TransitionNotAllowed:
+                if service.status == "suspended":
+                    logger.info(f"✅ [Server Webhook] Service {service_username} already suspended (idempotent)")
+                else:
+                    logger.warning(
+                        f"⚠️ [Server Webhook] Cannot suspend service {service_username} from status '{service.status}'"
+                    )
+                    return False, f"Service {service_username} cannot transition from '{service.status}'"
+            service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
 
             # Log security event
             log_security_event(
@@ -258,7 +281,17 @@ class ServerWebhookView(View):
             except Service.DoesNotExist:
                 return False, f"Service {service_username} not found"
 
-            service.activate()
+            try:
+                service.activate()
+            except TransitionNotAllowed:
+                if service.status == "active":
+                    logger.info(f"✅ [Server Webhook] Service {service_username} already active (idempotent)")
+                else:
+                    logger.warning(
+                        f"⚠️ [Server Webhook] Cannot activate service {service_username} from status '{service.status}'"
+                    )
+                    return False, f"Service {service_username} cannot transition from '{service.status}'"
+            service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
 
             logger.info(f"▶️ [Server Webhook] Service activated: {service.service_name}")
             return True, "Service activation processed successfully"
@@ -307,7 +340,7 @@ class ServerWebhookView(View):
             if new_status not in valid_statuses:
                 return False, f"Invalid server status: {new_status}"
 
-            server.status = new_status
+            server.status = new_status  # fsm-bypass: Server uses CharField, not FSMField
             server.save(update_fields=["status", "updated_at"])
 
             # Log security event for critical status changes
@@ -381,8 +414,8 @@ class ServerWebhookView(View):
             # Find and update provisioning task
             try:
                 task = ProvisioningTask.objects.get(id=task_id)
-                task.status = "completed"
-                task.completed_at = datetime.now()
+                task.status = "completed"  # fsm-bypass: ProvisioningTask is not FSM-protected
+                task.completed_at = timezone.now()
                 task.result = task_result
                 task.save()
 
@@ -411,7 +444,7 @@ class ServerWebhookView(View):
             # Find and update provisioning task
             try:
                 task = ProvisioningTask.objects.get(id=task_id)
-                task.status = "failed"
+                task.status = "failed"  # fsm-bypass: ProvisioningTask is not FSM-protected
                 task.error_message = error_message
                 task.save()
 

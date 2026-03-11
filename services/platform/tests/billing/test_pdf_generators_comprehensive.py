@@ -33,6 +33,7 @@ from apps.billing.pdf_generators import (
 )
 from apps.customers.models import Customer
 from apps.users.models import User
+from tests.helpers.fsm_helpers import force_status
 
 
 class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
@@ -525,9 +526,9 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_generator_render_status_information_paid(self) -> None:
         """Test RomanianInvoicePDFGenerator _render_status_information for paid invoice (Line 281-286)."""
         # Mark invoice as paid
-        self.invoice.status = 'paid'
+        force_status(self.invoice, "paid", save=False)
         self.invoice.paid_at = timezone.now()
-        self.invoice.save()
+        self.invoice.save(update_fields=["status", "paid_at"])
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
@@ -543,9 +544,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
     def test_invoice_generator_render_status_information_paid_no_paid_at(self) -> None:
         """Test _render_status_information for paid invoice without paid_at date."""
         # Mark invoice as paid but without paid_at
-        self.invoice.status = 'paid'
-        self.invoice.paid_at = None
-        self.invoice.save()
+        force_status(self.invoice, "paid")
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
 

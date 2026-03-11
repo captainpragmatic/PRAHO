@@ -541,7 +541,7 @@ class StripeSyncTasksTestCase(TransactionTestCase):
         mock_service = MagicMock()
         mock_result = MagicMock()
         mock_result.is_ok.return_value = False
-        mock_result.error = "Stripe API error"
+        mock_result.unwrap_err.return_value = "Stripe API error"
         mock_service.sync_aggregation_to_stripe.return_value = mock_result
         mock_service_class.return_value = mock_service
 

@@ -101,7 +101,7 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "is_active", "campaign_type", "created_at")
     search_fields = ("name", "slug", "description")
-    readonly_fields = ("spent_cents", "created_at", "updated_at", "created_by")
+    readonly_fields = ("status", "spent_cents", "created_at", "updated_at", "created_by")
     prepopulated_fields = {"slug": ("name",)}
     date_hierarchy = "created_at"
     inlines = [CouponInline]

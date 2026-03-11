@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import transaction
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.common.types import Err, Ok, Result
 
@@ -310,9 +311,9 @@ class SubscriptionService:
                 # Handle trial period
                 trial_days = data.get("trial_days", 0)
                 if trial_days > 0:
-                    subscription.start_trial(trial_days, user)
+                    subscription.start_trial(trial_days, user)  # fsm-bypass: start_trial() calls self.save() internally
                 else:
-                    subscription.activate(user)
+                    subscription.activate(user)  # fsm-bypass: activate() calls self.save() internally
 
                 log_security_event(
                     event_type="subscription_created",
@@ -458,7 +459,7 @@ class SubscriptionService:
         tax_cents = int(Decimal(subtotal_cents) * vat_rate)
         total_cents = subtotal_cents + tax_cents
 
-        # Create invoice
+        # Create invoice as draft, then issue via FSM
         invoice = Invoice.objects.create(
             customer=subscription.customer,
             number=sequence.get_next_number("INV"),
@@ -466,8 +467,6 @@ class SubscriptionService:
             subtotal_cents=subtotal_cents,
             tax_cents=tax_cents,
             total_cents=total_cents,
-            status="issued",
-            issued_at=timezone.now(),
             due_at=timezone.now() + timedelta(days=7),
             bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
             bill_to_email=subscription.customer.primary_email or "",
@@ -490,6 +489,10 @@ class SubscriptionService:
             tax_rate=vat_rate,
             line_total_cents=total_cents,
         )
+
+        # Issue via FSM transition — sets issued_at and locked_at
+        invoice.issue()
+        invoice.save()
 
         # Link change to invoice
         change.invoice = invoice
@@ -545,7 +548,10 @@ class SubscriptionService:
                 return Err("Subscription is not cancelled")
 
             with transaction.atomic():
-                subscription.status = "active"
+                # Use FSM transition for cancelled → active; for cancel_at_period_end
+                # the status is still active/other, so just clear the flag.
+                if subscription.status == "cancelled":
+                    subscription._reactivate_now()
                 subscription.cancel_at_period_end = False
                 subscription.cancelled_at = None
                 subscription.cancellation_reason = ""
@@ -819,6 +825,13 @@ class RecurringBillingService:
                         f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"  # type: ignore[union-attr]
                     )
 
+            except TransitionNotAllowed:
+                msg = (
+                    f"Subscription {subscription.subscription_number} cannot transition "
+                    f"from status '{subscription.status}' during billing cycle"
+                )
+                logger.warning(f"⚠️ [BillingCycle] {msg}")
+                result["errors"].append(msg)
             except Exception as e:
                 logger.exception(f"Error processing subscription {subscription.id}: {e}")
                 result["errors"].append(f"Error for {subscription.subscription_number}: {e}")
@@ -853,7 +866,7 @@ class RecurringBillingService:
             tax_cents = int(Decimal(subtotal_cents) * tax_rate)
             total_cents = subtotal_cents + tax_cents
 
-            # Create invoice
+            # Create invoice as draft, then issue via FSM
             invoice = Invoice.objects.create(
                 customer=subscription.customer,
                 number=sequence.get_next_number("INV"),
@@ -861,8 +874,6 @@ class RecurringBillingService:
                 subtotal_cents=subtotal_cents,
                 tax_cents=tax_cents,
                 total_cents=total_cents,
-                status="issued",
-                issued_at=timezone.now(),
                 due_at=timezone.now() + timedelta(days=14),
                 bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
                 bill_to_email=subscription.customer.primary_email or "",
@@ -887,6 +898,10 @@ class RecurringBillingService:
                 tax_rate=tax_rate,
                 line_total_cents=total_cents,
             )
+
+            # Issue via FSM transition — sets issued_at and locked_at
+            invoice.issue()
+            invoice.save()
 
             return Ok(invoice)
 
@@ -996,8 +1011,8 @@ class RecurringBillingService:
                         at_period_end=False,
                     )
                 else:
-                    # Suspend services but keep subscription
-                    subscription.status = "paused"
+                    # Suspend services but keep subscription — use FSM transition.
+                    subscription._pause_now()
                     subscription.paused_at = now
                     subscription.save()
 

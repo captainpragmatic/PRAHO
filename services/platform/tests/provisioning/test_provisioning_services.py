@@ -13,11 +13,13 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice
 from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.services import ServiceActivationService
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -332,6 +334,21 @@ class ServiceActivationIntegrationTestCase(TestCase):
         # Services should still exist (placeholder implementation doesn't modify)
         services_after = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(services_after, 2)
+
+    def test_activate_service_clears_suspension_metadata(self):
+        """activate_service() must persist suspended_at and suspension_reason clears."""
+        force_status(self.service1, "suspended")
+        self.service1.suspended_at = timezone.now()
+        self.service1.suspension_reason = "manual hold"
+        self.service1.save(update_fields=["status", "suspended_at", "suspension_reason"])
+
+        result = ServiceActivationService.activate_service(self.service1, "reactivation test")
+        self.assertTrue(result.is_ok())
+
+        self.service1.refresh_from_db()
+        self.assertEqual(self.service1.status, "active")
+        self.assertIsNone(self.service1.suspended_at)
+        self.assertEqual(self.service1.suspension_reason, "")
 
     def test_service_activation_with_different_service_statuses(self):
         """Test service activation handles services in different statuses"""

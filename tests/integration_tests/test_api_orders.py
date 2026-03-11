@@ -29,6 +29,7 @@ from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingP
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product, ProductCategory
 from apps.billing.models import Currency
+from tests.helpers.fsm_helpers import force_status  # noqa: E402
 
 User = get_user_model()
 
@@ -202,8 +203,7 @@ class TestOrderStatusWorkflow(TestCase):
 
     def test_order_status_change_to_confirmed(self):
         """Order status can change to confirmed"""
-        self.order.status = 'pending'
-        self.order.save()
+        force_status(self.order, 'pending')
 
         self.client.force_login(self.admin)
         response = self.client.post(
@@ -215,8 +215,7 @@ class TestOrderStatusWorkflow(TestCase):
 
     def test_invalid_status_transition_rejected(self):
         """Invalid status transitions should be rejected"""
-        self.order.status = 'completed'
-        self.order.save()
+        force_status(self.order, 'completed')
 
         self.client.force_login(self.admin)
         response = self.client.post(

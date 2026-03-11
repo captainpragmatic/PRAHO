@@ -38,6 +38,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
+from django_fsm import TransitionNotAllowed
 
 from apps.billing.config import get_invoice_payment_terms_days
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
@@ -773,51 +774,50 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("billing:invoice_detail", pk=existing_invoice.pk)
 
     if request.method == "POST":
-        # Get next invoice number
-        sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
-        invoice_number = sequence.get_next_number("INV")
+        with transaction.atomic():
+            # Get next invoice number
+            sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
+            invoice_number = sequence.get_next_number("INV")
 
-        # Create invoice from proforma
-        invoice = Invoice.objects.create(
-            customer=proforma.customer,
-            number=invoice_number,
-            status="issued",  # Invoices start as issued, not draft
-            currency=proforma.currency,
-            subtotal_cents=proforma.subtotal_cents,
-            tax_cents=proforma.tax_cents,
-            total_cents=proforma.total_cents,
-            issued_at=timezone.now(),
-            due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
-            # Copy billing address from proforma
-            bill_to_name=proforma.bill_to_name,
-            bill_to_tax_id=proforma.bill_to_tax_id,
-            bill_to_email=proforma.bill_to_email,
-            bill_to_address1=proforma.bill_to_address1,
-            bill_to_address2=proforma.bill_to_address2,
-            bill_to_city=proforma.bill_to_city,
-            bill_to_region=proforma.bill_to_region,
-            bill_to_postal=proforma.bill_to_postal,
-            bill_to_country=proforma.bill_to_country,
-            # Link back to proforma
-            converted_from_proforma=proforma,
-        )
-
-        # Copy line items
-        for proforma_line in proforma.lines.all():
-            InvoiceLine.objects.create(
-                invoice=invoice,
-                kind=proforma_line.kind,
-                service=proforma_line.service,
-                description=proforma_line.description,
-                quantity=proforma_line.quantity,
-                unit_price_cents=proforma_line.unit_price_cents,
-                tax_rate=proforma_line.tax_rate,
-                line_total_cents=proforma_line.line_total_cents,
+            # Create invoice from proforma (draft first, then issue via FSM)
+            invoice = Invoice.objects.create(
+                customer=proforma.customer,
+                number=invoice_number,
+                currency=proforma.currency,
+                subtotal_cents=proforma.subtotal_cents,
+                tax_cents=proforma.tax_cents,
+                total_cents=proforma.total_cents,
+                due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
+                # Copy billing address from proforma
+                bill_to_name=proforma.bill_to_name,
+                bill_to_tax_id=proforma.bill_to_tax_id,
+                bill_to_email=proforma.bill_to_email,
+                bill_to_address1=proforma.bill_to_address1,
+                bill_to_address2=proforma.bill_to_address2,
+                bill_to_city=proforma.bill_to_city,
+                bill_to_region=proforma.bill_to_region,
+                bill_to_postal=proforma.bill_to_postal,
+                bill_to_country=proforma.bill_to_country,
+                # Link back to proforma
+                converted_from_proforma=proforma,
             )
 
-        # Lock the invoice after it has been created and lines copied.
-        # Use queryset update to avoid triggering immutability validation during creation.
-        Invoice.objects.filter(pk=invoice.pk).update(locked_at=timezone.now())
+            # Copy line items
+            for proforma_line in proforma.lines.all():
+                InvoiceLine.objects.create(
+                    invoice=invoice,
+                    kind=proforma_line.kind,
+                    service=proforma_line.service,
+                    description=proforma_line.description,
+                    quantity=proforma_line.quantity,
+                    unit_price_cents=proforma_line.unit_price_cents,
+                    tax_rate=proforma_line.tax_rate,
+                    line_total_cents=proforma_line.line_total_cents,
+                )
+
+            # Issue via FSM transition — sets issued_at and locked_at
+            invoice.issue()
+            invoice.save()
 
         messages.success(
             request,
@@ -908,14 +908,25 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
                 created_by=request.user,
             )
 
-            # Mark invoice as paid
-            invoice.status = "paid"
-            invoice.paid_at = timezone.now()
-            invoice.save()
-
-            messages.success(
-                request, _("✅ Payment processed and invoice #{number} marked as paid!").format(number=invoice.number)
-            )
+            # Mark invoice as paid via FSM transition
+            try:
+                invoice.mark_as_paid()
+            except TransitionNotAllowed:
+                logger.warning(
+                    f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
+                )
+                messages.warning(
+                    request,
+                    _(
+                        "⚠️ Payment recorded but invoice #{number} could not be marked as paid (status: {status})."
+                    ).format(number=invoice.number, status=invoice.status),
+                )
+            else:
+                invoice.save()
+                messages.success(
+                    request,
+                    _("✅ Payment processed and invoice #{number} marked as paid!").format(number=invoice.number),
+                )
             return json_success({"invoice_id": invoice.id}, "Payment processed successfully")
         else:
             return json_error("Failed to convert proforma", status=400)
@@ -1212,12 +1223,26 @@ def proforma_send(request: HttpRequest, pk: int) -> HttpResponse:
 
         email_sent = send_proforma_email(proforma)
         if email_sent:
-            proforma.status = "sent"
-            proforma.save(update_fields=["status"])
-            messages.success(
-                request,
-                _("✅ Proforma #{proforma_number} has been sent successfully!").format(proforma_number=proforma.number),
-            )
+            try:
+                proforma.send_proforma()
+            except TransitionNotAllowed:
+                logger.warning(
+                    f"⚠️ [Billing] Cannot transition proforma {proforma.number} to sent from status '{proforma.status}'"
+                )
+                messages.warning(
+                    request,
+                    _(
+                        "⚠️ Email sent but proforma #{proforma_number} status could not be updated (status: {status})."
+                    ).format(proforma_number=proforma.number, status=proforma.status),
+                )
+            else:
+                proforma.save(update_fields=["status"])
+                messages.success(
+                    request,
+                    _("✅ Proforma #{proforma_number} has been sent successfully!").format(
+                        proforma_number=proforma.number
+                    ),
+                )
             return JsonResponse({"success": True})
         else:
             messages.error(request, _("❌ Failed to send proforma email."))
@@ -1411,13 +1436,25 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
             created_by=request.user,
         )
 
-        # Update invoice status if fully paid
+        # Update invoice status if fully paid via FSM transition
         if invoice.get_remaining_amount() <= 0:
-            invoice.status = "paid"
-            invoice.paid_at = timezone.now()
-            invoice.save()
-
-        messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
+            try:
+                invoice.mark_as_paid()
+            except TransitionNotAllowed:
+                logger.warning(
+                    f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
+                )
+                messages.warning(
+                    request,
+                    _(
+                        "⚠️ Payment registered but invoice #{number} could not be marked as paid (status: {status})."
+                    ).format(number=invoice.number, status=invoice.status),
+                )
+            else:
+                invoice.save()
+                messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
+        else:
+            messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
         return JsonResponse({"success": True})
 
     return JsonResponse({"error": "Invalid method"}, status=405)
@@ -1540,7 +1577,8 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         result = RefundService.refund_invoice(invoice.id, refund_data)
         if result.is_ok():
             refund_result = result.unwrap()
-            return JsonResponse({"success": True, "refund_id": str(refund_result.refund_id)})
+            refund_id = refund_result.get("refund_id")
+            return JsonResponse({"success": True, "refund_id": str(refund_id)})
         return json_error(result.unwrap_err())
 
     except Exception as e:
@@ -1628,7 +1666,7 @@ This ticket was automatically created from a customer refund request.
             contact_phone=getattr(request.user, "phone", ""),
             category=billing_category,
             priority="normal",
-            status="new",
+            status="open",
             source="web",
             created_by=request.user,
             # Link to invoice
@@ -1921,7 +1959,8 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
         if result.is_ok():
             refund_result = result.unwrap()
             logger.info(f"✅ API: Refund processed for payment {payment_id}")
-            return JsonResponse({"success": True, "refund_id": str(refund_result.refund_id)})
+            refund_id = refund_result.get("refund_id")
+            return JsonResponse({"success": True, "refund_id": str(refund_id)})
         logger.warning(f"⚠️ API: Refund failed for payment {payment_id}: {result.unwrap_err()}")
         return JsonResponse({"success": False, "error": result.unwrap_err()}, status=400)
 

@@ -150,6 +150,16 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # FSM guardrail lint — detects FSM bypass patterns (ADR-0034)
+      - id: fsm-guardrail-check
+        name: "FSM: Guardrail Lint (ADR-0034)"
+        entry: uv run python
+        args: [scripts/lint_fsm_guardrails.py]
+        language: system
+        files: ^services/platform/apps/.*\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+
       # Check for hardcoded credentials (warning only)
       - id: security-credentials-check
         name: "Security: Check for Hardcoded Credentials"

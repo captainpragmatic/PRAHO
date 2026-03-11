@@ -13,7 +13,6 @@ This service handles:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -23,8 +22,10 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import AuditService
+from apps.common.types import Err, Ok, Result
 from apps.customers.models import CustomerAddress, CustomerTaxProfile
 
 from . import config as billing_config
@@ -35,37 +36,6 @@ from .payment_models import CreditLedger
 from .subscription_models import Subscription
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Result:
-    """Result pattern for operations"""
-
-    _value: Any
-    _error: str | None
-
-    @classmethod
-    def ok(cls, value: Any) -> Result:
-        return cls(_value=value, _error=None)
-
-    @classmethod
-    def err(cls, error: str) -> Result:
-        return cls(_value=None, _error=error)
-
-    def is_ok(self) -> bool:
-        return self._error is None
-
-    def is_err(self) -> bool:
-        return self._error is not None
-
-    def unwrap(self) -> Any:
-        if self._error:
-            raise ValueError(f"Called unwrap on error: {self._error}")
-        return self._value
-
-    @property
-    def error(self) -> str | None:
-        return self._error
 
 
 class UsageInvoiceService:
@@ -86,7 +56,7 @@ class UsageInvoiceService:
 
     def generate_invoice_from_cycle(  # noqa: C901, PLR0915  # Complexity: multi-step business logic
         self, billing_cycle_id: str
-    ) -> Result:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
+    ) -> Result[dict[str, Any], str]:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """
         Generate an invoice from a billing cycle.
 
@@ -98,10 +68,10 @@ class UsageInvoiceService:
                 "subscription", "subscription__customer", "subscription__currency"
             ).get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
-            return Result.err(f"Billing cycle not found: {billing_cycle_id}")
+            return Err(f"Billing cycle not found: {billing_cycle_id}")
 
         if billing_cycle.status not in ("closed", "accumulating"):
-            return Result.err(f"Billing cycle not ready for invoicing: status is {billing_cycle.status}")
+            return Err(f"Billing cycle not ready for invoicing: status is {billing_cycle.status}")
 
         subscription = billing_cycle.subscription
         customer = subscription.customer
@@ -109,7 +79,7 @@ class UsageInvoiceService:
 
         # Check if invoice already exists
         if billing_cycle.invoice:
-            return Result.err(f"Invoice already exists for billing cycle: {billing_cycle.invoice.number}")
+            return Err(f"Invoice already exists for billing cycle: {billing_cycle.invoice.number}")
 
         # Get unrated aggregations - they need rating first
         unrated = UsageAggregation.objects.filter(
@@ -121,7 +91,7 @@ class UsageInvoiceService:
             rating_engine = RatingEngine()
             rating_result = rating_engine.rate_billing_cycle(str(billing_cycle_id))
             if rating_result.is_err():
-                return Result.err(f"Failed to rate billing cycle: {rating_result.error}")
+                return Err(f"Failed to rate billing cycle: {rating_result.unwrap_err()}")
 
         # Refresh billing cycle to get updated totals
         billing_cycle.refresh_from_db()
@@ -231,8 +201,8 @@ class UsageInvoiceService:
 
                     # Link aggregation to invoice line
                     agg.invoice_line = line
-                    agg.status = "invoiced"
-                    agg.save(update_fields=["invoice_line", "status"])
+                    agg.mark_invoiced()
+                    agg.save()
 
             # Add discount line if applicable
             if discount_cents > 0:
@@ -268,10 +238,9 @@ class UsageInvoiceService:
 
             # Update billing cycle
             billing_cycle.invoice = invoice
-            billing_cycle.invoiced_at = timezone.now()
-            billing_cycle.status = "invoiced"
             billing_cycle.total_cents = total_cents
             billing_cycle.tax_cents = tax_cents
+            billing_cycle.mark_invoiced()  # FSM transition sets invoiced_at
             billing_cycle.save()
 
             # Log invoice creation
@@ -298,7 +267,7 @@ class UsageInvoiceService:
 
         logger.info(f"Generated invoice {invoice.number} for billing cycle {billing_cycle_id}: {total_cents} cents")
 
-        return Result.ok(
+        return Ok(
             {
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
@@ -396,22 +365,25 @@ class UsageInvoiceService:
             return int(aggregation.charge_cents / aggregation.overage_value)
         return 0
 
-    def issue_invoice(self, invoice_id: str) -> Result:
+    def issue_invoice(self, invoice_id: str) -> Result[Any, str]:
         """
         Issue a draft invoice (change status from draft to issued).
         """
         try:
             invoice = Invoice.objects.get(id=invoice_id)
         except Invoice.DoesNotExist:
-            return Result.err(f"Invoice not found: {invoice_id}")
+            return Err(f"Invoice not found: {invoice_id}")
 
         if invoice.status != "draft":
-            return Result.err(f"Invoice is not in draft status: {invoice.status}")
+            return Err(f"Invoice is not in draft status: {invoice.status}")
 
         with transaction.atomic():
-            invoice.status = "issued"
-            invoice.issued_at = timezone.now()
-            invoice.locked_at = timezone.now()  # Make immutable
+            try:
+                invoice.issue()
+            except TransitionNotAllowed:
+                logger.warning("⚠️ [Invoice] Cannot issue invoice %s from status '%s'", invoice.number, invoice.status)
+                return Err(f"Cannot issue invoice {invoice.number} from status '{invoice.status}'")
+            # Note: issue() FSM transition already sets issued_at and locked_at
             invoice.save()
 
             # Log issuance
@@ -428,7 +400,7 @@ class UsageInvoiceService:
                 },
             )
 
-        return Result.ok(invoice)
+        return Ok(invoice)
 
 
 class BillingCycleManager:
@@ -441,17 +413,17 @@ class BillingCycleManager:
     - Closing expired cycles
     """
 
-    def create_billing_cycle(self, subscription_id: str, period_start: datetime | None = None) -> Result:
+    def create_billing_cycle(self, subscription_id: str, period_start: datetime | None = None) -> Result[Any, str]:
         """
         Create a new billing cycle for a subscription.
         """
         try:
             subscription = Subscription.objects.get(id=subscription_id)
         except Subscription.DoesNotExist:
-            return Result.err(f"Subscription not found: {subscription_id}")
+            return Err(f"Subscription not found: {subscription_id}")
 
         if not subscription.is_active:
-            return Result.err(f"Subscription is not active: {subscription.status}")
+            return Err(f"Subscription is not active: {subscription.status}")
 
         # Determine period start
         if period_start is None:
@@ -472,7 +444,7 @@ class BillingCycleManager:
         existing = BillingCycle.objects.filter(subscription=subscription, period_start=period_start).exists()
 
         if existing:
-            return Result.err(f"Billing cycle already exists for period starting {period_start}")
+            return Err(f"Billing cycle already exists for period starting {period_start}")
 
         with transaction.atomic():
             billing_cycle = BillingCycle.objects.create(
@@ -504,7 +476,7 @@ class BillingCycleManager:
                 },
             )
 
-        return Result.ok(billing_cycle)
+        return Ok(billing_cycle)
 
     def advance_all_subscriptions(self) -> tuple[int, int, list[str]]:
         """
@@ -528,7 +500,7 @@ class BillingCycleManager:
                     created += 1
                 else:
                     errors += 1
-                    error_messages.append(f"Subscription {subscription.id}: {result.error}")
+                    error_messages.append(f"Subscription {subscription.id}: {result.unwrap_err()}")
 
         logger.info(f"Billing cycle advancement: {created} created, {errors} errors")
 
@@ -553,7 +525,7 @@ class BillingCycleManager:
                 closed += 1
             else:
                 errors += 1
-                logger.error(f"Error closing cycle {cycle.id}: {result.error}")
+                logger.error(f"Error closing cycle {cycle.id}: {result.unwrap_err()}")
 
         logger.info(f"Closed {closed} expired billing cycles, {errors} errors")
 
@@ -577,7 +549,7 @@ class BillingCycleManager:
                 generated += 1
             else:
                 errors += 1
-                logger.error(f"Error generating invoice for cycle {cycle.id}: {result.error}")
+                logger.error(f"Error generating invoice for cycle {cycle.id}: {result.unwrap_err()}")
 
         logger.info(f"Generated {generated} invoices, {errors} errors")
 

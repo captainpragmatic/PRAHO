@@ -91,6 +91,7 @@ from tests.factories.billing_factories import (
     CustomerFactory,
     InvoiceFactory,
 )
+from tests.helpers.fsm_helpers import force_status
 
 
 def _get_or_create_currency(code: str = "RON") -> Currency:
@@ -261,8 +262,7 @@ class TestSubscriptionLifecycleSignals(TestCase):
             next_billing_date=timezone.now() + timedelta(days=30),
         )
         mock_log.reset_mock()
-        sub.status = "cancelled"
-        sub.save()
+        force_status(sub, "cancelled")
         call_kwargs = mock_log.call_args_list[-1][1]
         assert call_kwargs["event_type"] == "subscription_model_updated"
 
@@ -374,8 +374,7 @@ class TestRefundLifecycleSignals(TestCase):
             refund_type="full",
         )
         mock_log.reset_mock()
-        refund.status = "completed"
-        refund.save()
+        force_status(refund, "completed")
         call_kwargs = mock_log.call_args_list[-1][1]
         assert call_kwargs["event_type"] == "refund_model_updated"
 
@@ -538,8 +537,7 @@ class TestInvoiceCreatedOrUpdatedSignal(TestCase):
             status="draft",
         )
         # Now update status - pre_save stores original values
-        invoice.status = "issued"
-        invoice.save()
+        force_status(invoice, "issued")
         # The status change handler should be called
         # (depends on _original_invoice_values being set by pre_save)
 
@@ -555,8 +553,7 @@ class TestInvoiceCreatedOrUpdatedSignal(TestCase):
             number="INV-SIG-003",
             status="paid",
         )
-        invoice.status = "refunded"
-        invoice.save()
+        force_status(invoice, "refunded")
 
     @patch("apps.billing.signals._update_billing_analytics")
     @patch("apps.billing.signals._trigger_efactura_submission")
@@ -598,8 +595,7 @@ class TestStoreOriginalInvoiceValues(TestCase):
             status="draft",
         )
         # On next save, pre_save should store original values
-        invoice.status = "issued"
-        invoice.save()
+        force_status(invoice, "issued")
         # _original_invoice_values should have been set
         assert hasattr(invoice, "_original_invoice_values")
 
@@ -634,8 +630,7 @@ class TestInvoiceNumberGeneration(TestCase):
         mock_seq.get_next_number.return_value = "INV-000001"
         mock_numbering.get_or_create_sequence.return_value = mock_seq
 
-        invoice.status = "issued"
-        invoice.save()
+        force_status(invoice, "issued")
         # The signal handler checks for TMP- prefix on non-created issued invoices
 
 
@@ -702,8 +697,7 @@ class TestPaymentCreatedOrUpdatedSignal(TestCase):
     @patch("apps.billing.signals.BillingAuditService")
     def test_payment_status_change_to_succeeded(self, mock_bas, mock_status, mock_activate, mock_credit):
         payment = _make_payment(self.customer, currency=self.currency, status="pending")
-        payment.status = "succeeded"
-        payment.save()
+        force_status(payment, "succeeded")
 
     @override_settings(DISABLE_AUDIT_SIGNALS=True)
     @patch("apps.billing.signals.BillingAuditService")
@@ -719,8 +713,7 @@ class TestStoreOriginalPaymentValues(TestCase):
 
     def test_stores_original_on_update(self):
         payment = _make_payment(self.customer, currency=self.currency, status="pending")
-        payment.status = "succeeded"
-        payment.save()
+        force_status(payment, "succeeded")
         assert hasattr(payment, "_original_payment_values")
 
 
@@ -779,14 +772,12 @@ class TestProformaInvoiceSignal(TestCase):
             status="draft",
         )
         mock_bas.reset_mock()
-        proforma.status = "sent"
-        proforma.save()
+        force_status(proforma, "sent")
         mock_bas.log_proforma_event.assert_called()
 
-    @patch("apps.billing.signals.ProformaConversionService" if False else "apps.billing.services.ProformaConversionService")
     @patch("apps.billing.signals.BillingAuditService")
-    def test_proforma_paid_triggers_conversion(self, mock_bas, mock_conv):
-        """When proforma status changes to paid, auto-conversion is attempted."""
+    def test_proforma_status_change_triggers_audit(self, mock_bas):
+        """When proforma status changes to accepted, audit signal is fired."""
         proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -795,16 +786,10 @@ class TestProformaInvoiceSignal(TestCase):
             subtotal_cents=5000,
             status="draft",
         )
-        # Change to paid
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_invoice = MagicMock()
-        mock_invoice.number = "INV-FROM-PRO"
-        mock_result.unwrap.return_value = mock_invoice
-        mock_conv.convert_to_invoice.return_value = mock_result
-
-        proforma.status = "paid"
-        proforma.save()
+        mock_bas.reset_mock()
+        # "accepted" is a valid proforma status (draft → sent → accepted)
+        force_status(proforma, "accepted")
+        mock_bas.log_proforma_event.assert_called()
 
 
 class TestStoreOriginalProformaValues(TestCase):
@@ -820,8 +805,7 @@ class TestStoreOriginalProformaValues(TestCase):
             total_cents=5000,
             subtotal_cents=5000,
         )
-        proforma.status = "sent"
-        proforma.save()
+        force_status(proforma, "sent")
         assert hasattr(proforma, "_original_proforma_values")
 
 
@@ -1413,7 +1397,7 @@ class TestHandlePaymentRefund(TestCase):
         payment.invoice.payments.filter.return_value = [refunded_payment]
         _handle_payment_refund(payment)
         payment.invoice.save.assert_called_once()
-        assert payment.invoice.status == "refunded"
+        payment.invoice.refund_invoice.assert_called_once()
 
     @patch("apps.billing.signals._send_payment_refund_email")
     def test_partial_refund(self, mock_email):

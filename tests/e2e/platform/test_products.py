@@ -390,7 +390,7 @@ def test_product_pricing_management(monitored_staff_page: Page) -> None:  # noqa
     ]
     unused = [c for c in dropdown_currencies if c not in used_currencies]
     if not unused:
-        pytest.skip("All available currencies already have prices — add-price flow not tested")
+        pytest.skip("All available currencies already have prices — add-price flow not tested (TODO: add fixture with partial pricing)")
 
     # Select the first unused currency from the dropdown
     currency = unused[0]

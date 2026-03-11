@@ -3,7 +3,10 @@ Support ticket models for PRAHO Platform
 Romanian hosting provider customer support system.
 """
 
+from __future__ import annotations
+
 import secrets
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -11,6 +14,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR_FLOAT
 
@@ -109,7 +113,7 @@ class Ticket(models.Model):
     # Classification
     category = models.ForeignKey(SupportCategory, on_delete=models.SET_NULL, null=True, verbose_name=_("Category"))
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="normal", verbose_name=_("Priority"))
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="open", verbose_name=_("Status"))
+    status = FSMField(max_length=30, choices=STATUS_CHOICES, default="open", protected=True, verbose_name=_("Status"))
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default="web", verbose_name=_("Source"))
 
     # Assignment
@@ -187,6 +191,12 @@ class Ticket(models.Model):
             models.Index(fields=["category"]),
             models.Index(fields=["ticket_number"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=["open", "in_progress", "waiting_on_customer", "closed"]),
+                name="ticket_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"#{self.ticket_number}: {self.title}"
@@ -195,11 +205,50 @@ class Ticket(models.Model):
         if not self.ticket_number:
             self.ticket_number = self._generate_ticket_number()
 
-        # Set closed timestamp when status becomes closed
-        if self.status == "closed" and not self.closed_at:
-            self.closed_at = timezone.now()
-
         super().save(*args, **kwargs)
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Ticket] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See orders.Order.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=status, source=["open", "waiting_on_customer"], target="in_progress")
+    def start_work(self) -> None:
+        """Start working on the ticket."""
+
+    @transition(field=status, source=["open", "in_progress"], target="waiting_on_customer")
+    def wait_on_customer(self) -> None:
+        """Wait for customer response."""
+
+    @transition(field=status, source=["open", "in_progress", "waiting_on_customer"], target="closed")
+    def close(self) -> None:
+        """Close the ticket."""
+        self.closed_at = timezone.now()
+
+    @transition(field=status, source="closed", target="open")
+    def reopen(self) -> None:
+        """Reopen a closed ticket."""
+        self.closed_at = None
+
+    @transition(field=status, source="waiting_on_customer", target="open")
+    def back_to_queue(self) -> None:
+        """Return ticket to open queue (e.g., customer replied but no agent assigned)."""
 
     def _generate_ticket_number(self) -> str:
         """Generate cryptographically random, unique ticket number.
@@ -223,12 +272,12 @@ class Ticket(models.Model):
     @property
     def is_awaiting_customer(self) -> bool:
         """Check if ticket is waiting on customer response"""
-        return self.status == "waiting_on_customer"
+        return bool(self.status == "waiting_on_customer")
 
     @property
     def customer_replied_recently(self) -> bool:
         """Check if customer has replied recently (for badge display)"""
-        return self.has_customer_replied and self.status != "waiting_on_customer"
+        return bool(self.has_customer_replied and self.status != "waiting_on_customer")
 
     def get_priority_color(self) -> str:
         """Get color for priority display"""

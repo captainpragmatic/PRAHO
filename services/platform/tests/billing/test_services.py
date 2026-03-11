@@ -35,6 +35,7 @@ from apps.billing.services import (
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
+from tests.helpers.fsm_helpers import force_status
 
 
 class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
@@ -532,7 +533,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
     def test_validate_order_refund_eligibility_invalid_status(self) -> None:
         """Test _validate_order_refund_eligibility with invalid status (Line 597-603)."""
         mock_order = self._create_test_order()
-        mock_order.status = 'draft'
+        force_status(mock_order, 'draft')
 
         refund_data = self._create_refund_data()
         result = RefundService._validate_order_refund_eligibility(mock_order, refund_data)
@@ -614,8 +615,7 @@ class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
 
     def test_validate_invoice_refund_eligibility_invalid_status(self) -> None:
         """Test _validate_invoice_refund_eligibility with invalid status (Line 654-660)."""
-        self.invoice.status = 'draft'
-        self.invoice.save()
+        force_status(self.invoice, "draft")
 
         refund_data = self._create_refund_data()
         result = RefundService._validate_invoice_refund_eligibility(self.invoice, refund_data)
