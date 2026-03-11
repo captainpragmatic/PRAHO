@@ -56,7 +56,7 @@ def cookie_consent_view(request: HttpRequest) -> HttpResponse:
     try:
         result = api_client.submit_cookie_consent(consent_data)
         success = result.get("success", False)
-    except PlatformAPIError:  # noqa: rate-limit-aware  — fire-and-forget, consent saved client-side as fallback
+    except PlatformAPIError:  # fire-and-forget: rate-limit-aware, consent saved client-side as fallback
         logger.warning("⚠️ [Portal Cookie] Platform API unavailable, consent saved client-side only")
         success = False
 

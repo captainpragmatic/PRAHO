@@ -721,7 +721,7 @@ class InteractiveTypeAdder:
     def _format_file(self) -> None:
         """Format the file using ruff"""
         try:
-            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
                 [sys.executable, "-m", "ruff", "format", str(self.file_path)],
                 capture_output=True,
                 text=True,

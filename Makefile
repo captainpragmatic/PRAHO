@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit check-types pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -468,11 +468,14 @@ lint-audit:
 lint-portal:
 	@echo "🌐 [Portal] Code quality check (NO database access)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/2: Performance & Security Analysis (Ruff)..."
+	@echo "🔍 1/3: Performance & Security Analysis (Ruff)..."
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
-	@echo "📊 2/2: Django Check (NO DB)..."
+	@echo "📊 2/3: Django Check (NO DB)..."
 	@$(PYTHON_PORTAL_MANAGE) check
+	@echo ""
+	@echo "🌐 3/3: i18n Coverage Check..."
+	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/portal/apps services/portal/templates
 	@echo "✅ Portal linting complete!"
 
 lint:
@@ -497,7 +500,7 @@ else
 	@echo "📋 Phase 5: Code health scan"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
 	@echo "📋 Phase 6: FSM guardrail lint (ADR-0034)"
-	@$(VENV_DIR)/bin/python scripts/lint_fsm_guardrails.py
+	@$(MAKE) lint-fsm
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -662,10 +665,18 @@ ifdef FILE
 else
 	@echo "🏷️ [All Services] Comprehensive type checking..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
-	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
+	@$(MAKE) check-types-platform
+	@$(MAKE) check-types-portal
 	@echo "🎉 All services type checking complete!"
 endif
+
+check-types-platform:
+	@echo "🏷️ [Platform] Type checking..."
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
+
+check-types-portal:
+	@echo "🏷️ [Portal] Type checking..."
+	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 
 # ===============================================================================
 # PRE-COMMIT HOOKS 🔗

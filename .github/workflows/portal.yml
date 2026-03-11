@@ -1,20 +1,21 @@
 # ===============================================================================
 # PORTAL SERVICE CI/CD - API-ONLY, NO DATABASE ACCESS
 # ===============================================================================
-# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for details
+# Tests and type checking for the portal service.
+# Linting is consolidated in integration.yml (make lint).
 
 name: Portal Service CI/CD
 
 on:
   push:
-    branches: [ master, develop, 'feat/*', 'fix/*' ]
+    branches: [master, staging]
     paths:
       - 'services/portal/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/portal.yml'
   pull_request:
-    branches: [ master, develop ]
+    branches: [master]
     paths:
       - 'services/portal/**'
       - 'pyproject.toml'
@@ -36,8 +37,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -52,57 +51,24 @@ jobs:
 
     - name: Validate portal has no external database dependencies
       run: |
-        echo "Verifying portal has no external database drivers..."
         cd services/portal
-
-        # Check pyproject.toml doesn't contain external DB drivers
-        # (psycopg, mysql-connector, etc. — sqlite3 is stdlib, not a dep)
         if grep -iP "psycopg|mysql-connector|mysqlclient|cx.oracle" pyproject.toml 2>/dev/null; then
           echo "SECURITY FAILURE: Portal has external database drivers in pyproject.toml!"
           exit 1
-        else
-          echo "Portal pyproject.toml has no external database drivers"
         fi
-
-        # Verify portal does not use PostgreSQL/MySQL — in-memory SQLite for
-        # Django session/auth internals is acceptable (no business data).
         if grep -r "psycopg\|mysql\|oracle" config/settings* 2>/dev/null; then
           echo "SECURITY FAILURE: Portal has external database configuration!"
           exit 1
-        else
-          echo "Portal settings use only SQLite (Django internals only)"
         fi
+        echo "Portal settings use only SQLite (Django internals only)"
 
     - name: Run portal unit tests with coverage
       run: |
         cd services/portal
-        echo "Running portal unit tests with coverage..."
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pytest tests/ -v --tb=short --maxfail=10 --cov=apps --cov-report=xml:coverage-portal.xml --cov-report=term-missing
 
-    - name: Ruff no-new-debt gate (portal)
-      run: |
-        BASE_REF="${{ github.event.before }}"
-        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_REF="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE_REF="HEAD~1"
-          fi
-        fi
-        if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
-          echo "Baseline ref not present locally ($BASE_REF); fetching..."
-          git fetch origin "${BASE_REF}" --depth=1 || true
-        fi
-        echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py \
-          --baseline-ref "$BASE_REF" \
-          --path-prefix services/portal
-
-    - name: Lint portal code
-      run: |
-        cd services/portal
-        echo "Running linting for portal service..."
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/ruff check apps/ || echo "Linting completed with issues"
+    - name: Portal type checking (make check-types-portal)
+      run: make check-types-portal
 
     - name: Upload portal artifacts
       uses: actions/upload-artifact@v4
@@ -111,5 +77,5 @@ jobs:
         name: portal-reports
         path: |
           services/portal/htmlcov/
-          services/portal/pytest_report.html
+          services/portal/coverage-portal.xml
         if-no-files-found: warn

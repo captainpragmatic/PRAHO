@@ -48,7 +48,7 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
         else:
             cmd = ["git", "diff", "--name-only", "HEAD"]
 
-        result = subprocess.run(  # noqa: S603  # Safe: shell=False
+        result = subprocess.run(  # Safe: shell=False
             cmd, capture_output=True, text=True, check=True
         )  # Safe: shell=False  # Safe: shell=False
         files = result.stdout.strip().split("\n")
@@ -125,8 +125,8 @@ def _get_merge_base() -> str:
     """Return the merge-base commit between HEAD and the main branch."""
     for main_branch in ("master", "main"):
         try:
-            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
-                [  # noqa: S607  # Safe: known executable
+            result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
+                [  # Safe: known executable
                     "git",
                     "merge-base",
                     "HEAD",
@@ -146,7 +146,7 @@ def _get_merge_base() -> str:
 def _run_mypy(files: list[str], service_root: Path, env: dict[str, str]) -> str:
     """Run mypy and return raw stdout."""
     cmd = ["mypy", "--follow-imports=silent", *files]
-    result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
+    result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
         cmd,
         check=False,
         capture_output=True,
@@ -177,8 +177,8 @@ def _get_baseline_errors(
         full_path = service_root / nf
         git_path = f"services/platform/{nf}"
         try:
-            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
-                [  # noqa: S607  # Safe: known executable
+            result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
+                [  # Safe: known executable
                     "git",
                     "show",
                     f"{merge_base}:{git_path}",

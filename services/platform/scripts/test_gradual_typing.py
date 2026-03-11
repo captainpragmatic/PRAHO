@@ -15,7 +15,7 @@ def run_mypy_check(target_path: str, description: str) -> tuple[int, str]:
     cmd = [sys.executable, "-m", "mypy", "--config-file=pyproject.toml", target_path]
 
     try:
-        result = subprocess.run(  # noqa: S603  # Safe: shell=False
+        result = subprocess.run(  # Safe: shell=False
             cmd, check=False, capture_output=True, text=True, cwd=Path(__file__).parent.parent
         )  # Safe: shell=False  # Safe: shell=False
 

@@ -72,7 +72,7 @@ class PriceSealingService:
                         "Configure PRICE_SEALING_SECRET environment variable for production deployment."
                     )
                     _SEALING_SECRET_WARNING_ISSUED = True
-                return str(settings.SECRET_KEY)  # noqa: SECRET_KEY — fallback for dev
+                return str(settings.SECRET_KEY)  # noqa: SECRET_KEY — dev fallback when PRICE_SEALING_SECRET unset
 
         # Validate secret key length for security
         if len(price_sealing_secret) < MIN_SECRET_LENGTH:

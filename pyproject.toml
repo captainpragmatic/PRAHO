@@ -465,7 +465,7 @@ ignore = [
 ]
 
 # Development scripts - Allow print statements and exception handling
-"scripts/*.py" = [
+"**/scripts/*.py" = [
     "T201", "T203",     # Print statements (progress reporting)
     "S602", "S603", "S607",  # Subprocess calls (utility scripts)
     "S110",             # Try-except-pass (resilient scripts)

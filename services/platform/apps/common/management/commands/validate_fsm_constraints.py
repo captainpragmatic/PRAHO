@@ -14,12 +14,13 @@ from __future__ import annotations
 from typing import Any
 
 from django.core.management.base import BaseCommand
+from django.db import models
 from django_fsm import FSMField
 
 
 # Registry of (model_class, fsm_field_name, constraint_name) tuples.
 # Populated lazily in handle() to avoid import-time side effects.
-def _get_fsm_registry() -> list[tuple[type, str, str]]:
+def _get_fsm_registry() -> list[tuple[type[models.Model], str, str]]:
     from apps.billing.efactura.models import EFacturaDocument  # noqa: PLC0415
     from apps.billing.invoice_models import Invoice  # noqa: PLC0415
     from apps.billing.metering_models import BillingCycle, UsageAggregation  # noqa: PLC0415
