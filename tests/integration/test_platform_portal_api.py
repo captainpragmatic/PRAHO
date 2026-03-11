@@ -162,6 +162,7 @@ class TestDatabaseCacheIntegration:
 
     @pytest.mark.integration
     @pytest.mark.cache
+    @pytest.mark.django_db
     def test_platform_uses_database_cache(self):
         """
         Test that platform service uses appropriate cache backend.

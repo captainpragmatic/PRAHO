@@ -3,13 +3,15 @@ from __future__ import annotations
 import pyotp
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.users.mfa import backup_code_service, mfa_service, totp_service
 
 User = get_user_model()
+TEST_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
 
 
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
 class MFASecurityIntegrationTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
