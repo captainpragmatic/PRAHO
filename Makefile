@@ -20,7 +20,8 @@ PYTHON_PLATFORM = cd services/platform && PYTHONPATH=$(PWD)/services/platform $(
 PYTHON_PLATFORM_MANAGE = $(PYTHON_PLATFORM) manage.py
 
 # Portal-specific Python (NO PYTHONPATH - cannot import platform code)
-PYTHON_PORTAL = cd services/portal && $(PWD)/$(VENV_DIR)/bin/python
+# DJANGO_SETTINGS_MODULE pinned to config.settings.dev — portal has no test.py settings
+PYTHON_PORTAL = cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PORTAL_MANAGE = $(PYTHON_PORTAL) manage.py
 
 # Shared Python for workspace-level tasks
@@ -322,9 +323,9 @@ test-security:
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && DJANGO_SETTINGS_MODULE=config.settings.base PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
+	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
+	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"
 
 test-e2e:
