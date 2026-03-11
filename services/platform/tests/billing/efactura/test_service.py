@@ -176,7 +176,7 @@ class EFacturaServiceTestCase(TestCase):
 
         self.assertFalse(result.success)
         self.assertIn("validation failed", result.error_message.lower())
-        mock_doc.mark_rejected.assert_called_once()
+        mock_doc.mark_error.assert_called_once()
 
     @patch("apps.billing.efactura.service.EFacturaDocument.objects")
     @patch.object(EFacturaService, "_generate_xml")
@@ -328,6 +328,46 @@ class EFacturaStatusCheckTestCase(TestCase):
         self.assertFalse(result.is_terminal)
         mock_doc.mark_processing.assert_called_once()
 
+    @patch("apps.billing.efactura.service.transaction.atomic")
+    def test_check_status_accepted_uses_transaction_atomic(self, mock_atomic):
+        """Accepted status branch must be atomic with invoice update."""
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.anaf_upload_index = "12345"
+        mock_doc.invoice = Mock()
+
+        mock_response = Mock()
+        mock_response.is_accepted = True
+        mock_response.is_rejected = False
+        mock_response.is_processing = False
+        mock_response.download_id = "67890"
+        mock_response.raw_response = {}
+        self.mock_client.get_upload_status.return_value = mock_response
+
+        with patch.object(self.service, "_log_audit_event"), patch.object(self.service, "_record_webhook_event"):
+            self.service.check_status(mock_doc)
+
+        mock_atomic.assert_called_once()
+
+    @patch("apps.billing.efactura.service.transaction.atomic")
+    def test_check_status_rejected_uses_transaction_atomic(self, mock_atomic):
+        """Rejected status branch must be atomic for status persistence consistency."""
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.anaf_upload_index = "12345"
+        mock_doc.invoice = Mock()
+
+        mock_response = Mock()
+        mock_response.is_accepted = False
+        mock_response.is_rejected = True
+        mock_response.is_processing = False
+        mock_response.errors = [{"message": "Invalid CUI"}]
+        mock_response.raw_response = {}
+        self.mock_client.get_upload_status.return_value = mock_response
+
+        with patch.object(self.service, "_log_audit_event"), patch.object(self.service, "_record_webhook_event"):
+            self.service.check_status(mock_doc)
+
+        mock_atomic.assert_called_once()
+
 
 @override_settings(EFACTURA_ENABLED=True)
 class EFacturaDownloadTestCase(TestCase):
@@ -404,6 +444,19 @@ class EFacturaRetryTestCase(TestCase):
         self.assertTrue(result.success)
         mock_doc.mark_queued.assert_called_once()
         mock_doc.save.assert_called_once()
+
+    @patch("apps.billing.efactura.service.transaction.atomic")
+    @patch.object(EFacturaService, "submit_invoice")
+    def test_retry_failed_submission_uses_transaction_atomic(self, mock_submit, mock_atomic):
+        """Retry queueing and resubmission call should run in one atomic block."""
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.can_retry = True
+        mock_doc.invoice = Mock()
+        mock_submit.return_value = SubmissionResult.ok(mock_doc)
+
+        self.service.retry_failed_submission(mock_doc)
+
+        mock_atomic.assert_called_once()
 
 
 @override_settings(EFACTURA_ENABLED=True)

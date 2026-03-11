@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from django.db import transaction as db_transaction
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
@@ -70,13 +71,14 @@ class ServiceManagementService:
                 logger.info(f"⚙️ [ServiceMgmt] Stopped (suspended) service {service_id}")
 
             elif action == "restart":
-                # suspend then re-activate
-                service.suspend(reason="restart")
-                service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
-                service.activate()
-                service.save(
-                    update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
-                )
+                # suspend then re-activate — atomic so partial failure doesn't leave service suspended
+                with db_transaction.atomic():
+                    service.suspend(reason="restart")
+                    service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+                    service.activate()
+                    service.save(
+                        update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
+                    )
                 logger.info(f"⚙️ [ServiceMgmt] Restarted service {service_id}")
 
             elif action == "suspend":

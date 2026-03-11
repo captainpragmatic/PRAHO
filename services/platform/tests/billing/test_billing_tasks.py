@@ -1013,6 +1013,83 @@ class RunPaymentCollectionTests(TestCase):
         run = PaymentCollectionRun.objects.get(id=result["run_id"])
         self.assertEqual(run.total_scheduled, 1)
 
+    @patch("apps.billing.payment_service.PaymentService.confirm_payment")
+    def test_collection_does_not_count_success_when_fsm_transition_fails(self, mock_confirm_payment: MagicMock) -> None:
+        """A failed payment cannot transition to succeeded, so run metrics must not report a recovery."""
+        mock_confirm_payment.return_value = {"success": True, "status": "succeeded"}
+
+        customer = create_customer()
+        currency = create_currency()
+        invoice = create_invoice(customer=customer, currency=currency)
+        payment = create_payment(
+            PaymentCreationRequest(
+                customer=customer,
+                invoice=invoice,
+                currency=currency,
+                amount_cents=5000,
+                status="pending",
+            )
+        )
+        force_status(payment, "failed")
+        payment.gateway_txn_id = "pi_test_retry_failed"
+        payment.save(update_fields=["gateway_txn_id"])
+
+        policy = _make_retry_policy()
+        PaymentRetryAttempt.objects.create(
+            payment=payment,
+            policy=policy,
+            attempt_number=1,
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+            status="pending",
+        )
+
+        result = run_payment_collection()
+
+        run = PaymentCollectionRun.objects.get(id=result["run_id"])
+        self.assertEqual(run.total_successful, 0)
+        self.assertEqual(result["successful"], 0)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "failed")
+
+    @patch("apps.billing.payment_service.PaymentService.confirm_payment")
+    def test_collection_succeeds_for_pending_payment(self, mock_confirm_payment: MagicMock) -> None:
+        """A pending payment should transition to succeeded and count as a successful recovery."""
+        mock_confirm_payment.return_value = {"success": True, "status": "succeeded"}
+
+        customer = create_customer()
+        currency = create_currency()
+        invoice = create_invoice(customer=customer, currency=currency)
+        payment = create_payment(
+            PaymentCreationRequest(
+                customer=customer,
+                invoice=invoice,
+                currency=currency,
+                amount_cents=5000,
+                status="pending",
+            )
+        )
+        payment.gateway_txn_id = "pi_test_retry_pending"
+        payment.save(update_fields=["gateway_txn_id"])
+
+        policy = _make_retry_policy()
+        PaymentRetryAttempt.objects.create(
+            payment=payment,
+            policy=policy,
+            attempt_number=1,
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+            status="pending",
+        )
+
+        result = run_payment_collection()
+
+        run = PaymentCollectionRun.objects.get(id=result["run_id"])
+        self.assertEqual(run.total_successful, 1)
+        self.assertEqual(result["successful"], 1)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "succeeded")
+
     @patch("apps.billing.payment_models.PaymentCollectionRun.objects.create")
     def test_outer_exception_returns_error(self, mock_create: MagicMock) -> None:
         mock_create.side_effect = RuntimeError("DB error")

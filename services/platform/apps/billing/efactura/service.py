@@ -140,7 +140,7 @@ class EFacturaService:
                 validation = self._validate_xml(xml_content)
                 if not validation.is_valid:
                     error_dicts = [e.to_dict() for e in validation.errors]
-                    document.mark_rejected(error_dicts)
+                    document.mark_error(f"XML validation failed: {len(validation.errors)} errors")
                     document.save()
                     self._log_audit_event(invoice, document, "efactura_validation_failed")
                     return SubmissionResult.error(
@@ -208,9 +208,10 @@ class EFacturaService:
             response = self._client.get_upload_status(document.anaf_upload_index)
 
             if response.is_accepted:
-                document.mark_accepted(response.download_id, response.raw_response)
-                document.save()
-                document._update_invoice_on_acceptance()
+                with transaction.atomic():
+                    document.mark_accepted(response.download_id, response.raw_response)
+                    document.save()
+                    document._update_invoice_on_acceptance()
                 self._log_audit_event(document.invoice, document, "efactura_accepted")
                 self._record_webhook_event(document, "accepted", response.raw_response)
                 return StatusCheckResult(
@@ -220,8 +221,9 @@ class EFacturaService:
                 )
 
             elif response.is_rejected:
-                document.mark_rejected(response.errors, response.raw_response)
-                document.save()
+                with transaction.atomic():
+                    document.mark_rejected(response.errors, response.raw_response)
+                    document.save()
                 self._log_audit_event(document.invoice, document, "efactura_rejected")
                 self._record_webhook_event(document, "rejected", response.raw_response)
                 return StatusCheckResult(
@@ -283,11 +285,11 @@ class EFacturaService:
         if not document.can_retry:
             return SubmissionResult.error("Document cannot be retried (max retries exceeded or wrong status)")
 
-        # Use FSM transition to queue for resubmission
-        document.mark_queued()
-        document.save()
-
-        return self.submit_invoice(document.invoice, validate_first=True)
+        with transaction.atomic():
+            # Use FSM transition to queue for resubmission
+            document.mark_queued()
+            document.save()
+            return self.submit_invoice(document.invoice, validate_first=True)
 
     # --- Batch Operations ---
 

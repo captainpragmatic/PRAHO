@@ -113,14 +113,11 @@ def process_pending_orders() -> dict[str, Any]:
     }
 
     try:
-        # Prevent concurrent processing
+        # Prevent concurrent processing (atomic lock acquisition)
         lock_key = "process_pending_orders_lock"
-        if cache.get(lock_key):
+        if not cache.add(lock_key, True, 300):
             logger.info("⏭️ [OrderProcessor] Pending order processing already running, skipping")
             return {"success": True, "message": "Already running"}
-
-        # Set lock for 5 minutes
-        cache.set(lock_key, True, 300)
 
         try:
             # Get all pending orders
@@ -698,14 +695,11 @@ def process_recurring_orders() -> dict[str, Any]:
     }
 
     try:
-        # Prevent concurrent processing
+        # Prevent concurrent processing (atomic lock acquisition)
         lock_key = "process_recurring_orders_lock"
-        if cache.get(lock_key):
+        if not cache.add(lock_key, True, 1800):
             logger.info("⏭️ [RecurringOrders] Recurring order processing already running, skipping")
             return {"success": True, "message": "Already running"}
-
-        # Set lock for 30 minutes
-        cache.set(lock_key, True, 1800)
 
         try:
             # Check if Service model is available

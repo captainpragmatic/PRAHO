@@ -30,9 +30,6 @@ TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
         "failed",
         "refunded",
         "partially_refunded",
-        "disputed",
-        "cancelled",
-        "canceled",
     }
 )
 
@@ -90,7 +87,7 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     # Payment details
     status = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)
     payment_method = models.CharField(max_length=20, choices=METHOD_CHOICES, default="stripe")
-    amount_cents = models.BigIntegerField(validators=[MinValueValidator(1)], default=0)
+    amount_cents = models.BigIntegerField(validators=[MinValueValidator(0)], default=0)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
 
     # Gateway/external tracking
@@ -134,8 +131,8 @@ class Payment(ConcurrentTransitionMixin, models.Model):
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
-                condition=models.Q(amount_cents__gte=1),
-                name="payment_amount_positive",
+                condition=models.Q(amount_cents__gte=0),
+                name="payment_amount_non_negative",
             ),
             models.CheckConstraint(
                 condition=models.Q(status__in=["pending", "succeeded", "failed", "refunded", "partially_refunded"]),

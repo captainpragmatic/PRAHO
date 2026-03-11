@@ -88,20 +88,3 @@ class ProformaService:
         except Exception as e:
             logger.error(f"Failed to update proforma {proforma.number}: {e}")
             return Err(f"Failed to update proforma: {e}")
-
-    @staticmethod
-    def change_status(proforma: ProformaInvoice, new_status: str, user: User) -> Result[bool, str]:
-        """Change proforma status"""
-        try:
-            old_status = proforma.status
-            proforma.status = new_status  # fsm-bypass: KNOWN BUG (H6) — will crash on FSMField, method is dead code, fix in remediation plan
-            proforma.save()
-
-            logger.info(
-                f"📝 [Proforma] Changed status of {proforma.number} from {old_status} to {new_status} by user {user.email}"
-            )
-            return Ok(True)
-
-        except Exception as e:
-            logger.error(f"Failed to change proforma status: {e}")
-            return Err(f"Failed to change status: {e}")

@@ -5,6 +5,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    atomic = False
 
     dependencies = [
         ('billing', '0021_alter_payment_status_alter_refund_status_and_more'),
@@ -46,7 +47,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='payment',
-            constraint=models.CheckConstraint(condition=models.Q(('amount_cents__gte', 1)), name='payment_amount_positive'),
+            constraint=models.CheckConstraint(condition=models.Q(('amount_cents__gte', 0)), name='payment_amount_non_negative'),
         ),
         migrations.AddConstraint(
             model_name='payment',

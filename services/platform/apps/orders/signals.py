@@ -131,7 +131,7 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
             # Order becomes payable - create pending services (industry standard)
             _create_pending_services_for_order(order)
 
-        elif new_status == "processing" and old_status == "pending":
+        elif new_status == "processing" and old_status == "confirmed":
             # Payment received - generate invoice and update services to provisioning
             _trigger_invoice_generation(order)
             _update_services_to_provisioning(order)

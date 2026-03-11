@@ -13,7 +13,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.models import Currency
 from apps.common.decorators import staff_required_strict
@@ -245,6 +245,7 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
         reason = request.POST.get("reason", "Staff suspension")
         try:
             service.suspend(reason=reason)
+            service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
         except TransitionNotAllowed:
             messages.error(
                 request,
@@ -253,7 +254,12 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
                 ),
             )
             return redirect("provisioning:service_detail", pk=pk)
-        service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+        except ConcurrentTransition:
+            messages.error(
+                request,
+                _("❌ Service {domain} was modified concurrently. Please try again.").format(domain=service.domain),
+            )
+            return redirect("provisioning:service_detail", pk=pk)
 
         messages.success(request, _("⏸️ Service {domain} has been suspended!").format(domain=service.domain))
         return redirect("provisioning:service_detail", pk=pk)
@@ -276,6 +282,7 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         try:
             service.activate()
+            service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
         except TransitionNotAllowed:
             messages.error(
                 request,
@@ -284,7 +291,12 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
                 ),
             )
             return redirect("provisioning:service_detail", pk=pk)
-        service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
+        except ConcurrentTransition:
+            messages.error(
+                request,
+                _("❌ Service {domain} was modified concurrently. Please try again.").format(domain=service.domain),
+            )
+            return redirect("provisioning:service_detail", pk=pk)
 
         messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
         return redirect("provisioning:service_detail", pk=pk)

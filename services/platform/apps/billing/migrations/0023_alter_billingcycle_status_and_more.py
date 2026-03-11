@@ -5,6 +5,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    atomic = False
 
     dependencies = [
         ('billing', '0022_invoice_invoice_subtotal_non_negative_and_more'),

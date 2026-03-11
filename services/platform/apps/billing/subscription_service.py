@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import transaction
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.common.types import Err, Ok, Result
 
@@ -824,6 +825,13 @@ class RecurringBillingService:
                         f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"  # type: ignore[union-attr]
                     )
 
+            except TransitionNotAllowed:
+                msg = (
+                    f"Subscription {subscription.subscription_number} cannot transition "
+                    f"from status '{subscription.status}' during billing cycle"
+                )
+                logger.warning(f"⚠️ [BillingCycle] {msg}")
+                result["errors"].append(msg)
             except Exception as e:
                 logger.exception(f"Error processing subscription {subscription.id}: {e}")
                 result["errors"].append(f"Error for {subscription.subscription_number}: {e}")

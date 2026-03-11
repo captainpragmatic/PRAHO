@@ -232,7 +232,16 @@ class ServerWebhookView(View):
             except Service.DoesNotExist:
                 return False, f"Service {service_username} not found"
 
-            service.suspend(reason=suspension_reason)
+            try:
+                service.suspend(reason=suspension_reason)
+            except TransitionNotAllowed:
+                if service.status == "suspended":
+                    logger.info(f"✅ [Server Webhook] Service {service_username} already suspended (idempotent)")
+                else:
+                    logger.warning(
+                        f"⚠️ [Server Webhook] Cannot suspend service {service_username} from status '{service.status}'"
+                    )
+                    return False, f"Service {service_username} cannot transition from '{service.status}'"
             service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
 
             # Log security event
@@ -272,7 +281,16 @@ class ServerWebhookView(View):
             except Service.DoesNotExist:
                 return False, f"Service {service_username} not found"
 
-            service.activate()
+            try:
+                service.activate()
+            except TransitionNotAllowed:
+                if service.status == "active":
+                    logger.info(f"✅ [Server Webhook] Service {service_username} already active (idempotent)")
+                else:
+                    logger.warning(
+                        f"⚠️ [Server Webhook] Cannot activate service {service_username} from status '{service.status}'"
+                    )
+                    return False, f"Service {service_username} cannot transition from '{service.status}'"
             service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
 
             logger.info(f"▶️ [Server Webhook] Service activated: {service.service_name}")

@@ -774,49 +774,50 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("billing:invoice_detail", pk=existing_invoice.pk)
 
     if request.method == "POST":
-        # Get next invoice number
-        sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
-        invoice_number = sequence.get_next_number("INV")
+        with transaction.atomic():
+            # Get next invoice number
+            sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
+            invoice_number = sequence.get_next_number("INV")
 
-        # Create invoice from proforma (draft first, then issue via FSM)
-        invoice = Invoice.objects.create(
-            customer=proforma.customer,
-            number=invoice_number,
-            currency=proforma.currency,
-            subtotal_cents=proforma.subtotal_cents,
-            tax_cents=proforma.tax_cents,
-            total_cents=proforma.total_cents,
-            due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
-            # Copy billing address from proforma
-            bill_to_name=proforma.bill_to_name,
-            bill_to_tax_id=proforma.bill_to_tax_id,
-            bill_to_email=proforma.bill_to_email,
-            bill_to_address1=proforma.bill_to_address1,
-            bill_to_address2=proforma.bill_to_address2,
-            bill_to_city=proforma.bill_to_city,
-            bill_to_region=proforma.bill_to_region,
-            bill_to_postal=proforma.bill_to_postal,
-            bill_to_country=proforma.bill_to_country,
-            # Link back to proforma
-            converted_from_proforma=proforma,
-        )
-
-        # Copy line items
-        for proforma_line in proforma.lines.all():
-            InvoiceLine.objects.create(
-                invoice=invoice,
-                kind=proforma_line.kind,
-                service=proforma_line.service,
-                description=proforma_line.description,
-                quantity=proforma_line.quantity,
-                unit_price_cents=proforma_line.unit_price_cents,
-                tax_rate=proforma_line.tax_rate,
-                line_total_cents=proforma_line.line_total_cents,
+            # Create invoice from proforma (draft first, then issue via FSM)
+            invoice = Invoice.objects.create(
+                customer=proforma.customer,
+                number=invoice_number,
+                currency=proforma.currency,
+                subtotal_cents=proforma.subtotal_cents,
+                tax_cents=proforma.tax_cents,
+                total_cents=proforma.total_cents,
+                due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
+                # Copy billing address from proforma
+                bill_to_name=proforma.bill_to_name,
+                bill_to_tax_id=proforma.bill_to_tax_id,
+                bill_to_email=proforma.bill_to_email,
+                bill_to_address1=proforma.bill_to_address1,
+                bill_to_address2=proforma.bill_to_address2,
+                bill_to_city=proforma.bill_to_city,
+                bill_to_region=proforma.bill_to_region,
+                bill_to_postal=proforma.bill_to_postal,
+                bill_to_country=proforma.bill_to_country,
+                # Link back to proforma
+                converted_from_proforma=proforma,
             )
 
-        # Issue via FSM transition — sets issued_at and locked_at
-        invoice.issue()
-        invoice.save()
+            # Copy line items
+            for proforma_line in proforma.lines.all():
+                InvoiceLine.objects.create(
+                    invoice=invoice,
+                    kind=proforma_line.kind,
+                    service=proforma_line.service,
+                    description=proforma_line.description,
+                    quantity=proforma_line.quantity,
+                    unit_price_cents=proforma_line.unit_price_cents,
+                    tax_rate=proforma_line.tax_rate,
+                    line_total_cents=proforma_line.line_total_cents,
+                )
+
+            # Issue via FSM transition — sets issued_at and locked_at
+            invoice.issue()
+            invoice.save()
 
         messages.success(
             request,
@@ -1576,7 +1577,7 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         result = RefundService.refund_invoice(invoice.id, refund_data)
         if result.is_ok():
             refund_result = result.unwrap()
-            refund_id = getattr(refund_result, "refund_id", None)
+            refund_id = refund_result.get("refund_id")
             return JsonResponse({"success": True, "refund_id": str(refund_id)})
         return json_error(result.unwrap_err())
 
@@ -1958,7 +1959,7 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:
         if result.is_ok():
             refund_result = result.unwrap()
             logger.info(f"✅ API: Refund processed for payment {payment_id}")
-            refund_id = getattr(refund_result, "refund_id", None)
+            refund_id = refund_result.get("refund_id")
             return JsonResponse({"success": True, "refund_id": str(refund_id)})
         logger.warning(f"⚠️ API: Refund failed for payment {payment_id}: {result.unwrap_err()}")
         return JsonResponse({"success": False, "error": result.unwrap_err()}, status=400)

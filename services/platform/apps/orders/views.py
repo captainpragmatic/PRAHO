@@ -1563,7 +1563,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
         return redirect("dashboard")
 
     # Get current cart order (draft)
-    cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+    cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
     context = {
         "cart_order": cart_order,
@@ -1590,7 +1590,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
             return HttpResponse("No customer profile", status=400)
 
         # Get current cart order
-        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+        cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Empty cart", status=400)
@@ -1638,7 +1638,7 @@ def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+        cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)
@@ -1689,7 +1689,7 @@ def cart_remove(  # noqa: PLR0911  # Complexity: multi-step business logic
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+        cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)

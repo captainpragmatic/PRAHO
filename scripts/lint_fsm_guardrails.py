@@ -414,9 +414,11 @@ def check_dict_bypass(path: Path, lines: list[str], result: ScanResult) -> None:
             return
 
     for field_name in FSM_STATUS_FIELDS:
-        pattern = re.compile(rf"__dict__\[[\"']{field_name}[\"']\]")
+        dict_pattern = re.compile(rf"__dict__\[[\"']{field_name}[\"']\]")
+        vars_pattern = re.compile(rf"vars\([^)]*\)\[[\"']{field_name}[\"']\]")
+        dunder_setattr_pattern = re.compile(rf"__setattr__\([^,]+,\s*[\"']{field_name}[\"']")
         for i, line in enumerate(lines):
-            if pattern.search(line):
+            if dict_pattern.search(line) or vars_pattern.search(line) or dunder_setattr_pattern.search(line):
                 # Allow in refresh_from_db overrides (they pop/restore for FSM compat)
                 context = "\n".join(lines[max(0, i - 10) : i + 5])
                 if "refresh_from_db" in context:

@@ -15,7 +15,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.audit.services import AuditContext, DomainsAuditService
 from apps.common.request_ip import get_safe_client_ip
@@ -196,7 +196,11 @@ class RegistrarWebhookView(View):
             if nameservers and isinstance(nameservers, list):
                 domain.nameservers = nameservers
 
-            domain.save()
+            try:
+                domain.save()
+            except ConcurrentTransition:
+                logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during registration")
+                return False, f"Domain {domain.name} was modified concurrently"
 
             # Log audit event
             DomainsAuditService.log_domain_event(
@@ -268,7 +272,11 @@ class RegistrarWebhookView(View):
             if "epp_code" in webhook_data:
                 domain.set_encrypted_epp_code(webhook_data["epp_code"])
 
-            domain.save()
+            try:
+                domain.save()
+            except ConcurrentTransition:
+                logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during transfer")
+                return False, f"Domain {domain.name} was modified concurrently"
 
             # Log security event for domain transfer
             DomainsAuditService.log_domain_security_event(
@@ -318,7 +326,11 @@ class RegistrarWebhookView(View):
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot expire domain {domain.name} from status '{domain.status}'")
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to expired"
-            domain.save()
+            try:
+                domain.save()
+            except ConcurrentTransition:
+                logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during expiration")
+                return False, f"Domain {domain.name} was modified concurrently"
 
             # Log audit event
             DomainsAuditService.log_domain_event(
@@ -351,7 +363,11 @@ class RegistrarWebhookView(View):
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot suspend domain {domain.name} from status '{domain.status}'")
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to suspended"
-            domain.save()
+            try:
+                domain.save()
+            except ConcurrentTransition:
+                logger.warning(f"⚠️ [Webhook] Domain {domain.name} was modified concurrently during suspension")
+                return False, f"Domain {domain.name} was modified concurrently"
 
             # Log security event for suspension
             DomainsAuditService.log_domain_security_event(

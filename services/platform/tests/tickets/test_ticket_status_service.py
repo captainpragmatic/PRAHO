@@ -369,7 +369,7 @@ class TicketStatusServiceTest(TestCase):
         # Get choices from model
         choices = dict(Ticket.RESOLUTION_CHOICES)
 
-        for code, expected_display in expected_codes.items():
+        for code in expected_codes:
             self.assertIn(code, choices)
             # Note: The actual display might be translated, so we just check the key exists
 
@@ -392,3 +392,19 @@ class TicketStatusServiceTest(TestCase):
         # Invalid status should raise error at DB level (CHECK constraint)
         with self.assertRaises(Exception):
             Ticket.objects.filter(pk=ticket.pk).update(status='invalid_status')
+
+    def test_apply_fsm_transition_raises_value_error_on_invalid_transition(self):
+        """Invalid status routes should surface as ValueError for service callers."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Test Ticket',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com'
+        )
+        force_status(ticket, 'closed')
+
+        with self.assertRaises(ValueError):
+            TicketStatusService._apply_fsm_transition(ticket, 'in_progress')

@@ -11,6 +11,9 @@ Part of the defense-in-depth strategy from ADR-0034.
 
 from __future__ import annotations
 
+import inspect
+from unittest.mock import patch
+
 from django.test import TestCase
 from django.utils import timezone
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
@@ -19,13 +22,15 @@ from apps.billing.currency_models import Currency
 from apps.billing.efactura.models import EFacturaDocument
 from apps.billing.invoice_models import Invoice
 from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
-from apps.billing.payment_models import Payment
+from apps.billing.payment_models import TERMINAL_PAYMENT_STATUSES, Payment
 from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription
 from apps.customers.customer_models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 from apps.orders.models import Order, OrderItem
+from apps.orders.signals import _handle_order_status_change
+from apps.orders.tasks import process_pending_orders, process_recurring_orders
 from apps.products.models import Product
 from apps.promotions.models import PromotionCampaign
 from apps.provisioning.relationship_models import ServiceGroup
@@ -1729,3 +1734,189 @@ class SignalTransitionFailureSafetyTests(FSMTestMixin, TestCase):
 
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "refunded")
+
+
+# ===============================================================================
+# CODE REVIEW FIX TESTS (C1-C5, H1-H4, H6)
+# ===============================================================================
+
+
+class TestC1OrderStatusNotEnum(FSMTestMixin, TestCase):
+    """C1: Order uses STATUS_CHOICES tuple, not TextChoices enum — no Order.Status."""
+
+    def test_order_has_no_status_class(self) -> None:
+        """Order.Status does not exist — using it raises AttributeError."""
+        self.assertFalse(hasattr(Order, "Status"))
+
+    def test_draft_status_is_string_literal(self) -> None:
+        """Draft orders use the string 'draft', not Order.Status.DRAFT."""
+        customer = self._create_customer()
+        currency = Currency.objects.get(code="RON")
+        order = Order.objects.create(
+            customer=customer, currency=currency,
+            customer_email=customer.primary_email, customer_name=customer.name,
+        )
+        self.assertEqual(order.status, "draft")
+
+
+class TestC2SignalProcessingTrigger(FSMTestMixin, TestCase):
+    """C2: Order signal must check old_status=='confirmed' for processing trigger."""
+
+    def test_signal_checks_confirmed_not_pending(self) -> None:
+        """The signal handler must check old_status=='confirmed' for the processing transition."""
+        customer = self._create_customer()
+        currency = Currency.objects.get(code="RON")
+        order = Order.objects.create(
+            customer=customer, currency=currency,
+            customer_email=customer.primary_email, customer_name=customer.name,
+        )
+        force_status(order, "processing")
+
+        # Simulate the signal handler being called with confirmed→processing
+        with patch("apps.orders.signals._trigger_invoice_generation") as mock_invoice, \
+             patch("apps.orders.signals._update_services_to_provisioning"):
+            _handle_order_status_change(order, "confirmed", "processing")
+            mock_invoice.assert_called_once_with(order)
+
+    def test_signal_does_not_trigger_from_pending(self) -> None:
+        """pending→processing should NOT trigger invoice generation (FSM requires confirmed first)."""
+        customer = self._create_customer()
+        currency = Currency.objects.get(code="RON")
+        order = Order.objects.create(
+            customer=customer, currency=currency,
+            customer_email=customer.primary_email, customer_name=customer.name,
+        )
+        force_status(order, "processing")
+
+        with patch("apps.orders.signals._trigger_invoice_generation") as mock_invoice, \
+             patch("apps.orders.signals._update_services_to_provisioning"):
+            _handle_order_status_change(order, "pending", "processing")
+            mock_invoice.assert_not_called()
+
+
+class TestC3TypedDictGetattr(TestCase):
+    """C3: getattr() on TypedDict (dict at runtime) always returns None."""
+
+    def test_dict_get_returns_value(self) -> None:
+        """dict.get() works on TypedDict instances; getattr() does not."""
+        result: dict[str, str] = {"refund_id": "ref_123", "status": "ok"}
+        # getattr on a dict returns None (the bug)
+        self.assertIsNone(getattr(result, "refund_id", None))
+        # .get() returns the actual value (the fix)
+        self.assertEqual(result.get("refund_id"), "ref_123")
+
+
+class TestC4EFacturaMarkRejectedOnDraft(FSMTestMixin, TestCase):
+    """C4: mark_rejected() only works from 'processing', not 'draft'."""
+
+    def test_mark_rejected_fails_on_draft(self) -> None:
+        """Draft EFacturaDocument cannot use mark_rejected (source=processing only)."""
+        customer = self._create_customer()
+        currency = Currency.objects.get(code="RON")
+        invoice = Invoice.objects.create(
+            customer=customer,
+            currency=currency,
+            number="C4-TEST-001",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        doc = EFacturaDocument.objects.create(invoice=invoice, document_type="invoice")
+        self.assertEqual(doc.status, "draft")
+
+        with self.assertRaises(TransitionNotAllowed):
+            doc.mark_rejected([{"error": "test"}])
+
+    def test_mark_error_works_on_draft(self) -> None:
+        """Draft EFacturaDocument can use mark_error (source includes draft)."""
+        customer = self._create_customer()
+        currency = Currency.objects.get(code="RON")
+        invoice = Invoice.objects.create(
+            customer=customer,
+            currency=currency,
+            number="C4-TEST-002",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        doc = EFacturaDocument.objects.create(invoice=invoice, document_type="invoice")
+        doc.mark_error("XML validation failed: 3 errors")
+        doc.save()
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, "error")
+
+
+class TestC5WebhookIdempotency(FSMTestMixin, TestCase):
+    """C5: Provisioning webhooks must handle duplicate suspend/activate gracefully."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+        cls.server = Server.objects.create(
+            name="c5-server", hostname="c5.test.local", server_type="shared",
+            primary_ip="10.0.5.1", location="Test", datacenter="DC-C5",
+            cpu_model="Test CPU", cpu_cores=4, ram_gb=16,
+            disk_type="SSD", disk_capacity_gb=100,
+        )
+        cls.plan = ServicePlan.objects.create(
+            name="C5 Plan", plan_type="shared",
+            price_monthly=10, price_quarterly=25, price_annual=90,
+        )
+
+    def _make_service(self) -> Service:
+        return Service.objects.create(
+            customer=self.customer, server=self.server, service_plan=self.plan,
+            currency=self.currency, service_name="C5 Test Service",
+            username=f"c5test{Service.objects.count() + 1}", price=10,
+        )
+
+    def test_suspend_already_suspended_raises_without_handling(self) -> None:
+        """Calling suspend() on already-suspended service raises TransitionNotAllowed."""
+        service = self._make_service()
+        force_status(service, "suspended")
+
+        with self.assertRaises(TransitionNotAllowed):
+            service.suspend()
+
+    def test_activate_already_active_raises_without_handling(self) -> None:
+        """Calling activate() on already-active service raises TransitionNotAllowed."""
+        service = self._make_service()
+        force_status(service, "active")
+
+        with self.assertRaises(TransitionNotAllowed):
+            service.activate()
+
+
+class TestH1ConcurrentTransitionInViews(FSMTestMixin, TestCase):
+    """H1: ConcurrentTransition must be caught separately from TransitionNotAllowed."""
+
+    def test_concurrent_transition_is_not_transition_not_allowed(self) -> None:
+        """ConcurrentTransition is NOT a subclass of TransitionNotAllowed."""
+        self.assertFalse(issubclass(ConcurrentTransition, TransitionNotAllowed))
+
+
+class TestH4TerminalPaymentStatuses(TestCase):
+    """H4: TERMINAL_PAYMENT_STATUSES must only contain valid STATUS_CHOICES values."""
+
+    def test_terminal_statuses_are_valid(self) -> None:
+        """Every status in TERMINAL_PAYMENT_STATUSES must exist in Payment.STATUS_CHOICES."""
+        valid_statuses = {choice[0] for choice in Payment.STATUS_CHOICES}
+        invalid = TERMINAL_PAYMENT_STATUSES - valid_statuses
+        self.assertEqual(invalid, set(), f"Invalid statuses in TERMINAL_PAYMENT_STATUSES: {invalid}")
+
+
+class TestH6TaskLockAtomicity(TestCase):
+    """H6: Task locks must use cache.add() (atomic) not cache.get()+cache.set() (TOCTOU)."""
+
+    def test_pending_orders_uses_atomic_lock(self) -> None:
+        """process_pending_orders must use cache.add() for atomic lock acquisition."""
+        source = inspect.getsource(process_pending_orders)
+        self.assertIn("cache.add(", source, "Lock must use atomic cache.add(), not cache.get()")
+        self.assertNotIn("cache.get(lock_key)", source, "TOCTOU: cache.get() + cache.set() is racy")
+
+    def test_recurring_orders_uses_atomic_lock(self) -> None:
+        """process_recurring_orders must use cache.add() for atomic lock acquisition."""
+        source = inspect.getsource(process_recurring_orders)
+        self.assertIn("cache.add(", source, "Lock must use atomic cache.add(), not cache.get()")
+        self.assertNotIn("cache.get(lock_key)", source, "TOCTOU: cache.get() + cache.set() is racy")

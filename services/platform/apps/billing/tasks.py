@@ -830,15 +830,18 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
                     success = confirm_result.get("success", False) and confirm_result.get("status") == "succeeded"
 
                 if success:
-                    retry.status = "success"
-                    successful += 1
-                    total_recovered_cents += retry.payment.amount_cents
-
                     # Update payment status via FSM transition
                     try:
                         retry.payment.succeed()
                         retry.payment.save(update_fields=["status", "updated_at"])
+                        retry.status = "success"
+                        retry.failure_reason = ""
+                        successful += 1
+                        total_recovered_cents += retry.payment.amount_cents
                     except TransitionNotAllowed:
+                        retry.status = "failed"
+                        retry.failure_reason = f"Payment cannot transition to succeeded from {retry.payment.status}"
+                        failed += 1
                         logger.warning(
                             f"⚠️ [Collection] Payment {retry.payment_id} cannot transition to succeeded "
                             f"from {retry.payment.status}"

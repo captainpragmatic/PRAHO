@@ -50,7 +50,9 @@ class ProvisioningService:
                     service.complete_provisioning()
                 else:
                     service.activate()
-                service.save(update_fields=["status", "activated_at", "updated_at"])
+                service.save(
+                    update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"]
+                )
 
                 AuditService.log_simple_event(
                     event_type="service_activated",

@@ -795,7 +795,7 @@ class OrderItem(models.Model):
             self.service.complete_provisioning()
             self.service.save(update_fields=["status", "activated_at"])
 
-        self.save()
+        self.save(update_fields=["provisioning_status", "provisioned_at", "service", "updated_at"])
 
 
 class OrderStatusHistory(models.Model):

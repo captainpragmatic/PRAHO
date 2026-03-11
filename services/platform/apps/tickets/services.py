@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 
 from django.db.models import QuerySet
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.users.models import User
 
@@ -265,7 +266,10 @@ class TicketStatusService:
         transition_method_name = _TICKET_TRANSITION_MAP.get(new_status)
         if transition_method_name is None:
             raise ValueError(f"No FSM transition mapped for target status: {new_status}")
-        getattr(ticket, transition_method_name)()
+        try:
+            getattr(ticket, transition_method_name)()
+        except TransitionNotAllowed as exc:
+            raise ValueError(f"Cannot transition ticket from '{ticket.status}' to '{new_status}'") from exc
 
     @classmethod
     def get_allowed_transitions(cls, current_status: str) -> list[str]:
