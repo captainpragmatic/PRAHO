@@ -10,6 +10,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+from django.db import transaction
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 from django_q.tasks import async_task
@@ -406,28 +407,32 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             is_valid = vies.is_valid
             status = "valid" if vies.is_valid else "invalid"
         else:
-            # VIES down — accept format-only
+            # VIES down — record format-only result but do NOT grant reverse charge
             source = "format_check"
-            is_valid = True
+            is_valid = False  # Format passed but VIES not confirmed — not valid for reverse charge
             status = "format_only"
-            logger.warning("[VAT] VIES unavailable for %s, accepting format-only", fmt.full_vat_number)
+            logger.warning(
+                "[VAT] VIES unavailable for %s, format-only recorded (not eligible for reverse charge)",
+                fmt.full_vat_number,
+            )
 
-        # Step 4: Store results
-        _store_validation(
-            country_code,
-            vat_digits,
-            fmt.full_vat_number,
-            is_valid=is_valid,
-            source=source,
-            company_name=vies.company_name,
-            company_address=vies.company_address,
-            response_data=vies.raw_response,
-        )
-        _update_tax_profile_vies(
-            tax_profile,
-            status=status,
-            company_name=vies.company_name if vies.api_available else "",
-        )
+        # Step 4: Store results — atomic to keep VATValidation + TaxProfile in sync
+        with transaction.atomic():
+            _store_validation(
+                country_code,
+                vat_digits,
+                fmt.full_vat_number,
+                is_valid=is_valid,
+                source=source,
+                company_name=vies.company_name,
+                company_address=vies.company_address,
+                response_data=vies.raw_response,
+            )
+            _update_tax_profile_vies(
+                tax_profile,
+                status=status,
+                company_name=vies.company_name if vies.api_available else "",
+            )
 
         logger.info("[VAT] Validated %s: %s (source=%s)", fmt.full_vat_number, status, source)
 
@@ -499,7 +504,14 @@ def _update_tax_profile_vies(
     status: str,
     company_name: str = "",
 ) -> None:
-    """Update CustomerTaxProfile VIES verification fields."""
+    """Update CustomerTaxProfile VIES verification fields.
+
+    Status values and their effect on reverse_charge_eligible:
+      - "valid": VIES confirmed → eligible = True
+      - "invalid": VIES rejected → eligible = False
+      - "format_only": VIES unavailable, format passed → eligible = False (no VIES proof)
+      - any other: unknown → eligible = False (fail-closed)
+    """
     tax_profile.vies_verification_status = status
     tax_profile.vies_verified_name = company_name
     update_fields = ["vies_verification_status", "vies_verified_name", "updated_at"]
@@ -507,7 +519,8 @@ def _update_tax_profile_vies(
         tax_profile.vies_verified_at = timezone.now()
         tax_profile.reverse_charge_eligible = True
         update_fields.extend(["vies_verified_at", "reverse_charge_eligible"])
-    elif status == "invalid":
+    else:
+        # All non-"valid" statuses revoke reverse charge eligibility (fail-closed)
         tax_profile.reverse_charge_eligible = False
         update_fields.append("reverse_charge_eligible")
     tax_profile.save(update_fields=update_fields)
@@ -1053,12 +1066,13 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
         .values_list("vat_number", "country_code")[:100]
     )
 
-    queued = 0
-    for vat_number, _country_code in expired:
-        # Find the tax profile that owns this VAT number
-        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+    from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
-        profile = CustomerTaxProfile.objects.filter(vat_number__icontains=vat_number).first()
+    queued = 0
+    for vat_number, country_code in expired:
+        # Find the tax profile with exact VAT number match (not icontains which can match wrong profile)
+        full_vat = f"{country_code}{vat_number}"
+        profile = CustomerTaxProfile.objects.filter(vat_number=full_vat).first()
         if profile:
             async_task("apps.billing.tasks.validate_vat_number", str(profile.id))
             queued += 1

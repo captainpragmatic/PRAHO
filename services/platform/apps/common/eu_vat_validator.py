@@ -68,14 +68,17 @@ class VATFormatResult:
     error_message: str = ""
 
 
-def parse_vat_number(raw: str) -> tuple[str, str]:
+def parse_vat_number(raw: str, *, default_country: str = "RO") -> tuple[str, str]:
     """Extract country code and VAT body from a raw VAT number string.
 
     Args:
         raw: Raw VAT number (e.g., "RO12345678", "DE123456789", "12345678").
+        default_country: Country code to use when no prefix is found.
+            Callers should pass the customer's known country when available
+            to avoid misclassifying non-RO VATs as Romanian.
 
     Returns:
-        Tuple of (country_code, vat_body). Defaults to "RO" if no prefix found.
+        Tuple of (country_code, vat_body).
     """
     cleaned = re.sub(r"[\s\-.]", "", raw.strip()).upper()
 
@@ -83,8 +86,8 @@ def parse_vat_number(raw: str) -> tuple[str, str]:
     if match:
         return match.group(1), match.group(2)
 
-    # No country prefix — assume Romanian
-    return "RO", cleaned
+    # No country prefix — use caller-provided default
+    return default_country.upper(), cleaned
 
 
 def is_eu_country(country_code: str) -> bool:

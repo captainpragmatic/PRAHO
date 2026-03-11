@@ -202,6 +202,7 @@ class VATValidation(models.Model):
         max_length=20,
         choices=[
             ("vies", _("VIES API")),
+            ("format_check", _("Format Check Only")),
             ("manual", _("Manual Override")),
             ("cached", _("Previous Validation")),
         ],
