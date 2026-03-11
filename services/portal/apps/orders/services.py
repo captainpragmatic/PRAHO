@@ -37,7 +37,7 @@ class HMACPriceSealer:
             from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
 
             raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set for price seal verification")
-        return secret_key
+        return str(secret_key)
 
     @staticmethod
     def seal_price_data(price_data: dict[str, Any], client_ip: str = "127.0.0.1") -> dict[str, Any]:

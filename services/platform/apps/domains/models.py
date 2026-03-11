@@ -10,7 +10,7 @@ from django.db import models
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django_fsm import FSMField, transition
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
 
@@ -282,7 +282,7 @@ class TLDRegistrarAssignment(models.Model):
 # ===============================================================================
 
 
-class Domain(models.Model):
+class Domain(ConcurrentTransitionMixin, models.Model):
     """
     🌍 Complete domain lifecycle management
 

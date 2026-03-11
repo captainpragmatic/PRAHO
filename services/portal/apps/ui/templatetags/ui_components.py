@@ -4,16 +4,22 @@ PRAHO PLATFORM - UI Components Template Tags
 HTMX-powered reusable components for Romanian hosting provider interface
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django import template
 from django.forms import CheckboxInput, Select, Textarea
 from django.template.base import FilterExpression
 from django.template.base import token_kwargs as django_token_kwargs
-from django.utils.html import format_html, mark_safe  # For XSS prevention
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe  # For XSS prevention
 from django.utils.translation import gettext_lazy as _
+
+if TYPE_CHECKING:
+    from django.utils.functional import _StrPromise
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 
@@ -142,7 +148,7 @@ class DataTableConfig:
 
     sortable: bool = True
     searchable: bool = True
-    pagination: bool = True
+    pagination: bool | Any = True  # Can be bool or a Django Paginator object at runtime
     actions: list[dict[str, Any]] | None = None
     css_class: str = ""
     empty_message: str = "No data available."
@@ -640,6 +646,7 @@ class PageHeaderNode(template.Node):
         resolved: dict[str, Any] = {k: v.resolve(context) for k, v in self.kwargs.items()}
         actions_html = self.nodelist_actions.render(context)
 
+        assert context.template is not None, "page_header tag requires a template context"
         t = context.template.engine.get_template("components/page_header.html")
         with context.update(
             {
@@ -693,6 +700,7 @@ class SectionCardNode(template.Node):
         resolved: dict[str, Any] = {k: v.resolve(context) for k, v in self.kwargs.items()}
         content_html = self.nodelist_content.render(context)
 
+        assert context.template is not None, "section_card tag requires a template context"
         t = context.template.engine.get_template("components/section_card.html")
         with context.update(
             {
@@ -795,7 +803,7 @@ def empty_state(  # noqa: PLR0913
 # ===============================================================================
 
 # ⚡ O(1) lookup — human-readable labels for statuses that don't title-case well
-_STATUS_LABEL_MAP: dict[str, str] = {
+_STATUS_LABEL_MAP: dict[str, str | _StrPromise] = {
     "waiting_on_customer": _("Waiting on You"),
     "in_progress": _("In Progress"),
     "not_consented": _("Not Consented"),

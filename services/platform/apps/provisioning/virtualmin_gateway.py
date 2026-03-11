@@ -24,6 +24,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, safe_request
@@ -1095,7 +1096,7 @@ class VirtualminGateway:
         bandwidth_info = {"bandwidth_usage_mb": 0, "bandwidth_quota_mb": None}
 
         try:
-            current_date = datetime.now()
+            current_date = timezone.now()
             start_date = current_date.replace(day=1).strftime("%Y-%m-%d")
             end_date = current_date.strftime("%Y-%m-%d")
 

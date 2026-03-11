@@ -17,11 +17,11 @@ Issue #96 documented a concrete bypass: `confirm_order` does direct `order.statu
 | OrderItem (provisioning_status) | orders | 5 | No |
 | Invoice | billing | 6 | No |
 | ProformaInvoice | billing | 4 | No |
-| Payment | billing | 5 | No |
+| Payment | billing | 5 | Yes |
 | Refund | billing | 7 | No |
 | Subscription | billing | 7 | No |
 | Service | provisioning | 7 | Yes |
-| Domain | domains | 7 | No |
+| Domain | domains | 7 | Yes |
 | Ticket | tickets | 4 | No |
 
 ### Bypass vectors identified
@@ -66,7 +66,7 @@ Adopt **django-fsm-2** v4.x with `FSMField(protected=True)` on all 10 models, co
 - Illegal state transitions fail loudly at runtime
 - Transition rules are declarative and discoverable on the model class
 - Audit trail is automatic via `post_transition` signal
-- Race conditions handled by `ConcurrentTransitionMixin` on Order and Service
+- Race conditions handled by `ConcurrentTransitionMixin` on Order, Service, Payment, and Domain
 
 ### Negative
 - Test setup must use `force_status()` or `Model.objects.create(status="xxx")` instead of direct assignment
@@ -97,6 +97,21 @@ def update_order_status(self, order, new_status):
         return Ok(order)
     except TransitionNotAllowed:
         return Err(f"Invalid transition: {order.status} -> {new_status}")
+```
+
+### Private transitions (Subscription pattern)
+Some models use private `_method()` transition methods (prefixed with underscore) for internal-only state changes that should not be callable from outside the service layer. For example, `Subscription._cancel_now()` vs the public `cancel()` which schedules cancellation at period end.
+
+### Exception handling — ConcurrentTransition
+`ConcurrentTransitionMixin` raises `ConcurrentTransition` (a separate exception, NOT a subclass of `TransitionNotAllowed`) when the state field was modified between fetch and save. All handlers must catch both:
+```python
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
+
+try:
+    order.confirm()
+    order.save(update_fields=["status", "updated_at"])
+except (TransitionNotAllowed, ConcurrentTransition):
+    return Err("Transition failed — invalid state or concurrent modification")
 ```
 
 ### Test setup

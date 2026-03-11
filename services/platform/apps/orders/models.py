@@ -779,7 +779,13 @@ class OrderItem(models.Model):
         """Retry failed provisioning."""
 
     def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
-        """Mark this item as successfully provisioned and activate the service"""
+        """Mark this item as successfully provisioned and activate the service.
+
+        The item's ``provisioning_status`` must be ``"in_progress"`` before
+        calling this method (``complete_provisioning()`` requires that source).
+        Callers are responsible for calling ``start_provisioning()`` first when
+        the item is still in ``"pending"`` state.
+        """
         self.complete_provisioning()  # FSM transition sets provisioned_at
         if service:
             self.service = service

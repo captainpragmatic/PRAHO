@@ -941,7 +941,7 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         )
         return json_success("Refund processed successfully")
     else:
-        return json_error(result.error)
+        return json_error(result.unwrap_err())
 
 
 @login_required

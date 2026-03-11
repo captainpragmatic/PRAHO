@@ -40,6 +40,7 @@ from apps.provisioning.virtualmin_signals import (
 )
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer, VirtualminProvisioningJob
 from apps.users.models import User, CustomerMembership
+from tests.helpers.fsm_helpers import force_status
 
 
 class BillingProvisioningIntegrationTest(TestCase):
@@ -284,7 +285,7 @@ class DomainsProvisioningIntegrationTest(TestCase):
         self.virtualmin_account.save()
 
         # Set domain to suspended in DB first (so pre_save captures old_status="suspended")
-        Domain.objects.filter(pk=self.domain.pk).update(status="suspended")
+        force_status(self.domain, "suspended")
         self.domain.refresh_from_db()
 
         # Change domain status back to active via FSM — post_save signal triggers sync

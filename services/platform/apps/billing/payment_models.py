@@ -5,6 +5,7 @@ Payment tracking, credit ledger functionality, and retry policies.
 
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta
@@ -15,9 +16,11 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django_fsm import FSMField, transition
+from django_fsm import ConcurrentTransitionMixin, FSMField, TransitionNotAllowed, transition
 
 from .currency_models import Currency
+
+logger = logging.getLogger(__name__)
 
 # All statuses from which a payment MUST NOT transition.
 # Includes "cancelled"/"canceled" for safety (Stripe uses "canceled", some legacy code uses "cancelled").
@@ -56,7 +59,7 @@ _GATEWAY_TRANSITION_MAP: dict[str, str] = {
 # ===============================================================================
 
 
-class Payment(models.Model):
+class Payment(ConcurrentTransitionMixin, models.Model):
     """
     Enhanced payment tracking aligned with PostgreSQL schema.
     Updated to support multiple payment methods and gateway responses.
@@ -194,7 +197,19 @@ class Payment(models.Model):
     # =========================================================================
 
     def update_from_stripe_payment_intent(self, payment_intent: dict[str, Any]) -> None:
-        """Update payment from Stripe PaymentIntent data"""
+        """Update payment from Stripe PaymentIntent data.
+
+        This method mutates ``self.meta`` and may call an FSM transition (e.g.
+        ``succeed()`` or ``fail_payment()``).  It does **not** call
+        ``self.save()`` — the caller is responsible for persisting the changes,
+        e.g.::
+
+            payment.update_from_stripe_payment_intent(pi)
+            payment.save(update_fields=["status", "meta", "updated_at"])
+
+        Prefer :meth:`apply_gateway_event` for webhook handlers — it handles
+        idempotency, terminal-state guards, and persistence internally.
+        """
         if self.payment_method != "stripe":
             return
 
@@ -228,15 +243,32 @@ class Payment(models.Model):
 
         Must be called on a row locked with select_for_update() inside
         transaction.atomic(). Returns True if status changed, False if
-        already in terminal state (idempotent no-op).
+        already in terminal state or if the transition is not allowed
+        from the current state (idempotent no-op).
         """
         if self.status in TERMINAL_PAYMENT_STATUSES:
             return False
 
-        method_name = _GATEWAY_TRANSITION_MAP.get(new_status)
+        # State-aware routing: a partially_refunded payment completing a full
+        # refund must use complete_refund() (source: partially_refunded), not
+        # refund_payment() which requires source: succeeded.
+        if new_status == "refunded" and self.status == "partially_refunded":
+            method_name = "complete_refund"
+        else:
+            method_name = _GATEWAY_TRANSITION_MAP.get(new_status)
+
         if method_name:
             transition_fn = getattr(self, method_name)
-            transition_fn()
+            try:
+                transition_fn()
+            except TransitionNotAllowed:
+                logger.warning(
+                    "⚠️ [Payment] Transition to '%s' not allowed from '%s' for payment %s",
+                    new_status,
+                    self.status,
+                    self.pk,
+                )
+                return False
 
         if meta_update:
             self.meta = {**(self.meta or {}), **meta_update}

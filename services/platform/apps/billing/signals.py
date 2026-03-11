@@ -664,7 +664,7 @@ def handle_proforma_invoice_conversion(
                             invoice.orders.set(instance.orders.all())
 
                     else:
-                        logger.error(f"🔥 [Proforma] Conversion failed: {result.error}")
+                        logger.error(f"🔥 [Proforma] Conversion failed: {result.unwrap_err()}")
 
                 except Exception as e:
                     logger.exception(f"🔥 [Proforma] Auto-conversion failed: {e}")

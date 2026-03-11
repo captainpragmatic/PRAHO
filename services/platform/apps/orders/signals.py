@@ -7,6 +7,7 @@ import contextlib
 import logging
 from typing import Any
 
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
@@ -59,15 +60,19 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
         OrdersAuditService.log_order_event(event_data)
 
         if created:
-            # Order created - send welcome email
-            _send_order_confirmation_email(instance)
+            # Wrap in on_commit so email is not sent if the enclosing transaction
+            # rolls back (e.g. atomic block that saves the Order then fails later).
+            transaction.on_commit(lambda: _send_order_confirmation_email(instance))
             logger.info(f"✅ [Order] Created {instance.order_number} for {instance.customer}")
 
         else:
             # Order updated - check for status changes
             old_status = old_values.get("status")
             if old_status and old_status != instance.status:
-                _handle_order_status_change(instance, old_status, instance.status)
+                # Capture loop variables to avoid late-binding closure issues.
+                _old = old_status
+                _new = instance.status
+                transaction.on_commit(lambda: _handle_order_status_change(instance, _old, _new))
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Failed to handle order save: {e}")

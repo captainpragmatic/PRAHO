@@ -310,9 +310,9 @@ class SubscriptionService:
                 # Handle trial period
                 trial_days = data.get("trial_days", 0)
                 if trial_days > 0:
-                    subscription.start_trial(trial_days, user)
+                    subscription.start_trial(trial_days, user)  # fsm-bypass: start_trial() calls self.save() internally
                 else:
-                    subscription.activate(user)
+                    subscription.activate(user)  # fsm-bypass: activate() calls self.save() internally
 
                 log_security_event(
                     event_type="subscription_created",

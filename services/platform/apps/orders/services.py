@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import IntegrityError, NotSupportedError, models, transaction
 from django.utils import timezone
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.models import Currency
 from apps.common.types import EmailAddress, Err, Ok, Result
@@ -526,6 +526,14 @@ class OrderService:
             try:
                 getattr(order, method_name)()
                 order.save()
+            except ConcurrentTransition:
+                logger.warning(
+                    "⚠️ [OrderService] Concurrent transition on order %s from %s to %s — retriable",
+                    order.order_number,
+                    old_status,
+                    status_data.new_status,
+                )
+                return Err(f"Concurrent modification on order {order.order_number} — please retry")
             except TransitionNotAllowed:
                 return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
 

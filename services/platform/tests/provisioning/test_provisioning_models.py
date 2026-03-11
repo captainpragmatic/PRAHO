@@ -28,6 +28,7 @@ from apps.provisioning.models import (
     ServiceGroup,
     ServiceGroupMember,
 )
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -483,9 +484,8 @@ class ServiceModelTestCase(TestCase):
 
     def test_suspend_method(self):
         """Test suspend method updates status and timestamps"""
-        # Service starts as 'pending'; use DB update to put it in 'active' state for test
-        from apps.provisioning.models import Service  # noqa: PLC0415
-        Service.objects.filter(pk=self.service.pk).update(status='active')
+        # Service starts as 'pending'; use force_status to put it in 'active' state for test
+        force_status(self.service, 'active')
         self.service.refresh_from_db()
 
         reason = "Payment overdue"
@@ -500,8 +500,7 @@ class ServiceModelTestCase(TestCase):
     def test_activate_method_first_time(self):
         """Test activate method for first-time activation"""
         # Service starts as 'pending'; put it in 'failed' state so activate() is valid
-        from apps.provisioning.models import Service  # noqa: PLC0415
-        Service.objects.filter(pk=self.service.pk).update(status='failed')
+        force_status(self.service, 'failed')
         self.service.refresh_from_db()
 
         self.service.activate()
@@ -515,10 +514,11 @@ class ServiceModelTestCase(TestCase):
 
     def test_activate_method_reactivation(self):
         """Test activate method for reactivation after suspension"""
-        from apps.provisioning.models import Service  # noqa: PLC0415
         # Put service in 'active' state first, then suspend via FSM
         original_activation = timezone.now() - timezone.timedelta(days=10)
-        Service.objects.filter(pk=self.service.pk).update(status='active', activated_at=original_activation)
+        force_status(self.service, 'active')
+        from apps.provisioning.models import Service  # noqa: PLC0415
+        Service.objects.filter(pk=self.service.pk).update(activated_at=original_activation)
         self.service.refresh_from_db()
 
         self.service.suspend("Test suspension")

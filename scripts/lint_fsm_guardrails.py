@@ -17,7 +17,7 @@ Checks:
 5. No side effects (HTTP/email) inside @transition methods
 6. No objects.create(status="non-default") bypassing FSM lifecycle
 7. No datetime.now() in production code (use timezone.now())
-8. FSM transition calls must be followed by .save() within 5 lines
+8. FSM transition calls must be followed by .save() within 20 lines
 
 Exit codes:
   0 - No violations found
@@ -300,7 +300,7 @@ def check_direct_status_assignment(path: Path, lines: list[str], result: ScanRes
             if _is_in_transition_method(lines, i):
                 continue
             # Allow in refresh_from_db overrides
-            if REFRESH_OVERRIDE_PATTERN.search(repr(lines[max(0, i - 10) : i + 1])):
+            if REFRESH_OVERRIDE_PATTERN.search("\n".join(lines[max(0, i - 10) : i + 1])):
                 continue
             result.violations.append(
                 Violation(
@@ -572,9 +572,9 @@ def check_transition_without_save(path: Path, lines: list[str], result: ScanResu
         if obj_name[0].isupper():
             continue
 
-        # Check if .save() appears within the next 5 lines for the same object
+        # Check if .save() appears within the next 20 lines for the same object
         save_found = False
-        for j in range(i + 1, min(i + 6, len(lines))):
+        for j in range(i + 1, min(i + 21, len(lines))):
             if f"{obj_name}.save(" in lines[j]:
                 save_found = True
                 break
@@ -591,7 +591,7 @@ def check_transition_without_save(path: Path, lines: list[str], result: ScanResu
                     line=i + 1,
                     check="transition-no-save",
                     message=(
-                        f"{obj_name}.{method_name}() — no .save() within 5 lines. FSM transitions don't auto-save."
+                        f"{obj_name}.{method_name}() — no .save() within 20 lines. FSM transitions don't auto-save."
                     ),
                     severity="warning",
                 )

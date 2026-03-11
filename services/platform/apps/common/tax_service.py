@@ -32,6 +32,14 @@ class VATScenario(Enum):
     CUSTOM_RATE_OVERRIDE = "custom_rate_override"  # Per-customer rate override
 
 
+class VATResult(TypedDict):
+    """Result of a simple VAT calculation via TaxConfiguration.calculate_vat()."""
+
+    vat_cents: int
+    total_cents: int
+    vat_rate_percent: Decimal
+
+
 class CustomerVATInfo(TypedDict, total=False):
     """Customer VAT information for calculation.
 
@@ -235,7 +243,7 @@ class TaxConfiguration:
     @classmethod
     def calculate_vat(
         cls, amount_cents: int, country_code: str = "RO", is_business: bool = False, vat_number: str | None = None
-    ) -> dict[str, int]:
+    ) -> VATResult:
         """
         Calculate VAT for an amount using proper rounding.
 
@@ -246,7 +254,7 @@ class TaxConfiguration:
             vat_number: VAT number for reverse charge checking
 
         Returns:
-            Dict with vat_cents and total_cents
+            VATResult with vat_cents, total_cents, and vat_rate_percent
         """
         country_code = country_code.upper().strip() if country_code else "RO"
 
@@ -254,11 +262,11 @@ class TaxConfiguration:
         # and is in an EU country other than Romania (provider's home country)
         if is_business and vat_number and cls.is_eu_country(country_code) and country_code != "RO":
             logger.info(f"💰 [TaxService] EU B2B reverse charge: {country_code} VAT {vat_number} → 0% VAT")
-            return {
-                "vat_cents": 0,
-                "total_cents": amount_cents,
-                "vat_rate_percent": Decimal("0.0"),  # type: ignore[dict-item]
-            }
+            return VATResult(
+                vat_cents=0,
+                total_cents=amount_cents,
+                vat_rate_percent=Decimal("0.0"),
+            )
 
         # Get VAT rate as decimal (e.g., 0.21 for 21%)
         vat_rate = cls.get_vat_rate(country_code, as_decimal=True)
@@ -267,7 +275,7 @@ class TaxConfiguration:
         vat_amount = Decimal(amount_cents) * vat_rate
         vat_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
 
-        return {"vat_cents": vat_cents, "total_cents": amount_cents + vat_cents, "vat_rate_percent": vat_rate * 100}  # type: ignore[dict-item]
+        return VATResult(vat_cents=vat_cents, total_cents=amount_cents + vat_cents, vat_rate_percent=vat_rate * 100)
 
     @classmethod
     def invalidate_cache(cls, country_code: str | None = None) -> None:
@@ -277,10 +285,22 @@ class TaxConfiguration:
             cache.delete(cache_key)
             logger.info(f"🔄 [TaxService] Invalidated cache for {country_code}")
         else:
-            # Clear all known tax rate caches by iterating DEFAULT_VAT_RATES keys.
+            # Build union of DEFAULT_VAT_RATES keys and all country codes stored in
+            # TaxRule rows (non-EU countries such as US, GB, CH are only in the DB).
             # NOTE: cache.keys() with wildcards is NOT supported by Django's
             # DatabaseCache backend — only Redis/Memcached support it.
-            keys = [f"{cls.CACHE_KEY_PREFIX}:{cc}" for cc in cls.DEFAULT_VAT_RATES]
+            country_codes: set[str] = set(cls.DEFAULT_VAT_RATES.keys())
+            try:
+                from apps.billing.tax_models import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    TaxRule,  # Circular: cross-app  # Deferred: avoids circular import
+                )
+
+                db_codes = TaxRule.objects.values_list("country_code", flat=True).distinct()
+                country_codes.update(db_codes)
+            except Exception as e:
+                logger.debug(f"Could not fetch TaxRule country codes for cache invalidation: {e}")
+
+            keys = [f"{cls.CACHE_KEY_PREFIX}:{cc}" for cc in country_codes]
             cache.delete_many(keys)
             logger.info("🔄 [TaxService] Invalidated all tax rate caches")
 

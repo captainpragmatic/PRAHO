@@ -16,7 +16,9 @@ from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
 from apps.billing.currency_models import Currency
+from apps.billing.efactura.models import EFacturaDocument
 from apps.billing.invoice_models import Invoice
+from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
 from apps.billing.payment_models import Payment
 from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.refund_models import Refund
@@ -25,12 +27,10 @@ from apps.customers.customer_models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
-from apps.provisioning.service_models import Server, Service, ServicePlan
-from apps.tickets.models import Ticket
-from apps.billing.efactura.models import EFacturaDocument
-from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
 from apps.promotions.models import PromotionCampaign
 from apps.provisioning.relationship_models import ServiceGroup
+from apps.provisioning.service_models import Server, Service, ServicePlan
+from apps.tickets.models import Ticket
 from tests.helpers.fsm_helpers import force_status
 
 
