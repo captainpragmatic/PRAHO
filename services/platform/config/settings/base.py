@@ -58,6 +58,7 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE: list[str] = [
     "apps.common.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "apps.common.middleware.CSPNonceMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -88,6 +89,7 @@ TEMPLATES = [
                 "apps.common.context_processors.current_customer",
                 "apps.common.context_processors.romanian_business_context",
                 "apps.common.context_processors.navigation_dropdowns",
+                "apps.common.context_processors.csp_nonce",
             ],
         },
     },

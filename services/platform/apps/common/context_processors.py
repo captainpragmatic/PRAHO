@@ -227,6 +227,15 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
     return {}
 
 
+def csp_nonce(request: HttpRequest) -> dict[str, str]:
+    """CSP nonce for inline scripts/styles.
+
+    Usage in templates: <script nonce="{{ csp_nonce }}">...</script>
+    Requires CSPNonceMiddleware to be active.
+    """
+    return {"csp_nonce": getattr(request, "csp_nonce", "")}
+
+
 def gdpr_compliance(request: HttpRequest) -> dict[str, Any]:
     """GDPR compliance context"""
     # Check if session exists (for test environments)

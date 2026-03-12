@@ -135,6 +135,7 @@ MIDDLEWARE = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
     "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "apps.common.middleware.CSPNonceMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",

@@ -379,27 +379,35 @@ class Order(ConcurrentTransitionMixin, models.Model):
             return qs.values_list("order_number", flat=True).first()
 
     def generate_order_number(self) -> None:
-        """Generate a unique order number based on date and sequence.
+        """Generate a unique order number via OrderNumberingService.
 
-        Uses MAX(order_number) with select_for_update to reduce TOCTOU races.
-        The retry in save() handles the remaining edge case where two processes
-        read the same MAX simultaneously.  SQLite does not support FOR UPDATE,
-        so the lock is skipped via _locked_latest_order_number fallback.
+        Delegates to OrderNumberingService for per-customer sequential numbering
+        (ORD-{YYYY}-{customer_id[:8]}-{seq:04d}), ensuring a single canonical
+        format across both model and service code paths.
+
+        Falls back to date-based global numbering only if customer is None
+        (shouldn't happen in normal flow — orders always have a customer).
         """
         if not self.order_number:
-            date_part = timezone.now().strftime("%Y%m%d")
-            prefix = f"ORD-{date_part}-"
-            qs = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number")
-            latest = self._locked_latest_order_number(qs)
-            if latest:
-                try:
-                    last_seq = int(latest.split("-")[-1])
-                    next_seq = last_seq + 1
-                except (ValueError, IndexError):
-                    next_seq = 1
+            if self.customer:
+                from .services import OrderNumberingService
+
+                self.order_number = OrderNumberingService.generate_order_number(self.customer)
             else:
-                next_seq = 1
-            self.order_number = f"{prefix}{next_seq:06d}"
+                # Fallback: no customer (shouldn't happen in production)
+                date_part = timezone.now().strftime("%Y%m%d")
+                prefix = f"ORD-{date_part}-"
+                qs = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number")
+                latest = self._locked_latest_order_number(qs)
+                if latest:
+                    try:
+                        last_seq = int(latest.split("-")[-1])
+                        next_seq = last_seq + 1
+                    except (ValueError, IndexError):
+                        next_seq = 1
+                else:
+                    next_seq = 1
+                self.order_number = f"{prefix}{next_seq:06d}"
 
     def _regenerate_order_number_sequence(self) -> None:
         """Regenerate just the sequence part of an existing order number.
