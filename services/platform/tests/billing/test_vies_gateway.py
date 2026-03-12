@@ -74,10 +74,12 @@ class TestVIESGateway(SimpleTestCase):
     @patch("apps.billing.gateways.vies_gateway.cache")
     @patch("apps.billing.gateways.vies_gateway.safe_request")
     def test_cache_hit_skips_api_call(self, mock_request, mock_cache):
-        cached = VIESResponse(
-            is_valid=True, country_code="FR", vat_number="12345678901",
-            company_name="Cached Co", api_available=True,
-        )
+        cached = {
+            "is_valid": True, "country_code": "FR", "vat_number": "12345678901",
+            "company_name": "Cached Co", "api_available": True,
+            "company_address": "", "request_date": "", "error_message": "",
+            "raw_response": {},
+        }
         mock_cache.get.return_value = cached
 
         result = VIESGateway.check_vat("FR", "12345678901")
