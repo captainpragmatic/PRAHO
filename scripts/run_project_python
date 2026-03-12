@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${UV_PROJECT_ENVIRONMENT:-}" && -x "${UV_PROJECT_ENVIRONMENT}/bin/python" ]]; then
+  exec "${UV_PROJECT_ENVIRONMENT}/bin/python" "$@"
+fi
+
+if [[ -x ".venv-darwin/bin/python" ]]; then
+  exec ".venv-darwin/bin/python" "$@"
+fi
+
+if [[ -x ".venv-linux/bin/python" ]]; then
+  exec ".venv-linux/bin/python" "$@"
+fi
+
+if [[ -x ".venv/bin/python" ]]; then
+  exec ".venv/bin/python" "$@"
+fi
+
+exec python3 "$@"

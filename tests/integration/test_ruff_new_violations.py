@@ -85,7 +85,7 @@ def test_collect_python_candidates_returns_effective_baseline(monkeypatch):
         return ["a.py", "a.py", "notes.txt", "services/platform/b.py"], "HEAD~1"
 
     monkeypatch.setattr(module, "resolve_changed_files_for_baseline", fake_resolve)
-    candidates, effective_baseline = module.collect_python_candidates(
+    candidates, effective_baseline, baseline_path_map = module.collect_python_candidates(
         explicit_paths=[],
         staged=False,
         since=None,
@@ -95,6 +95,7 @@ def test_collect_python_candidates_returns_effective_baseline(monkeypatch):
 
     assert candidates == ["services/platform/b.py"]
     assert effective_baseline == "HEAD~1"
+    assert baseline_path_map == {"services/platform/b.py": "services/platform/b.py"}
 
 
 def test_build_baseline_tree_skips_when_effective_baseline_is_none(tmp_path):
@@ -103,5 +104,6 @@ def test_build_baseline_tree_skips_when_effective_baseline_is_none(tmp_path):
         files=["a.py"],
         baseline_ref=None,
         baseline_root=tmp_path / "baseline",
+        baseline_paths={"a.py": "a.py"},
     )
     assert baseline_files == []

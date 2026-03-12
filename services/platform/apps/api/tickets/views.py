@@ -319,7 +319,7 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
         if not validated_data.get("contact_person"):
             validated_data["contact_person"] = customer.name
 
-        ticket = Ticket.objects.create(customer=customer, source="api", status="open", **validated_data)
+        ticket = Ticket.objects.create(customer=customer, source="api", **validated_data)
 
         # Return created ticket details
         # Reload with the same prefetching to keep payload limited and efficient

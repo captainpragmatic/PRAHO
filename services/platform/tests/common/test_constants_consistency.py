@@ -9,7 +9,7 @@ Verifies:
 2. Billing term defaults match between constants.py and SettingsService
 3. Page size consistent between constants.py and REST_FRAMEWORK
 4. Dead constants stay removed
-5. calculate_romanian_vat() reads from TaxService (not hardcoded)
+5. VAT breakdown helper reads from TaxService (not hardcoded)
 6. Context processor reads VAT rate from TaxService
 """
 
@@ -116,26 +116,26 @@ class DeadConstantsTest(TestCase):
 
 
 class CalculateRomanianVATTaxServiceTest(TestCase):
-    """Verify calculate_romanian_vat() reads from TaxService, not a constant."""
+    """Verify VAT breakdown helper reads from TaxService defaults."""
 
     def setUp(self) -> None:
         cache.clear()
 
     def test_uses_current_tax_service_rate(self) -> None:
         """calculate_romanian_vat() returns the rate from TaxService defaults."""
-        from apps.common.types import calculate_romanian_vat
+        from apps.common.tax_service import calculate_romanian_vat  # noqa: PLC0415
 
-        result = calculate_romanian_vat(10000, include_vat=False)
+        result = calculate_romanian_vat(Decimal("100.00"))
 
-        # With default TaxService rate of 21%, VAT on 10000 should be 2100
-        self.assertEqual(result["vat_amount"], 2100)
-        self.assertAlmostEqual(result["vat_rate"], 0.21)
+        # With default TaxService rate of 21%, VAT included in 100.00 is 17.36
+        self.assertEqual(result["vat_rate"], 21)
+        self.assertEqual(result["amount_with_vat"], Decimal("100"))
+        self.assertEqual(result["vat_amount"], Decimal("17.36"))
 
     def test_responds_to_db_rate_change(self) -> None:
         """When TaxRule changes the rate, calculate_romanian_vat() reflects it."""
-        from apps.billing.tax_models import TaxRule
-        from apps.common.tax_service import TaxService
-        from apps.common.types import calculate_romanian_vat
+        from apps.billing.tax_models import TaxRule  # noqa: PLC0415
+        from apps.common.tax_service import TaxService, calculate_romanian_vat  # noqa: PLC0415
 
         # Seed a TaxRule with 25% rate
         TaxRule.objects.create(
@@ -148,11 +148,10 @@ class CalculateRomanianVATTaxServiceTest(TestCase):
         )
         TaxService.invalidate_cache("RO")
 
-        result = calculate_romanian_vat(10000, include_vat=False)
+        result = calculate_romanian_vat(Decimal("100.00"))
 
-        # With 25% rate, VAT on 10000 should be 2500
-        self.assertEqual(result["vat_amount"], 2500)
-        self.assertAlmostEqual(result["vat_rate"], 0.25)
+        self.assertEqual(result["vat_rate"], 25)
+        self.assertEqual(result["amount_with_vat"], Decimal("100"))
 
 
 class ContextProcessorVATTest(TestCase):
@@ -163,9 +162,9 @@ class ContextProcessorVATTest(TestCase):
 
     def test_vat_rate_from_tax_service_default(self) -> None:
         """Context processor returns 21 (int) from TaxService defaults."""
-        from django.test import RequestFactory
+        from django.test import RequestFactory  # noqa: PLC0415
 
-        from apps.common.context_processors import romanian_business_context
+        from apps.common.context_processors import romanian_business_context  # noqa: PLC0415
 
         request = RequestFactory().get("/")
         context = romanian_business_context(request)
@@ -174,11 +173,11 @@ class ContextProcessorVATTest(TestCase):
 
     def test_vat_rate_responds_to_db_change(self) -> None:
         """Context processor reflects TaxRule changes."""
-        from django.test import RequestFactory
+        from django.test import RequestFactory  # noqa: PLC0415
 
-        from apps.billing.tax_models import TaxRule
-        from apps.common.context_processors import romanian_business_context
-        from apps.common.tax_service import TaxService
+        from apps.billing.tax_models import TaxRule  # noqa: PLC0415
+        from apps.common.context_processors import romanian_business_context  # noqa: PLC0415
+        from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         TaxRule.objects.create(
             country_code="RO",

@@ -46,7 +46,7 @@
                 </h3>
 
                 <div class="flex flex-wrap items-center gap-2 text-sm text-slate-400 mb-3">
-                  {% badge item.product_type|title variant="secondary" size="sm" %}
+                  {% if item.product_type %}{% badge item.product_type|title variant="secondary" size="sm" %}{% endif %}
                   {% badge item.billing_period|title variant="primary" size="sm" %}
 
                   {% if item.domain_name %}
@@ -88,13 +88,14 @@
                   <select id="qty-{{ forloop.counter0 }}"
                           name="quantity"
                           hx-post="{% url 'orders:update_cart_item' %}"
-                          hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}'
+                          hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}'
                           hx-target="#cart-totals"
                           hx-swap="outerHTML"
                           hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                           hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));"
+                          hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')"
                           class="bg-slate-700 text-white rounded px-2 py-1 text-sm border border-slate-600 focus:border-blue-500 focus:outline-none">
-                    {% for i in "12345678910"|make_list %}
+                    {% for i in "xxxxxxxxxx"|make_list %}
                     <option value="{{ forloop.counter }}" {% if item.quantity == forloop.counter %}selected{% endif %}>
                       {{ forloop.counter }}
                     </option>
@@ -103,15 +104,7 @@
                 </div>
 
                 <!-- Remove Button -->
-                <button hx-post="{% url 'orders:remove_from_cart' %}"
-                        hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}'
-                        hx-target="#cart-item-{{ forloop.counter0 }}"
-                        hx-swap="outerHTML swap:1s"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated')); htmx.ajax('POST', '{% url 'orders:calculate_totals' %}', {target: '#cart-totals', swap: 'outerHTML'});"
-                        hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}"
-                        class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700"
-                        aria-label="{% trans 'Remove from cart' %}">
+                <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-item-{{ forloop.counter0 }}" hx-swap="outerHTML swap:1s" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
                   <span>{% icon "x" size="sm" css_class="text-slate-400" %}</span>
                   <span class="ml-1 text-sm hidden sm:inline">{% trans "Remove" %}</span>
                 </button>
@@ -149,12 +142,7 @@
       <div class="bg-slate-800 rounded-lg border border-slate-700 sticky top-8">
 
         <!-- Calculate Totals -->
-        <div id="cart-totals"
-             hx-post="{% url 'orders:calculate_totals' %}"
-             hx-trigger="load"
-             hx-target="this"
-             hx-swap="outerHTML"
-             hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+        <div id="cart-totals" hx-post="{% url 'orders:calculate_totals' %}" hx-trigger="load" hx-target="this" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#cart-totals-spinner" hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
 
           <!-- Loading State -->
           <div class="p-6">

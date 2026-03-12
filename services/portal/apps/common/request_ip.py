@@ -39,7 +39,7 @@ def get_safe_client_ip(request: HttpRequest) -> str:
     # Cloudflare: only trust CF-Connecting-IP when CF-Ray header is also present.
     # CF-Ray is always set by Cloudflare — its absence means the request is not CF-proxied.
     if request.META.get("HTTP_CF_RAY") and trusted_proxies and _is_trusted_proxy(remote_addr, trusted_proxies):
-        cf_ip = request.META.get("HTTP_CF_CONNECTING_IP", "").strip()
+        cf_ip = str(request.META.get("HTTP_CF_CONNECTING_IP", "")).strip()
         if cf_ip and _is_valid_ip(cf_ip):
             return cf_ip
 
@@ -58,7 +58,7 @@ def get_safe_client_ip(request: HttpRequest) -> str:
                 candidates = [ip.strip() for ip in raw.split(",")]
                 for candidate in reversed(candidates):
                     if candidate and _is_valid_ip(candidate) and not _is_trusted_proxy(candidate, trusted_proxies):
-                        return candidate
+                        return str(candidate)
 
     # No matching proxy header found, or proxy not trusted — fall back to direct IP.
     return remote_addr

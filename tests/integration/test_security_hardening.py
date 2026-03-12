@@ -446,7 +446,7 @@ class TestPortalIsolation:
         """Portal requirements must not include any database driver (no direct DB access)."""
         portal_req = PORTAL_DIR / "requirements.txt"
         if not portal_req.exists():
-            pytest.skip("Portal requirements.txt not found")
+            pytest.skip("Portal requirements.txt not found (TODO: update test path if build layout changes)")
 
         lines = portal_req.read_text().splitlines()
         for line in lines:

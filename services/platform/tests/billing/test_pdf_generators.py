@@ -7,6 +7,7 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -20,6 +21,7 @@ from apps.billing.pdf_generators import (
     RomanianProformaPDFGenerator,
 )
 from apps.customers.models import Customer
+from tests.helpers.fsm_helpers import force_status
 
 
 class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
@@ -27,7 +29,7 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -235,7 +237,7 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -335,9 +337,9 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
 
     def test_render_status_information_paid(self):
         """Test _render_status_information for paid invoice"""
-        self.invoice.status = 'paid'
+        force_status(self.invoice, "paid", save=False)
         self.invoice.paid_at = timezone.now()
-        self.invoice.save()
+        self.invoice.save(update_fields=["status", "paid_at"])
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
@@ -346,9 +348,8 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
 
     def test_render_status_information_paid_without_date(self):
         """Test _render_status_information for paid invoice without paid_at date"""
-        self.invoice.status = 'paid'
+        force_status(self.invoice, "paid")
         # Don't set paid_at to test the hasattr condition
-        self.invoice.save()
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
@@ -388,7 +389,7 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -487,7 +488,7 @@ class PDFGenerationErrorHandlingTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -584,7 +585,7 @@ class PDFContentValidationTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -701,7 +702,7 @@ class PDFGenerationPerformanceTestCase(TestCase):
 
     def setUp(self):
         """Setup test data"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -779,7 +780,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
 
     def setUp(self):
         """Setup test data for edge cases"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -815,8 +816,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
 
     def test_paid_invoice_without_paid_at_attribute(self):
         """Test paid invoice status without paid_at attribute"""
-        self.invoice.status = 'paid'
-        self.invoice.save()
+        force_status(self.invoice, "paid")
 
         # This tests the hasattr condition in the code
         generator = RomanianInvoicePDFGenerator(self.invoice)
@@ -867,23 +867,41 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
         self.assertIsInstance(response, HttpResponse)
         self.assertGreater(len(response.content), 0)
 
-    def test_negative_amount_invoice(self):
-        """Test PDF generation for credit note (negative amounts)"""
-        credit_invoice = Invoice.objects.create(
+    def test_minimal_amount_invoice(self):
+        """Test PDF generation for invoice with minimal (1 cent) amounts"""
+        minimal_invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
-            number='CN-001',  # Credit Note
-            subtotal_cents=-5000,
-            tax_cents=-1050,
-            total_cents=-6050,
+            number='CN-001',
+            subtotal_cents=1,
+            tax_cents=0,
+            total_cents=1,
             status='issued'
         )
 
-        generator = RomanianInvoicePDFGenerator(credit_invoice)
+        generator = RomanianInvoicePDFGenerator(minimal_invoice)
         response = generator.generate_response()
 
         self.assertIsInstance(response, HttpResponse)
         self.assertGreater(len(response.content), 0)
+
+    def test_negative_amount_invoice_rejected_by_constraint(self):
+        """Test that negative financial amounts are rejected by DB CHECK constraint.
+
+        Credit notes with negative amounts would violate the non-negative CHECK
+        constraints (invoice_subtotal_non_negative, etc.). This test verifies
+        the constraint works as expected.
+        """
+        with self.assertRaises(IntegrityError):
+            Invoice.objects.create(
+                customer=self.customer,
+                currency=self.currency,
+                number='CN-NEG-001',
+                subtotal_cents=-5000,
+                tax_cents=-1050,
+                total_cents=-6050,
+                status='draft',
+            )
 
     def test_invoice_lines_with_zero_quantity(self):
         """Test invoice with zero quantity line items"""
@@ -967,7 +985,7 @@ class PDFGeneratorMockingTestCase(TestCase):
 
     def setUp(self):
         """Setup test data for mocking tests"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -1075,7 +1093,7 @@ class PDFGeneratorIntegrationTestCase(TestCase):
 
     def setUp(self):
         """Setup realistic test scenario"""
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',

@@ -174,7 +174,10 @@ def get_authenticated_customer(request: HttpRequest) -> tuple[Customer | None, R
     if error_response or request_data is None:
         return None, error_response or _uniform_error_response()
 
-    customer_id = request_data["customer_id"]
+    customer_id = request_data.get("customer_id")
+    if customer_id is None:
+        logger.warning("🚨 [API Security] Missing customer_id in HMAC context body")
+        return None, _uniform_error_response("Invalid request format", 400)
     action = request_data.get("action", "api_access")
     body_user_id = request_data.get("user_id")
 

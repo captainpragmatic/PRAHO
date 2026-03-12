@@ -10,7 +10,22 @@ from django.contrib.sessions.backends.cache import SessionStore
 from django.utils import timezone
 from unittest.mock import patch, Mock
 
-from apps.orders.services import GDPRCompliantCartSession, CartRateLimiter
+from apps.orders.services import GDPRCompliantCartSession
+
+
+def _make_mock_platform_api(requires_domain: bool = False) -> Mock:
+    """Return a PlatformAPIClient mock whose .get() returns a generic product."""
+    mock_instance = Mock()
+    mock_instance.get.return_value = {
+        "id": "generic-product",
+        "slug": "generic-product",
+        "name": "Generic Product",
+        "product_type": "hosting",
+        "requires_domain": requires_domain,
+        "is_active": True,
+    }
+    mock_cls = Mock(return_value=mock_instance)
+    return mock_cls
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -18,9 +33,19 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
     """Test the GDPR-compliant cart session implementation"""
 
     def setUp(self):
-        """Set up test session"""
+        """Set up test session with PlatformAPIClient mocked (no real API call)."""
         self.session = SessionStore()
         self.session.create()
+        # Mock Platform API so add_item() doesn't hit the real server.
+        # Use requires_domain=False so tests that don't supply domain_name still work.
+        self._platform_patcher = patch(
+            "apps.orders.services.PlatformAPIClient",
+            _make_mock_platform_api(requires_domain=False),
+        )
+        self._platform_patcher.start()
+
+    def tearDown(self):
+        self._platform_patcher.stop()
 
     def test_create_empty_cart(self):
         """Test creating an empty cart with proper structure"""
@@ -161,8 +186,8 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
         for item in cart_data['items']:
             # These fields should NOT contain PII
             allowed_fields = [
-                'item_id', 'product_slug', 'product_name', 'quantity',
-                'billing_period', 'domain_name', 'config', 'added_at'
+                'item_id', 'product_slug', 'product_name', 'product_type',
+                'quantity', 'billing_period', 'domain_name', 'config', 'added_at'
             ]
             for field in item.keys():
                 self.assertIn(field, allowed_fields,
@@ -187,66 +212,3 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
         self.assertEqual(len(cart2.get_items()), 1)
         self.assertEqual(cart1.get_items()[0]['product_slug'], 'product1')
         self.assertEqual(cart2.get_items()[0]['product_slug'], 'product2')
-
-
-class TestCartRateLimiter(SimpleTestCase):
-    """Test rate limiting functionality"""
-
-    def test_rate_limit_allows_normal_usage(self):
-        """Test that normal usage is allowed"""
-        session_key = 'test_session_123'
-
-        # Should allow normal operations
-        for i in range(20):  # Well under limit of 30
-            self.assertTrue(CartRateLimiter.check_rate_limit(session_key))
-
-    def test_rate_limit_blocks_abuse(self):
-        """Test that rate limiting blocks abuse"""
-        session_key = 'test_session_abuse'
-
-        # Exhaust the rate limit
-        for i in range(30):
-            self.assertTrue(CartRateLimiter.check_rate_limit(session_key))
-
-        # Next request should be blocked
-        self.assertFalse(CartRateLimiter.check_rate_limit(session_key))
-
-    def test_rate_limit_handles_missing_session(self):
-        """Test rate limiting with missing session key"""
-        # Should allow operations with no session key
-        self.assertTrue(CartRateLimiter.check_rate_limit(None))
-        self.assertTrue(CartRateLimiter.check_rate_limit(''))
-
-    def test_record_operation_increments_counter(self):
-        """Test that recording operations increments the counter"""
-        session_key = 'test_session_record'
-
-        # Record several operations
-        for i in range(10):
-            CartRateLimiter.record_operation(session_key)
-
-        # Should have used up 10 of the 30 allowed operations
-        remaining_checks = 0
-        for i in range(25):  # Try 25 more (total would be 35)
-            if CartRateLimiter.check_rate_limit(session_key):
-                remaining_checks += 1
-            else:
-                break
-
-        # Should allow exactly 20 more operations (30 - 10 recorded)
-        self.assertEqual(remaining_checks, 20)
-
-    def test_rate_limit_session_isolation(self):
-        """Test that rate limits are isolated per session"""
-        session1 = 'test_session_1'
-        session2 = 'test_session_2'
-
-        # Exhaust rate limit for session1
-        for i in range(30):
-            self.assertTrue(CartRateLimiter.check_rate_limit(session1))
-
-        # session1 should be blocked
-        self.assertFalse(CartRateLimiter.check_rate_limit(session1))
-
-        # session2 should still be allowed
-        self.assertTrue(CartRateLimiter.check_rate_limit(session2))

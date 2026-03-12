@@ -21,7 +21,7 @@ class CustomerAnalyticsTestCase(TestCase):
     """Test update_customer_analytics with real database queries."""
 
     def setUp(self):
-        self.currency = Currency.objects.create(code="RON", symbol="L", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Analytics Test Co",
             customer_type="company",

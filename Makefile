@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit check-types pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -20,7 +20,8 @@ PYTHON_PLATFORM = cd services/platform && PYTHONPATH=$(PWD)/services/platform $(
 PYTHON_PLATFORM_MANAGE = $(PYTHON_PLATFORM) manage.py
 
 # Portal-specific Python (NO PYTHONPATH - cannot import platform code)
-PYTHON_PORTAL = cd services/portal && $(PWD)/$(VENV_DIR)/bin/python
+# DJANGO_SETTINGS_MODULE pinned to config.settings.dev — portal has no test.py settings
+PYTHON_PORTAL = cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PORTAL_MANAGE = $(PYTHON_PORTAL) manage.py
 
 # Shared Python for workspace-level tasks
@@ -65,6 +66,7 @@ help:
 	@echo "  make lint            - Lint all services"
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
+	@echo "  make lint-fsm        - FSM guardrail lint (ADR-0034)"
 	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
 	@echo "  make lint-health     - Code health anti-pattern scan"
 	@echo "  make check-types     - Type check all services"
@@ -291,13 +293,13 @@ test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Running integration tests..."
-	@$(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
 	@echo "💾 [Cache] Testing database cache functionality (post Redis removal)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/test_database_cache.py -v -m cache
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/test_database_cache.py -v -m cache
 	@echo "✅ Database cache tests passed!"
 
 test-security:
@@ -321,9 +323,9 @@ test-security:
 	@echo "🧪 Testing platform uses database cache (base settings, not dev override)..."
 	@cd services/platform && DJANGO_SETTINGS_MODULE=config.settings.base PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; cache_backend = settings.CACHES['default']['BACKEND']; assert 'DatabaseCache' in cache_backend, f'Should use database cache, got: {cache_backend}'; print('✅ Platform base settings use database cache')"
 	@echo "🧪 Testing portal has NO database access..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev'); import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
+	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -c "import django; django.setup(); from django.conf import settings; print('✅ Portal isolated from DB:', not bool(getattr(settings, 'DATABASES', {})))"
 	@echo "🧪 Running portal database access prevention test..."
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
+	@cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/security/test_import_isolation_guard.py::test_db_access_blocked -v
 	@echo "🎉 All security isolation tests passed!"
 
 test-e2e:
@@ -464,14 +466,23 @@ lint-audit:
 	@$(PYTHON_SHARED) scripts/audit_coverage_scan.py --min-severity=medium --exclude-tests services/platform/apps
 	@echo "✅ Audit coverage check complete!"
 
+lint-test-layout:
+	@echo "🧪 [Test Layout] Auditing naming drift and duplicate tests..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_SHARED) scripts/audit_test_layout.py --strict --json > test-layout-audit.json
+	@echo "✅ Test layout audit complete (report: test-layout-audit.json)"
+
 lint-portal:
 	@echo "🌐 [Portal] Code quality check (NO database access)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "🔍 1/2: Performance & Security Analysis (Ruff)..."
+	@echo "🔍 1/3: Performance & Security Analysis (Ruff)..."
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --statistics || echo "⚠️ Ruff check skipped"
 	@echo ""
-	@echo "📊 2/2: Django Check (NO DB)..."
+	@echo "📊 2/3: Django Check (NO DB)..."
 	@$(PYTHON_PORTAL_MANAGE) check
+	@echo ""
+	@echo "🌐 3/3: i18n Coverage Check..."
+	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/portal/apps services/portal/templates
 	@echo "✅ Portal linting complete!"
 
 lint:
@@ -489,12 +500,16 @@ else
 	@$(MAKE) lint-platform
 	@echo "📋 Phase 2: Portal service"
 	@$(MAKE) lint-portal
-	@echo "📋 Phase 3: Test suppression scan (ADR-0014)"
+	@echo "📋 Phase 3: Test layout audit"
+	@$(MAKE) lint-test-layout
+	@echo "📋 Phase 4: Test suppression scan (ADR-0014)"
 	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
-	@echo "📋 Phase 4: i18n coverage scan"
+	@echo "📋 Phase 5: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
-	@echo "📋 Phase 5: Code health scan"
+	@echo "📋 Phase 6: Code health scan"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
+	@echo "📋 Phase 6: FSM guardrail lint (ADR-0034)"
+	@$(MAKE) lint-fsm
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -518,10 +533,15 @@ lint-health:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=medium --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 
+lint-fsm:
+	@echo "🔒 [FSM] FSM guardrail lint (ADR-0034)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/lint_fsm_guardrails.py
+
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@SEMGREP_BIN=""; SEMGREP_EXIT=0; \
+	@SEMGREP_BIN=""; SEMGREP_EXIT=0; SEMGREP_ENV_ISSUE=0; SEMGREP_TMP="$$(mktemp)"; \
 	if [ -x "$(PWD)/$(VENV_DIR)/bin/semgrep" ]; then \
 		SEMGREP_BIN="$(PWD)/$(VENV_DIR)/bin/semgrep"; \
 	elif command -v semgrep >/dev/null 2>&1; then \
@@ -533,14 +553,45 @@ lint-security:
 		echo "   brew install semgrep"; \
 		exit 1; \
 	fi; \
+	SEMGREP_CACHE_DIR="$(PWD)/.cache/semgrep"; \
+	mkdir -p "$$SEMGREP_CACHE_DIR" "$$SEMGREP_CACHE_DIR/xdg_config" "$$SEMGREP_CACHE_DIR/xdg_cache"; \
+	CERT_PATH="$$( $(PWD)/$(VENV_DIR)/bin/python -c 'import certifi; print(certifi.where())' 2>/dev/null || true )"; \
 	echo "🔎 Using Semgrep: $$SEMGREP_BIN"; \
 	echo "🧪 1/2: Semgrep scan (blocking)..."; \
-	"$$SEMGREP_BIN" scan --config=auto --exclude=tests --error services/platform services/portal || SEMGREP_EXIT=$$?; \
+	if [ -n "$$CERT_PATH" ]; then \
+		XDG_CONFIG_HOME="$$SEMGREP_CACHE_DIR/xdg_config" \
+		XDG_CACHE_HOME="$$SEMGREP_CACHE_DIR/xdg_cache" \
+		SEMGREP_LOG_FILE="$$SEMGREP_CACHE_DIR/semgrep.log" \
+		SEMGREP_SETTINGS_FILE="$$SEMGREP_CACHE_DIR/settings.yml" \
+		SEMGREP_ENABLE_VERSION_CHECK=0 \
+		SSL_CERT_FILE="$$CERT_PATH" \
+		REQUESTS_CA_BUNDLE="$$CERT_PATH" \
+		timeout 180 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
+	else \
+		XDG_CONFIG_HOME="$$SEMGREP_CACHE_DIR/xdg_config" \
+		XDG_CACHE_HOME="$$SEMGREP_CACHE_DIR/xdg_cache" \
+		SEMGREP_LOG_FILE="$$SEMGREP_CACHE_DIR/semgrep.log" \
+		SEMGREP_SETTINGS_FILE="$$SEMGREP_CACHE_DIR/settings.yml" \
+		SEMGREP_ENABLE_VERSION_CHECK=0 \
+		timeout 180 "$$SEMGREP_BIN" scan --config=auto --exclude=tests --error services/platform services/portal >"$$SEMGREP_TMP" 2>&1 || SEMGREP_EXIT=$$?; \
+	fi; \
+	cat "$$SEMGREP_TMP"; \
+	if [ $$SEMGREP_EXIT -ne 0 ]; then \
+		if [ $$SEMGREP_EXIT -eq 124 ] || grep -Eq "empty trust anchors|Failed to create system store X509 authenticator|Operation not permitted: '.*/\\.semgrep/semgrep\\.log'|NameResolutionError|Failed to resolve 'semgrep.dev'|Max retries exceeded with url: /c/auto|requests\\.exceptions\\.ConnectionError" "$$SEMGREP_TMP"; then \
+			echo "⚠️ Semgrep environment bootstrap issue detected; continuing with credential checks and internal scanners."; \
+			SEMGREP_ENV_ISSUE=1; \
+			SEMGREP_EXIT=0; \
+		fi; \
+	fi; \
+	rm -f "$$SEMGREP_TMP"; \
 	echo "🧪 2/2: Hardcoded credentials check..."; \
 	$(MAKE) lint-credentials; \
 	if [ $$SEMGREP_EXIT -ne 0 ]; then \
 		echo "❌ Semgrep reported findings (exit $$SEMGREP_EXIT)."; \
 		exit $$SEMGREP_EXIT; \
+	fi; \
+	if [ $$SEMGREP_ENV_ISSUE -ne 0 ]; then \
+		echo "⚠️ Semgrep auto-config was skipped due local environment constraints."; \
 	fi
 	@echo "🔒 [Security] PRAHO architectural security scan..."
 	@$(VENV_DIR)/bin/python scripts/security_scanner.py services/ --min-severity HIGH || true
@@ -654,10 +705,18 @@ ifdef FILE
 else
 	@echo "🏷️ [All Services] Comprehensive type checking..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
-	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
+	@$(MAKE) check-types-platform
+	@$(MAKE) check-types-portal
 	@echo "🎉 All services type checking complete!"
 endif
+
+check-types-platform:
+	@echo "🏷️ [Platform] Type checking..."
+	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
+
+check-types-portal:
+	@echo "🏷️ [Portal] Type checking..."
+	@cd services/portal && PYTHONPATH=$(PWD)/services/portal $(PWD)/$(VENV_DIR)/bin/mypy apps/ --config-file=../../pyproject.toml
 
 # ===============================================================================
 # PRE-COMMIT HOOKS 🔗

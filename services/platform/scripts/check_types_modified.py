@@ -48,7 +48,7 @@ def get_modified_python_files(staged_only: bool = False, since: str | None = Non
         else:
             cmd = ["git", "diff", "--name-only", "HEAD"]
 
-        result = subprocess.run(  # noqa: S603  # Safe: shell=False
+        result = subprocess.run(  # Safe: shell=False
             cmd, capture_output=True, text=True, check=True
         )  # Safe: shell=False  # Safe: shell=False
         files = result.stdout.strip().split("\n")
@@ -125,8 +125,8 @@ def _get_merge_base() -> str:
     """Return the merge-base commit between HEAD and the main branch."""
     for main_branch in ("master", "main"):
         try:
-            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
-                [  # noqa: S607  # Safe: known executable
+            result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
+                [  # Safe: known executable
                     "git",
                     "merge-base",
                     "HEAD",
@@ -146,7 +146,7 @@ def _get_merge_base() -> str:
 def _run_mypy(files: list[str], service_root: Path, env: dict[str, str]) -> str:
     """Run mypy and return raw stdout."""
     cmd = ["mypy", "--follow-imports=silent", *files]
-    result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
+    result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
         cmd,
         check=False,
         capture_output=True,
@@ -177,8 +177,8 @@ def _get_baseline_errors(
         full_path = service_root / nf
         git_path = f"services/platform/{nf}"
         try:
-            result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
-                [  # noqa: S607  # Safe: known executable
+            result = subprocess.run(  # Safe: shell=False  # Safe: shell=False
+                [  # Safe: known executable
                     "git",
                     "show",
                     f"{merge_base}:{git_path}",
@@ -230,7 +230,17 @@ def run_mypy_incremental(files: list[str], verbose: bool = False) -> bool:
     normalized_files = [normalize_repo_path(f) for f in files_to_check]
 
     env = os.environ.copy()
-    env["PATH"] = f"{repo_root / '.venv' / 'bin'}:{env.get('PATH', '')}"
+    project_env = env.get("UV_PROJECT_ENVIRONMENT")
+    if project_env:
+        python_bin_dir = Path(project_env) / "bin"
+    else:
+        default_env = ".venv-darwin" if os.uname().sysname.lower() == "darwin" else ".venv-linux"
+        python_bin_dir = repo_root / default_env / "bin"
+        if not python_bin_dir.exists():
+            # Legacy fallback for environments that still use a single .venv.
+            python_bin_dir = repo_root / ".venv" / "bin"
+
+    env["PATH"] = f"{python_bin_dir}:{env.get('PATH', '')}"
     env["PYTHONPATH"] = f"{service_root}:{env.get('PYTHONPATH', '')}".rstrip(":")
 
     # Step 1: Run mypy on current working-tree files

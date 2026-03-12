@@ -984,9 +984,9 @@ class GiftCardService:
         # Update gift card balance
         gift_card.current_balance_cents -= amount_cents
         if gift_card.current_balance_cents == 0:
-            gift_card.status = "depleted"
+            gift_card.status = "depleted"  # fsm-bypass: GiftCard uses CharField, not FSMField
         else:
-            gift_card.status = "partially_used"
+            gift_card.status = "partially_used"  # fsm-bypass: GiftCard uses CharField, not FSMField
 
         if customer and not gift_card.redeemed_by:
             gift_card.redeemed_by = customer
@@ -1026,7 +1026,7 @@ class GiftCardService:
         if gift_card.status != "pending":
             return False
 
-        gift_card.status = "active"
+        gift_card.status = "active"  # fsm-bypass: GiftCard uses CharField, not FSMField
         gift_card.current_balance_cents = gift_card.initial_value_cents
         gift_card.activated_at = timezone.now()
         gift_card.save()
@@ -1102,7 +1102,7 @@ class ReferralService:
         if referral.status != "pending":
             return False
 
-        referral.status = "qualified"
+        referral.status = "qualified"  # fsm-bypass: Referral uses CharField, not FSMField
         referral.qualifying_order = order
         referral.qualified_at = timezone.now()
         referral.save()
@@ -1130,7 +1130,7 @@ class ReferralService:
             referral.referrer_reward_given_at = timezone.now()
 
         # Mark as rewarded
-        referral.status = "rewarded"
+        referral.status = "rewarded"  # fsm-bypass: Referral uses CharField, not FSMField
         referral.rewarded_at = timezone.now()
         referral.save()
 

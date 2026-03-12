@@ -37,7 +37,7 @@ class ProformaViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -141,7 +141,7 @@ class ProformaDetailViewTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -229,7 +229,7 @@ class ProformaEditViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -325,7 +325,7 @@ class ProformaSendViewsTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',
@@ -373,7 +373,7 @@ class ProformaPaymentProcessingTestCase(TestCase):
     def setUp(self):
         """Setup test data"""
         self.factory = RequestFactory()
-        self.currency = Currency.objects.create(code='RON', symbol='lei', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         self.customer = Customer.objects.create(
             customer_type='company',

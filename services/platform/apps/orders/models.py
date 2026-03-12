@@ -6,16 +6,20 @@ Romanian hosting provider specific order processing and configuration.
 
 import logging
 import uuid
-from decimal import ROUND_HALF_EVEN, Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
+from collections.abc import Iterable
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
+
+from django.core.validators import MinValueValidator
+from django.db import DatabaseError, IntegrityError, NotSupportedError, connection, models, transaction
+from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
+from django_fsm import ConcurrentTransitionMixin, FSMField, transition
+
+from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
 
 if TYPE_CHECKING:
     from apps.provisioning.models import Service
-
-from django.core.validators import MinValueValidator
-from django.db import IntegrityError, models
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
 
 # ===============================================================================
 # ORDER MANAGEMENT MODELS
@@ -24,7 +28,13 @@ from django.utils.translation import gettext_lazy as _
 logger = logging.getLogger(__name__)
 
 
-class Order(models.Model):
+def _order_has_items(instance: models.Model) -> bool:
+    """FSM condition: order must have at least one item before submitting."""
+    order = cast("Order", instance)
+    return bool(order.items.exists())
+
+
+class Order(ConcurrentTransitionMixin, models.Model):
     """
     Customer order for products/services.
     Tracks the entire lifecycle from cart to provisioning.
@@ -52,8 +62,12 @@ class Order(models.Model):
         ("refunded", _("Refunded")),  # Order was refunded
         ("partially_refunded", _("Partially Refunded")),  # Partial refund processed
     )
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="draft", help_text=_("Current order status")
+    status = FSMField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="draft",
+        protected=True,
+        help_text=_("Current order status"),
     )
 
     # Editable fields by status for hybrid editing approach
@@ -148,6 +162,14 @@ class Order(models.Model):
         help_text=_("Generated invoice for this order"),
     )
 
+    # Idempotency key for preventing duplicate orders
+    idempotency_key = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=_("Client-provided idempotency key to prevent duplicate orders"),
+    )
+
     # Metadata
     meta = models.JSONField(default=dict, blank=True, help_text=_("Additional order metadata"))
 
@@ -174,7 +196,7 @@ class Order(models.Model):
             models.Index(fields=["customer", "status"]),
         )
         # DB-level guards against negative financial values (#71)
-        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
             models.CheckConstraint(
                 condition=models.Q(subtotal_cents__gte=0),
                 name="order_subtotal_non_negative",
@@ -191,31 +213,107 @@ class Order(models.Model):
                 condition=models.Q(total_cents__gte=0),
                 name="order_total_non_negative",
             ),
+            models.UniqueConstraint(
+                fields=["customer", "idempotency_key"],
+                condition=models.Q(idempotency_key__gt=""),
+                name="unique_customer_idempotency_key",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "draft",
+                        "pending",
+                        "confirmed",
+                        "processing",
+                        "completed",
+                        "cancelled",
+                        "failed",
+                        "refunded",
+                        "partially_refunded",
+                    ]
+                ),
+                name="order_status_valid_values",
+            ),
         )
 
     def __str__(self) -> str:
         return f"Order {self.order_number} - {self.customer_email}"
 
+    # Markers to identify order_number uniqueness violations in IntegrityError messages.
+    # PostgreSQL uses the constraint name; SQLite uses "column_name".
+    _ORDER_NUMBER_COLLISION_MARKERS = ("orders_order_number_key", "orders.order_number")
+    # Markers for non-retryable IntegrityErrors (e.g., idempotency key constraint).
+    # If these appear in the exception string, re-raise immediately instead of retrying.
+    _NON_RETRYABLE_CONSTRAINT_MARKERS = ("unique_customer_idempotency_key",)
+
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Auto-generate order number before saving, with retry on collision."""
+        """Auto-generate order number before saving, with retry on collision.
+
+        The retry loop (with savepoints via transaction.atomic) is only engaged
+        during initial creation (_state.adding=True).  Plain updates bypass it
+        entirely to avoid unnecessary savepoint overhead and to avoid accidentally
+        swallowing non-retryable constraint errors on existing rows.
+
+        Each creation retry is wrapped in a savepoint because PostgreSQL aborts
+        the entire transaction on IntegrityError — without a savepoint, subsequent
+        save() calls would fail with InFailedSqlTransaction.
+        """
         if not self.order_number:
             self.generate_order_number()
-        # Retry up to 3 times on order_number collision (parallel execution race)
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                super().save(*args, **kwargs)
-                return
-            except IntegrityError as exc:
-                if "order_number" not in str(exc) or attempt >= max_retries - 1:
-                    raise
-                # Regenerate with collision-resistant suffix
-                logger.warning(
-                    "⚠️ [Order] order_number collision on attempt %d, regenerating",
-                    attempt + 1,
-                )
-                self.order_number = ""
-                self.generate_order_number()
+
+        # Only retry on creation (order_number collision is only possible on INSERT)
+        if self._state.adding:
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Savepoint: PostgreSQL aborts the transaction on IntegrityError,
+                    # so each attempt needs its own savepoint to allow retry.
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError as exc:
+                    exc_str = str(exc)
+                    # Never retry non-order-number constraints (e.g., idempotency key)
+                    if any(m in exc_str for m in self._NON_RETRYABLE_CONSTRAINT_MARKERS):
+                        raise
+                    is_order_number_collision = any(m in exc_str for m in self._ORDER_NUMBER_COLLISION_MARKERS)
+                    if not is_order_number_collision or attempt >= max_retries - 1:
+                        raise
+                    # Regenerate sequence only, preserving the original prefix format.
+                    # This prevents split-brain between model format (ORD-{date}-{seq})
+                    # and service format (ORD-{year}-{customer}-{seq}).
+                    logger.warning(
+                        "⚠️ [Order] order_number collision on attempt %d, regenerating sequence",
+                        attempt + 1,
+                    )
+                    self._regenerate_order_number_sequence()
+        else:
+            super().save(*args, **kwargs)
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: "models.QuerySet[Order] | None" = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Django's
+        refresh_from_db uses setattr internally, which would raise AttributeError
+        if the field is already in __dict__. Temporarily removing the protected
+        field from __dict__ lets Django's setattr path bypass the descriptor
+        guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
 
     @property
     def subtotal(self) -> Decimal:
@@ -240,12 +338,12 @@ class Order(models.Model):
     @property
     def is_draft(self) -> bool:
         """Check if order is still in draft state"""
-        return self.status == "draft"
+        return bool(self.status == "draft")
 
     @property
     def is_paid(self) -> bool:
         """Check if order has been paid"""
-        return self.status in ["confirmed", "processing", "completed"]
+        return bool(self.status in ["confirmed", "processing", "completed"])
 
     @property
     def can_be_cancelled(self) -> bool:
@@ -261,23 +359,38 @@ class Order(models.Model):
         """Get list of fields that can be edited in current status"""
         return self.EDITABLE_FIELDS_BY_STATUS.get(self.status, [])
 
+    @staticmethod
+    def _locked_latest_order_number(qs: models.QuerySet["Order"]) -> str | None:
+        """Attempt select_for_update inside its own savepoint; fall back on unsupported backends.
+
+        Wrapping in transaction.atomic() ensures the lock works even when the
+        caller is in autocommit mode (PostgreSQL raises TransactionManagementError
+        for select_for_update outside a transaction, not NotSupportedError).
+        """
+        try:
+            with transaction.atomic():
+                return qs.select_for_update(of=("self",)).values_list("order_number", flat=True).first()
+        except (NotSupportedError, DatabaseError):
+            if connection.vendor != "sqlite":
+                logger.error(
+                    "⚠️ [Order] select_for_update failed on %s — TOCTOU race possible",
+                    connection.vendor,
+                )
+            return qs.values_list("order_number", flat=True).first()
+
     def generate_order_number(self) -> None:
         """Generate a unique order number based on date and sequence.
 
-        Uses MAX(order_number) instead of COUNT to avoid TOCTOU race conditions
-        in parallel execution. The retry in save() handles the remaining edge case
-        where two processes read the same MAX simultaneously.
+        Uses MAX(order_number) with select_for_update to reduce TOCTOU races.
+        The retry in save() handles the remaining edge case where two processes
+        read the same MAX simultaneously.  SQLite does not support FOR UPDATE,
+        so the lock is skipped via _locked_latest_order_number fallback.
         """
         if not self.order_number:
             date_part = timezone.now().strftime("%Y%m%d")
             prefix = f"ORD-{date_part}-"
-            # Use MAX to find the highest existing sequence (not count, which races)
-            latest = (
-                Order.objects.filter(order_number__startswith=prefix)
-                .order_by("-order_number")
-                .values_list("order_number", flat=True)
-                .first()
-            )
+            qs = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number")
+            latest = self._locked_latest_order_number(qs)
             if latest:
                 try:
                     last_seq = int(latest.split("-")[-1])
@@ -288,35 +401,92 @@ class Order(models.Model):
                 next_seq = 1
             self.order_number = f"{prefix}{next_seq:06d}"
 
+    def _regenerate_order_number_sequence(self) -> None:
+        """Regenerate just the sequence part of an existing order number.
+
+        Preserves the prefix format (whether from model or service generator)
+        to prevent format split-brain on collision retry.
+        """
+        if not self.order_number:
+            self.generate_order_number()
+            return
+        # Split on last dash to extract prefix and sequence
+        parts = self.order_number.rsplit("-", 1)
+        expected_parts = 2  # prefix + sequence
+        if len(parts) != expected_parts:
+            # Can't determine format — fall back to full regeneration
+            self.order_number = ""
+            self.generate_order_number()
+            return
+        prefix = parts[0] + "-"
+        seq_width = len(parts[1])  # Preserve zero-padding width (4 or 6)
+        qs = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number")
+        latest = self._locked_latest_order_number(qs)
+        if latest:
+            try:
+                last_seq = int(latest.rsplit("-", 1)[-1])
+                next_seq = last_seq + 1
+            except (ValueError, IndexError):
+                next_seq = 1
+        else:
+            next_seq = 1
+        self.order_number = f"{prefix}{next_seq:0{seq_width}d}"
+
     def calculate_totals(self) -> None:
         """
         Recalculate order totals from line items.
         Should be called after adding/removing/updating items.
         """
-        items = self.items.all()
-
-        # Calculate subtotal from all items
-        self.subtotal_cents = sum(item.quantity * item.unit_price_cents + item.setup_cents for item in items)
-
-        # Calculate total tax
-        self.tax_cents = sum(item.tax_cents for item in items)
-
-        # Apply any order-level discounts
-        # (item-level discounts are already included in their unit prices)
-
-        # Calculate final total
-        self.total_cents = self.subtotal_cents + self.tax_cents - self.discount_cents
-
-        # Ensure total is not negative
-        self.total_cents = max(0, self.total_cents)
-
+        totals = calculate_document_totals(list(self.items.all()), self.discount_cents)
+        self.subtotal_cents = totals.subtotal_cents
+        self.tax_cents = totals.tax_cents
+        self.total_cents = totals.total_cents
         self.save(update_fields=["subtotal_cents", "tax_cents", "total_cents"])
 
-    def mark_as_completed(self) -> None:
-        """Mark order as completed and set completion timestamp"""
-        self.status = "completed"
+    # =========================================================================
+    # FSM TRANSITIONS
+    # =========================================================================
+
+    @transition(field=status, source="draft", target="pending", conditions=[_order_has_items])
+    def submit(self) -> None:
+        """Submit draft order for payment."""
+
+    @transition(field=status, source="pending", target="confirmed")
+    def confirm(self) -> None:
+        """Confirm order after payment verification."""
+
+    @transition(field=status, source="confirmed", target="processing")
+    def start_processing(self) -> None:
+        """Start provisioning the order."""
+
+    @transition(field=status, source="processing", target="completed")
+    def complete(self) -> None:
+        """Mark order as completed."""
         self.completed_at = timezone.now()
-        self.save(update_fields=["status", "completed_at"])
+
+    @transition(field=status, source=["draft", "pending", "confirmed", "processing", "failed"], target="cancelled")
+    def cancel(self) -> None:
+        """Cancel the order."""
+
+    @transition(field=status, source=["pending", "processing"], target="failed")
+    def fail(self) -> None:
+        """Mark order as failed."""
+
+    @transition(field=status, source="failed", target="pending")
+    def retry(self) -> None:
+        """Retry a failed order."""
+
+    @transition(field=status, source="completed", target="refunded")
+    def refund_order(self) -> None:
+        """Fully refund a completed order."""
+
+    @transition(field=status, source="completed", target="partially_refunded")
+    def partial_refund(self) -> None:
+        """Partially refund a completed order."""
+
+    @transition(field=status, source="partially_refunded", target="refunded")
+    def complete_refund(self) -> None:
+        """Complete remaining refund on partially refunded order."""
 
 
 class OrderItem(models.Model):
@@ -386,8 +556,12 @@ class OrderItem(models.Model):
         ("failed", _("Failed")),
         ("cancelled", _("Cancelled")),
     )
-    provisioning_status = models.CharField(
-        max_length=20, choices=PROVISIONING_STATUS, default="pending", help_text=_("Provisioning status for this item")
+    provisioning_status = FSMField(
+        max_length=20,
+        choices=PROVISIONING_STATUS,
+        default="pending",
+        protected=True,
+        help_text=_("Provisioning status for this item"),
     )
     provisioning_notes = models.TextField(blank=True, help_text=_("Provisioning notes and error messages"))
 
@@ -413,7 +587,7 @@ class OrderItem(models.Model):
             models.Index(fields=["product", "provisioning_status"]),
         )
         # DB-level guards against negative financial values (#71)
-        constraints: ClassVar[tuple[models.CheckConstraint, ...]] = (
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
             models.CheckConstraint(
                 condition=models.Q(unit_price_cents__gte=0),
                 name="orderitem_unit_price_non_negative",
@@ -429,6 +603,12 @@ class OrderItem(models.Model):
             models.CheckConstraint(
                 condition=models.Q(line_total_cents__gte=0),
                 name="orderitem_line_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    provisioning_status__in=["pending", "in_progress", "completed", "failed", "cancelled"]
+                ),
+                name="orderitem_provisioning_status_valid_values",
             ),
         )
 
@@ -480,6 +660,27 @@ class OrderItem(models.Model):
         self.calculate_totals()
 
         super().save(*args, **kwargs)
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: "models.QuerySet[OrderItem] | None" = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See Order.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["provisioning_status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
 
     @property
     def unit_price(self) -> Decimal:
@@ -546,28 +747,55 @@ class OrderItem(models.Model):
         return Decimal(self.subtotal_cents) / 100
 
     def calculate_totals(self) -> int:
-        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-        subtotal = self.subtotal_cents
-        # Use banker's rounding for VAT compliance (same as OrderVATCalculator)
-        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
-        self.line_total_cents = subtotal + self.tax_cents
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""
+        totals = calculate_line_totals(self.subtotal_cents, self.tax_rate)
+        self.tax_cents = totals.tax_cents
+        self.line_total_cents = totals.line_total_cents
         return self.line_total_cents
 
-    def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
-        """Mark this item as successfully provisioned and activate the service"""
-        self.provisioning_status = "completed"
+    # =========================================================================
+    # FSM TRANSITIONS
+    # =========================================================================
+
+    @transition(field=provisioning_status, source="pending", target="in_progress")
+    def start_provisioning(self) -> None:
+        """Start provisioning this item."""
+
+    @transition(field=provisioning_status, source="in_progress", target="completed")
+    def complete_provisioning(self) -> None:
+        """Mark provisioning as completed."""
         self.provisioned_at = timezone.now()
+
+    @transition(field=provisioning_status, source="in_progress", target="failed")
+    def fail_provisioning(self) -> None:
+        """Mark provisioning as failed."""
+
+    @transition(field=provisioning_status, source=["pending", "in_progress"], target="cancelled")
+    def cancel_provisioning(self) -> None:
+        """Cancel provisioning."""
+
+    @transition(field=provisioning_status, source="failed", target="pending")
+    def retry_provisioning(self) -> None:
+        """Retry failed provisioning."""
+
+    def mark_as_provisioned(self, service: Optional["Service"] = None) -> None:
+        """Mark this item as successfully provisioned and activate the service.
+
+        The item's ``provisioning_status`` must be ``"in_progress"`` before
+        calling this method (``complete_provisioning()`` requires that source).
+        Callers are responsible for calling ``start_provisioning()`` first when
+        the item is still in ``"pending"`` state.
+        """
+        self.complete_provisioning()  # FSM transition sets provisioned_at
         if service:
             self.service = service
 
         # Update the linked service status to active when provisioning completes
         if self.service and self.service.status == "provisioning":
-            self.service.status = "active"
-            self.service.activated_at = timezone.now()
+            self.service.complete_provisioning()
             self.service.save(update_fields=["status", "activated_at"])
 
-        self.save(update_fields=["provisioning_status", "provisioned_at", "service"])
+        self.save(update_fields=["provisioning_status", "provisioned_at", "service", "updated_at"])
 
 
 class OrderStatusHistory(models.Model):

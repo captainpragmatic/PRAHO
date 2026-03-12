@@ -1,0 +1,14 @@
+{
+  "allowed_duplicate_names": [
+    "test_ticket_mobile_responsiveness"
+  ],
+  "allowed_duplicate_name_patterns": [
+    "^CoerceRetryAfterSecondsTests\\.test_",
+    "^TestProdLoggingConfiguration\\.test_",
+    "^TestStagingLoggingConfiguration\\.test_",
+    "^EFacturaEnvironmentTestCase\\.test_oauth_base_url$",
+    "^EnhancedWebAuthnCredentialTest\\.test_webauthn_credential_defaults$",
+    "^TestCanBeDestroyedIncludesStopped\\.test_",
+    "^TestGDPRCompliantCartSession(Mocked)?\\.test_create_empty_cart$"
+  ]
+}

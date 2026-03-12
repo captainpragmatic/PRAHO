@@ -18,7 +18,7 @@ This file serves as a re-export hub following ADR-0012 feature-based organizatio
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from datetime import timedelta
 
 # Re-export all services from feature files
 # ===============================================================================
@@ -31,7 +31,8 @@ from django.utils import timezone as tz
 
 from apps.billing.currency_models import Currency as CurrencyModel
 from apps.billing.models import Currency, Invoice, InvoiceLine, InvoiceSequence
-from apps.common.tax_service import TaxService
+from apps.common.tax_service import CustomerVATInfo, TaxService
+from apps.common.types import Err, Ok, Result
 
 # Add imports to fix PLC0415 linting issues
 # Ensure refund service uses the same log_security_event function for testing
@@ -70,7 +71,6 @@ from .refund_service import (
     RefundService,
     RefundStatus,
     RefundType,
-    Result,
 )
 from .stripe_metering import (
     StripeMeterEventService,
@@ -84,7 +84,7 @@ from .usage_invoice_service import (
     UsageInvoiceService,
 )
 
-# Result class is imported from refund_service.py - no need to redefine here
+# Result types imported from apps.common.types (ADR-0003)
 
 # ===============================================================================
 # REFUND SERVICE RE-EXPORTS
@@ -137,20 +137,20 @@ class InvoiceService:
                         # Another process created it - get it with lock
                         sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
 
-                # Calculate totals using current Romanian VAT rate
-                vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-                subtotal_amount = Decimal(order.total_cents) / 100
-                tax_amount = subtotal_amount * vat_rate
-                total_amount = subtotal_amount + tax_amount
+                # Use unified VAT scenario engine for consistent customer-aware behavior.
+                vat_result = TaxService.calculate_vat_for_document(
+                    subtotal_cents=int(order.total_cents),
+                    customer_info=_build_customer_vat_info(order.customer, order_id=str(order.id)),
+                )
 
                 # Create invoice - all within the same atomic block to ensure consistency
                 invoice = Invoice.objects.create(
                     customer=order.customer,
                     number=sequence.get_next_number("INV"),
                     currency=currency,
-                    subtotal_cents=int(subtotal_amount * 100),
-                    tax_cents=int(tax_amount * 100),
-                    total_cents=int(total_amount * 100),
+                    subtotal_cents=vat_result.subtotal_cents,
+                    tax_cents=vat_result.vat_cents,
+                    total_cents=vat_result.total_cents,
                     status="draft",
                     # Copy billing address from customer
                     bill_to_name=order.customer.company_name or order.customer.full_name or "",
@@ -163,7 +163,7 @@ class InvoiceService:
                 )
 
                 # Create invoice lines from order items
-                vat_rate_percent = TaxService.get_vat_rate("RO", as_decimal=False)
+                vat_rate_percent = vat_result.vat_rate
                 for item in order.items.all():
                     InvoiceLine.objects.create(  # type: ignore[misc]
                         invoice=invoice,
@@ -189,13 +189,36 @@ class InvoiceService:
                     },
                 )
 
-                return Result.ok(invoice)
+                return Ok(invoice)
 
         except Exception as e:
-            return Result.err(f"Failed to create invoice from order: {e!s}")
+            return Err(f"Failed to create invoice from order: {e!s}")
 
 
 _services_logger = logging.getLogger(__name__)
+
+
+def _build_customer_vat_info(customer: Any, order_id: str | None = None) -> CustomerVATInfo:
+    """Build customer VAT context for TaxService.calculate_vat_for_document()."""
+    info: CustomerVATInfo = {
+        "country": (getattr(customer, "country", None) or "RO"),
+        "is_business": bool(getattr(customer, "company_name", "")),
+        "vat_number": None,
+        "customer_id": str(getattr(customer, "id", "")),
+        "order_id": order_id,
+    }
+    try:
+        tax_profile = customer.tax_profile
+    except Exception:
+        return info
+
+    info["vat_number"] = getattr(tax_profile, "vat_number", None)
+    info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
+    info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
+    vat_rate_override = getattr(tax_profile, "vat_rate", None)
+    if vat_rate_override is not None:
+        info["custom_vat_rate"] = vat_rate_override
+    return info
 
 
 class PaymentRetryService:
@@ -213,26 +236,26 @@ class PaymentRetryService:
         try:
             payment = Payment.objects.select_related("customer").get(id=payment_id)
         except Payment.DoesNotExist:
-            return Result.err(f"Payment not found: {payment_id}")
+            return Err(f"Payment not found: {payment_id}")
 
         if payment.status == "succeeded":
-            return Result.ok(True)  # Already succeeded
+            return Ok(True)  # Already succeeded
 
         # Find applicable retry policy (customer-specific or default)
         policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
         if not policy:
             _services_logger.warning(f"⚠️ [Retry] No active retry policy for payment {payment_id}")
-            return Result.err("No retry policy configured")
+            return Err("No retry policy configured")
 
         # Check if max attempts reached
         existing_attempts = PaymentRetryAttempt.objects.filter(payment=payment).count()
         if existing_attempts >= policy.max_attempts:
-            return Result.err(f"Max retry attempts ({policy.max_attempts}) reached")
+            return Err(f"Max retry attempts ({policy.max_attempts}) reached")
 
         # Schedule next retry
         next_retry_date = policy.get_next_retry_date(tz.now(), existing_attempts)
         if not next_retry_date:
-            return Result.err("No more retry dates available")
+            return Err("No more retry dates available")
 
         PaymentRetryAttempt.objects.create(
             payment=payment,
@@ -244,7 +267,7 @@ class PaymentRetryService:
         _services_logger.info(
             f"✅ [Retry] Scheduled retry #{existing_attempts + 1} for payment {payment_id} at {next_retry_date}"
         )
-        return Result.ok(True)
+        return Ok(True)
 
 
 class EFacturaService:
@@ -261,14 +284,14 @@ class EFacturaService:
         try:
             invoice = InvoiceModel.objects.get(id=invoice_id)
         except InvoiceModel.DoesNotExist:
-            return Result.err(f"Invoice not found: {invoice_id}")
+            return Err(f"Invoice not found: {invoice_id}")
 
         service = EFacturaSubmissionService()
         result = service.submit_invoice(invoice)
         if result.success:
             _services_logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number}")
-            return Result.ok(True)
-        return Result.err(result.message or "e-Factura submission failed")
+            return Ok(True)
+        return Err(result.message or "e-Factura submission failed")
 
 
 class InvoiceNumberingService:
@@ -292,10 +315,10 @@ class ProformaConversionService:
         try:
             proforma = ProformaInvoice.objects.select_related("customer", "currency").get(id=proforma_id)
         except ProformaInvoice.DoesNotExist:
-            return Result.err(f"Proforma not found: {proforma_id}")
+            return Err(f"Proforma not found: {proforma_id}")
 
-        if proforma.status not in ("draft", "issued"):
-            return Result.err(f"Proforma {proforma.number} cannot be converted (status: {proforma.status})")
+        if proforma.status not in ("draft", "sent", "accepted"):
+            return Err(f"Proforma {proforma.number} cannot be converted (status: {proforma.status})")
 
         try:
             with transaction.atomic():
@@ -309,10 +332,13 @@ class ProformaConversionService:
                     )
 
                 # Recalculate tax
-                vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
                 subtotal_cents = proforma.subtotal_cents or 0
-                tax_cents = int(Decimal(subtotal_cents) * vat_rate)
-                total_cents = subtotal_cents + tax_cents
+                vat_result = TaxService.calculate_vat_for_document(
+                    subtotal_cents=subtotal_cents,
+                    customer_info=_build_customer_vat_info(proforma.customer),
+                )
+                tax_cents = vat_result.vat_cents
+                total_cents = vat_result.total_cents
 
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,
@@ -321,8 +347,7 @@ class ProformaConversionService:
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,
                     total_cents=total_cents,
-                    status="issued",
-                    issued_at=tz.now(),
+                    due_at=tz.now() + timedelta(days=30),
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",
                     bill_to_tax_id=getattr(proforma, "bill_to_tax_id", "") or "",
@@ -331,6 +356,9 @@ class ProformaConversionService:
                     bill_to_country=getattr(proforma, "bill_to_country", "RO") or "RO",
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )
+                # Issue via FSM transition to set locked_at and issued_at
+                invoice.issue()
+                invoice.save()
 
                 # Copy line items
                 for line in proforma.lines.all():
@@ -343,8 +371,8 @@ class ProformaConversionService:
                         line_total_cents=line.line_total_cents,
                     )
 
-                # Update proforma status
-                proforma.status = "converted"
+                # Update proforma status via FSM transition
+                proforma.convert()
                 proforma.meta = {
                     **(proforma.meta or {}),
                     "invoice_id": str(invoice.id),
@@ -365,11 +393,11 @@ class ProformaConversionService:
                 )
 
                 _services_logger.info(f"✅ [Conversion] Proforma {proforma.number} → Invoice {invoice.number}")
-                return Result.ok(invoice)
+                return Ok(invoice)
 
         except Exception as e:
             _services_logger.error(f"🔥 [Conversion] Failed to convert proforma {proforma_id}: {e}")
-            return Result.err(f"Conversion failed: {e!s}")
+            return Err(f"Conversion failed: {e!s}")
 
 
 # Expose all services in __all__ for explicit imports

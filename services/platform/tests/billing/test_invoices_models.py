@@ -6,11 +6,14 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice
+from tests.helpers.fsm_helpers import force_status
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from tests.factories.billing_factories import create_invoice
@@ -23,7 +26,7 @@ class InvoiceTestCase(TestCase):
 
     def setUp(self):
         """Create test data for invoice tests"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -197,7 +200,7 @@ class InvoiceLineTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -320,6 +323,7 @@ class InvoiceLineTestCase(TestCase):
             service_name='Basic Hosting Plan',
             username='testuser123',
             price=Decimal('50.00'),
+            currency=self.currency,
             status='active'
         )
 
@@ -336,12 +340,120 @@ class InvoiceLineTestCase(TestCase):
         self.assertEqual(line.service, service)
 
 
+class InvoiceFSMTestCase(TestCase):
+    """Test Invoice FSM transitions and immutability"""
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self.customer = Customer.objects.create(
+            customer_type='company',
+            company_name='FSM Test SRL',
+            status='active'
+        )
+
+    def test_issue_sets_locked_at(self):
+        """H2: issue() transition must set locked_at for immutability"""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-LOCK-001',
+            total_cents=10000,
+        )
+        self.assertIsNone(invoice.locked_at)
+
+        invoice.issue()
+        invoice.save()
+        invoice.refresh_from_db()
+
+        self.assertEqual(invoice.status, 'issued')
+        self.assertIsNotNone(invoice.locked_at)
+        self.assertIsNotNone(invoice.issued_at)
+
+    def test_locked_invoice_rejects_financial_modification(self):
+        """H2: Locked invoice must reject changes to financial fields"""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-LOCK-002',
+            total_cents=10000,
+            tax_cents=1900,
+        )
+        invoice.issue()
+        invoice.save()
+
+        # Attempting to modify financial data on a locked, issued invoice must fail
+        invoice.total_cents = 20000
+        with self.assertRaises(ValidationError):
+            invoice.save()
+
+    def test_locked_invoice_allows_status_transitions(self):
+        """Locked invoice must still allow FSM transitions (e.g., mark_as_paid)"""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-LOCK-003',
+            total_cents=10000,
+        )
+        invoice.issue()
+        invoice.save()
+
+        # Status transition should work even on locked invoice
+        invoice.mark_as_paid()
+        invoice.save()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'paid')
+
+    def test_draft_invoice_allows_modification(self):
+        """Draft invoices must remain fully editable"""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-DRAFT-MOD',
+            total_cents=5000,
+        )
+        invoice.total_cents = 10000
+        invoice.save()  # Should not raise
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.total_cents, 10000)
+
+    def test_issue_transition_requires_draft_status(self):
+        """issue() must only work from draft status"""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-FSM-DRAFT',
+            status='issued'
+        )
+        with self.assertRaises(TransitionNotAllowed):
+            invoice.issue()
+
+    def test_mark_partially_refunded_from_partially_refunded(self):
+        """H4: Multiple partial refunds must be possible"""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-PARTIAL-002',
+        )
+        force_status(invoice, 'paid')
+        invoice.save()
+
+        # First partial refund
+        invoice.mark_partially_refunded()
+        invoice.save()
+        self.assertEqual(invoice.status, 'partially_refunded')
+
+        # Second partial refund — must not raise TransitionNotAllowed
+        invoice.mark_partially_refunded()
+        invoice.save()
+        self.assertEqual(invoice.status, 'partially_refunded')
+
+
 class InvoiceIntegrationTestCase(TestCase):
     """Test Invoice integration scenarios"""
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Integration Test SRL',
@@ -386,7 +498,7 @@ class InvoiceIntegrationTestCase(TestCase):
             currency=self.currency,
             number='INV-PAYMENT',
             total_cents=10000,
-            status='sent'
+            status='issued'
         )
 
         # Mark as paid

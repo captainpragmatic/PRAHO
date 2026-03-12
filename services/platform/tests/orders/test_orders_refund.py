@@ -14,7 +14,8 @@ from unittest.mock import patch
 from django.test import RequestFactory, TestCase
 
 from apps.billing.models import Currency
-from apps.billing.refund_service import RefundResult, Result
+from apps.billing.refund_service import RefundResult
+from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.views import order_refund
@@ -46,7 +47,7 @@ class OrderRefundViewTests(TestCase):
     @patch("apps.billing.refund_service.RefundService.refund_order")
     def test_refund_success(self, mock_refund):
         """Successful refund returns JSON success"""
-        mock_refund.return_value = Result.ok(
+        mock_refund.return_value = Ok(
             RefundResult(refund_id=uuid.uuid4(), status="completed", amount_cents=11900)
         )
         request = self.factory.post(
@@ -60,7 +61,7 @@ class OrderRefundViewTests(TestCase):
     @patch("apps.billing.refund_service.RefundService.refund_order")
     def test_refund_error_returns_failure(self, mock_refund):
         """Failed refund returns JSON error"""
-        mock_refund.return_value = Result.err("Already refunded")
+        mock_refund.return_value = Err("Already refunded")
         request = self.factory.post(
             f"/orders/{self.order.id}/refund/",
             {"reason": "test"},

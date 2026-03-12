@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% load i18n ui_components %}
-{% load i18n %}
 
 {% block title %}{% trans "Order Confirmed" %}{% endblock %}
 
@@ -12,6 +11,15 @@
 
   <!-- Success Header -->
   <div class="text-center mb-8">
+    {% if order.payment_method == "bank_transfer" %}
+    <div class="mb-4">{% icon "building" size="2xl" css_class="text-amber-400" %}</div>
+    <h1 class="text-3xl font-bold text-amber-400 mb-2">
+      {% trans "Awaiting your bank transfer" %}
+    </h1>
+    <p class="text-slate-400 text-lg">
+      {% trans "Your order has been registered. Please complete your bank transfer to activate your services." %}
+    </p>
+    {% else %}
     <div class="mb-4">{% icon "check" size="2xl" css_class="text-green-400" %}</div>
     <h1 class="text-3xl font-bold text-green-400 mb-2">
       {% trans "Order confirmed successfully!" %}
@@ -19,6 +27,7 @@
     <p class="text-slate-400 text-lg">
       {% trans "Your order has been registered and will be processed soon." %}
     </p>
+    {% endif %}
   </div>
 
   <!-- Order Details Card -->
@@ -53,7 +62,7 @@
             <h4 class="font-medium text-white">{{ item.product_name }}</h4>
 
             <div class="flex flex-wrap items-center gap-2 mt-2">
-              {% badge item.product_type|title variant="secondary" size="sm" %}
+              {% if item.product_type %}{% badge item.product_type|title variant="secondary" size="sm" %}{% endif %}
               {% badge item.billing_period|title variant="primary" size="sm" %}
 
               {% if item.domain_name %}
@@ -108,7 +117,7 @@
               <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
             </div>
             <div class="flex justify-between text-slate-400">
-              <span>{% trans "VAT (21%)" %}</span>
+              <span>{% trans "VAT" %} ({{ order.vat_rate_percent }}%)</span>
               <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
             </div>
             <div class="border-t border-slate-600 pt-2">
@@ -191,7 +200,7 @@
               <span class="font-mono">{{ order.subtotal }} {{ order.currency_code }}</span>
             </div>
             <div class="flex justify-between text-slate-300">
-              <span>{% trans "VAT (21%)" %}</span>
+              <span>{% trans "VAT" %} ({{ order.vat_rate_percent }}%)</span>
               <span class="font-mono">{{ order.tax_amount }} {{ order.currency_code }}</span>
             </div>
             <div class="border-t border-slate-600 pt-3">
@@ -217,6 +226,73 @@
     </div>
   </div>
   {% endif %}{% endif %}
+
+  <!-- Bank Transfer Instructions Card -->
+  {% if order.payment_method == "bank_transfer" %}
+  <div class="bg-gradient-to-r from-amber-900/30 to-yellow-900/20 border border-amber-600/50 rounded-lg mb-8">
+    <div class="px-6 py-4 border-b border-amber-700/50">
+      <h3 class="text-xl font-medium text-white flex items-center">
+        {% icon "building" size="sm" css_class="mr-2 text-amber-400" %}
+        {% trans "Bank Transfer Instructions" %}
+      </h3>
+      <p class="text-amber-200 text-sm mt-1">
+        {% trans "Use the details below to complete your bank transfer" %}
+      </p>
+    </div>
+
+    <div class="p-6">
+      <div class="grid sm:grid-cols-2 gap-6">
+        <div class="space-y-4">
+          {% if bank_details.iban %}
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "IBAN" %}</label>
+            <div x-data="{ copied: false }" class="flex items-center gap-2">
+              <p class="flex-1 text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ bank_details.iban }}</p>
+              <button type="button" x-on:click="navigator.clipboard.writeText('{{ bank_details.iban|escapejs }}').then(() => { copied = true; setTimeout(() => copied = false, 2000) })" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="copied ? '{% trans "Copied!" %}' : '{% trans "Copy IBAN to clipboard" %}'">
+                <span x-show="!copied">{% icon "clipboard" size="sm" %}</span>
+                <span x-show="copied" class="text-green-400">{% icon "check" size="sm" %}</span>
+              </button>
+            </div>
+          </div>
+          {% endif %}
+          {% if bank_details.bank_name %}
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Bank" %}</label>
+            <p class="text-white text-sm">{{ bank_details.bank_name }}</p>
+          </div>
+          {% endif %}
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Beneficiary" %}</label>
+            <p class="text-white text-sm">{{ bank_details.beneficiary }}</p>
+          </div>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Payment Reference" %}</label>
+            <div x-data="{ copied: false }" class="flex items-center gap-2">
+              <p class="flex-1 text-white font-mono text-sm bg-slate-700/50 px-3 py-2 rounded select-all">{{ order.order_number }}</p>
+              <button type="button" x-on:click="navigator.clipboard.writeText('{{ order.order_number|escapejs }}').then(() => { copied = true; setTimeout(() => copied = false, 2000) })" class="flex-shrink-0 px-2 py-2 text-amber-300 hover:text-amber-100 bg-slate-700/50 hover:bg-slate-600/50 rounded transition-colors" :title="copied ? '{% trans "Copied!" %}' : '{% trans "Copy reference to clipboard" %}'">
+                <span x-show="!copied">{% icon "clipboard" size="sm" %}</span>
+                <span x-show="copied" class="text-green-400">{% icon "check" size="sm" %}</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-amber-300 uppercase tracking-wider mb-1">{% trans "Amount to Transfer" %}</label>
+            <p class="text-green-400 font-bold text-lg font-mono">{{ order.total }} {{ order.currency_code }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 p-3 bg-amber-900/30 border border-amber-700/40 rounded-lg">
+        <p class="text-amber-200 text-sm">
+          {% icon "warning" size="sm" css_class="text-amber-400 mr-1" %}
+          {% trans "Please include the payment reference in your bank transfer description. Your services will be activated within 24 hours of payment confirmation." %}
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Next Steps -->
   <div class="grid md:grid-cols-2 gap-6 mb-8">
@@ -313,15 +389,15 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   // Initialize Stripe
-  const stripe = Stripe('{{ stripe_config.publishable_key }}');
+  const stripe = Stripe('{{ stripe_config.publishable_key|escapejs }}');
 
   // Configure Stripe Elements
   const options = {
-    clientSecret: '{{ payment_info.client_secret }}',
+    clientSecret: '{{ payment_info.client_secret|escapejs }}',
     appearance: {
-      theme: '{{ stripe_config.appearance.theme }}',
+      theme: '{{ stripe_config.appearance.theme|escapejs }}',
       variables: {
-        colorPrimary: '{{ stripe_config.appearance.variables.colorPrimary }}',
+        colorPrimary: '{{ stripe_config.appearance.variables.colorPrimary|escapejs }}',
         colorBackground: '#ffffff',
         colorText: '#1a202c',
         fontFamily: 'ui-sans-serif, system-ui, sans-serif',
@@ -358,7 +434,6 @@ document.addEventListener('DOMContentLoaded', function() {
   // Enable the submit button when the payment element is ready
   paymentElement.on('ready', function() {
     submitButton.disabled = false;
-    console.log('[Stripe] Elements ready');
   });
 
   // Handle real-time validation errors from the Payment Element
@@ -392,18 +467,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
       if (error) {
         // Payment failed
-        console.error('[Payment] Failed:', error);
+        // Payment element error — logged for support debugging
         showError(error.message);
         resetButton();
       } else {
-        // Payment succeeded
-        console.log('[Payment] Succeeded:', paymentIntent);
-
-        // Confirm payment on backend and create service
+        // Payment succeeded — confirm on backend and create service
         confirmPaymentOnBackend(paymentIntent.id);
       }
     } catch (err) {
-      console.error('[Payment] Unexpected error:', err);
+      // Unexpected payment error — caught and displayed to user
       showError('{% trans "An unexpected error occurred. Please try again." %}');
       resetButton();
     }
@@ -433,7 +505,7 @@ document.addEventListener('DOMContentLoaded', function() {
       showSuccess();
 
       // Call backend to confirm payment and create service
-      const response = await fetch('/order/confirm-payment/', {
+      const response = await fetch('{% url "orders:confirm_payment" %}', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -441,7 +513,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         body: JSON.stringify({
           payment_intent_id: paymentIntentId,
-          order_id: '{{ order.id }}',
+          order_id: '{{ order.id|escapejs }}',
           gateway: 'stripe'
         })
       });
@@ -449,18 +521,17 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
 
       if (data.success) {
-        console.log('[Payment] Confirmed on backend:', data);
         // Redirect to success page or dashboard
         setTimeout(() => {
-          window.location.href = '/order/';
+          window.location.href = '{% url "orders:catalog" %}';
         }, 2000);
       } else {
-        console.error('[Payment] Backend confirmation failed:', data.error);
+        // Backend confirmation failed — error shown to user via showError()
         showError(data.error || 'Payment confirmation failed');
         resetButton();
       }
     } catch (err) {
-      console.error('[Payment] Error confirming payment:', err);
+      // Payment confirmation network error — shown to user via showError()
       showError('Failed to confirm payment. Please contact support.');
       resetButton();
     }
@@ -487,13 +558,6 @@ document.addEventListener('DOMContentLoaded', function() {
     spinner.classList.add('hidden');
   }
 
-  // Log configuration for debugging
-  console.log('[Stripe] Configuration:', {
-    publishable_key: '{{ stripe_config.publishable_key }}' ? 'configured' : 'missing',
-    client_secret: '{{ payment_info.client_secret }}' ? 'configured' : 'missing',
-    currency: '{{ stripe_config.currency }}',
-    country: '{{ stripe_config.country }}'
-  });
 });
 </script>
 {% endif %}{% endif %}

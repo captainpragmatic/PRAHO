@@ -776,6 +776,19 @@ wheels = [
 ]
 
 [[package]]
+name = "django-fsm-2"
+version = "4.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "django-stubs-ext" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/8b/62b769abae6ecf2e4fc02eb4503274e9e4bb236b3f1052d95c9fb1f7a59e/django_fsm_2-4.2.1.tar.gz", hash = "sha256:e5a8b9bf9abc8546a6c8b6bb25c3c2b70d29d4bcc9dd998a9392d138aeb1b3ab", size = 21488, upload-time = "2026-03-09T08:04:04.89Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/cc/08cb68a51b2cbc9ae77c53abb22b2cc099291100bcbf67f4032d40639101/django_fsm_2-4.2.1-py3-none-any.whl", hash = "sha256:7e9a2e37431a5e858f744157e7b680ab172901ae6e00013bed44242dc441a4ee", size = 23217, upload-time = "2026-03-09T08:04:03.546Z" },
+]
+
+[[package]]
 name = "django-health-check"
 version = "3.23.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1767,6 +1780,7 @@ dependencies = [
     { name = "bleach" },
     { name = "django" },
     { name = "django-environ" },
+    { name = "django-fsm-2" },
     { name = "django-ipware" },
     { name = "django-q2" },
     { name = "djangorestframework" },
@@ -1872,6 +1886,7 @@ requires-dist = [
     { name = "bleach", specifier = ">=6.3.0" },
     { name = "django", specifier = ">=5.2,<5.3" },
     { name = "django-environ", specifier = ">=0.12.0" },
+    { name = "django-fsm-2", specifier = ">=4.0.0,<5.0.0" },
     { name = "django-ipware", specifier = ">=7.0.1" },
     { name = "django-q2", specifier = ">=1.9.0" },
     { name = "djangorestframework", specifier = ">=3.16.0" },

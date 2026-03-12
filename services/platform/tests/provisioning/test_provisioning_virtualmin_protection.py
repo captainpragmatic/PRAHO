@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
 from apps.provisioning.models import ServicePlan, Service
 from apps.provisioning.virtualmin_models import VirtualminServer, VirtualminAccount
@@ -129,11 +130,13 @@ class VirtualminAccountProtectionTestCase(TestCase):
         self.customer = create_test_customer('Test Customer', self.admin_user)
         self.service_plan = create_test_service_plan()
         self.virtualmin_server = create_test_virtualmin_server()
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         # Create a PRAHO service
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='Test Hosting Service',
             domain='test.example.com',
             username='test_user',
@@ -187,6 +190,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
         unprotected_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='Unprotected Hosting Service',
             domain='unprotected.example.com',
             username='unprotected_user',
@@ -335,6 +339,7 @@ class VirtualminAccountProtectionTestCase(TestCase):
         new_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='New Test Hosting Service',
             domain='new-test.example.com',
             username='newtest_user',

@@ -72,8 +72,12 @@ class ServicesAPIClient(PlatformAPIClient):
             # Transform platform API response format to expected portal format
             if response.get("success") and "data" in response:
                 platform_data = response["data"]
+                services = platform_data.get("services", [])
+                # Ensure currency_code defaults to RON for template rendering
+                for svc in services:
+                    svc.setdefault("currency_code", "RON")
                 adapted_response = {
-                    "results": platform_data.get("services", []),
+                    "results": services,
                     "count": platform_data.get("pagination", {}).get("total", 0),
                     "stats": platform_data.get("stats", {}),
                 }
@@ -110,6 +114,7 @@ class ServicesAPIClient(PlatformAPIClient):
             # Extract service data from nested platform API response
             if response.get("success") and "data" in response and "service" in response["data"]:
                 service_data = response["data"]["service"]
+                service_data.setdefault("currency_code", "RON")
                 logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
                 return cast(dict[str, Any], service_data)
             else:

@@ -1,48 +1,51 @@
 # ===============================================================================
-# INTEGRATION TESTS - Cross-service validation
+# INTEGRATION CI — Lint, Quality, Security, and Cross-Service Tests
 # ===============================================================================
-# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for details
+# Single source of truth for all linting (make lint) and cross-service validation.
+# Service-specific tests and type checking live in platform.yml / portal.yml.
 
-name: Integration Tests
+name: Integration CI
 
 on:
   push:
-    branches: [ master, develop, 'feat/*', 'fix/*' ]
+    branches: [master, staging]
     paths:
       - 'services/**'
       - 'scripts/**'
-      - 'tests/integration/**'
+      - 'tests/**'
+      - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/integration.yml'
-      - 'deploy/**'
   pull_request:
-    branches: [ master, develop ]
+    branches: [master]
     paths:
       - 'services/**'
       - 'scripts/**'
-      - 'tests/integration/**'
+      - 'tests/**'
+      - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/integration.yml'
-      - 'deploy/**'
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
-  DJANGO_SECRET_KEY: test-secret-key-for-integration
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
 
 jobs:
-  error-handling-scan:
+  # ---------------------------------------------------------------------------
+  # Lint & Quality — no database needed
+  # ---------------------------------------------------------------------------
+  lint-and-quality:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 0  # Full history needed for ruff no-new-debt (Phase 0)
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -53,23 +56,41 @@ jobs:
     - name: Set up Python and install dependencies
       run: |
         uv python install
-        uv sync --group dev
+        uv sync --all-groups
 
-    - name: Run error handling scanner (non-blocking)
+    - name: Lint all services (make lint — 7 phases)
+      run: make lint
+
+    - name: Component parity check (portal ↔ platform)
+      run: make check-parity
+      continue-on-error: true  # TODO: fix badge.html drift, then make blocking
+
+    - name: Template design-system lint
+      run: make lint-templates
+      continue-on-error: true  # TODO: fix 78 blockers, then make blocking
+
+    - name: Install semgrep for security scanning
       run: |
-        echo "Running non-blocking error handling scanner..."
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/error_handling_scan.py --min-severity medium --exclude-tests --json > error-handling-scan.json || true
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pip install semgrep 2>/dev/null \
+          || echo "⚠️ semgrep install failed — lint-security will skip semgrep checks"
 
-    - name: Upload error handling scan report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: error-handling-scan-report
-        path: error-handling-scan.json
-        if-no-files-found: warn
+    - name: Security lint (make lint-security)
+      run: make lint-security
+      continue-on-error: true  # Non-blocking until semgrep is a stable dependency
 
+  # ---------------------------------------------------------------------------
+  # Integration Tests — requires PostgreSQL
+  # ---------------------------------------------------------------------------
   integration-test:
     runs-on: ubuntu-latest
+
+    # Override workflow-level settings: integration tests need PostgreSQL + DatabaseCache
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.base
+      DB_NAME: test_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: localhost
 
     services:
       postgres:
@@ -119,44 +140,25 @@ jobs:
         echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
         ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py --baseline-ref "$BASE_REF"
 
+    - name: Test layout audit (bootstrap non-blocking)
+      run: |
+        echo "Running test layout audit (non-blocking bootstrap pass)..."
+        # TODO: Remove `|| true` after baseline cleanup lands on master.
+        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/audit_test_layout.py --strict --json > test-layout-audit.json || true
     - name: Set up platform database
       run: |
         cd services/platform
-        echo "Setting up platform database..."
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py migrate --no-input
+        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py createcachetable
 
-    - name: Run service isolation security tests
-      run: |
-        echo "Running service isolation tests..."
+    - name: Service isolation security tests (make test-security)
+      run: make test-security
 
-        # Test 1: Platform can access its models
-        echo "Testing platform model access..."
-        cd services/platform
-        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -c "
-        import os
-        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-        import django
-        django.setup()
-        from apps.billing.models import Invoice
-        print('Platform can access billing models')
-        " || exit 1
+    - name: Database cache tests (make test-cache)
+      run: make test-cache
 
-        # Test 2: Portal cannot access platform models
-        echo "Testing portal model isolation..."
-        cd ../../services/portal
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python -c "
-        try:
-            from apps.billing.models import Invoice
-            print('SECURITY BREACH: Portal can access platform models!')
-            exit(1)
-        except ImportError:
-            print('Portal properly isolated from platform models')
-        " || echo "Portal isolation test passed"
-
-    - name: Run integration test suite
-      run: |
-        echo "Running integration tests..."
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/pytest tests/integration/ -v --tb=short --maxfail=5 || echo "Integration tests completed"
+    - name: Integration test suite (make test-integration)
+      run: make test-integration
 
     - name: Upload integration test reports
       uses: actions/upload-artifact@v4
@@ -166,4 +168,5 @@ jobs:
         path: |
           tests/integration/reports/
           htmlcov/
+          test-layout-audit.json
         if-no-files-found: warn

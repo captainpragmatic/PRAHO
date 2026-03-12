@@ -328,7 +328,7 @@ class InvoiceImmutabilityTests(TestCase):
     """
 
     def setUp(self) -> None:
-        self.currency = Currency.objects.create(code="RON", symbol="lei", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             customer_type="company",
             company_name="Test SRL",
@@ -356,20 +356,25 @@ class InvoiceImmutabilityTests(TestCase):
         self.assertEqual(invoice.total_cents, 15000)
 
     def test_locked_non_draft_invoice_raises_on_modify(self) -> None:
-        """Locked invoices with non-draft status cannot be saved."""
-        invoice = Invoice(
+        """Locked invoices with non-draft status cannot have financial fields modified."""
+        invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
             number="INV-TEST-002",
-            status="issued",
-            locked_at=timezone.now(),
             total_cents=11900,
             tax_cents=1900,
             subtotal_cents=10000,
         )
+        invoice.issue()
+        invoice.save()
+
+        # Modify financial fields on locked invoice
+        invoice.total_cents = 23800
+        invoice.tax_cents = 3800
+        invoice.subtotal_cents = 20000
         with self.assertRaises(ValidationError) as ctx:
             invoice.clean()
-        self.assertIn("Cannot modify locked invoice", str(ctx.exception))
+        self.assertIn("Cannot modify financial data on a locked invoice", str(ctx.exception))
 
     def test_locked_draft_invoice_can_still_be_cleaned(self) -> None:
         """Locked invoice in 'draft' status is a transitional state (allowed)."""
@@ -882,7 +887,7 @@ class ProformaInvoiceTaxTests(TestCase):
     """Test that ProformaInvoice stores VAT rate per line."""
 
     def setUp(self) -> None:
-        self.currency = Currency.objects.create(code="RON", symbol="lei", decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             customer_type="company",
             company_name="Proforma Test SRL",

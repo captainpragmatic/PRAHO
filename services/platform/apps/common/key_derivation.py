@@ -52,9 +52,9 @@ def derive_key(domain: str) -> bytes:
         salt=None,
         info=info,
     )
-    if not settings.SECRET_KEY:  # noqa: SECRET_KEY
+    if not settings.SECRET_KEY:  # noqa: SECRET_KEY — this IS the key derivation module
         raise ImproperlyConfigured("SECRET_KEY must be configured for key derivation")
-    return hkdf.derive(settings.SECRET_KEY.encode())  # noqa: SECRET_KEY
+    return hkdf.derive(settings.SECRET_KEY.encode())  # noqa: SECRET_KEY — HKDF input material
 
 
 def get_key_hex(domain: str) -> str:

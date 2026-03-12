@@ -6,13 +6,13 @@ Global test configuration for PRAHO Platform.
 
 Test Structure:
 - tests/ mirrors apps/ structure for app-specific tests
-- tests/integration_tests/ for cross-app integration tests
+- tests/integration/ for cross-app integration tests
 - Naming convention: test_{app}_{feature}.py
 
 Test Discovery:
 - pytest automatically discovers tests in tests/{app}/ directories
 - Run specific app tests: pytest tests/billing/
-- Run integration tests: pytest tests/integration_tests/
+- Run integration tests: pytest tests/integration/
 - Run all tests: pytest tests/
 """
 

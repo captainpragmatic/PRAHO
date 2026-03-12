@@ -19,7 +19,9 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import transaction
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
+from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -39,6 +41,29 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_PAYMENT_RETRIES = 5
 MAX_PAYMENT_RETRIES = _DEFAULT_MAX_PAYMENT_RETRIES
+
+
+def _build_customer_vat_info(customer: Any) -> CustomerVATInfo:
+    """Build customer VAT context for TaxService.calculate_vat_for_document()."""
+    info: CustomerVATInfo = {
+        "country": (getattr(customer, "country", None) or "RO"),
+        "is_business": bool(getattr(customer, "company_name", "")),
+        "vat_number": None,
+        "customer_id": str(getattr(customer, "id", "")),
+        "order_id": None,
+    }
+    try:
+        tax_profile = customer.tax_profile
+    except Exception:
+        return info
+
+    info["vat_number"] = getattr(tax_profile, "vat_number", None)
+    info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
+    info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
+    vat_rate_override = getattr(tax_profile, "vat_rate", None)
+    if vat_rate_override is not None:
+        info["custom_vat_rate"] = vat_rate_override
+    return info
 
 
 def get_max_payment_retries() -> int:
@@ -310,9 +335,9 @@ class SubscriptionService:
                 # Handle trial period
                 trial_days = data.get("trial_days", 0)
                 if trial_days > 0:
-                    subscription.start_trial(trial_days, user)
+                    subscription.start_trial(trial_days, user)  # fsm-bypass: start_trial() calls self.save() internally
                 else:
-                    subscription.activate(user)
+                    subscription.activate(user)  # fsm-bypass: activate() calls self.save() internally
 
                 log_security_event(
                     event_type="subscription_created",
@@ -450,15 +475,15 @@ class SubscriptionService:
         except Currency.DoesNotExist:
             currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
-        # Calculate tax using centralized TaxService (ADR-0015)
-        from apps.common.tax_service import TaxService  # noqa: PLC0415  # Deferred: avoids circular import
-
         subtotal_cents = change.proration_amount_cents
-        vat_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-        tax_cents = int(Decimal(subtotal_cents) * vat_rate)
-        total_cents = subtotal_cents + tax_cents
+        vat_result = TaxService.calculate_vat_for_document(
+            subtotal_cents=subtotal_cents,
+            customer_info=_build_customer_vat_info(subscription.customer),
+        )
+        tax_cents = vat_result.vat_cents
+        total_cents = vat_result.total_cents
 
-        # Create invoice
+        # Create invoice as draft, then issue via FSM
         invoice = Invoice.objects.create(
             customer=subscription.customer,
             number=sequence.get_next_number("INV"),
@@ -466,8 +491,6 @@ class SubscriptionService:
             subtotal_cents=subtotal_cents,
             tax_cents=tax_cents,
             total_cents=total_cents,
-            status="issued",
-            issued_at=timezone.now(),
             due_at=timezone.now() + timedelta(days=7),
             bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
             bill_to_email=subscription.customer.primary_email or "",
@@ -487,9 +510,13 @@ class SubscriptionService:
             description=f"Proration: {change.change_type.replace('_', ' ').title()} - {subscription.product.name}",
             quantity=Decimal("1"),
             unit_price_cents=subtotal_cents,
-            tax_rate=vat_rate,
+            tax_rate=(vat_result.vat_rate / Decimal("100")),
             line_total_cents=total_cents,
         )
+
+        # Issue via FSM transition — sets issued_at and locked_at
+        invoice.issue()
+        invoice.save()
 
         # Link change to invoice
         change.invoice = invoice
@@ -545,7 +572,10 @@ class SubscriptionService:
                 return Err("Subscription is not cancelled")
 
             with transaction.atomic():
-                subscription.status = "active"
+                # Use FSM transition for cancelled → active; for cancel_at_period_end
+                # the status is still active/other, so just clear the flag.
+                if subscription.status == "cancelled":
+                    subscription._reactivate_now()
                 subscription.cancel_at_period_end = False
                 subscription.cancelled_at = None
                 subscription.cancellation_reason = ""
@@ -819,6 +849,13 @@ class RecurringBillingService:
                         f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"  # type: ignore[union-attr]
                     )
 
+            except TransitionNotAllowed:
+                msg = (
+                    f"Subscription {subscription.subscription_number} cannot transition "
+                    f"from status '{subscription.status}' during billing cycle"
+                )
+                logger.warning(f"⚠️ [BillingCycle] {msg}")
+                result["errors"].append(msg)
             except Exception as e:
                 logger.exception(f"Error processing subscription {subscription.id}: {e}")
                 result["errors"].append(f"Error for {subscription.subscription_number}: {e}")
@@ -845,15 +882,15 @@ class RecurringBillingService:
         try:
             sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
 
-            # Calculate amounts using centralized TaxService (ADR-0015)
-            from apps.common.tax_service import TaxService  # noqa: PLC0415  # Deferred: avoids circular import
-
             subtotal_cents = subscription.total_price_cents
-            tax_rate = TaxService.get_vat_rate("RO", as_decimal=True)
-            tax_cents = int(Decimal(subtotal_cents) * tax_rate)
-            total_cents = subtotal_cents + tax_cents
+            vat_result = TaxService.calculate_vat_for_document(
+                subtotal_cents=subtotal_cents,
+                customer_info=_build_customer_vat_info(subscription.customer),
+            )
+            tax_cents = vat_result.vat_cents
+            total_cents = vat_result.total_cents
 
-            # Create invoice
+            # Create invoice as draft, then issue via FSM
             invoice = Invoice.objects.create(
                 customer=subscription.customer,
                 number=sequence.get_next_number("INV"),
@@ -861,8 +898,6 @@ class RecurringBillingService:
                 subtotal_cents=subtotal_cents,
                 tax_cents=tax_cents,
                 total_cents=total_cents,
-                status="issued",
-                issued_at=timezone.now(),
                 due_at=timezone.now() + timedelta(days=14),
                 bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
                 bill_to_email=subscription.customer.primary_email or "",
@@ -884,9 +919,13 @@ class RecurringBillingService:
                 description=f"{subscription.product.name} - {subscription.billing_cycle.title()} ({period_desc})",
                 quantity=Decimal(subscription.quantity),
                 unit_price_cents=subscription.effective_price_cents,
-                tax_rate=tax_rate,
+                tax_rate=(vat_result.vat_rate / Decimal("100")),
                 line_total_cents=total_cents,
             )
+
+            # Issue via FSM transition — sets issued_at and locked_at
+            invoice.issue()
+            invoice.save()
 
             return Ok(invoice)
 
@@ -996,8 +1035,8 @@ class RecurringBillingService:
                         at_period_end=False,
                     )
                 else:
-                    # Suspend services but keep subscription
-                    subscription.status = "paused"
+                    # Suspend services but keep subscription — use FSM transition.
+                    subscription._pause_now()
                     subscription.paused_at = now
                     subscription.save()
 

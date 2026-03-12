@@ -28,7 +28,7 @@ class TypeCoverageReporter:
         cmd = ["python", "-m", "mypy", target, "--config-file", "pyproject.toml", "--show-traceback", "--error-summary"]
 
         try:
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, capture_output=True, text=True, cwd=self.project_root
             )  # Safe: shell=False  # Safe: shell=False
 

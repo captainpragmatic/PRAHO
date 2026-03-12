@@ -46,6 +46,7 @@ from typing import Any, ClassVar, TypeVar
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection, reset_queries
+from django.utils import timezone as tz
 
 # Thread-local storage for request context
 _request_context = threading.local()
@@ -300,7 +301,7 @@ class QueryInfo:
     sql: str
     time_ms: float
     stack_trace: list[str]
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=tz.now)
     params: tuple[Any, ...] | None = None
     is_duplicate: bool = False
 
@@ -818,7 +819,7 @@ class PerformanceProfiler:
             logger.debug("Cache backend does not expose internal cache stats")
 
         return PerformanceSnapshot(
-            timestamp=datetime.now(),
+            timestamp=tz.now(),
             memory_mb=memory_mb,
             cpu_percent=cpu_percent,
             thread_count=thread_count,
@@ -884,7 +885,7 @@ class RuntimeAnalyzer:
         """Context manager to analyze an operation."""
         analysis: dict[str, Any] = {
             "operation": operation_name,
-            "start_time": datetime.now().isoformat(),
+            "start_time": tz.now().isoformat(),
             "query_trace": None,
             "method_trace": None,
             "performance": None,
@@ -923,7 +924,7 @@ class RuntimeAnalyzer:
             if self.trace_methods:
                 analysis["method_trace"] = MethodTracer.get_trace_report()
 
-            analysis["end_time"] = datetime.now().isoformat()
+            analysis["end_time"] = tz.now().isoformat()
             self._analyses[operation_name] = analysis
 
     def get_analysis(self, operation_name: str) -> dict[str, Any] | None:

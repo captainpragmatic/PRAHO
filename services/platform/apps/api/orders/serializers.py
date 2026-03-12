@@ -3,6 +3,7 @@ Order API Serializers for PRAHO Platform
 DRF serializers for order and product catalog endpoints with Romanian compliance.
 """
 
+import json
 import logging
 import traceback
 from typing import Any
@@ -14,6 +15,8 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.orders.models import Order, OrderItem
 from apps.orders.price_sealing import create_sealed_price_for_product_price
 from apps.products.models import Product, ProductPrice
+
+MAX_METADATA_BYTES = 4096
 
 
 class ProductPriceSerializer(serializers.ModelSerializer):
@@ -92,6 +95,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "requires_domain",
             "is_active",
             "prices",
+            "meta",
         )
 
 
@@ -241,7 +245,6 @@ class CartItemInputSerializer(serializers.Serializer):
 class CartCalculationInputSerializer(serializers.Serializer):
     """Input serializer for cart total calculations"""
 
-    customer_id = serializers.IntegerField()
     currency = serializers.CharField(max_length=3, default="RON")
     items = CartItemInputSerializer(many=True)
 
@@ -252,6 +255,7 @@ class CartCalculationOutputSerializer(serializers.Serializer):
     subtotal_cents = serializers.IntegerField()
     tax_cents = serializers.IntegerField()
     total_cents = serializers.IntegerField()
+    vat_rate_percent = serializers.IntegerField(required=False, default=0)
     currency = serializers.CharField(max_length=3)
     warnings = serializers.ListField(child=serializers.DictField(), default=list)
 
@@ -262,13 +266,20 @@ class CartCalculationOutputSerializer(serializers.Serializer):
 class OrderCreateInputSerializer(serializers.Serializer):
     """Input serializer for order creation"""
 
-    customer_id = serializers.IntegerField()
     currency = serializers.CharField(max_length=3, default="RON")
     items = CartItemInputSerializer(many=True)
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True)
-    status = serializers.CharField(max_length=20, default="draft")
-    source = serializers.CharField(max_length=50, default="api")
     meta = serializers.JSONField(default=dict, required=False)
+
+    def validate_meta(self, value: dict[str, Any]) -> dict[str, Any]:
+        """Limit metadata payload size to reduce abuse and parser pressure."""
+        try:
+            encoded = json.dumps(value, ensure_ascii=True)
+        except (TypeError, ValueError) as exc:
+            raise serializers.ValidationError(_("Invalid metadata format")) from exc
+        if len(encoded.encode("utf-8")) > MAX_METADATA_BYTES:
+            raise serializers.ValidationError(_("Metadata must be at most 4KB"))
+        return value
 
 
 class PriceWarningSerializer(serializers.Serializer):

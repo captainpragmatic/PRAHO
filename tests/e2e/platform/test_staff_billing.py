@@ -671,7 +671,7 @@ def test_staff_complete_billing_workflow(monitored_staff_page: Page) -> None:
     print("    Step 2: Converting proforma to invoice...")
     invoice_ready = _convert_proforma_to_invoice(page)
     if not invoice_ready:
-        pytest.skip("Proforma not in convertible state — conversion flow not tested")
+        pytest.skip("Proforma not in convertible state — conversion flow not tested (TODO: ensure fixture creates convertible proforma)")
 
     # Step 3: Test PDF generation
     print("    Step 3: Testing PDF generation...")

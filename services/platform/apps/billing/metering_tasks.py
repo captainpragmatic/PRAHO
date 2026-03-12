@@ -219,7 +219,7 @@ def rate_pending_aggregations(billing_cycle_id: str | None = None) -> dict[str, 
 
         if billing_cycle_id:
             result = engine.rate_billing_cycle(billing_cycle_id)
-            return result.unwrap() if result.is_ok() else {"success": False, "error": result.error}
+            return result.unwrap() if result.is_ok() else {"success": False, "error": result.unwrap_err()}
 
         # Rate all pending
         pending_cycles = BillingCycle.objects.filter(status="closed")
@@ -367,7 +367,7 @@ def send_usage_alert_notification(alert_id: str) -> dict[str, Any]:
         if result.is_ok():
             return {"success": True, "alert_id": alert_id}
         else:
-            return {"success": False, "error": result.error}
+            return {"success": False, "error": result.unwrap_err()}
     except Exception as e:
         logger.exception(f"Error sending alert notification: {e}")
         return {"success": False, "error": str(e)}
@@ -434,7 +434,7 @@ def sync_aggregation_to_stripe(aggregation_id: str) -> dict[str, Any]:
         if result.is_ok():
             return {"success": True, **result.unwrap()}
         else:
-            return {"success": False, "error": result.error}
+            return {"success": False, "error": result.unwrap_err()}
     except Exception as e:
         logger.exception(f"Error syncing to Stripe: {e}")
         return {"success": False, "error": str(e)}
@@ -457,7 +457,7 @@ def sync_billing_cycle_to_stripe(billing_cycle_id: str) -> dict[str, Any]:
         if result.is_ok():
             return {"success": True, **result.unwrap()}
         else:
-            return {"success": False, "error": result.error}
+            return {"success": False, "error": result.unwrap_err()}
     except Exception as e:
         logger.exception(f"Error syncing billing cycle to Stripe: {e}")
         return {"success": False, "error": str(e)}

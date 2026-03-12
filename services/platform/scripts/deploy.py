@@ -197,7 +197,7 @@ class PragmaticHostDeployment:
                 return True
 
             cmd = [sys.executable, str(backup_script)]
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 
@@ -219,7 +219,7 @@ class PragmaticHostDeployment:
 
             cmd = ["git", "clone", "--branch", branch, "--depth", "1", self.config["git_repo"], str(release_dir)]
 
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 
@@ -292,7 +292,7 @@ class PragmaticHostDeployment:
 
             cmd = [self.config["pip_path"], "install", "--upgrade", "--requirement", str(requirements_file)]
 
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, cwd=str(release_dir), capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 
@@ -317,7 +317,7 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 
@@ -342,7 +342,7 @@ class PragmaticHostDeployment:
             env = os.environ.copy()
             env["DJANGO_SETTINGS_MODULE"] = "config.settings.prod"
 
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, cwd=str(release_dir), env=env, capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 
@@ -389,7 +389,7 @@ class PragmaticHostDeployment:
                     logger.info(f"Restarting {service}...")
 
                     cmd = ["sudo", "systemctl", "restart", service]
-                    result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                    result = subprocess.run(  # Safe: shell=False
                         cmd, check=False, capture_output=True, text=True
                     )  # Safe: shell=False  # Safe: shell=False
 
@@ -484,8 +484,8 @@ class PragmaticHostDeployment:
 
             for release in to_remove:
                 logger.info(f"Removing old release: {release.name}")
-                subprocess.run(  # noqa: S603  # Safe: shell=False
-                    ["rm", "-rf", str(release)],  # noqa: S607  # Safe: known executable
+                subprocess.run(  # Safe: shell=False
+                    ["rm", "-rf", str(release)],  # Safe: known executable
                     check=False,
                 )
 

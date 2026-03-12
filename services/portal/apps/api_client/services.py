@@ -906,6 +906,7 @@ class PlatformAPIClient:
         self,
         invoice_id: int | None = None,
         order_id: int | None = None,
+        customer_id: int | None = None,
         amount_cents: int | None = None,
         reason: str = "",
         user_id: str = "",
@@ -913,6 +914,8 @@ class PlatformAPIClient:
     ) -> dict[str, Any]:
         """Process a refund for an invoice or order."""
         data: dict[str, Any] = {"reason": reason, "user_id": user_id, "refund_type": refund_type}
+        if customer_id is not None:
+            data["customer_id"] = customer_id
         if invoice_id:
             data["invoice_id"] = invoice_id
         if order_id:

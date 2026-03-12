@@ -290,10 +290,9 @@ class GiftCardModelTests(TestCase):
     def setUp(self):
         """Set up test fixtures."""
         from apps.billing.models import Currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="lei",
+            defaults={"name": "Romanian Leu", "symbol": "lei"},
         )
 
     def test_gift_card_creation(self):
@@ -378,10 +377,9 @@ class LoyaltyProgramModelTests(TestCase):
     def setUp(self):
         """Set up test fixtures."""
         from apps.billing.models import Currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="lei",
+            defaults={"name": "Romanian Leu", "symbol": "lei"},
         )
 
     def test_loyalty_program_creation(self):

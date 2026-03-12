@@ -40,6 +40,7 @@ from apps.provisioning.virtualmin_signals import (
 )
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer, VirtualminProvisioningJob
 from apps.users.models import User, CustomerMembership
+from tests.helpers.fsm_helpers import force_status
 
 
 class BillingProvisioningIntegrationTest(TestCase):
@@ -68,10 +69,9 @@ class BillingProvisioningIntegrationTest(TestCase):
         )
 
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON"
+            defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
         # Create product
@@ -94,6 +94,7 @@ class BillingProvisioningIntegrationTest(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
@@ -150,9 +151,11 @@ class BillingProvisioningIntegrationTest(TestCase):
         self.service.save()
         self.assertFalse(self.service.requires_hosting_account())
 
-        # Test inactive service
+        # Test inactive service — use FSM to reach terminated state
         self.service.domain = "example.com"
-        self.service.status = "terminated"
+        self.service.save()
+        # Transition: active -> terminated via FSM
+        self.service.terminate()
         self.service.save()
         self.assertFalse(self.service.requires_hosting_account())
 
@@ -185,6 +188,8 @@ class DomainsProvisioningIntegrationTest(TestCase):
             company_name="Test Customer Ltd",
             customer_type="company",
         )
+
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
 
         # Create TLD and registrar
         self.tld = TLD.objects.create(
@@ -224,6 +229,7 @@ class DomainsProvisioningIntegrationTest(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
@@ -259,8 +265,8 @@ class DomainsProvisioningIntegrationTest(TestCase):
         """Test that domain status change suspends Virtualmin account via post_save signal"""
         mock_suspend.return_value = Ok(True)
 
-        # Change domain status — post_save signal triggers sync_domain_to_virtualmin
-        self.domain.status = "suspended"
+        # Change domain status via FSM — post_save signal triggers sync_domain_to_virtualmin
+        self.domain.suspend()
         self.domain.save()
 
         # Verify suspension was called (by the signal, not manually)
@@ -279,11 +285,11 @@ class DomainsProvisioningIntegrationTest(TestCase):
         self.virtualmin_account.save()
 
         # Set domain to suspended in DB first (so pre_save captures old_status="suspended")
-        Domain.objects.filter(pk=self.domain.pk).update(status="suspended")
+        force_status(self.domain, "suspended")
         self.domain.refresh_from_db()
 
-        # Change domain status back to active — post_save signal triggers sync
-        self.domain.status = "active"
+        # Change domain status back to active via FSM — post_save signal triggers sync
+        self.domain.activate()
         self.domain.save()
 
         # Verify unsuspension was called (by the signal, not manually)
@@ -325,9 +331,12 @@ class ProvisioningAuditIntegrationTest(TestCase):
             price_monthly=Decimal("29.99")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
@@ -532,9 +541,12 @@ class CustomerProvisioningIntegrationTest(TestCase):
             price_monthly=Decimal("29.99")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Hosting",
             domain="example.com",
             username="testuser",
@@ -609,10 +621,9 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         )
 
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            name="Romanian Leu",
-            symbol="RON"
+            defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
 
     # TODO: Consider adding query efficiency tests for Django-Q2 task processing
@@ -638,6 +649,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             service = Service.objects.create(
                 customer=self.customer,
                 service_plan=service_plan,
+                currency=self.currency,
                 service_name=f"Service {i}",
                 domain=f"example{i}.com",
                 username=f"user{i}",
@@ -721,6 +733,7 @@ class CrossAppIntegrationPerformanceTest(TestCase):
         service = Service.objects.create(
             customer=self.customer,
             service_plan=service_plan,
+            currency=self.currency,
             service_name="Test Service",
             domain="example.com",
             username="testuser",

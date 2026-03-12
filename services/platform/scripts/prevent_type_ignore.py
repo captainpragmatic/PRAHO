@@ -204,7 +204,7 @@ class TypeIgnoreChecker:
     def _parse_staged_added_lines(self: "TypeIgnoreChecker", file_paths: list[str]) -> dict[str, list[tuple[int, str]]]:
         """Return added lines from staged diff keyed by file path."""
         cmd = ["git", "diff", "--cached", "--unified=0", "--", *file_paths]
-        result = subprocess.run(  # noqa: S603  # Safe: shell=False
+        result = subprocess.run(  # Safe: shell=False
             cmd, check=False, capture_output=True, text=True
         )  # Safe: shell=False  # Safe: shell=False
         if result.returncode != 0:

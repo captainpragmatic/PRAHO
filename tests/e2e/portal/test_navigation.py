@@ -624,7 +624,7 @@ def test_login_shows_error_on_wrong_credentials(page: Page) -> None:
         page,
         "login wrong credentials",
         check_console=False,  # Auth errors expected
-        check_network=False,
+        check_network=False,  # Auth errors produce 401/403 responses — expected during login testing
         check_html=True,
         check_css=True,
         check_accessibility=False,

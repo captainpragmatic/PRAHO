@@ -707,7 +707,7 @@ class AggregationConsistencyTestCase(TransactionTestCase):
             period_end=cycle.period_end,
             total_value=total,
             billable_value=total,
-            status="pending",
+            status="accumulating",
         )
 
         self.assertEqual(agg.total_value, Decimal("55"))  # Sum of 1-10

@@ -16,10 +16,9 @@ class CurrencyTestCase(TestCase):
 
     def test_create_currency(self):
         """Test basic currency creation"""
-        currency = Currency.objects.create(
+        currency, _ = Currency.objects.get_or_create(
             code='EUR',
-            symbol='€',
-            decimals=2
+            defaults={'symbol': '€', 'decimals': 2}
         )
 
         self.assertEqual(currency.code, 'EUR')
@@ -28,17 +27,18 @@ class CurrencyTestCase(TestCase):
 
     def test_currency_code_primary_key(self):
         """Test currency code as primary key"""
-        currency = Currency.objects.create(code='USD', symbol='$')
+        currency, _ = Currency.objects.get_or_create(code='USD', defaults={'symbol': '$'})
         self.assertEqual(currency.pk, 'USD')
 
     def test_currency_str_representation(self):
         """Test string representation"""
-        currency = Currency.objects.create(code='RON', symbol='RON')
-        self.assertEqual(str(currency), 'RON (RON)')
+        currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'RON'})
+        # Migration 0019 seeds RON with symbol='lei'; get_or_create returns existing
+        self.assertEqual(str(currency), f'RON ({currency.symbol})')
 
     def test_currency_decimals_default(self):
         """Test default decimals value"""
-        currency = Currency.objects.create(code='BTC', symbol='₿')
+        currency, _ = Currency.objects.get_or_create(code='BTC', defaults={'symbol': '₿'})
         self.assertEqual(currency.decimals, 2)  # Default value
 
 
@@ -47,9 +47,9 @@ class FXRateTestCase(TestCase):
 
     def setUp(self):
         """Create test currencies"""
-        self.eur = Currency.objects.create(code='EUR', symbol='€', decimals=2)
-        self.ron = Currency.objects.create(code='RON', symbol='RON', decimals=2)
-        self.usd = Currency.objects.create(code='USD', symbol='$', decimals=2)
+        self.eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self.ron, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'RON', 'decimals': 2})
+        self.usd, _ = Currency.objects.get_or_create(code='USD', defaults={'symbol': '$', 'decimals': 2})
 
     def test_create_fx_rate(self):
         """Test basic FX rate creation"""
@@ -181,8 +181,8 @@ class CurrencyIntegrationTestCase(TestCase):
     """Test Currency integration scenarios"""
 
     def setUp(self):
-        self.eur = Currency.objects.create(code='EUR', symbol='€', decimals=2)
-        self.ron = Currency.objects.create(code='RON', symbol='RON', decimals=2)
+        self.eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self.ron, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'RON', 'decimals': 2})
 
     def test_currency_used_in_invoices(self):
         """Test currency protection when used in invoices"""

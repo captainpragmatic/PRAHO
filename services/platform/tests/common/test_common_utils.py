@@ -12,9 +12,9 @@ from django.http import JsonResponse
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.common.tax_service import calculate_romanian_vat
 from apps.common.utils import (
     calculate_due_date,
-    calculate_romanian_vat,
     format_romanian_date,
     format_romanian_datetime,
     generate_invoice_number,

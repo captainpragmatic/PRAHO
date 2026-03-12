@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import NotSupportedError, models, transaction
+from django.db import IntegrityError, NotSupportedError, models, transaction
 from django.utils import timezone
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.models import Currency
 from apps.common.types import EmailAddress, Err, Ok, Result
@@ -90,6 +91,7 @@ class OrderCreateData:
     currency: str = "RON"
     notes: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
+    idempotency_key: str = ""
 
 
 @dataclass
@@ -229,7 +231,7 @@ class OrderNumberingService:
             created_at__year=current_year,
         ).order_by("-order_number")
         try:
-            latest_order = qs.select_for_update().first()
+            latest_order = qs.select_for_update(of=("self",)).first()
         except NotSupportedError:
             # SQLite doesn't support SELECT FOR UPDATE — fall back to plain query
             latest_order = qs.first()
@@ -250,6 +252,32 @@ class OrderNumberingService:
 # ===============================================================================
 # MAIN ORDER SERVICE
 # ===============================================================================
+
+# FSM transition dispatch map: target status → method name on Order model
+# FSM transition dispatch map: (source, target) → method name on Order model.
+# Keyed by (source, target) because different source states may need different
+# methods to reach the same target (e.g., draft→pending via submit vs failed→pending via retry).
+_ORDER_TRANSITION_MAP: dict[tuple[str, str], str] = {
+    # Happy path
+    ("draft", "pending"): "submit",
+    ("pending", "confirmed"): "confirm",
+    ("confirmed", "processing"): "start_processing",
+    ("processing", "completed"): "complete",
+    # Cancellation (multiple sources)
+    ("draft", "cancelled"): "cancel",
+    ("pending", "cancelled"): "cancel",
+    ("confirmed", "cancelled"): "cancel",
+    ("processing", "cancelled"): "cancel",
+    ("failed", "cancelled"): "cancel",
+    # Failure + retry
+    ("pending", "failed"): "fail",
+    ("processing", "failed"): "fail",
+    ("failed", "pending"): "retry",
+    # Refunds
+    ("completed", "refunded"): "refund_order",
+    ("completed", "partially_refunded"): "partial_refund",
+    ("partially_refunded", "refunded"): "complete_refund",
+}
 
 
 class OrderService:
@@ -327,13 +355,14 @@ class OrderService:
             # Get currency instance (Currency already imported at top)
             currency_instance = Currency.objects.get(code=data.currency)
 
-            # Create order
+            # Create order (idempotency_key set atomically to prevent race conditions)
             order = Order.objects.create(
                 order_number=order_number,
                 customer=data.customer,
                 currency=currency_instance,
                 notes=data.notes,
                 meta=data.meta,
+                idempotency_key=data.idempotency_key,
                 # Customer snapshot fields
                 customer_email=data.customer.primary_email,
                 customer_name=data.customer.name,
@@ -453,6 +482,10 @@ class OrderService:
 
             return Ok(order)
 
+        except IntegrityError:
+            # Let IntegrityError propagate — idempotency race conditions must be
+            # handled at the view level where the existing order can be returned.
+            raise
         except Exception as e:
             logger.exception(f"Failed to create order: {e}")
             return Err(f"Failed to create order: {e!s}")
@@ -460,13 +493,9 @@ class OrderService:
     @staticmethod
     @transaction.atomic
     def update_order_status(order: Order, status_data: StatusChangeData) -> Result[Order, str]:
-        """Update order status with validation and audit trail"""
+        """Update order status via FSM transition with validation and audit trail."""
         try:
             old_status = order.status
-
-            # Validate status transition
-            if not OrderService._is_valid_status_transition(old_status, status_data.new_status):
-                return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
 
             # Enforce preflight validation on draft → pending
             if old_status == "draft" and status_data.new_status == "pending":
@@ -488,9 +517,25 @@ class OrderService:
                     )
                     return Err(f"Preflight validation failed: {e!s}")
 
-            # Update order status
-            order.status = status_data.new_status
-            order.save(update_fields=["status", "updated_at"])
+            # Look up FSM transition method by (source, target) tuple
+            method_name = _ORDER_TRANSITION_MAP.get((old_status, status_data.new_status))
+            if not method_name:
+                return Err(f"No transition from '{old_status}' to '{status_data.new_status}'")
+
+            # Execute FSM transition
+            try:
+                getattr(order, method_name)()
+                order.save()
+            except ConcurrentTransition:
+                logger.warning(
+                    "⚠️ [OrderService] Concurrent transition on order %s from %s to %s — retriable",
+                    order.order_number,
+                    old_status,
+                    status_data.new_status,
+                )
+                return Err(f"Concurrent modification on order {order.order_number} — please retry")
+            except TransitionNotAllowed:
+                return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
 
             # Create status history entry
             OrderService._create_status_history(
@@ -532,25 +577,6 @@ class OrderService:
             notes=notes,
             changed_by=changed_by,
         )
-
-    @staticmethod
-    def _is_valid_status_transition(old_status: str, new_status: str) -> bool:
-        """Validate order status transitions according to business rules"""
-
-        # Define valid transitions based on Romanian business logic
-        valid_transitions = {
-            "draft": ["pending", "cancelled"],
-            "pending": ["confirmed", "cancelled", "failed"],
-            "confirmed": ["processing", "cancelled"],
-            "processing": ["completed", "failed", "cancelled"],
-            "completed": ["refunded", "partially_refunded"],  # Allow refunds from completed
-            "cancelled": [],  # Terminal state
-            "failed": ["pending", "cancelled"],  # Allow retry
-            "refunded": [],  # Terminal state
-            "partially_refunded": ["refunded"],  # Can complete refund
-        }
-
-        return new_status in valid_transitions.get(old_status, [])
 
 
 # ===============================================================================
@@ -623,11 +649,12 @@ class OrderServiceCreationService:
                 service = Service.objects.create(
                     customer=order.customer,
                     service_plan=service_plan,
+                    currency=order.currency,
                     service_name=service_name,
                     domain=item.domain_name or "",
                     username=username,  # Temporary unique username
                     billing_cycle=billing_cycle,
-                    price=item.unit_price / 100,  # Convert from cents to decimal
+                    price=item.unit_price,  # Already converted from cents by property
                     status="pending",  # Key status - visible to customer
                     # Link to order for tracking
                     admin_notes=f"Created from order {order.order_number}",
@@ -749,7 +776,7 @@ class OrderServiceCreationService:
 
             for item in order.items.all():
                 if item.service and item.service.status == "pending":
-                    item.service.status = "provisioning"
+                    item.service.start_provisioning()
                     item.service.save(update_fields=["status"])
                     updated_services.append(item.service)
 

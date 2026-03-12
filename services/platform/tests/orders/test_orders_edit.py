@@ -13,6 +13,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.orders.views import order_edit
 from apps.users.models import User
+from tests.helpers.fsm_helpers import force_status
 
 
 class OrderEditableFieldsTests(TestCase):
@@ -41,7 +42,7 @@ class OrderEditableFieldsTests(TestCase):
 
     def test_completed_order_limited_editable(self):
         """Completed orders only allow notes editing"""
-        self.order.status = "completed"
+        force_status(self.order, "completed")
         self.assertEqual(self.order.get_editable_fields(), ["notes"])
 
     def test_edit_post_no_longer_placeholder(self):

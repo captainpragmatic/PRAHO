@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -26,7 +26,7 @@ class ProfileService:
         customer: Customer,
         user: User,
         cui: str = "",
-        **kwargs: Any,
+        **kwargs: object,
     ) -> CustomerTaxProfile:
         """Create tax profile for customer."""
 
@@ -48,7 +48,7 @@ class ProfileService:
     def create_billing_profile(
         customer: Customer,
         user: User,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> CustomerBillingProfile:
         """Create billing profile for customer."""
 
@@ -92,7 +92,7 @@ class ProfileService:
     def update_tax_profile(
         tax_profile: CustomerTaxProfile,
         user: User,
-        **updates: Any,
+        **updates: object,
     ) -> CustomerTaxProfile:
         """Update tax profile with validation. Only allows safe fields."""
         safe_updates = {k: v for k, v in updates.items() if k in ProfileService.TAX_PROFILE_UPDATABLE_FIELDS}
@@ -101,6 +101,8 @@ class ProfileService:
 
         if "cui" in safe_updates:
             new_cui = safe_updates.pop("cui")
+            if not isinstance(new_cui, str):
+                raise ValueError("CUI must be a string")
             from apps.common.cui_validator import CUIValidator
 
             result = CUIValidator.validate_strict(new_cui)
@@ -127,7 +129,7 @@ class ProfileService:
     def update_billing_profile(
         billing_profile: CustomerBillingProfile,
         user: User,
-        **updates: Any,
+        **updates: object,
     ) -> CustomerBillingProfile:
         """Update billing profile. Only allows safe fields."""
         safe_updates = {k: v for k, v in updates.items() if k in ProfileService.BILLING_PROFILE_UPDATABLE_FIELDS}
@@ -160,11 +162,11 @@ class ProfileService:
         return Decimal("0.00")
 
     @staticmethod
-    def validate_tax_compliance(customer: Customer) -> dict[str, Any]:
+    def validate_tax_compliance(customer: Customer) -> dict[str, object]:
         """Validate customer tax compliance status."""
         tax_profile = customer.get_tax_profile()
 
-        compliance_status = {
+        compliance_status: dict[str, object] = {
             "has_tax_profile": tax_profile is not None,
             "cui_valid": False,
             "vat_configured": False,

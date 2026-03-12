@@ -9,7 +9,9 @@ from typing import Any, ClassVar
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, transition
 
 
 class ServiceRelationship(models.Model):
@@ -290,7 +292,7 @@ class ServiceGroup(models.Model):
     )
 
     # Status and lifecycle
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True, db_index=True)
 
     # Billing configuration
     billing_cycle = models.CharField(
@@ -323,17 +325,60 @@ class ServiceGroup(models.Model):
             models.Index(fields=["group_type", "status"], name="service_group_type_idx"),
         )
 
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(status__in=["active", "suspended", "cancelled", "pending"]),
+                name="service_group_valid_status",
+            ),
+        ]
+
     def __str__(self) -> str:
         return f"{self.name} ({self.get_group_type_display()})"
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True)."""
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    # --- FSM Status Transitions ---
+
+    @transition(field=status, source="pending", target="active")
+    def activate(self) -> None:
+        """Activate the service group after setup."""
+
+    @transition(field=status, source="active", target="suspended")
+    def suspend(self) -> None:
+        """Suspend the service group."""
+
+    @transition(field=status, source="suspended", target="active")
+    def resume(self) -> None:
+        """Resume a suspended service group."""
+
+    @transition(field=status, source=["pending", "active", "suspended"], target="cancelled")
+    def cancel(self) -> None:
+        """Cancel the service group."""
+
     @property
     def total_services(self) -> int:
-        """📊 Total number of services in group"""
+        """Total number of services in group."""
         return self.members.count()
 
     @property
     def active_services(self) -> int:
-        """🟢 Number of active services in group"""
+        """Number of active services in group."""
         return self.members.filter(service__status="active").count()
 
 

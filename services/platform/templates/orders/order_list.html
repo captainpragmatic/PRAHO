@@ -47,7 +47,7 @@
   {% endif %}
 
   <!-- Statistics Cards -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6 mb-6 sm:mb-8">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-6 mb-6 sm:mb-8">
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
@@ -80,6 +80,18 @@
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'Pending Orders' %}</p>
           <p class="text-2xl font-semibold text-white">{{ status_counts.pending }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <div class="flex items-center">
+        <div class="flex-shrink-0">
+          <div class="w-8 h-8">{% icon "check" size="lg" %}</div>
+        </div>
+        <div class="ml-4">
+          <p class="text-sm font-medium text-slate-400">{% trans 'Confirmed' %}</p>
+          <p class="text-2xl font-semibold text-white">{{ status_counts.confirmed }}</p>
         </div>
       </div>
     </div>
@@ -131,6 +143,7 @@
             <option value="">{% trans "All Statuses" %}</option>
             <option value="draft" {% if current_status == "draft" %}selected{% endif %}>📝 {% trans "Draft" %}</option>
             <option value="pending" {% if current_status == "pending" %}selected{% endif %}>⏳ {% trans "Pending" %}</option>
+            <option value="confirmed" {% if current_status == "confirmed" %}selected{% endif %}>✅ {% trans "Confirmed" %}</option>
             <option value="processing" {% if current_status == "processing" %}selected{% endif %}>⚙️ {% trans "Processing" %}</option>
             <option value="completed" {% if current_status == "completed" %}selected{% endif %}>✅ {% trans "Completed" %}</option>
             <option value="cancelled" {% if current_status == "cancelled" %}selected{% endif %}>❌ {% trans "Cancelled" %}</option>
@@ -176,6 +189,8 @@
                     {% trans "Draft" as bt3 %}{% badge bt3 icon="document" variant="secondary" %}
                   {% elif order.status == "pending" %}
                     {% trans "Pending" as bt4 %}{% badge bt4 icon="clock" variant="warning" %}
+                  {% elif order.status == "confirmed" %}
+                    {% trans "Confirmed" as bt4b %}{% badge bt4b icon="check" variant="success" %}
                   {% elif order.status == "processing" %}
                     {% trans "Processing" as bt5 %}{% badge bt5 icon="settings" variant="primary" %}
                   {% elif order.status == "completed" %}
@@ -275,6 +290,8 @@
                   {% trans "Draft" as bt13 %}{% badge bt13 icon="document" variant="secondary" size="sm" %}
                 {% elif order.status == "pending" %}
                   {% trans "Pending" as bt14 %}{% badge bt14 icon="clock" variant="warning" size="sm" %}
+                {% elif order.status == "confirmed" %}
+                  {% trans "Confirmed" as bt14b %}{% badge bt14b icon="check" variant="success" size="sm" %}
                 {% elif order.status == "processing" %}
                   {% trans "Processing" as bt15 %}{% badge bt15 icon="settings" variant="primary" size="sm" %}
                 {% elif order.status == "completed" %}

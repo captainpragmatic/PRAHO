@@ -13,11 +13,13 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 
-from apps.billing.models import Invoice
+from apps.billing.models import Currency, Invoice
 from apps.customers.models import Customer, CustomerTaxProfile, CustomerBillingProfile, CustomerAddress
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.services import ServiceActivationService
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -103,7 +105,12 @@ def create_test_service_plan(**kwargs) -> ServicePlan:
 # ===============================================================================
 
 class ServiceActivationServiceTestCase(TestCase):
-    """Test ServiceActivationService methods and business logic"""
+    """Test ServiceActivationService methods and business logic
+
+    NOTE: Current tests verify logging because service methods are placeholder
+    implementations. Expand to assert DB state changes once real provisioning
+    logic is implemented (e.g., Service.status transitions).
+    """
 
     def setUp(self):
         """Set up test data"""
@@ -283,11 +290,13 @@ class ServiceActivationIntegrationTestCase(TestCase):
         self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
         self.customer = create_test_customer('Integration Test Customer', self.admin_user)
         self.plan = create_test_service_plan()
+        Currency.objects.get_or_create(code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2})
 
         # Create real services for integration testing
         self.service1 = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency_id="RON",
             service_name='Test Service 1',
             domain='test1.example.com',
             username='test1_user',
@@ -299,6 +308,7 @@ class ServiceActivationIntegrationTestCase(TestCase):
         self.service2 = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency_id="RON",
             service_name='Test Service 2',
             domain='test2.example.com',
             username='test2_user',
@@ -325,12 +335,28 @@ class ServiceActivationIntegrationTestCase(TestCase):
         services_after = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(services_after, 2)
 
+    def test_activate_service_clears_suspension_metadata(self):
+        """activate_service() must persist suspended_at and suspension_reason clears."""
+        force_status(self.service1, "suspended")
+        self.service1.suspended_at = timezone.now()
+        self.service1.suspension_reason = "manual hold"
+        self.service1.save(update_fields=["status", "suspended_at", "suspension_reason"])
+
+        result = ServiceActivationService.activate_service(self.service1, "reactivation test")
+        self.assertTrue(result.is_ok())
+
+        self.service1.refresh_from_db()
+        self.assertEqual(self.service1.status, "active")
+        self.assertIsNone(self.service1.suspended_at)
+        self.assertEqual(self.service1.suspension_reason, "")
+
     def test_service_activation_with_different_service_statuses(self):
         """Test service activation handles services in different statuses"""
         # Create services with different statuses
         suspended_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency_id="RON",
             service_name='Suspended Service',
             domain='suspended.example.com',
             username='suspended_user',
@@ -342,6 +368,7 @@ class ServiceActivationIntegrationTestCase(TestCase):
         expired_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
+            currency_id="RON",
             service_name='Expired Service',
             domain='expired.example.com',
             username='expired_user',

@@ -24,6 +24,7 @@ from django.core.files.storage import default_storage
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import (
     AuditContext,
@@ -663,7 +664,7 @@ def handle_proforma_invoice_conversion(
                             invoice.orders.set(instance.orders.all())
 
                     else:
-                        logger.error(f"🔥 [Proforma] Conversion failed: {result.error}")
+                        logger.error(f"🔥 [Proforma] Conversion failed: {result.unwrap_err()}")
 
                 except Exception as e:
                     logger.exception(f"🔥 [Proforma] Auto-conversion failed: {e}")
@@ -1127,12 +1128,19 @@ def _handle_payment_success(payment: Payment) -> None:
         if payment.invoice:
             remaining_amount = payment.invoice.get_remaining_amount()
             if remaining_amount <= 0:
-                payment.invoice.status = "paid"
-                payment.invoice.paid_at = timezone.now()
-                payment.invoice.save(update_fields=["status", "paid_at"])
+                try:
+                    payment.invoice.mark_as_paid()
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Invoice Signal] Cannot mark invoice %s as paid from status '%s'",
+                        payment.invoice.number,
+                        payment.invoice.status,
+                    )
+                else:
+                    payment.invoice.save(update_fields=["status", "paid_at"])
 
-                # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
-                _trigger_virtualmin_provisioning_on_payment(payment.invoice)
+                    # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
+                    _trigger_virtualmin_provisioning_on_payment(payment.invoice)
 
         _send_payment_success_email(payment)
         _update_customer_payment_history(payment.customer, "positive")
@@ -1163,8 +1171,16 @@ def _handle_payment_refund(payment: Payment) -> None:
         if payment.invoice:
             refunded_amount = sum(p.amount_cents for p in payment.invoice.payments.filter(status="refunded"))
             if refunded_amount >= payment.invoice.total_cents:
-                payment.invoice.status = "refunded"
-                payment.invoice.save(update_fields=["status"])
+                try:
+                    payment.invoice.refund_invoice()
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Invoice Signal] Cannot mark invoice %s as refunded from status '%s'",
+                        payment.invoice.number,
+                        payment.invoice.status,
+                    )
+                else:
+                    payment.invoice.save(update_fields=["status"])
 
         _send_payment_refund_email(payment)
 
@@ -1628,7 +1644,10 @@ def _consider_service_suspension(payment: Payment) -> None:
 def _cancel_payment_retries(payment: Payment) -> None:
     """Cancel any pending payment retries"""
     try:
-        PaymentRetryAttempt.objects.filter(payment=payment, status="pending").update(status="cancelled")
+        PaymentRetryAttempt.objects.filter(
+            payment=payment,
+            status="pending",
+        ).update(status="cancelled")  # fsm-bypass: PaymentRetryAttempt is not FSM-protected
 
         logger.info(f"🚫 [Payment] Cancelled pending retries for payment {payment.id}")
 
@@ -1767,7 +1786,7 @@ def _cancel_invoice_webhooks(invoice: Invoice) -> None:
             customer=invoice.customer,
             event_type__startswith="invoice.",  # invoice.created, invoice.cancelled, etc.
             status="pending",
-        ).update(status="cancelled")
+        ).update(status="cancelled")  # fsm-bypass: WebhookDelivery is not FSM-protected
 
         if cancelled_count > 0:
             logger.info(f"🚫 [Webhook] Cancelled {cancelled_count} pending deliveries for invoice {invoice.number}")

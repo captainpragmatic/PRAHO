@@ -20,6 +20,7 @@ from apps.orders.services import (
     OrderService,
     StatusChangeData,
 )
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -80,10 +81,9 @@ class OrderNumberingServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -161,10 +161,9 @@ class OrderServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -292,6 +291,23 @@ class OrderServiceTestCase(TestCase):
                 'fiscal_code': 'RO12345678',
             }
         )
+        # FSM: submit() (draft→pending) requires at least one item on the order
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type="hosting",
+            quantity=1,
+            unit_price_cents=5000,
+        )
+        # Preflight validation requires a current price for the order currency
+        ProductPrice.objects.create(
+            product=self.product,
+            currency=self.currency,
+            monthly_price_cents=5000,
+            setup_cents=0,
+            is_active=True,
+        )
 
         # Update status
         status_data = StatusChangeData(
@@ -303,7 +319,7 @@ class OrderServiceTestCase(TestCase):
         result = OrderService.update_order_status(order, status_data)
 
         # Verify success
-        self.assertTrue(result.is_ok())
+        self.assertTrue(result.is_ok(), f"Expected success, got error: {result.unwrap_err() if result.is_err() else 'N/A'}")
         updated_order = result.unwrap()
         self.assertEqual(updated_order.status, "pending")
 
@@ -334,10 +350,14 @@ class OrderServiceTestCase(TestCase):
 
         result = OrderService.update_order_status(order, status_data)
 
-        # Verify failure
+        # Verify failure — (completed, draft) is not in the TRANSITION_MAP
         self.assertTrue(result.is_err())
         error_message = result.unwrap_err()  # type: ignore[union-attr]
-        self.assertIn("Invalid status transition", error_message)
+        self.assertTrue(
+            "No transition from" in error_message
+            or "Invalid status transition" in error_message,
+            f"Expected a transition error, got: {error_message}",
+        )
 
         # Verify order status unchanged
         order.refresh_from_db()
@@ -356,7 +376,8 @@ class OrderServiceTestCase(TestCase):
             ("processing", "completed"),
             ("processing", "failed"),
             ("processing", "cancelled"),
-            ("failed", "pending"),
+            # NOTE: ("failed", "pending") uses FSM retry() method which is not
+            # exposed via update_order_status service — omitted here intentionally
             ("failed", "cancelled"),
         ]
 
@@ -378,6 +399,30 @@ class OrderServiceTestCase(TestCase):
                     }
                 )
 
+                # FSM: draft → pending requires items + a current price (preflight validation)
+                if old_status == "draft" and new_status == "pending":
+                    item_product = Product.objects.create(
+                        slug=f"transition-product-{old_status}-{new_status}",
+                        name="Transition Test Product",
+                        product_type="hosting",
+                        is_active=True,
+                    )
+                    OrderItem.objects.create(
+                        order=order,
+                        product=item_product,
+                        product_name=item_product.name,
+                        product_type=item_product.product_type,
+                        quantity=1,
+                        unit_price_cents=1000,
+                    )
+                    ProductPrice.objects.create(
+                        product=item_product,
+                        currency=self.currency,
+                        monthly_price_cents=1000,
+                        setup_cents=0,
+                        is_active=True,
+                    )
+
                 status_data = StatusChangeData(
                     new_status=new_status,
                     notes=f"Transition from {old_status} to {new_status}",
@@ -393,10 +438,9 @@ class OrderQueryServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         self.customer = Customer.objects.create(
@@ -532,7 +576,7 @@ class OrderServiceCreationTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         # Create currency
-        self.currency = Currency.objects.create(code="RON", name="Romanian Leu")
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"name": "Romanian Leu"})
 
         # Create customer
         self.customer = Customer.objects.create(
@@ -631,7 +675,6 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(order.status, 'pending')
 
         # Manually trigger service creation (signals may not work in test environment)
-        from apps.orders.services import OrderServiceCreationService
         creation_result = OrderServiceCreationService.create_pending_services(order)
         self.assertTrue(creation_result.is_ok(), f"Service creation failed: {creation_result}")
 
@@ -670,6 +713,8 @@ class OrderServiceCreationTestCase(TestCase):
         # Refresh order item to get latest service link
         order_item.refresh_from_db()
 
+        # FSM: provisioning_status must be in_progress before complete_provisioning() can fire
+        force_status(order_item, "in_progress", field_name="provisioning_status")
         order_item.mark_as_provisioned()
 
         # Verify service status updated to active

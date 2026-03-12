@@ -21,7 +21,7 @@ class ProformaInvoiceTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -174,7 +174,7 @@ class ProformaLineTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -196,6 +196,7 @@ class ProformaLineTestCase(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='Test Service',
             username='testuser',
             price=Decimal('99.99'),
@@ -298,19 +299,19 @@ class ProformaLineTestCase(TestCase):
         self.assertEqual(line.line_total, Decimal('25.50'))
 
     def test_proforma_line_discount(self):
-        """Test discount line with negative amount"""
+        """Test discount line (kind='discount' signals subtraction; price is positive)"""
         line = ProformaLine.objects.create(
             proforma=self.proforma,
             kind='discount',
             description='Early Bird Discount',
             quantity=Decimal('1.000'),
-            unit_price_cents=-1000,  # Negative for discount
-            line_total_cents=-1000
+            unit_price_cents=1000,
+            line_total_cents=1000
         )
 
         self.assertEqual(line.kind, 'discount')
-        self.assertEqual(line.unit_price_cents, -1000)
-        self.assertEqual(line.line_total_cents, -1000)
+        self.assertEqual(line.unit_price_cents, 1000)
+        self.assertEqual(line.line_total_cents, 1000)
 
 
 class ProformaIntegrationTestCase(TestCase):
@@ -318,7 +319,7 @@ class ProformaIntegrationTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Integration Test SRL',
@@ -337,6 +338,7 @@ class ProformaIntegrationTestCase(TestCase):
         self.hosting_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.hosting_plan,
+            currency=self.currency,
             service_name='Integration Test Hosting',
             username='inttest_hosting',
             price=Decimal('49.99'),
@@ -345,6 +347,7 @@ class ProformaIntegrationTestCase(TestCase):
         self.domain_service = Service.objects.create(
             customer=self.customer,
             service_plan=self.domain_plan,
+            currency=self.currency,
             service_name='Integration Test Domain',
             username='inttest_domain',
             price=Decimal('12.99'),
@@ -438,23 +441,22 @@ class ProformaIntegrationTestCase(TestCase):
             line_total_cents=4999
         )
 
-        # Discount line (negative amount)
+        # Discount line (positive price, kind='discount' signals subtraction)
         ProformaLine.objects.create(
             proforma=proforma,
             kind='discount',
             description='Early Bird Discount',
             quantity=Decimal('1.000'),
-            unit_price_cents=-1000,  # Negative for discount
-            line_total_cents=-1000
+            unit_price_cents=1000,
+            line_total_cents=1000
         )
 
         lines = proforma.lines.all()
         self.assertEqual(len(lines), 2)
 
-        # One positive, one negative
         amounts = [line.line_total_cents for line in lines]
         self.assertIn(4999, amounts)
-        self.assertIn(-1000, amounts)
+        self.assertIn(1000, amounts)
 
     def test_proforma_conversion_tracking(self):
         """Test tracking conversion to invoice"""
@@ -517,14 +519,14 @@ class ProformaIntegrationTestCase(TestCase):
             line_total_cents=5000
         )
 
-        # Volume discount
+        # Volume discount (positive price, kind='discount' signals subtraction)
         ProformaLine.objects.create(
             proforma=proforma,
             kind='discount',
             description='6-month prepayment discount',
             quantity=Decimal('1.000'),
-            unit_price_cents=-22996,  # Significant discount
-            line_total_cents=-22996
+            unit_price_cents=22996,
+            line_total_cents=22996
         )
 
         self.assertEqual(proforma.lines.count(), 4)

@@ -17,6 +17,38 @@ from django.urls import reverse
 from apps.api_client.services import PlatformAPIError
 from apps.orders.services import CartCalculationService, OrderCreationService
 
+from ._order_rate_limit_and_security_cases import (
+    TestAddToCartToastProductName,
+    TestBankersRoundingImport,
+    TestCartSessionRateLimit,
+    TestCartVersionHashExcludesUpdatedAt,
+    TestConfirmPaymentIdempotencyRound2,
+    TestDangerousURISchemeValidation,
+    TestGatewayValidation,
+    TestIdempotencyFallbackKeyNoTimestamp,
+    TestOrderConfirmationUUIDValidation,
+    TestOrderCreationAtomicIdempotency,
+    TestOrderValidationFormatStringSafety,
+    TestPaymentMethodValidation,
+    TestTotalCentsZeroRejection,
+)
+
+_IMPORTED_RATE_LIMIT_CASES = (
+    TestAddToCartToastProductName,
+    TestBankersRoundingImport,
+    TestCartSessionRateLimit,
+    TestCartVersionHashExcludesUpdatedAt,
+    TestConfirmPaymentIdempotencyRound2,
+    TestDangerousURISchemeValidation,
+    TestGatewayValidation,
+    TestIdempotencyFallbackKeyNoTimestamp,
+    TestOrderConfirmationUUIDValidation,
+    TestOrderCreationAtomicIdempotency,
+    TestOrderValidationFormatStringSafety,
+    TestPaymentMethodValidation,
+    TestTotalCentsZeroRejection,
+)
+
 
 def _rate_limited_error(retry_after: int = 30) -> PlatformAPIError:
     return PlatformAPIError(
@@ -66,7 +98,7 @@ class OrdersRateLimitViewTests(SimpleTestCase):
 
             response = self.client.post(
                 reverse("orders:confirm_payment"),
-                data='{"payment_intent_id": "pi_test", "order_id": "ORD-001"}',
+                data='{"payment_intent_id": "pi_test0001234567890abc", "order_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}',
                 content_type="application/json",
             )
 

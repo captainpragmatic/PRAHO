@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
 from django.db import transaction
@@ -18,6 +18,9 @@ from django.utils import timezone
 from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
+
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
 
 logger = logging.getLogger(__name__)
 
@@ -311,7 +314,7 @@ def update_customer_analytics(customer_id: str) -> dict[str, Any]:
         return {"success": False, "error": "Task failed, see server logs"}
 
 
-def _process_inactive_candidate(customer: Any, reactivation_cooldown: Any, results: dict[str, Any]) -> None:
+def _process_inactive_candidate(customer: Customer, reactivation_cooldown: datetime, results: dict[str, Any]) -> None:
     """Process a single inactive customer candidate (extracted for complexity budget).
 
     Service and Ticket exclusions are handled in the queryset via Exists() subqueries,
@@ -556,7 +559,7 @@ def send_customer_welcome_email(customer_id: str) -> dict[str, Any]:
         return {"success": False, "error": "Task failed, see server logs"}
 
 
-def _calculate_engagement_score(customer: Any, total_orders: int, account_age_days: int) -> int:
+def _calculate_engagement_score(customer: Customer, total_orders: int, account_age_days: int) -> int:
     """
     Weight-based engagement scoring for background analytics tasks.
     Uses SettingsService weights (default 40/30/30). Denominator is always 100.
@@ -684,7 +687,7 @@ def _detect_feedback_sentiment(content: str) -> str:
     return "neutral"
 
 
-def _get_customer_locale(customer: Any) -> str:
+def _get_customer_locale(customer: Customer) -> str:
     """Get preferred locale for a customer based on their primary user's language."""
     try:
         primary_membership = (
@@ -699,7 +702,7 @@ def _get_customer_locale(customer: Any) -> str:
     return "ro"  # Default to Romanian for Romanian hosting provider
 
 
-def _send_reactivation_email(customer: Any) -> bool:
+def _send_reactivation_email(customer: Customer) -> bool:
     """Send a reactivation check-in email to an inactive customer."""
     if not customer.primary_email:
         logger.warning(f"⚠️ [Reactivation] No email for customer {customer.id}, skipping")

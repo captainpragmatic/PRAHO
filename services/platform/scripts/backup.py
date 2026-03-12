@@ -164,7 +164,7 @@ class PragmaticHostBackup:
                 env = os.environ.copy()
                 env["PGPASSWORD"] = db_config["PASSWORD"]
 
-                result = subprocess.run(  # noqa: S603  # Safe: shell=False
+                result = subprocess.run(  # Safe: shell=False
                     cmd, check=False, env=env, capture_output=True, text=True
                 )  # Safe: shell=False  # Safe: shell=False
 
@@ -220,7 +220,7 @@ class PragmaticHostBackup:
             # Use rsync for efficient copying
             cmd = ["rsync", "-av", "--progress", f"{media_root}/", f"{media_backup_path}/"]
 
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 
@@ -280,7 +280,7 @@ class PragmaticHostBackup:
 
             cmd = ["tar", "-czf", str(archive_path), "-C", str(backup_path.parent), backup_path.name]
 
-            result = subprocess.run(  # noqa: S603  # Safe: shell=False
+            result = subprocess.run(  # Safe: shell=False
                 cmd, check=False, capture_output=True, text=True
             )  # Safe: shell=False  # Safe: shell=False
 

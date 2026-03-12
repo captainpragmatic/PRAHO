@@ -32,6 +32,7 @@ from apps.common.tax_service import TaxService  # noqa: E402
 from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
 from apps.orders.models import Order, OrderItem  # noqa: E402
 from apps.products.models import Product  # noqa: E402
+from tests.helpers.fsm_helpers import force_status  # noqa: E402
 
 User = get_user_model()
 
@@ -132,8 +133,7 @@ class TestOrderToBillingWorkflow(TestCase):
         assert order.items.count() == 1
 
         # Step 2: Confirm order
-        order.status = 'confirmed'
-        order.save()
+        force_status(order, 'confirmed')
 
         # Step 3: Create invoice from order
         invoice = Invoice.objects.create(

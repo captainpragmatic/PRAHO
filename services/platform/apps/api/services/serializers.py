@@ -85,6 +85,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
 
     # Pricing
     monthly_price = serializers.SerializerMethodField()
+    currency_code = serializers.CharField(source="currency.code", read_only=True)
 
     # Service lifecycle
     is_overdue = serializers.ReadOnlyField()
@@ -127,6 +128,7 @@ class ServiceListSerializer(serializers.ModelSerializer):
             "created_at",
             "activated_at",
             "expires_at",
+            "currency_code",
             "updated_at",
         ]
 
@@ -192,6 +194,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
     monthly_price = serializers.SerializerMethodField()
     total_monthly_cost = serializers.SerializerMethodField()
     vat_amount = serializers.SerializerMethodField()
+    currency_code = serializers.CharField(source="currency.code", read_only=True)
 
     # Service lifecycle
     is_overdue = serializers.ReadOnlyField()
@@ -221,6 +224,7 @@ class ServiceDetailSerializer(serializers.ModelSerializer):
             "monthly_price",
             "total_monthly_cost",
             "vat_amount",
+            "currency_code",
             "setup_fee_paid",
             "auto_renew",
             # Customer info

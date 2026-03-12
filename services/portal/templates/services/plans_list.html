@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load i18n ui_components formatting %}
 
 {% block title %}{% trans "Service Plans" %} - PRAHO Portal{% endblock %}
 
@@ -115,7 +115,7 @@
           <div>
             <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Monthly" %}</p>
             <p class="text-lg font-semibold text-white">
-              {{ plan.price_monthly|floatformat:0 }} RON
+              {{ plan.price_monthly|romanian_currency }}
             </p>
           </div>
           {% endif %}
@@ -124,7 +124,7 @@
           <div>
             <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Quarterly" %}</p>
             <p class="text-lg font-semibold text-white">
-              {{ plan.price_quarterly|floatformat:0 }} RON
+              {{ plan.price_quarterly|romanian_currency }}
             </p>
             {% if plan.quarterly_savings %}
             <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.quarterly_savings }}%</p>
@@ -136,7 +136,7 @@
           <div>
             <p class="text-xs text-slate-500 uppercase tracking-wide">{% trans "Annual" %}</p>
             <p class="text-lg font-semibold text-white">
-              {{ plan.price_annual|floatformat:0 }} RON
+              {{ plan.price_annual|romanian_currency }}
             </p>
             {% if plan.annual_savings %}
             <p class="text-xs text-green-400">{% trans "Save" %} {{ plan.annual_savings }}%</p>

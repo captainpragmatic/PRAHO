@@ -3,18 +3,67 @@ Test suite for Order Views
 Tests authentication, cart operations, and order creation flows.
 """
 
-import json
-from unittest.mock import patch, Mock
-from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase, Client, override_settings
-from django.contrib.sessions.middleware import SessionMiddleware
+from unittest.mock import Mock, patch
+
 from django.contrib.messages.middleware import MessageMiddleware
+from django.contrib.sessions.middleware import SessionMiddleware
+from django.core.exceptions import ValidationError
 from django.http import HttpRequest
-from django.urls import reverse
+from django.test import Client, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from apps.api_client.services import PlatformAPIError
 from apps.orders.views import require_customer_authentication
+
+from ._order_flow_cases import (
+    TestAgreeTermsValidation,
+    TestBankTransferConfirmationHeader,
+    TestBankTransferContextPassthrough,
+    TestBankTransferInstructionsCard,
+    TestBankTransferSkipsStripeIntent,
+    TestCardPaymentRouting,
+    TestCartTotalsPerItemArray,
+    TestCartTotalsVatRatePercent,
+    TestCartVersionMismatch,
+    TestCentsConversionNoFloatingPoint,
+    TestCheckoutReactiveSidebar,
+    TestNoFloatformatOnMonetaryValues,
+    TestNoHardcodedRomanianInOrderTemplates,
+    TestParseOrderTimestamp,
+    TestPriceSealingRequiredKeys,
+    TestProductTypeInCartItem,
+    TestSinglePreflightProducesOneVatAuditEvent,
+    TestStripeFailureRedirectsToConfirmation,
+)
+from ._order_regression_cases import (
+    TestCartRemoveNoDuplicatePost,
+    TestPlatformFallbackFailSafe,
+    TestVatRateNoHardcodedDefault,
+)
+
+_IMPORTED_ORDER_VIEW_CASES = (
+    TestAgreeTermsValidation,
+    TestBankTransferConfirmationHeader,
+    TestBankTransferContextPassthrough,
+    TestBankTransferInstructionsCard,
+    TestBankTransferSkipsStripeIntent,
+    TestCardPaymentRouting,
+    TestCartTotalsPerItemArray,
+    TestCartTotalsVatRatePercent,
+    TestCartVersionMismatch,
+    TestCentsConversionNoFloatingPoint,
+    TestCheckoutReactiveSidebar,
+    TestNoFloatformatOnMonetaryValues,
+    TestNoHardcodedRomanianInOrderTemplates,
+    TestParseOrderTimestamp,
+    TestPriceSealingRequiredKeys,
+    TestProductTypeInCartItem,
+    TestSinglePreflightProducesOneVatAuditEvent,
+    TestStripeFailureRedirectsToConfirmation,
+    TestCartRemoveNoDuplicatePost,
+    TestPlatformFallbackFailSafe,
+    TestVatRateNoHardcodedDefault,
+)
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -84,7 +133,7 @@ class TestOrderViews(SimpleTestCase):
                     'product_type': 'shared_hosting',
                     'is_featured': True,
                     'prices': [
-                        {'billing_period': 'monthly', 'price_cents': 2999, 'currency': 'RON'}
+                        {'billing_period': 'monthly', 'price_cents': 2999, 'monthly_price': '29.99', 'semiannual_price': '149.94', 'annual_price': '269.88', 'setup_fee': '0.00', 'has_semiannual_discount': False, 'has_annual_discount': False, 'currency': 'RON'}
                     ]
                 }
             ]
@@ -153,13 +202,9 @@ class TestOrderViews(SimpleTestCase):
         self.assertEqual(response.status_code, 405)  # Method not allowed
 
     @patch('apps.orders.views.GDPRCompliantCartSession')
-    @patch('apps.orders.views.CartRateLimiter')
-    def test_add_to_cart_success(self, mock_rate_limiter, mock_cart_class):
+    def test_add_to_cart_success(self, mock_cart_class):
         """Test successful add to cart operation"""
         self._create_authenticated_session()
-
-        # Mock rate limiter to allow operation
-        mock_rate_limiter.check_rate_limit.return_value = True
 
         # Mock cart
         mock_cart = Mock()
@@ -187,25 +232,6 @@ class TestOrderViews(SimpleTestCase):
             domain_name='example.ro',
             config={}
         )
-        mock_rate_limiter.record_operation.assert_called_once()
-
-    @patch('apps.orders.views.CartRateLimiter')
-    def test_add_to_cart_rate_limited(self, mock_rate_limiter):
-        """Test add to cart when rate limited"""
-        self._create_authenticated_session()
-
-        # Mock rate limiter to block operation
-        mock_rate_limiter.check_rate_limit.return_value = False
-
-        response = self.client.post('/order/cart/add/', {
-            'product_slug': 'test-product',
-            'quantity': 1,
-            'billing_period': 'monthly'
-        })
-
-        self.assertEqual(response.status_code, 429)
-        response_data = json.loads(response.content)
-        self.assertIn('Too many operations', response_data['error'])
 
     @patch('apps.orders.views.GDPRCompliantCartSession')
     def test_cart_review_empty(self, mock_cart_class):
@@ -300,16 +326,13 @@ class TestCartErrorResponses(SimpleTestCase):
         session.save()
 
     @patch('apps.orders.views.OrderSecurityHardening')
-    @patch('apps.orders.views.CartRateLimiter')
     @patch('apps.orders.views.GDPRCompliantCartSession')
-    def test_add_to_cart_validation_error_returns_422(self, mock_cart_class, mock_rate_limiter, mock_sec):
+    def test_add_to_cart_validation_error_returns_422(self, mock_cart_class, mock_sec):
         """Validation errors in add_to_cart must return HTTP 422, not 200."""
         mock_sec.fail_closed_on_cache_failure.return_value = None
         mock_sec.check_suspicious_patterns.return_value = None
         mock_sec.validate_request_size.return_value = None
         mock_sec.uniform_response_delay.return_value = None
-        mock_rate_limiter.check_rate_limit.return_value = True
-        mock_rate_limiter.get_client_ip.return_value = "127.0.0.1"
         mock_cart_class.side_effect = ValidationError("Bad input")
 
         response = self.client.post('/order/cart/add/', {
@@ -318,16 +341,13 @@ class TestCartErrorResponses(SimpleTestCase):
         self.assertEqual(response.status_code, 422)
 
     @patch('apps.orders.views.OrderSecurityHardening')
-    @patch('apps.orders.views.CartRateLimiter')
     @patch('apps.orders.views.GDPRCompliantCartSession')
-    def test_add_to_cart_error_has_retarget_header(self, mock_cart_class, mock_rate_limiter, mock_sec):
+    def test_add_to_cart_error_has_retarget_header(self, mock_cart_class, mock_sec):
         """Error responses must include HX-Retarget header for HTMX processing."""
         mock_sec.fail_closed_on_cache_failure.return_value = None
         mock_sec.check_suspicious_patterns.return_value = None
         mock_sec.validate_request_size.return_value = None
         mock_sec.uniform_response_delay.return_value = None
-        mock_rate_limiter.check_rate_limit.return_value = True
-        mock_rate_limiter.get_client_ip.return_value = "127.0.0.1"
         mock_cart_class.side_effect = ValidationError("Bad input")
 
         response = self.client.post('/order/cart/add/', {
@@ -364,7 +384,7 @@ class TestOrderViewsIntegration(SimpleTestCase):
                     'name': 'Basic Shared Hosting',
                     'product_type': 'shared_hosting',
                     'prices': [
-                        {'billing_period': 'monthly', 'price_cents': 2999}
+                        {'billing_period': 'monthly', 'price_cents': 2999, 'monthly_price': '29.99', 'semiannual_price': '149.94', 'annual_price': '269.88', 'setup_fee': '0.00', 'has_semiannual_discount': False, 'has_annual_discount': False, 'currency': 'RON'}
                     ]
                 }
             ]
@@ -378,12 +398,6 @@ class TestOrderViewsIntegration(SimpleTestCase):
         # Step 2: Add to cart (would need more mocking for real test)
         # This test demonstrates the flow structure
         # Real implementation would require mocking cart operations
-
-    def test_session_persistence_across_requests(self):
-        """Test that cart persists across multiple requests"""
-        # This test would verify that cart items are maintained
-        # across different views in the order flow
-        pass  # Placeholder for session persistence test
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
@@ -405,12 +419,6 @@ class TestOrderViewsSecurity(SimpleTestCase):
             'quantity': 1
         })
         self.assertEqual(response.status_code, 403)  # CSRF failure
-
-    def test_rate_limiting_integration(self):
-        """Test rate limiting integration in views"""
-        # This would test the actual rate limiting in views
-        # by making multiple rapid requests
-        pass  # Placeholder for rate limiting integration test
 
     def test_input_validation_and_sanitization(self):
         """Test that malicious/invalid input is rejected with 400 before processing.

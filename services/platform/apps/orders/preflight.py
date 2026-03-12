@@ -95,16 +95,20 @@ class OrderPreflightValidationService:
                 for item in order.items.all():
                     subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
 
-            customer_vat_info: CustomerVATInfo = {
-                "country": country,
-                "is_business": is_business,
-                "vat_number": vat_number or None,
-                "customer_id": str(order.customer_id),
-                "order_id": str(order.id),
-            }
-            vat_result = OrderVATCalculator.calculate_vat(
-                subtotal_cents=subtotal_cents, customer_info=customer_vat_info
-            )
+            # Reuse pre-computed VAT result when available (avoids duplicate calculation — B5/BUG-10)
+            if hasattr(order, "_preflight_vat_result"):
+                vat_result = order._preflight_vat_result
+            else:
+                customer_vat_info: CustomerVATInfo = {
+                    "country": country,
+                    "is_business": is_business,
+                    "vat_number": vat_number or None,
+                    "customer_id": str(order.customer_id),
+                    "order_id": str(order.id),
+                }
+                vat_result = OrderVATCalculator.calculate_vat(
+                    subtotal_cents=subtotal_cents, customer_info=customer_vat_info
+                )
 
             expected_tax_cents = int(vat_result.vat_cents)
             expected_total_cents = int(vat_result.total_cents)

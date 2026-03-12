@@ -162,6 +162,7 @@ class TestDatabaseCacheIntegration:
 
     @pytest.mark.integration
     @pytest.mark.cache
+    @pytest.mark.django_db
     def test_platform_uses_database_cache(self):
         """
         Test that platform service uses appropriate cache backend.
@@ -215,14 +216,9 @@ class TestDatabaseCacheIntegration:
             from django.db import connection
 
             with connection.cursor() as cursor:
-                # Verify cache table exists
-                cursor.execute("""
-                    SELECT name FROM sqlite_master
-                    WHERE type='table' AND name='django_cache_table'
-                """)
-
-                result = cursor.fetchone()
-                assert result is not None, "django_cache_table should exist"
+                assert 'django_cache_table' in connection.introspection.table_names(), (
+                    "django_cache_table should exist"
+                )
 
                 # Test direct cache table operations
                 cache.set('db_test_key', 'db_test_value', timeout=60)

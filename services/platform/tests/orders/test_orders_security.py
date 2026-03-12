@@ -8,12 +8,9 @@ Tests the critical security fixes implemented for:
 4. Enhanced security logging
 """
 
-from decimal import Decimal
-from unittest.mock import patch
-
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.test.client import Client
 from django.urls import reverse
 
@@ -23,6 +20,34 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.orders.views import _sanitize_search_query, _validate_manual_price_override
 from apps.products.models import Product, ProductPrice
+
+from ._order_hardening_cases import (
+    ConfirmOrderErrorLeakageTest,
+    ConfirmOrderPaymentIntentBindingTest,
+    ConfirmOrderPIFormatValidationTest,
+    ConfirmOrderStatusHistoryTest,
+    CreateOrderIntegrityErrorScopeTest,
+    IdempotencyKeyContentValidationTest,
+    NonRetryableConstraintMarkersTest,
+    OrderIdempotencyConstraintTest,
+    OrderNumberingServiceTest,
+    OrderNumberPrefixPreservationTest,
+    OrderSaveRetrySavepointTest,
+)
+
+_IMPORTED_ORDER_SECURITY_CASES = (
+    ConfirmOrderErrorLeakageTest,
+    ConfirmOrderPaymentIntentBindingTest,
+    ConfirmOrderPIFormatValidationTest,
+    ConfirmOrderStatusHistoryTest,
+    CreateOrderIntegrityErrorScopeTest,
+    IdempotencyKeyContentValidationTest,
+    NonRetryableConstraintMarkersTest,
+    OrderIdempotencyConstraintTest,
+    OrderNumberingServiceTest,
+    OrderNumberPrefixPreservationTest,
+    OrderSaveRetrySavepointTest,
+)
 
 User = get_user_model()
 
@@ -35,10 +60,9 @@ class OrderSecurityTestCase(TestCase):
         self.client = Client()
 
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code="RON",
-            symbol="lei",
-            decimals=2
+            defaults={"symbol": "lei", "decimals": 2}
         )
 
         # Create test customer

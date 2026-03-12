@@ -30,10 +30,9 @@ class ComprehensiveAccessControlTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         # Create currency
-        self.currency = Currency.objects.create(
+        self.currency, _ = Currency.objects.get_or_create(
             code='RON',
-            symbol='lei',
-            decimals=2
+            defaults={'symbol': 'lei', 'decimals': 2}
         )
 
         # Create staff user
@@ -110,6 +109,7 @@ class ComprehensiveAccessControlTestCase(TestCase):
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name='Test Hosting Service',
             domain='example.com',
             username='testuser123',

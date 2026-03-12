@@ -49,7 +49,7 @@ class TestLoginRateLimitUX:
             password_field = page.locator('input[name="password"]').first
 
             if email_field.count() == 0 or password_field.count() == 0:
-                pytest.skip("Login form fields not found — page structure may have changed")
+                pytest.skip("Login form fields not found — page structure may have changed (TODO: fix locators if template updated)")
 
             email_field.fill(f"ratelimit-test-{attempt}@example.com")
             password_field.fill("wrong_password")
@@ -83,7 +83,7 @@ class TestAuthenticatedRateLimitUX:
         """Under normal load, dashboard should not show rate-limit warnings."""
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Login failed — is the E2E service running? (make dev-e2e)")
+            pytest.skip("Login failed — is the E2E service running? (make dev-e2e) (TODO: investigate flaky login in CI)")
 
         page.goto(f"{BASE_URL}/dashboard/")
         page.wait_for_load_state("networkidle")
@@ -98,7 +98,7 @@ class TestAuthenticatedRateLimitUX:
         """Orders catalog should load without rate-limit warnings normally."""
         ensure_fresh_session(page)
         if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-            pytest.skip("Login failed — is the E2E service running? (make dev-e2e)")
+            pytest.skip("Login failed — is the E2E service running? (make dev-e2e) (TODO: investigate flaky login in CI)")
 
         page.goto(f"{BASE_URL}/orders/catalog/")
         page.wait_for_load_state("networkidle")
@@ -106,7 +106,7 @@ class TestAuthenticatedRateLimitUX:
         # Page should load (200 or redirect to login)
         current_url = page.url
         if "/login/" in current_url:
-            pytest.skip("Customer not authorized for orders catalog")
+            pytest.skip("Customer not authorized for orders catalog (TODO: check customer fixture has orders permission)")
 
         body_text = page.locator("body").inner_text().lower()
         assert "too many requests" not in body_text

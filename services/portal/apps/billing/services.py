@@ -314,6 +314,7 @@ class InvoiceViewService:
 
             response = self.api_client.process_refund(
                 invoice_id=invoice.id,
+                customer_id=customer_id,
                 amount_cents=amount_cents,
                 reason=reason,
                 refund_type="partial" if amount_cents else "full",

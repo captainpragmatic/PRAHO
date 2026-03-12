@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
@@ -23,6 +23,9 @@ from .customer_service import CustomerService
 
 # Profile service
 from .profile_service import ProfileService
+
+if TYPE_CHECKING:
+    from apps.customers.customer_models import Customer
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +156,7 @@ class CustomerAnalyticsService:
             return {"error": str(e), "customer_id": customer_id}
 
     @staticmethod
-    def _get_order_metrics(customer: Any) -> dict[str, Any]:
+    def _get_order_metrics(customer: Customer) -> dict[str, Any]:
         """Get order-related metrics for a customer (single aggregate query)."""
         try:
             from django.db.models import Max  # noqa: PLC0415  # Deferred: avoids circular import
@@ -196,7 +199,7 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _get_billing_metrics(customer: Any) -> dict[str, Any]:
+    def _get_billing_metrics(customer: Customer) -> dict[str, Any]:
         """Get billing-related metrics for a customer (2 aggregate queries)."""
         try:
             from apps.billing.models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
@@ -240,7 +243,7 @@ class CustomerAnalyticsService:
             }
 
     @staticmethod
-    def _get_service_metrics(customer: Any) -> dict[str, Any]:
+    def _get_service_metrics(customer: Customer) -> dict[str, Any]:
         """Get service-related metrics for a customer (single aggregate query)."""
         try:
             from apps.provisioning.models import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -271,7 +274,7 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def _calculate_engagement_score(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
-        customer: Any, metrics: dict[str, Any]
+        customer: Customer, metrics: dict[str, Any]
     ) -> int:  # Complexity: customer processing  # Complexity: multi-step business logic
         """
         Tier-based engagement scoring for synchronous customer metrics.
@@ -325,10 +328,10 @@ class CustomerAnalyticsService:
 
     @staticmethod
     def record_invoice_event(
-        customer: Any,
+        customer: Customer,
         event_type: str,
         invoice_amount_cents: int,
-        invoice_id: Any,
+        invoice_id: str | int,
     ) -> None:
         """
         Record an invoice event for customer analytics tracking.

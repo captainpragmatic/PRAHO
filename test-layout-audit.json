@@ -1,0 +1,1061 @@
+{
+  "allowlist_path": "scripts/test_layout_allowlist.json",
+  "branch_inventory": {
+    "local": [
+      "claude/vibrant-shtern",
+      "feat/ui-ux-design-system-epic",
+      "fix/deploy-bug",
+      "master"
+    ],
+    "remote": [
+      "imac",
+      "imac/claude/fix-mypy-errors-Qjj95",
+      "imac/claude/fix-security-issues-clean",
+      "imac/claude/fix-security-issues-jJUDr",
+      "imac/feat/api-auth-hardening-ratelimit-consolidation",
+      "imac/feat/customers-app-todo-enhancement",
+      "imac/feat/i18n-full-coverage",
+      "imac/master",
+      "origin",
+      "origin/feat/api-auth-hardening-ratelimit-consolidation",
+      "origin/feat/customers-app-todo-enhancement",
+      "origin/feat/django-fsm-migration",
+      "origin/feat/portal-order-flow-audit",
+      "origin/fix/harden-deploy-infrastructure",
+      "origin/master"
+    ]
+  },
+  "summary": {
+    "test_files_scanned": 335,
+    "suspiciously_named_files": 0,
+    "duplicate_test_names": 30,
+    "duplicate_test_names_unapproved": 0,
+    "duplicate_test_bodies": 21,
+    "duplicate_test_bodies_unapproved": 0
+  },
+  "suspicious_filenames": [],
+  "duplicate_test_names": [
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_at_cap_boundary",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_at_cap_boundary",
+          "start_line": 24,
+          "end_line": 25,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_at_cap_boundary",
+          "start_line": 24,
+          "end_line": 25,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_custom_cap_from_settings",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_custom_cap_from_settings",
+          "start_line": 58,
+          "end_line": 59,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_custom_cap_from_settings",
+          "start_line": 58,
+          "end_line": 59,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_empty_string_returns_none",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_empty_string_returns_none",
+          "start_line": 48,
+          "end_line": 49,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_empty_string_returns_none",
+          "start_line": 48,
+          "end_line": 49,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_extreme_date_no_crash",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_extreme_date_no_crash",
+          "start_line": 41,
+          "end_line": 46,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_extreme_date_no_crash",
+          "start_line": 41,
+          "end_line": 46,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_inf_returns_none",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_inf_returns_none",
+          "start_line": 54,
+          "end_line": 55,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_inf_returns_none",
+          "start_line": 54,
+          "end_line": 55,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_just_over_cap",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_just_over_cap",
+          "start_line": 27,
+          "end_line": 28,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_just_over_cap",
+          "start_line": 27,
+          "end_line": 28,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_large_value_capped_to_max",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_large_value_capped_to_max",
+          "start_line": 21,
+          "end_line": 22,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_large_value_capped_to_max",
+          "start_line": 21,
+          "end_line": 22,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_nan_returns_none",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_nan_returns_none",
+          "start_line": 51,
+          "end_line": 52,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_nan_returns_none",
+          "start_line": 51,
+          "end_line": 52,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_negative_int_returns_one",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_int_returns_one",
+          "start_line": 34,
+          "end_line": 36,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_int_returns_one",
+          "start_line": 34,
+          "end_line": 36,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_negative_string_returns_none",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_string_returns_none",
+          "start_line": 30,
+          "end_line": 32,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_string_returns_none",
+          "start_line": 30,
+          "end_line": 32,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_none_returns_none",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_none_returns_none",
+          "start_line": 9,
+          "end_line": 10,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_none_returns_none",
+          "start_line": 9,
+          "end_line": 10,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_positive_float_ceils",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_float_ceils",
+          "start_line": 15,
+          "end_line": 16,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_float_ceils",
+          "start_line": 15,
+          "end_line": 16,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_positive_int",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_int",
+          "start_line": 12,
+          "end_line": 13,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_int",
+          "start_line": 12,
+          "end_line": 13,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_string_digit",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_string_digit",
+          "start_line": 18,
+          "end_line": 19,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_string_digit",
+          "start_line": 18,
+          "end_line": 19,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "CoerceRetryAfterSecondsTests.test_unicode_digit_returns_none",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_unicode_digit_returns_none",
+          "start_line": 38,
+          "end_line": 39,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_unicode_digit_returns_none",
+          "start_line": 38,
+          "end_line": 39,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "EFacturaEnvironmentTestCase.test_oauth_base_url",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/billing/efactura/test_client.py",
+          "test_name": "EFacturaEnvironmentTestCase.test_oauth_base_url",
+          "start_line": 37,
+          "end_line": 40,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/billing/efactura/test_settings.py",
+          "test_name": "EFacturaEnvironmentTestCase.test_oauth_base_url",
+          "start_line": 155,
+          "end_line": 161,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "EnhancedWebAuthnCredentialTest.test_webauthn_credential_defaults",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/users/test_2fa_models.py",
+          "test_name": "EnhancedWebAuthnCredentialTest.test_webauthn_credential_defaults",
+          "start_line": 43,
+          "end_line": 60,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/users/test_authentication_models_enhanced.py",
+          "test_name": "EnhancedWebAuthnCredentialTest.test_webauthn_credential_defaults",
+          "start_line": 673,
+          "end_line": 687,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestCanBeDestroyedIncludesStopped.test_completed_can_be_destroyed",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_completed_can_be_destroyed",
+          "start_line": 391,
+          "end_line": 393,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_completed_can_be_destroyed",
+          "start_line": 452,
+          "end_line": 454,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestCanBeDestroyedIncludesStopped.test_destroyed_cannot_be_destroyed",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_destroyed_cannot_be_destroyed",
+          "start_line": 407,
+          "end_line": 409,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_destroyed_cannot_be_destroyed",
+          "start_line": 464,
+          "end_line": 466,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestCanBeDestroyedIncludesStopped.test_failed_can_be_destroyed",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_failed_can_be_destroyed",
+          "start_line": 395,
+          "end_line": 397,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_failed_can_be_destroyed",
+          "start_line": 456,
+          "end_line": 458,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestCanBeDestroyedIncludesStopped.test_pending_cannot_be_destroyed",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_pending_cannot_be_destroyed",
+          "start_line": 403,
+          "end_line": 405,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_pending_cannot_be_destroyed",
+          "start_line": 460,
+          "end_line": 462,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestCanBeDestroyedIncludesStopped.test_stopped_can_be_destroyed",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_stopped_can_be_destroyed",
+          "start_line": 399,
+          "end_line": 401,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_stopped_can_be_destroyed",
+          "start_line": 448,
+          "end_line": 450,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestProdLoggingConfiguration.test_handler_wiring",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_handler_wiring",
+          "start_line": 159,
+          "end_line": 160,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_handler_wiring",
+          "start_line": 122,
+          "end_line": 123,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestProdLoggingConfiguration.test_has_required_handlers",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_has_required_handlers",
+          "start_line": 151,
+          "end_line": 152,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_has_required_handlers",
+          "start_line": 118,
+          "end_line": 120,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestProdLoggingConfiguration.test_has_required_loggers",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_has_required_loggers",
+          "start_line": 165,
+          "end_line": 166,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_has_required_loggers",
+          "start_line": 128,
+          "end_line": 130,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestProdLoggingConfiguration.test_logger_wiring",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_logger_wiring",
+          "start_line": 162,
+          "end_line": 163,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestProdLoggingConfiguration.test_logger_wiring",
+          "start_line": 125,
+          "end_line": 126,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestStagingLoggingConfiguration.test_handler_wiring",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestStagingLoggingConfiguration.test_handler_wiring",
+          "start_line": 186,
+          "end_line": 187,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestStagingLoggingConfiguration.test_handler_wiring",
+          "start_line": 155,
+          "end_line": 156,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestStagingLoggingConfiguration.test_logger_wiring",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestStagingLoggingConfiguration.test_logger_wiring",
+          "start_line": 189,
+          "end_line": 190,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestStagingLoggingConfiguration.test_logger_wiring",
+          "start_line": 158,
+          "end_line": 159,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "TestStagingLoggingConfiguration.test_smaller_retention_than_prod",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/settings/test_logging_configuration.py",
+          "test_name": "TestStagingLoggingConfiguration.test_smaller_retention_than_prod",
+          "start_line": 195,
+          "end_line": 201,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/settings/test_logging_configuration.py",
+          "test_name": "TestStagingLoggingConfiguration.test_smaller_retention_than_prod",
+          "start_line": 164,
+          "end_line": 166,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "name": "test_ticket_mobile_responsiveness",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "tests/e2e/platform/test_platform_tickets.py",
+          "test_name": "test_ticket_mobile_responsiveness",
+          "start_line": 323,
+          "end_line": 341,
+          "symbol_kind": "function"
+        },
+        {
+          "file": "tests/e2e/portal/test_portal_tickets.py",
+          "test_name": "test_ticket_mobile_responsiveness",
+          "start_line": 299,
+          "end_line": 318,
+          "symbol_kind": "function"
+        }
+      ]
+    }
+  ],
+  "duplicate_test_bodies": [
+    {
+      "signature": "08cd4a46329dae9d7f2c29c87581b15d6de1f31c3839095930712fb3e5417705",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_none_returns_none",
+          "start_line": 9,
+          "end_line": 10,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_none_returns_none",
+          "start_line": 9,
+          "end_line": 10,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "1a9794087a8bd90406a4324a79183b3f173fd34e773f11281fb36190aa254ee7",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_unicode_digit_returns_none",
+          "start_line": 38,
+          "end_line": 39,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_unicode_digit_returns_none",
+          "start_line": 38,
+          "end_line": 39,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "1f37bb6015cd131c291af5901d9d923b767d56858643161876b0412a90ce8b4e",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_failed_can_be_destroyed",
+          "start_line": 395,
+          "end_line": 397,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_failed_can_be_destroyed",
+          "start_line": 456,
+          "end_line": 458,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "36fe687f32b2556e61473eb56c28c76743d73b0e29e775d2d8edd52e8eef0643",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_pending_cannot_be_destroyed",
+          "start_line": 403,
+          "end_line": 405,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_pending_cannot_be_destroyed",
+          "start_line": 460,
+          "end_line": 462,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "3f71a4af2d273cf1bb912495f9386f4648578ef5a1e7f66deebc1e068c5f85d9",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_large_value_capped_to_max",
+          "start_line": 21,
+          "end_line": 22,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_large_value_capped_to_max",
+          "start_line": 21,
+          "end_line": 22,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "42f2a649c01e829f6f5152631c0b6ee20d6e599e1a78b8afee345b11d48e4c01",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_extreme_date_no_crash",
+          "start_line": 41,
+          "end_line": 46,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_extreme_date_no_crash",
+          "start_line": 41,
+          "end_line": 46,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "537e08f73474cb735d45b19a21367ae33209a1e74a877019f11573958c1c4128",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_string_returns_none",
+          "start_line": 30,
+          "end_line": 32,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_string_returns_none",
+          "start_line": 30,
+          "end_line": 32,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "53c036a7aaf97adc464029d15c3fa57ff32a974718943c90a576df8459ab2ea7",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_int_returns_one",
+          "start_line": 34,
+          "end_line": 36,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_negative_int_returns_one",
+          "start_line": 34,
+          "end_line": 36,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "55e8c7fcd9a9fe430da228140ff72172bf69aeb91367c2da59c98aa9e395bb1a",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_nan_returns_none",
+          "start_line": 51,
+          "end_line": 52,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_nan_returns_none",
+          "start_line": 51,
+          "end_line": 52,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "64b3fcd010a79b1d5ee8994d80dd6855a9df67fdf760791168f51e71956f8373",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_custom_cap_from_settings",
+          "start_line": 58,
+          "end_line": 59,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_custom_cap_from_settings",
+          "start_line": 58,
+          "end_line": 59,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "706573e03297f42537efe794f8ebd761dfb9872cab4bdfbe4302136f105c7486",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_int",
+          "start_line": 12,
+          "end_line": 13,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_int",
+          "start_line": 12,
+          "end_line": 13,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "8643f92ecd6339b5b19d73331c9b20626a27bfa841d63d413283312e435cba79",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_completed_can_be_destroyed",
+          "start_line": 391,
+          "end_line": 393,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_completed_can_be_destroyed",
+          "start_line": 452,
+          "end_line": 454,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "926c2236e771c7a9d23def30b7d71d1a8310a2bc4009791d32c3630a55502e9c",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_string_digit",
+          "start_line": 18,
+          "end_line": 19,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_string_digit",
+          "start_line": 18,
+          "end_line": 19,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "9b0cfeb11a2362eefa83430062c11fabffa55c157ed26bfb2be59044daebbcab",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/portal/tests/orders/test_cart_session.py",
+          "test_name": "TestGDPRCompliantCartSession.test_create_empty_cart",
+          "start_line": 50,
+          "end_line": 68,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/orders/test_cart_session_mocked.py",
+          "test_name": "TestGDPRCompliantCartSessionMocked.test_create_empty_cart",
+          "start_line": 25,
+          "end_line": 43,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "ad9e8d4db8233e1745cf6d764b03e68ce26c9901fdcd766f39144eaf1c64240b",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_just_over_cap",
+          "start_line": 27,
+          "end_line": 28,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_just_over_cap",
+          "start_line": 27,
+          "end_line": 28,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "c21236e01a8773d6ad00d1a4a7947979ff3429f55165029e5a853e041c90bd50",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_inf_returns_none",
+          "start_line": 54,
+          "end_line": 55,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_inf_returns_none",
+          "start_line": 54,
+          "end_line": 55,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "d2c345d345d70f50fb16d448adbffd8376cea6707e18a4fddef3d255a9844295",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_at_cap_boundary",
+          "start_line": 24,
+          "end_line": 25,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_at_cap_boundary",
+          "start_line": 24,
+          "end_line": 25,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "dfa3187a842bb330cccb6c9ef1c6e1f1ad38ba6534ecf599c508dac1e3be50d3",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_stopped_can_be_destroyed",
+          "start_line": 399,
+          "end_line": 401,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_stopped_can_be_destroyed",
+          "start_line": 448,
+          "end_line": 450,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "e19b096a4f9a2293bd42295681442b7ba12cbc0d3ea019e3a62db66ae1f9b3da",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_float_ceils",
+          "start_line": 15,
+          "end_line": 16,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_positive_float_ceils",
+          "start_line": 15,
+          "end_line": 16,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "e65db7709f97a3b3662acc017730d434b4f69c19419e7332539d2f6396ce8182",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_service_pipeline.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_destroyed_cannot_be_destroyed",
+          "start_line": 407,
+          "end_line": 409,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/platform/tests/infrastructure/test_deployment_state_machine.py",
+          "test_name": "TestCanBeDestroyedIncludesStopped.test_destroyed_cannot_be_destroyed",
+          "start_line": 464,
+          "end_line": 466,
+          "symbol_kind": "method"
+        }
+      ]
+    },
+    {
+      "signature": "e7e1c6f5e88d316949f47a98503b7937531a9382f1c2b3d05dac96067857376f",
+      "allowed": true,
+      "locations": [
+        {
+          "file": "services/platform/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_empty_string_returns_none",
+          "start_line": 48,
+          "end_line": 49,
+          "symbol_kind": "method"
+        },
+        {
+          "file": "services/portal/tests/common/test_retry_after.py",
+          "test_name": "CoerceRetryAfterSecondsTests.test_empty_string_returns_none",
+          "start_line": 48,
+          "end_line": 49,
+          "symbol_kind": "method"
+        }
+      ]
+    }
+  ]
+}

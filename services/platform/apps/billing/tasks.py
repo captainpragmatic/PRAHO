@@ -12,6 +12,7 @@ from typing import Any
 
 from django.db import transaction
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
@@ -124,8 +125,8 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status != "pending":
-            logger.info(f"📅 [Reminders] Invoice {invoice.number} is not pending, skipping reminders")
+        if invoice.status != "issued":
+            logger.info(f"📅 [Reminders] Invoice {invoice.number} is not issued/pending, skipping reminders")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
@@ -269,8 +270,8 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status not in ["pending", "overdue"]:
-            logger.info(f"⚠️ [Dunning] Invoice {invoice.number} is not overdue, skipping dunning")
+        if invoice.status not in ["issued", "overdue"]:
+            logger.info(f"⚠️ [Dunning] Invoice {invoice.number} is not issued/overdue, skipping dunning")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
@@ -542,8 +543,8 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status != "pending":
-            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not pending, skipping auto-payment")
+        if invoice.status != "issued":
+            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not issued/pending, skipping auto-payment")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
@@ -896,7 +897,7 @@ def _schedule_next_retry(retry: Any, retry_model: Any) -> None:
             )
 
 
-def run_payment_collection() -> dict[str, Any]:
+def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
     """
     Run payment collection for failed payments.
 
@@ -952,13 +953,22 @@ def run_payment_collection() -> dict[str, Any]:
                     success = confirm_result.get("success", False) and confirm_result.get("status") == "succeeded"
 
                 if success:
-                    retry.status = "success"
-                    successful += 1
-                    total_recovered_cents += retry.payment.amount_cents
-
-                    # Update payment status
-                    retry.payment.status = "succeeded"
-                    retry.payment.save(update_fields=["status"])
+                    # Update payment status via FSM transition
+                    try:
+                        retry.payment.succeed()
+                        retry.payment.save(update_fields=["status", "updated_at"])
+                        retry.status = "success"
+                        retry.failure_reason = ""
+                        successful += 1
+                        total_recovered_cents += retry.payment.amount_cents
+                    except TransitionNotAllowed:
+                        retry.status = "failed"
+                        retry.failure_reason = f"Payment cannot transition to succeeded from {retry.payment.status}"
+                        failed += 1
+                        logger.warning(
+                            f"⚠️ [Collection] Payment {retry.payment_id} cannot transition to succeeded "
+                            f"from {retry.payment.status}"
+                        )
 
                 else:
                     retry.status = "failed"

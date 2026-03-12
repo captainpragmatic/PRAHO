@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load i18n ui_components formatting %}
 
 {% block title %}{% trans "Service Action Request" %} - {{ service.service_name }}{% endblock %}
 
@@ -210,7 +210,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans "Monthly Cost" %}</dt>
-            <dd class="text-sm text-white font-mono">{{ service.monthly_price|floatformat:2 }} RON</dd>
+            <dd class="text-sm text-white font-mono">{{ service.monthly_price|romanian_currency }}</dd>
           </div>
 
           <div>
@@ -378,7 +378,7 @@ document.addEventListener('DOMContentLoaded', function() {
       e.preventDefault();
       {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "Please select an action type." as select_action_msg %}
-      alert('{{ select_action_msg|escapejs }}');
+      if (typeof showToast === 'function') { showToast('{{ select_action_msg|escapejs }}', 'error'); } else { alert('{{ select_action_msg|escapejs }}'); }
       return;
     }
 
@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
       {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
       {% trans "Please provide a reason for this request." as provide_reason_msg %}
-      alert('{{ provide_reason_msg|escapejs }}');
+      if (typeof showToast === 'function') { showToast('{{ provide_reason_msg|escapejs }}', 'error'); } else { alert('{{ provide_reason_msg|escapejs }}'); }
     }
   });
 });

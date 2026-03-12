@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
+from apps.billing.models import Currency
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
@@ -224,9 +225,12 @@ class SuspendAccountIdempotencyTest(TestCase):
             setup_fee=Decimal("0.00")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Service",
             username="test_user",
             price=Decimal("10.00"),
@@ -297,9 +301,12 @@ class UnsuspendAccountIdempotencyTest(TestCase):
             setup_fee=Decimal("0.00")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Service",
             username="test_user",
             price=Decimal("10.00"),
@@ -357,9 +364,12 @@ class DeleteAccountIdempotencyTest(TestCase):
             setup_fee=Decimal("0.00")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Service",
             username="test_user",
             price=Decimal("10.00"),
@@ -441,9 +451,12 @@ class RollbackMechanismTest(TestCase):
             setup_fee=Decimal("0.00")
         )
 
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.service_plan,
+            currency=self.currency,
             service_name="Test Service",
             username="test_user",
             price=Decimal("10.00"),

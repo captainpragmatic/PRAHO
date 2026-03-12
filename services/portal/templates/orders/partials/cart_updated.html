@@ -1,8 +1,11 @@
 {% load i18n ui_components %}
 
 <!-- Updated Cart Widget (HTMX Response) -->
-<div id="cart-widget" class="relative">
-  <button onclick="toggleMiniCart()"
+<div id="cart-widget" class="relative"
+     x-data="{ miniCartOpen: false }"
+     @cart-added.window="miniCartOpen = true"
+     @click.outside="miniCartOpen = false">
+  <button @click="miniCartOpen = !miniCartOpen"
           class="flex items-center space-x-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors"
           aria-label="{% trans 'Shopping cart' %}">
     {% icon "orders" size="sm" %}
@@ -14,12 +17,13 @@
     {% endif %}
   </button>
 
-  <!-- Mini Cart Dropdown -->
-  <div id="mini-cart" class="hidden absolute right-0 mt-2 w-80 z-50">
-    <div hx-get="{% url 'orders:mini_cart_content' %}"
+  <!-- Mini Cart Dropdown (auto-open after successful add) -->
+  <div id="mini-cart" class="absolute right-0 mt-2 w-80 z-50" x-show="miniCartOpen" x-cloak>
+    <div hx-get="{% url 'orders:mini_cart_content' %}{% if just_added_slug %}?just_added={{ just_added_slug|urlencode }}{% endif %}"
          hx-trigger="load, cartUpdated from:body"
          hx-target="this"
-         hx-swap="innerHTML">
+         hx-swap="innerHTML"
+         hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
       <!-- Loading content -->
       <div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700 p-4">
         <div class="animate-pulse">
@@ -47,6 +51,9 @@
     {% if product_name %}
     <div class="text-xs opacity-90 ml-2">({{ product_name }})</div>
     {% endif %}
+    <a href="{% url 'orders:cart_review' %}" class="text-blue-400 hover:text-blue-300 text-sm font-medium ml-2">
+      {% trans "View Cart" %} →
+    </a>
   </div>
 </div>
 {% endif %}

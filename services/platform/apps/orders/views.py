@@ -291,6 +291,7 @@ def order_list(request: HttpRequest) -> HttpResponse:
         "total": Order.objects.filter(customer_id__in=customer_ids).count(),
         "draft": Order.objects.filter(customer_id__in=customer_ids, status="draft").count(),
         "pending": Order.objects.filter(customer_id__in=customer_ids, status="pending").count(),
+        "confirmed": Order.objects.filter(customer_id__in=customer_ids, status="confirmed").count(),
         "processing": Order.objects.filter(customer_id__in=customer_ids, status="processing").count(),
         "completed": Order.objects.filter(customer_id__in=customer_ids, status="completed").count(),
     }
@@ -940,7 +941,7 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         )
         return json_success("Refund processed successfully")
     else:
-        return json_error(result.error)
+        return json_error(result.unwrap_err())
 
 
 @login_required
@@ -1022,7 +1023,7 @@ This ticket was automatically created from a customer refund request.
             contact_phone=getattr(request.user, "phone", ""),
             category=billing_category,
             priority="normal",
-            status="new",
+            status="open",
             source="web",
             created_by=request.user,
             # Link to order
@@ -1562,7 +1563,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
         return redirect("dashboard")
 
     # Get current cart order (draft)
-    cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+    cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
     context = {
         "cart_order": cart_order,
@@ -1589,7 +1590,7 @@ def cart_calculate(request: HttpRequest) -> HttpResponse:
             return HttpResponse("No customer profile", status=400)
 
         # Get current cart order
-        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+        cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Empty cart", status=400)
@@ -1637,7 +1638,7 @@ def cart_update(  # noqa: PLR0911  # Complexity: multi-step business logic
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+        cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)
@@ -1688,7 +1689,7 @@ def cart_remove(  # noqa: PLR0911  # Complexity: multi-step business logic
             return HttpResponse("Invalid parameters", status=400)
 
         # Get cart order and item
-        cart_order = Order.objects.filter(customer=customer, status=Order.Status.DRAFT).first()
+        cart_order = Order.objects.filter(customer=customer, status="draft").first()
 
         if not cart_order:
             return HttpResponse("Cart not found", status=404)

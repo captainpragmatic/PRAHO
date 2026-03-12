@@ -1,20 +1,21 @@
 # ===============================================================================
 # PLATFORM SERVICE CI/CD - FULL DJANGO WITH DATABASE
 # ===============================================================================
-# Managed with uv (https://docs.astral.sh/uv/) - See ADR-0013 for details
+# Tests and type checking for the platform service.
+# Linting is consolidated in integration.yml (make lint).
 
 name: Platform Service CI/CD
 
 on:
   push:
-    branches: [ master, develop, 'feat/*', 'fix/*' ]
+    branches: [master, staging]
     paths:
       - 'services/platform/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/platform.yml'
   pull_request:
-    branches: [ master, develop ]
+    branches: [master]
     paths:
       - 'services/platform/**'
       - 'pyproject.toml'
@@ -47,8 +48,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -64,35 +63,12 @@ jobs:
     - name: Run platform unit tests with coverage
       run: |
         cd services/platform
-        echo "Running platform unit tests with coverage..."
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage run manage.py test tests --verbosity=2
         ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage xml -o coverage-platform.xml
         ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage report --show-missing
 
-    - name: Ruff no-new-debt gate (platform)
-      run: |
-        BASE_REF="${{ github.event.before }}"
-        if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_REF="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE_REF="HEAD~1"
-          fi
-        fi
-        if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
-          echo "Baseline ref not present locally ($BASE_REF); fetching..."
-          git fetch origin "${BASE_REF}" --depth=1 || true
-        fi
-        echo "Checking for newly introduced Ruff violations vs: $BASE_REF"
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python scripts/ruff_new_violations.py \
-          --baseline-ref "$BASE_REF" \
-          --path-prefix services/platform
-
-    - name: Lint platform code
-      run: |
-        cd services/platform
-        echo "Running linting for platform service..."
-        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/ruff check apps/ || echo "Linting completed with issues"
+    - name: Platform type checking (make check-types-platform)
+      run: make check-types-platform
 
     - name: Upload platform artifacts
       uses: actions/upload-artifact@v4
@@ -101,7 +77,7 @@ jobs:
         name: platform-reports
         path: |
           services/platform/htmlcov/
-          services/platform/pytest_report.html
+          services/platform/coverage-platform.xml
         if-no-files-found: warn
 
   platform-security:
@@ -124,7 +100,6 @@ jobs:
 
     - name: Run Bandit SAST Security Scan
       run: |
-        echo "Running Bandit security analysis..."
         cd services/platform
         ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
 
@@ -133,6 +108,5 @@ jobs:
       if: always()
       with:
         name: security-reports
-        path: |
-          services/platform/bandit-report.json
+        path: services/platform/bandit-report.json
         if-no-files-found: warn

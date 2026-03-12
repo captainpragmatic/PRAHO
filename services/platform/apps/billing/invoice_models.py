@@ -6,8 +6,9 @@ Romanian compliant invoice model with address snapshots and immutable ledger.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -15,6 +16,7 @@ from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_fsm import FSMField, TransitionNotAllowed, transition
 
 from apps.billing.validators import (
     MAX_ADDRESS_FIELD_LENGTH,
@@ -22,6 +24,7 @@ from apps.billing.validators import (
     validate_financial_json,
     validate_financial_text_field,
 )
+from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
@@ -93,6 +96,7 @@ class Invoice(models.Model):
         ("overdue", _("Overdue")),
         ("void", _("Void")),  # Changed from 'cancelled' to 'void'
         ("refunded", _("Refunded")),
+        ("partially_refunded", _("Partially Refunded")),
     )
 
     # Core identification
@@ -102,7 +106,7 @@ class Invoice(models.Model):
         related_name="invoices",
     )
     number = models.CharField(max_length=50, unique=True, default="TMP-000")  # From InvoiceSequence
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    status = FSMField(max_length=20, choices=STATUS_CHOICES, default="draft", protected=True)
 
     # Currency and amounts (cents for precision)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
@@ -170,6 +174,26 @@ class Invoice(models.Model):
             models.Index(fields=["status", "-due_at"]),
             models.Index(fields=["number"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(subtotal_cents__gte=0),
+                name="invoice_subtotal_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="invoice_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_cents__gte=0),
+                name="invoice_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=["draft", "issued", "paid", "overdue", "void", "refunded", "partially_refunded"]
+                ),
+                name="invoice_status_valid_values",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
@@ -215,12 +239,20 @@ class Invoice(models.Model):
         ):
             raise ValidationError(_("Financial calculation error: subtotal + tax must equal total"))
 
-        # Validate invoice immutability rules
-        # Keep strict validation when explicitly validating an invoice
-        # that is locked and not in draft. Views creating invoices that
-        # must be locked immediately should lock post-save.
-        if self.locked_at and self.status not in ["draft"]:
-            raise ValidationError(_("Cannot modify locked invoice"))
+        # Validate invoice immutability rules — financial fields are frozen
+        # once locked. Status transitions (mark_as_paid, void) are still
+        # allowed because they don't alter monetary values.
+        if self.locked_at and self.pk:
+            db_vals = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("locked_at", "total_cents", "subtotal_cents", "tax_cents")
+                .first()
+            )
+            if db_vals and db_vals[0] is not None:
+                _db_locked, db_total, db_subtotal, db_tax = db_vals
+                if self.total_cents != db_total or self.subtotal_cents != db_subtotal or self.tax_cents != db_tax:
+                    raise ValidationError(_("Cannot modify financial data on a locked invoice"))
 
         # Validate date consistency
         if self.issued_at and self.due_at and self.due_at <= self.issued_at:
@@ -260,14 +292,10 @@ class Invoice(models.Model):
         Recalculate document totals from line items.
         Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
         """
-        lines = self.lines.all()
-
-        # Calculate subtotals and tax amounts by summing line items
-        self.subtotal_cents = sum(line.subtotal_cents for line in lines)
-        self.tax_cents = sum(line.tax_cents for line in lines)
-
-        # Total = subtotal + tax (no discount handling for now)
-        self.total_cents = self.subtotal_cents + self.tax_cents
+        totals = calculate_document_totals(list(self.lines.all()))
+        self.subtotal_cents = totals.subtotal_cents
+        self.tax_cents = totals.tax_cents
+        self.total_cents = totals.total_cents
 
     def is_overdue(self) -> bool:
         """Check if invoice is overdue"""
@@ -296,11 +324,33 @@ class Invoice(models.Model):
         )
         return max(0, self.total_cents - paid_amount)
 
+    @transition(field=status, source="draft", target="issued")
+    def issue(self) -> None:
+        """Issue the invoice — sets timestamps and locks financial fields."""
+        if not self.issued_at:
+            self.issued_at = timezone.now()
+        self.locked_at = timezone.now()
+
+    @transition(field=status, source=["issued", "overdue"], target="paid")
     def mark_as_paid(self) -> None:
-        """Mark invoice as paid"""
-        self.status = "paid"
+        """Mark invoice as paid."""
         self.paid_at = timezone.now()
-        self.save()
+
+    @transition(field=status, source="issued", target="overdue")
+    def mark_overdue(self) -> None:
+        """Mark invoice as overdue."""
+
+    @transition(field=status, source=["draft", "issued", "overdue"], target="void")
+    def void(self) -> None:
+        """Void the invoice."""
+
+    @transition(field=status, source=["paid", "partially_refunded"], target="refunded")
+    def refund_invoice(self) -> None:
+        """Mark invoice as fully refunded."""
+
+    @transition(field=status, source=["paid", "partially_refunded"], target="partially_refunded")
+    def mark_partially_refunded(self) -> None:
+        """Mark invoice as partially refunded."""
 
     @property
     def amount_due(self) -> int:
@@ -309,6 +359,31 @@ class Invoice(models.Model):
             return 0  # Fast path: skip DB aggregate for paid invoices
         return self.get_remaining_amount()
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Invoice] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        django-fsm protected fields block setattr via the descriptor. Django's
+        refresh_from_db uses setattr internally, which would raise AttributeError
+        if the field is already in __dict__. Temporarily removing the protected
+        field from __dict__ lets Django's setattr path bypass the descriptor
+        guard and populate the field from the database.
+        """
+        fsm_fields = ["status"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
     def update_status_from_payments(self) -> None:
         """Update invoice status based on associated payments."""
         if self.status in ("paid", "void", "refunded"):
@@ -316,7 +391,11 @@ class Invoice(models.Model):
 
         remaining = self.amount_due
         if remaining <= 0:
-            self.mark_as_paid()
+            try:
+                self.mark_as_paid()
+                self.save(update_fields=["status", "paid_at"])
+            except TransitionNotAllowed:
+                logger.warning(f"⚠️ [Invoice] Cannot transition {self.number} to paid from status '{self.status}'")
         elif remaining < self.total_cents:
             logger.info(
                 f"💰 [Invoice] {self.number} partially paid: {self.total_cents - remaining}/{self.total_cents} cents"
@@ -365,6 +444,20 @@ class InvoiceLine(models.Model):
             models.Index(fields=["service"]),
             models.Index(fields=["invoice", "kind"]),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(unit_price_cents__gte=0),
+                name="invoiceline_unit_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_cents__gte=0),
+                name="invoiceline_tax_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(line_total_cents__gte=0),
+                name="invoiceline_line_total_non_negative",
+            ),
+        ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         # Calculate totals before saving
@@ -372,13 +465,10 @@ class InvoiceLine(models.Model):
         super().save(*args, **kwargs)
 
     def calculate_totals(self) -> int:
-        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance"""
-
-        subtotal = self.subtotal_cents
-        # Use banker's rounding for VAT compliance (same as OrderItem)
-        vat_amount = Decimal(subtotal) * Decimal(str(self.tax_rate))
-        self.tax_cents = int(vat_amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
-        self.line_total_cents = subtotal + self.tax_cents
+        """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""
+        totals = calculate_line_totals(self.subtotal_cents, self.tax_rate)
+        self.tax_cents = totals.tax_cents
+        self.line_total_cents = totals.line_total_cents
         return self.line_total_cents
 
     @property

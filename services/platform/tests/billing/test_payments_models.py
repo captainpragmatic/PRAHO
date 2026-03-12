@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment
 from apps.customers.models import Customer
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -19,7 +20,7 @@ class PaymentTestCase(TestCase):
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -66,7 +67,7 @@ class PaymentTestCase(TestCase):
 
     def test_payment_status_choices(self):
         """Test valid status choices"""
-        valid_statuses = ['pending', 'processing', 'succeeded', 'failed', 'cancelled', 'refunded']
+        valid_statuses = ['pending', 'succeeded', 'failed', 'refunded', 'partially_refunded']
 
         for status in valid_statuses:
             payment = Payment.objects.create(
@@ -192,13 +193,36 @@ class PaymentTestCase(TestCase):
 
         self.assertEqual(payment.notes, 'Payment received via bank transfer')
 
+    def test_zero_amount_payment_passes_constraint(self):
+        """Zero-amount payments (e.g. free trial auth) should be valid."""
+        payment = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=0,
+            payment_method='card',
+        )
+        self.assertEqual(payment.amount_cents, 0)
+
+    def test_apply_gateway_event_returns_false_on_transition_failure(self):
+        """Gateway event on terminal state should be a safe no-op."""
+        payment = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=1000,
+            payment_method='card',
+        )
+        force_status(payment, 'refunded')
+
+        result = payment.apply_gateway_event('refunded')
+        self.assertFalse(result)
+
 
 class PaymentIntegrationTestCase(TestCase):
     """Test Payment integration scenarios"""
 
     def setUp(self):
         """Create test data"""
-        self.currency = Currency.objects.create(code='EUR', symbol='€', decimals=2)
+        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Integration Test SRL',

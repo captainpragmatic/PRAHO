@@ -10,6 +10,7 @@ from apps.customers.models import Customer, CustomerTaxProfile
 from apps.tickets.models import Ticket, TicketComment, SupportCategory
 from apps.tickets.services import TicketStatusService
 from apps.users.models import CustomerMembership
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -348,8 +349,8 @@ class TicketStatusServiceTest(TestCase):
         }
 
         for status, expected_display in status_displays.items():
-            ticket.status = status
-            ticket.save()
+            # Use force_status for test setup — we're testing display labels, not transitions
+            force_status(ticket, status)
             ticket.refresh_from_db()
             self.assertEqual(ticket.get_status_display(), expected_display)
 
@@ -368,12 +369,12 @@ class TicketStatusServiceTest(TestCase):
         # Get choices from model
         choices = dict(Ticket.RESOLUTION_CHOICES)
 
-        for code, expected_display in expected_codes.items():
+        for code in expected_codes:
             self.assertIn(code, choices)
             # Note: The actual display might be translated, so we just check the key exists
 
     def test_only_valid_statuses_allowed(self):
-        """Test that only valid status values are accepted."""
+        """Test that FSMField restricts direct status assignment and invalid choices fail validation."""
         ticket = TicketStatusService.create_ticket(
             customer=self.customer,
             title='Test Ticket',
@@ -384,13 +385,26 @@ class TicketStatusServiceTest(TestCase):
             contact_email='customer@example.com'
         )
 
-        # Valid statuses should work
-        valid_statuses = ['open', 'in_progress', 'waiting_on_customer', 'closed']
-        for status in valid_statuses:
-            ticket.status = status
-            ticket.save()  # Should not raise
+        # FSMField(protected=True) blocks direct status assignment
+        with self.assertRaises(AttributeError):
+            ticket.status = 'in_progress'
 
-        # Invalid status should raise error when validated
-        ticket.status = 'invalid_status'
-        with self.assertRaises(Exception):  # Django validation error
-            ticket.full_clean()
+        # Invalid status should raise error at DB level (CHECK constraint)
+        with self.assertRaises(Exception):
+            Ticket.objects.filter(pk=ticket.pk).update(status='invalid_status')
+
+    def test_apply_fsm_transition_raises_value_error_on_invalid_transition(self):
+        """Invalid status routes should surface as ValueError for service callers."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Test Ticket',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com'
+        )
+        force_status(ticket, 'closed')
+
+        with self.assertRaises(ValueError):
+            TicketStatusService._apply_fsm_transition(ticket, 'in_progress')
