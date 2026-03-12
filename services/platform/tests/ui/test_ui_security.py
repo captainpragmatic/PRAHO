@@ -236,18 +236,19 @@ class CORSSecurityTests(TestCase):
     def test_cors_settings_documented(self):
         """Test that CORS settings are properly configured (documentation test)"""
         # This test documents the expected CORS behavior
-        # In development: relaxed for localhost
-        # In production: should be restricted
+        # In development: explicit origins for localhost (not CORS_ALLOW_ALL_ORIGINS)
+        # In production: should be restricted to production domains
 
         # Import development settings to verify configuration
         try:
             from config.settings import dev
 
-            # Development should have relaxed CORS for localhost development
-            self.assertTrue(hasattr(dev, 'CORS_ALLOW_ALL_ORIGINS'))
-
-            # But this should be documented as development-only
-            # Production should use CORS_ALLOWED_ORIGINS instead
+            # Development should use explicit CORS origins (not ALLOW_ALL)
+            self.assertTrue(hasattr(dev, 'CORS_ALLOWED_ORIGINS'))
+            self.assertFalse(
+                getattr(dev, 'CORS_ALLOW_ALL_ORIGINS', False),
+                "Development should not use CORS_ALLOW_ALL_ORIGINS",
+            )
 
         except ImportError:
             self.skipTest("Development settings not available")
