@@ -28,6 +28,7 @@ import hmac
 import json
 import time
 import urllib.parse
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from django.http import HttpResponse
@@ -98,7 +99,7 @@ def hmac_headers(  # noqa: PLR0913
     Returns dict with HTTP_X_* keys ready for **kwargs to client.post().
     """
     if nonce is None:
-        nonce = f"test-nonce-{int(time.time())}"
+        nonce = f"test-{uuid.uuid4().hex}"
     if timestamp is None:
         timestamp = str(int(time.time()))
 

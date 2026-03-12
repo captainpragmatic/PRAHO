@@ -4,17 +4,34 @@
 # Tests that verify database cache works correctly without Redis
 # Validates cache table creation, operations, and performance
 
+import time
+
 import pytest
-from django.core.cache import cache
 from django.conf import settings
+from django.core.cache import cache
 from django.db import connection
 from django.test import TestCase, override_settings
+
+# LocMemCache settings used by @override_settings so tests work with any settings module
+_LOCMEM_CACHE = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "integration-test-cache",
+    }
+}
 
 
 def is_database_cache_configured():
     """Check if database cache backend is configured."""
     cache_config = settings.CACHES.get('default', {})
     return cache_config.get('BACKEND') == 'django.core.cache.backends.db.DatabaseCache'
+
+
+def get_table_column_names(table_name):
+    """Return table column names using backend-neutral Django introspection."""
+    with connection.cursor() as cursor:
+        description = connection.introspection.get_table_description(cursor, table_name)
+    return [column.name for column in description]
 
 
 # Skip marker for tests that require database cache
@@ -26,6 +43,7 @@ requires_database_cache = pytest.mark.skipif(
 )
 
 
+@override_settings(CACHES=_LOCMEM_CACHE)
 class TestDatabaseCacheFunctionality(TestCase):
     """
     Tests for database cache functionality after Redis removal.
@@ -53,24 +71,16 @@ class TestDatabaseCacheFunctionality(TestCase):
         ]
         assert cache_config['BACKEND'] in expected_backends, \
             f"Expected one of {expected_backends}, got {cache_config['BACKEND']}"
-
         if cache_config['BACKEND'] == 'django.core.cache.backends.db.DatabaseCache':
-            # Production-like configuration
             assert cache_config['LOCATION'] == 'django_cache_table'
             assert cache_config['KEY_PREFIX'] == 'pragmatichost'
 
-            # Verify cache options
             options = cache_config.get('OPTIONS', {})
             assert 'MAX_ENTRIES' in options
             assert 'CULL_FREQUENCY' in options
-
-            # Verify timeout is set
             assert 'TIMEOUT' in cache_config
         else:
-            # Test environment configuration
-            assert cache_config['LOCATION'] in ['test-cache', 'praho-cache'], \
-                f"Expected 'test-cache' or 'praho-cache', got {cache_config['LOCATION']}"
-
+            assert cache_config['LOCATION'] == 'integration-test-cache'
     @pytest.mark.cache
     @pytest.mark.django_db
     @requires_database_cache
@@ -80,24 +90,15 @@ class TestDatabaseCacheFunctionality(TestCase):
 
         Note: Only applies to DatabaseCache backend (production).
         """
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT name FROM sqlite_master
-                WHERE type='table' AND name='django_cache_table'
-            """)
-            result = cursor.fetchone()
-            assert result is not None, "django_cache_table should exist"
+        assert 'django_cache_table' in connection.introspection.table_names(), (
+            "django_cache_table should exist"
+        )
 
-            # Check table structure
-            cursor.execute("PRAGMA table_info(django_cache_table)")
-            columns = cursor.fetchall()
+        column_names = get_table_column_names('django_cache_table')
+        expected_columns = ['cache_key', 'value', 'expires']
 
-            # Verify expected columns exist
-            column_names = [col[1] for col in columns]
-            expected_columns = ['cache_key', 'value', 'expires']
-
-            for col in expected_columns:
-                assert col in column_names, f"Column {col} should exist in cache table"
+        for col in expected_columns:
+            assert col in column_names, f"Column {col} should exist in cache table"
 
     @pytest.mark.cache
     def test_basic_cache_operations(self):
@@ -169,7 +170,6 @@ class TestDatabaseCacheFunctionality(TestCase):
         assert cached_value == test_value
 
         # Wait for expiration (in real test, would use time manipulation)
-        import time
         time.sleep(2)
 
         # Should be expired now
@@ -245,7 +245,8 @@ class TestDatabaseCacheFunctionality(TestCase):
 # CACHE PERFORMANCE TESTS 📊
 # ===============================================================================
 
-class TestDatabaseCachePerformance:
+@override_settings(CACHES=_LOCMEM_CACHE)
+class TestDatabaseCachePerformance(TestCase):
     """
     Performance tests for database cache to ensure it meets our needs.
     """
@@ -259,7 +260,6 @@ class TestDatabaseCachePerformance:
         While not as fast as Redis, database cache should be sufficient
         for our application's caching needs.
         """
-        import time
 
         # Test multiple cache operations
         start_time = time.time()
@@ -311,7 +311,8 @@ class TestDatabaseCachePerformance:
 # RATE LIMITING WITH DATABASE CACHE TESTS 🛡️
 # ===============================================================================
 
-class TestRateLimitingWithDatabaseCache:
+@override_settings(CACHES=_LOCMEM_CACHE)
+class TestRateLimitingWithDatabaseCache(TestCase):
     """
     Tests that rate limiting works correctly with database cache.
     """
@@ -324,7 +325,6 @@ class TestRateLimitingWithDatabaseCache:
 
         Uses a mock rate limiter since RateLimitValidator may not be implemented.
         """
-        from django.core.cache import cache
 
         # Mock rate limiter for testing
         class MockRateLimitValidator:
@@ -349,7 +349,7 @@ class TestRateLimitingWithDatabaseCache:
         cache.delete(cache_key)
 
         # Simulate rate limiting
-        for i in range(3):
+        for _i in range(3):
             rate_limiter.check_rate_limit(test_ip)
 
         # Verify rate limit data is in cache
