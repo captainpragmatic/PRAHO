@@ -891,7 +891,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911
+def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, C901
     """
     Confirm order after successful payment and trigger service provisioning.
     """
@@ -951,6 +951,41 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             if payment_intent_id is not None:
                 order.payment_intent_id = payment_intent_id
                 order.save(update_fields=["payment_intent_id", "payment_method"])
+
+            # H11: Server-side Stripe PaymentIntent verification (fail-closed).
+            # Prevents order confirmation with a forged/incomplete payment_status
+            # by verifying directly with Stripe that the PI status == "succeeded".
+            if payment_intent_id:
+                try:
+                    from apps.billing.gateways.base import PaymentGatewayFactory  # noqa: PLC0415
+
+                    stripe_gateway = PaymentGatewayFactory.create_gateway("stripe")
+                    payment_result = stripe_gateway.confirm_payment(payment_intent_id)
+
+                    if not payment_result["success"] or payment_result["status"] != "succeeded":
+                        logger.warning(
+                            "[API] Stripe PaymentIntent verification failed for order %s: "
+                            "success=%s, status=%s, error=%s",
+                            order.order_number,
+                            payment_result["success"],
+                            payment_result["status"],
+                            payment_result["error"],
+                        )
+                        return Response(
+                            {"success": False, "error": "Payment verification failed"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                except (ValueError, ImportError) as e:
+                    # Stripe gateway not configured or not installed — fail-closed
+                    logger.error(
+                        "[API] Stripe gateway unavailable for order %s: %s",
+                        order.order_number,
+                        e,
+                    )
+                    return Response(
+                        {"success": False, "error": "Payment gateway not configured"},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
 
             # Use OrderService.update_order_status() for proper state machine validation
             # and OrderStatusHistory creation (audit trail for this legally-significant transition).
