@@ -8,6 +8,17 @@
 # `command:`), they run instead of the default gunicorn.
 set -e
 
+SESSION_DB="${SESSION_DB_PATH:-portal.sqlite3}"
+
+# Pre-flight: if session DB exists but is corrupted, delete and recreate.
+# Session data is disposable — losing it just forces re-login.
+if [ -f "$SESSION_DB" ]; then
+    if ! python -c "import sqlite3; sqlite3.connect('$SESSION_DB').execute('PRAGMA integrity_check')" 2>/dev/null; then
+        echo "⚠️ Corrupt session DB detected, recreating..."
+        rm -f "$SESSION_DB" "${SESSION_DB}-wal" "${SESSION_DB}-shm"
+    fi
+fi
+
 echo "🗄️ Ensuring session table exists..."
 python manage.py migrate sessions --noinput
 

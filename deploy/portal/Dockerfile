@@ -2,7 +2,7 @@
 # PRAHO PORTAL SERVICE - PRODUCTION DOCKERFILE
 # ===============================================================================
 # Multi-stage build: builder stage compiles dependencies, final stage is minimal.
-# Lightweight customer portal - NO database access, API-only.
+# Customer portal — uses local SQLite for session storage only (no business DB).
 
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — install build tools + compile Python dependencies
@@ -39,7 +39,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # settings package (config/settings/{base,dev,prod}.py), same as platform.
 
 # Runtime-only system packages (no build tools, no uv)
-# Note: NO postgresql-client, NO libpq-dev - portal has no DB access
+# Note: NO postgresql-client, NO libpq-dev - portal uses SQLite for sessions only
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
@@ -61,9 +61,10 @@ COPY services/portal/ ./
 # Copy entrypoint script
 COPY deploy/portal/entrypoint.sh /app/entrypoint.sh
 
-# Create required directories (minimal)
+# Create required directories
 RUN mkdir -p /app/staticfiles \
     && mkdir -p /app/logs \
+    && mkdir -p /app/data \
     && mkdir -p /var/log/praho/portal
 
 # Create non-root user

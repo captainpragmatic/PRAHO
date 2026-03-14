@@ -90,7 +90,9 @@ services/portal/
 1. **Security**: No business data to compromise locally
 2. **Consistency**: Single source of truth (Platform database)
 3. **Deployment**: Portal can restart; users just re-login
-4. **Horizontal scale**: Add portal workers without database coordination
+4. **Worker scale**: Add gunicorn workers on the same host (SQLite WAL handles
+   concurrent reads). Multi-instance scale requires shared session storage (Redis
+   or PostgreSQL) — not currently supported.
 5. **Clear separation**: Domain logic in Platform, presentation in Portal
 
 ---

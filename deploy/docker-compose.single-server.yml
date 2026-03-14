@@ -113,9 +113,11 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
+      - SESSION_DB_PATH=/app/data/portal.sqlite3
     volumes:
       - portal_static:/app/staticfiles
       - portal_logs:/app/logs
+      - portal_sessions:/app/data
     depends_on:
       platform:
         condition: service_healthy
@@ -177,5 +179,6 @@ volumes:
   logs:
   portal_static:
   portal_logs:
+  portal_sessions:
   caddy_data:
   caddy_config:

@@ -387,17 +387,17 @@ class APIRateLimitMiddleware:
 
     def _check_cart_session_rate_limit(self, request: HttpRequest) -> JsonResponse | None:
         """
-        🔒 Per-session rate limiting for cart mutation endpoints.
-        Uses session key (if available) to prevent a single session from hammering
+        🔒 Per-user rate limiting for cart mutation endpoints.
+        Uses user_id (if available) to prevent a single user from hammering
         calculate_totals, which triggers Platform API calls and DB chains.
-        Falls through to IP-level limiting when no session exists.
+        Falls through to IP-level limiting when no authenticated session exists.
         """
         # Use user_id as the rate-limit key instead of session_key.
         # session_key is None under signed-cookie sessions, which would silently
         # disable per-session cart rate limiting.
         session = getattr(request, "session", None)
         user_id = session.get("user_id") if session else None
-        if not user_id:
+        if user_id is None:
             return None  # No session yet — IP-level limiting still applies
 
         cart_cache_key = f"cart_session_{user_id}"

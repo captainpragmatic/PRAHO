@@ -256,14 +256,14 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         return redirect("orders:checkout")
 
     try:
-        # Idempotency key fallback — includes user_id to prevent
-        # same-cart collisions across separate checkout attempts.
-        # Uses user_id instead of session_key for backend-agnosticism
-        # (signed-cookie sessions return session_key=None).
+        # Idempotency key fallback — includes user_id + session_key to prevent
+        # same-cart collisions across separate checkout attempts and devices.
+        # session_key differentiates browser sessions for the same user.
         if not ctx.idempotency_key:
             user_id = str(request.session.get("user_id", ""))
+            sess_key = request.session.session_key or ""
             ctx.idempotency_key = hashlib.sha256(
-                f"{ctx.customer_id}:{ctx.cart_version}:{user_id}".encode()
+                f"{ctx.customer_id}:{ctx.cart_version}:{user_id}:{sess_key}".encode()
             ).hexdigest()[:64]
 
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"

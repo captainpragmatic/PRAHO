@@ -121,9 +121,9 @@ class SessionSecurityMiddleware(MiddlewareMixin):
             return None
 
         except Exception as e:
-            logger.error(f"🔥 [Session] Security middleware error: {e}")
-            # Don't block request on middleware errors, but log them
-            return None
+            logger.error(f"🔥 [Session] Security middleware error: {e}", exc_info=True)
+            # Fail CLOSED: programming bugs must not silently grant access (ADR-0017)
+            return self._handle_security_violation(request, "middleware_error")
 
     def _should_skip_security(self, request: HttpRequest) -> bool:
         """Check if security validation should be skipped for this path"""

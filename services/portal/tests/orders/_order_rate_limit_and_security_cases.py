@@ -326,10 +326,10 @@ class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
     def setUp(self) -> None:
         cache.clear()
 
-    def _compute_expected_key(self, customer_id: str, cart_version: str, user_id: str) -> str:
+    def _compute_expected_key(self, customer_id: str, cart_version: str, user_id: str, sess_key: str = "") -> str:
         """Replicate the fallback key formula from views._create_and_process_order."""
         return hashlib.sha256(
-            f"{customer_id}:{cart_version}:{user_id}".encode()
+            f"{customer_id}:{cart_version}:{user_id}:{sess_key}".encode()
         ).hexdigest()[:64]
 
     def test_same_inputs_produce_same_key(self) -> None:

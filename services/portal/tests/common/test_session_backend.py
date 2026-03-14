@@ -322,14 +322,15 @@ class LoginSessionPersistenceTests(TestCase):
                 data={"email": "test@example.com", "password": "pass123"},
             )
 
-        # Verify session survives across separate requests
-        session_after_login = self.client.session
-        self.assertEqual(session_after_login["user_id"], 123)
+        # Verify session data from login is accessible
+        self.assertEqual(self.client.session["user_id"], 123)
 
-        # Make another request — session should still be there
-        with patch("apps.users.middleware.PortalAuthenticationMiddleware") as _:
-            # Just verify the session cookie is sent back
-            self.assertIsNotNone(self.client.cookies.get("portal_session"))
+        # Make a second request — session data must survive the round-trip
+        # through the DB backend (proves server-side storage works).
+        self.client.get("/status/")
+        # Session data should still be there after the second request
+        self.assertEqual(self.client.session["user_id"], 123)
+        self.assertEqual(self.client.session["customer_id"], 456)
 
 
 # ---------------------------------------------------------------------------
@@ -338,17 +339,17 @@ class LoginSessionPersistenceTests(TestCase):
 
 
 class OrderIdempotencyKeyTests(SimpleTestCase):
-    """Verify idempotency key uses user_id, not session_key."""
+    """Verify idempotency key uses user_id + session_key."""
 
-    def test_idempotency_key_uses_user_id(self):
-        """The fallback idempotency key should include user_id, not session_key."""
-        # Simulate what the view does (lines 263-265 of orders/views.py)
+    def test_idempotency_key_includes_user_id(self):
+        """The fallback idempotency key should include user_id."""
         customer_id = "456"
         cart_version = "abc123"
         user_id = "123"
+        sess_key = "abc123def456"
 
         key = hashlib.sha256(
-            f"{customer_id}:{cart_version}:{user_id}".encode()
+            f"{customer_id}:{cart_version}:{user_id}:{sess_key}".encode()
         ).hexdigest()[:64]
 
         # With session_key=None (signed cookies), the old code would use ""
@@ -356,22 +357,38 @@ class OrderIdempotencyKeyTests(SimpleTestCase):
             f"{customer_id}:{cart_version}:".encode()
         ).hexdigest()[:64]
 
-        # Keys must differ — user_id provides unique namespace per user
+        # Keys must differ — user_id + session_key provide unique namespace
         self.assertNotEqual(key, old_key_with_empty)
 
     def test_different_users_get_different_idempotency_keys(self):
         """Two users with the same cart should get different idempotency keys."""
         cart_version = "abc123"
         customer_id = "456"
+        sess_key = "same_session"
 
         key_user_1 = hashlib.sha256(
-            f"{customer_id}:{cart_version}:1".encode()
+            f"{customer_id}:{cart_version}:1:{sess_key}".encode()
         ).hexdigest()[:64]
         key_user_2 = hashlib.sha256(
-            f"{customer_id}:{cart_version}:2".encode()
+            f"{customer_id}:{cart_version}:2:{sess_key}".encode()
         ).hexdigest()[:64]
 
         self.assertNotEqual(key_user_1, key_user_2)
+
+    def test_different_sessions_same_user_get_different_keys(self):
+        """Same user on different devices/browsers should get different idempotency keys."""
+        customer_id = "456"
+        cart_version = "abc123"
+        user_id = "1"
+
+        key_session_a = hashlib.sha256(
+            f"{customer_id}:{cart_version}:{user_id}:session_aaa".encode()
+        ).hexdigest()[:64]
+        key_session_b = hashlib.sha256(
+            f"{customer_id}:{cart_version}:{user_id}:session_bbb".encode()
+        ).hexdigest()[:64]
+
+        self.assertNotEqual(key_session_a, key_session_b)
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Application definition - Portal service apps only
 DJANGO_APPS: list[str] = [
-    "django.contrib.sessions",  # Session framework (cache-only)
+    "django.contrib.sessions",  # Session framework (DB-backed, see ADR-0017)
     "django.contrib.messages",  # Message framework for user feedback
     "django.contrib.staticfiles",  # Static file serving
     "django.contrib.humanize",  # Template humanization
@@ -44,7 +44,7 @@ MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
     # 🔒 SECURITY: Auth rate limiting before sessions (IP-only, no session needed)
     "apps.common.rate_limiting.AuthenticationRateLimitMiddleware",  # Auth rate limiting
-    "django.contrib.sessions.middleware.SessionMiddleware",  # Cache-only sessions
+    "django.contrib.sessions.middleware.SessionMiddleware",  # DB-backed sessions
     # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
     "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
     "django.middleware.locale.LocaleMiddleware",  # After sessions
