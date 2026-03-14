@@ -1,113 +1,98 @@
-# 🏛️ Portal Stateless Architecture
+# Portal Stateless Architecture
 
-## 🚨 CRITICAL ARCHITECTURAL PRINCIPLE
+## Architectural Principle
 
-**The Portal service MUST be completely stateless.**
+**The Portal service has no business data.** All domain data (users, customers,
+invoices, orders, services) lives in the Platform database and is accessed via
+HMAC-signed API calls (ADR-0032).
 
-## ❌ What Portal Should NOT Have
+Portal does maintain **infrastructure state** — Django sessions in a local
+SQLite file — which is auth/UX plumbing, not business state. Losing
+`portal.sqlite3` forces users to re-login but loses no business data.
 
-- ❌ **No Real Database**: Portal uses dummy in-memory SQLite (lost on restart)
-- ❌ **No Models**: Portal apps should not define any Django models
-- ❌ **No Migrations**: Database router prevents all migrations
-- ❌ **No Sessions**: No session middleware or session storage
-- ❌ **No User Authentication**: No `django.contrib.auth` or user models
-- ❌ **No Messages Framework**: No `django.contrib.messages` (requires sessions)
-- ❌ **No CSRF Protection**: Portal is read-only, no forms that modify data
-- ❌ **No Redis**: No cache backend or external state storage
-- ❌ **No Shared State**: No communication with Platform via Redis/cache
-- ❌ **No Direct Data Storage**: All data comes from Platform API calls
+## What "Stateless" Means Here
 
-## ✅ What Portal DOES Have
+| Category | Portal has it? | Notes |
+|----------|:-:|-------|
+| Business models (User, Customer, Invoice, …) | No | All in Platform's PostgreSQL |
+| Django ORM migrations | No | Session table is created by `django.contrib.sessions` |
+| Redis / shared cache | No | LocMemCache only (per-process, accepted tradeoff) |
+| Cross-service shared state | No | Portal ↔ Platform via HMAC HTTP only |
+| **Session storage (SQLite)** | **Yes** | Server-side DB sessions for security middleware |
+| **`django.contrib.sessions`** | **Yes** | Required for auth, cart, rate limiting |
+| **`django.contrib.messages`** | **Yes** | User feedback on login/checkout flows |
+| **CSRF protection** | **Yes** | Required for POST forms (login, checkout, tickets) |
 
-- ✅ **Templates & Views**: Customer-facing UI rendering
-- ✅ **API Client**: Communication with Platform service via HTTP
-- ✅ **Static Files**: CSS, JS, images for customer interface
-- ✅ **Template Tags**: UI components and formatting helpers (stateless)
-- ✅ **Context Processors**: Template data enhancement (API-driven)
-- ✅ **Dummy Database**: In-memory SQLite (Django requirement, never used)
+## Why Server-Side Sessions (Not Signed Cookies)
 
-## 🔄 Data Flow Pattern
+Portal originally used `signed_cookies` for sessions to stay fully stateless.
+This was changed to `django.contrib.sessions.backends.db` after discovering
+that signed-cookie sessions silently disabled critical security controls:
+
+1. **`session_key` is always `None`** under signed cookies — this bypassed
+   `SessionSecurityMiddleware` (IP fingerprinting, session timeout, activity
+   tracking) which ADR-0017 relies on as a safety net.
+2. **Cookie size risk** — portal stores 25-40 session keys (cart, memberships,
+   account health). Exceeding the 4KB browser cookie limit causes silent
+   session loss.
+3. **No server-side revocation** — signed cookies cannot be invalidated on
+   logout; a stolen cookie remains valid for up to 30 days.
+4. **OWASP and Fortify** classify signed-cookie sessions as a "Bad Practice"
+   for auth state.
+
+Server-side SQLite sessions fix all four issues while keeping the portal free
+of business data. See ADR-0017 addendum for the full incident writeup.
+
+## Data Flow
 
 ```
-Customer Browser → Portal Service → Platform API → Platform Database
+Customer Browser → Portal (:8701) → Platform API (:8700) → PostgreSQL
                       ↓
                  Templates + Views
                       ↓
                  Rendered HTML
+
+Session state: portal.sqlite3 (django_session table only)
 ```
 
-## 🔧 Authentication Flow
-
-1. **Customer Accesses Portal**: Direct URL to portal service
-2. **Platform API Call**: Portal makes authenticated API call to Platform
-3. **API Token/Key**: Portal uses shared API secret or service token
-4. **Data Retrieval**: All customer data comes from Platform API responses
-5. **Template Rendering**: Portal renders HTML with API data
-6. **No Local State**: Portal never stores any customer information locally
-
-## 📁 Portal Service Structure
+## Portal Service Structure
 
 ```
 services/portal/
 ├── apps/
-│   ├── api_client/     # Platform API communication
+│   ├── api_client/     # Platform API communication (HMAC-signed)
+│   ├── users/          # Login/logout, session management, customer switching
 │   ├── dashboard/      # Customer dashboard views
 │   ├── billing/        # Billing display (via API)
+│   ├── orders/         # Cart, checkout, payment flows
 │   ├── services/       # Service management UI
 │   ├── tickets/        # Support ticket interface
 │   ├── ui/             # Template tags and components
-│   └── common/         # Shared utilities (no models!)
+│   └── common/         # Middleware, rate limiting, validators (no models)
 ├── templates/          # Customer-facing templates
 ├── static/             # CSS, JS, images
-└── config/             # Django settings (no auth/sessions)
+├── config/             # Django settings
+├── portal.sqlite3      # Session storage only (no business data)
+└── locale/             # i18n translations (RO/EN)
 ```
 
-## 🚫 Files That Should NOT Exist
+## Key Invariants
 
-- `portal.sqlite3` - No database file
-- `apps/users/` - No user authentication app
-- `*/migrations/` - No migration directories
-- Any file importing `django.contrib.auth`
-- Any file importing `django.db.models`
+1. **No business models** — portal apps must never define Django ORM models
+2. **No Platform imports** — portal must never import from platform apps
+3. **No direct database queries** — all domain data via Platform API
+4. **Session = infrastructure** — losing sessions forces re-login, not data loss
+5. **LocMemCache = per-worker** — rate limit counters are not shared across
+   gunicorn workers (accepted tradeoff for no-Redis constraint)
 
-## 🔧 Technical Implementation Details
+## Benefits
 
-### Why Dummy Database?
-
-Django **requires** a `DATABASES` setting to function, even if you never use it. Portal uses:
-
-```python
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",  # In-memory, disappears on restart
-    }
-}
-```
-
-- **In-Memory Only**: Database exists only in RAM, lost on restart
-- **Never Written To**: Database router prevents all migrations and writes
-- **Django Compliance**: Satisfies Django's configuration requirements
-- **Zero Persistence**: No files created, no state preserved
-
-### Why No Redis/Cache?
-
-- **Security Risk**: Shared cache could leak data between services
-- **Complexity**: Additional infrastructure dependency
-- **Unnecessary**: Portal only displays data, doesn't store it
-- **Stateless Goal**: Any cache would be local state (violates architecture)
-
-## 🎯 Benefits of Stateless Design
-
-1. **Scalability**: Portal instances can be load balanced easily
-2. **Security**: No local data to compromise or leak between customers
-3. **Consistency**: Single source of truth (Platform database)
-4. **Deployment**: Portal can restart without data loss
-5. **Development**: Clear separation of concerns
-6. **Zero Migrations**: Portal never needs database schema changes
-7. **Horizontal Scale**: Add portal instances without coordination
+1. **Security**: No business data to compromise locally
+2. **Consistency**: Single source of truth (Platform database)
+3. **Deployment**: Portal can restart; users just re-login
+4. **Horizontal scale**: Add portal workers without database coordination
+5. **Clear separation**: Domain logic in Platform, presentation in Portal
 
 ---
 
-**Generated**: September 6, 2025
-**Status**: ✅ IMPLEMENTED - Portal is now completely stateless
+**Updated**: March 2026 — switched from signed-cookie to DB sessions (see ADR-0017 addendum)

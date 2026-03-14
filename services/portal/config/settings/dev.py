@@ -90,8 +90,8 @@ if is_testing:
         "IS_RUNNING_TESTS": True,
     }
 
-    # Keep DB-backed sessions in tests so cache.clear() in security tests
-    # does not wipe authentication session state.
+    # DB-backed sessions in tests — matches base/prod and ensures session_key
+    # is available for SecurityMiddleware and rate-limiting tests.
     SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
     # Disable rate limiting during tests

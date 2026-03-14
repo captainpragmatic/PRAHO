@@ -86,6 +86,7 @@ services:
     volumes:
       - portal_static_volume:/app/staticfiles
       - portal_logs_volume:/app/logs
+      - portal_sessions_volume:/app/data
     environment:
       - DEBUG=1
       - PLATFORM_API_BASE_URL=http://platform:8700/api
@@ -94,7 +95,8 @@ services:
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SERVICE_NAME=portal
-      # No DB_* vars - portal has no DB access
+      - SESSION_DB_PATH=/app/data/portal.sqlite3
+      # No DB_* vars - portal has no business DB access
       # No PYTHONPATH - portal cannot import platform code
     depends_on:
       platform:
@@ -164,3 +166,5 @@ volumes:
     name: praho_portal_static_volume
   portal_logs_volume:
     name: praho_portal_logs_volume
+  portal_sessions_volume:
+    name: praho_portal_sessions_volume

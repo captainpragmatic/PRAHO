@@ -392,15 +392,19 @@ class APIRateLimitMiddleware:
         calculate_totals, which triggers Platform API calls and DB chains.
         Falls through to IP-level limiting when no session exists.
         """
-        session_key = getattr(request, "session", None) and getattr(request.session, "session_key", None)
-        if not session_key:
+        # Use user_id as the rate-limit key instead of session_key.
+        # session_key is None under signed-cookie sessions, which would silently
+        # disable per-session cart rate limiting.
+        session = getattr(request, "session", None)
+        user_id = session.get("user_id") if session else None
+        if not user_id:
             return None  # No session yet — IP-level limiting still applies
 
-        cart_cache_key = f"cart_session_{session_key}"
+        cart_cache_key = f"cart_session_{user_id}"
         cart_requests = cache.get(cart_cache_key, 0)
 
         if cart_requests >= self.CART_SESSION_RATE_LIMIT:
-            logger.warning(f"🚨 [APIRateLimit] Cart session limit exceeded: session={session_key[:8]}...")
+            logger.warning(f"🚨 [APIRateLimit] Cart session limit exceeded: user={user_id}...")
             return JsonResponse(
                 {
                     "error": _("Too many cart updates. Please slow down."),

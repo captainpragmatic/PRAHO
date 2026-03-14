@@ -140,9 +140,10 @@ CACHES = {
     }
 }
 
-# Portal sessions: use Django's signed-cookie backend (no DB, no cache worker affinity)
-# Each cookie is self-contained and HMAC-signed with SECRET_KEY, so any worker can read it.
-SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+# Portal sessions: server-side DB sessions backed by local SQLite.
+# Ensures session_key is available for SecurityMiddleware fingerprinting,
+# keeps the cookie small (~32 bytes), and allows server-side revocation.
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
 # Production logging — structured JSON with request ID tracing
 LOGGING = {

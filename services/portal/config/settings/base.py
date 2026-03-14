@@ -85,24 +85,29 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # ===============================================================================
-# DATABASE - POSTGRESQL FOR PRODUCTION, SQLITE FOR DEV
+# DATABASE - SQLITE FOR SESSION STORAGE ONLY (ALL ENVIRONMENTS)
 # ===============================================================================
 
-# DUMMY DATABASE - DJANGO REQUIREMENT (NEVER USED IN STATELESS PORTAL)
-# Portal uses cache-only sessions and Platform API for all data
+# SESSION DATABASE — used for Django session storage only, no business data.
+# Portal fetches all domain data from Platform via HMAC-signed API calls.
+# Losing portal.sqlite3 forces re-login but loses no business data.
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        # Use a file-backed SQLite DB so sessions persist across reloads
-        "NAME": str(BASE_DIR / "portal.sqlite3"),
+        "NAME": os.environ.get("SESSION_DB_PATH", str(BASE_DIR / "portal.sqlite3")),
         "OPTIONS": {
             "timeout": 20,
+            # WAL mode: concurrent readers + single writer without blocking.
+            # busy_timeout: wait up to 5 s for a write lock instead of raising.
+            "init_command": "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;",
         },
     }
 }
 
 # SESSION STORAGE
-# Use DB-backed sessions in both dev and prod (simple, persistent across reloads)
+# Server-side DB sessions: session_key works, cookie stays ~32 bytes,
+# SecurityMiddleware can fingerprint/expire sessions, and server-side
+# revocation is possible. See ADR-0017 addendum for rationale.
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
 # Portal uses LocMemCache (per-process, in-memory).

@@ -2,10 +2,17 @@
 # =============================================================================
 # PRAHO Portal — Docker Entrypoint
 # =============================================================================
-# Runs on every container start. Portal is stateless (no DB migrations needed).
+# Runs on every container start. Portal uses a local SQLite file for session
+# storage only (no business data). The session table migration is idempotent.
 # Supports command override: if arguments are passed (e.g., from docker-compose
 # `command:`), they run instead of the default gunicorn.
 set -e
+
+echo "🗄️ Ensuring session table exists..."
+python manage.py migrate sessions --noinput
+
+echo "🧹 Clearing expired sessions..."
+python manage.py clearsessions
 
 echo "📦 Collecting static files..."
 python manage.py collectstatic --noinput

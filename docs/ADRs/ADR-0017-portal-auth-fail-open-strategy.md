@@ -105,3 +105,58 @@ These log lines can be monitored to detect prolonged Platform outages affecting 
 ### Neutral
 - New customer logins still fail during Platform outages (no way to verify credentials without Platform)
 - The pattern is well-documented and scanner-suppressed, reducing confusion for future developers
+
+---
+
+## Addendum: Signed-Cookie Session Bug (March 2026)
+
+**Discovery date:** 2026-03-14
+**Severity:** High — ADR-0017's safety net was silently disabled in production
+
+### What happened
+
+Portal's `prod.py` used `SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"`.
+Django's signed-cookie backend always returns `session_key = None` because there is no
+server-side session record. This caused `SessionSecurityMiddleware.process_request()` to
+exit early at line 100:
+
+```python
+if not request.session.session_key:  # Always None under signed_cookies
+    return None  # Skips ALL security checks
+```
+
+As a result, the following safeguards from this ADR were **silently bypassed in production**:
+- IP address fingerprinting and change detection
+- User-Agent fingerprint binding
+- 1-hour activity timeout enforcement
+- Session activity tracking
+
+The "Independent session security" safeguard in the table above was therefore **inoperative**
+since signed-cookie sessions were deployed to production.
+
+### Root cause
+
+`session_key` is a Django `SessionBase` property that returns the unique server-side
+identifier for a session. For DB/cache backends this is a random 32-character string.
+For the `signed_cookies` backend, there is no server-side record, so `session_key` is
+always `None`. Code that branches on `session_key` truthiness silently changes behavior
+when the session backend is switched.
+
+### Fix
+
+1. **Session backend**: Switched all environments (base, dev, prod) to
+   `django.contrib.sessions.backends.db` backed by the existing `portal.sqlite3` file.
+   This restores a real `session_key` for all security checks.
+
+2. **Defensive guard**: Changed `SessionSecurityMiddleware` to guard on
+   `"user_id" not in request.session` instead of `not request.session.session_key`.
+   This makes the middleware backend-agnostic.
+
+3. **Cart rate limiting**: Changed from `session_key` to `user_id` keying to prevent
+   the same silent bypass.
+
+4. **Order idempotency**: Changed from `session_key` to `user_id` in hash inputs.
+
+5. **Tests**: Added `tests/common/test_session_backend.py` with regression tests that
+   verify `session_key` is non-None after login and that `SessionSecurityMiddleware`
+   activates for authenticated sessions.

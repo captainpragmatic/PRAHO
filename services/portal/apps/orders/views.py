@@ -256,12 +256,14 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
         return redirect("orders:checkout")
 
     try:
-        # Idempotency key fallback — includes session key + timestamp to prevent
+        # Idempotency key fallback — includes user_id to prevent
         # same-cart collisions across separate checkout attempts.
+        # Uses user_id instead of session_key for backend-agnosticism
+        # (signed-cookie sessions return session_key=None).
         if not ctx.idempotency_key:
-            session_key = (getattr(request, "session", None) and request.session.session_key) or ""
+            user_id = str(request.session.get("user_id", ""))
             ctx.idempotency_key = hashlib.sha256(
-                f"{ctx.customer_id}:{ctx.cart_version}:{session_key}".encode()
+                f"{ctx.customer_id}:{ctx.cart_version}:{user_id}".encode()
             ).hexdigest()[:64]
 
         idem_cache_key = f"orders:idempotency:{ctx.customer_id}:{ctx.idempotency_key}"
@@ -708,7 +710,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
 
     # 🔒 SECURITY: Comprehensive DoS hardening checks
-    cache_key = f"cart_update_{request.session.session_key or 'anon'}"
+    cache_key = f"cart_update_{request.session.get('user_id', 'anon')}"
     cache_response = _coerce_security_response(
         OrderSecurityHardening.fail_closed_on_cache_failure(cache_key, "update_cart_item")
     )
@@ -763,7 +765,7 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:
     """
 
     # 🔒 SECURITY: Comprehensive DoS hardening checks
-    cache_key = f"cart_remove_{request.session.session_key or 'anon'}"
+    cache_key = f"cart_remove_{request.session.get('user_id', 'anon')}"
     cache_response = _coerce_security_response(
         OrderSecurityHardening.fail_closed_on_cache_failure(cache_key, "remove_from_cart")
     )
@@ -856,7 +858,7 @@ def calculate_totals_htmx(request: HttpRequest) -> HttpResponse:  # noqa: PLR091
     """
 
     # 🔒 SECURITY: Comprehensive DoS hardening checks
-    cache_key = f"cart_totals_{request.session.session_key or 'anon'}"
+    cache_key = f"cart_totals_{request.session.get('user_id', 'anon')}"
     cache_response = _coerce_security_response(
         OrderSecurityHardening.fail_closed_on_cache_failure(cache_key, "calculate_totals_htmx")
     )
