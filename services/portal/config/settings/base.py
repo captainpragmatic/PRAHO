@@ -96,10 +96,11 @@ DATABASES: dict[str, dict[str, Any]] = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": os.environ.get("SESSION_DB_PATH", str(BASE_DIR / "portal.sqlite3")),
         "OPTIONS": {
+            # timeout: seconds to wait for a write lock (maps to sqlite3.connect timeout).
             "timeout": 20,
             # WAL mode: concurrent readers + single writer without blocking.
-            # busy_timeout: wait up to 5 s for a write lock instead of raising.
-            "init_command": "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;",
+            # Django 5.1+ supports init_command for SQLite (executed on every connection).
+            "init_command": "PRAGMA journal_mode=WAL;",
         },
     }
 }

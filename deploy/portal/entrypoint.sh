@@ -10,6 +10,10 @@ set -e
 
 SESSION_DB="${SESSION_DB_PATH:-portal.sqlite3}"
 
+# Ensure parent directory exists and is writable (handles Docker volume mounts)
+SESSION_DIR=$(dirname "$SESSION_DB")
+mkdir -p "$SESSION_DIR" 2>/dev/null || true
+
 # Pre-flight: if session DB exists but is corrupted, delete and recreate.
 # Session data is disposable — losing it just forces re-login.
 if [ -f "$SESSION_DB" ]; then
