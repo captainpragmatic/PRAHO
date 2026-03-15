@@ -251,8 +251,24 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         return get_safe_client_ip(request)
 
 
+class CSPNonceMiddleware:
+    """Generate a per-request CSP nonce for inline scripts/styles.
+
+    Must be placed BEFORE SecurityHeadersMiddleware in MIDDLEWARE.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        import secrets  # noqa: PLC0415
+
+        request.csp_nonce = secrets.token_urlsafe(32)
+        return self.get_response(request)
+
+
 class SecurityHeadersMiddleware:
-    """🔒 Enhanced security headers middleware with CSP and comprehensive protections"""
+    """Enhanced security headers middleware with CSP and comprehensive protections"""
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
@@ -260,25 +276,27 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
 
-        # 🔒 SECURITY: Core security headers
+        # Core security headers
         response["X-Content-Type-Options"] = "nosniff"
         response["X-Frame-Options"] = "DENY"
         response["X-XSS-Protection"] = "1; mode=block"
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-        # 🔒 SECURITY: Strict Transport Security (HTTPS only)
+        # Strict Transport Security (HTTPS only)
         if request.is_secure():
             response["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # 🔒 SECURITY: Content Security Policy for HTMX/Tailwind compatibility
+        # Content Security Policy — nonce-based with unsafe-inline fallback
+        nonce = getattr(request, "csp_nonce", "")
+        nonce_directive = f"'nonce-{nonce}'" if nonce else ""
         csp_parts = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",  # HTMX + Stripe need unsafe-inline; Alpine.js v3 needs unsafe-eval for x-data expressions
-            "style-src 'self' 'unsafe-inline'",  # Tailwind requires unsafe-inline
+            f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {nonce_directive} https://js.stripe.com",
+            f"style-src 'self' 'unsafe-inline' {nonce_directive}",
             "img-src 'self' data: https:",
             "font-src 'self'",
             "connect-src 'self' https://api.stripe.com",
-            "frame-src 'self' https://js.stripe.com https://*.stripe.com",  # Stripe Elements frames
+            "frame-src 'self' https://js.stripe.com https://*.stripe.com",
             "frame-ancestors 'none'",
             "form-action 'self'",
             "base-uri 'self'",
