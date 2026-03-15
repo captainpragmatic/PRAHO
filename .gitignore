@@ -179,3 +179,7 @@ QA/screenshots/
 
 # Design/plan docs (internal, not tracked)
 docs/plans/
+
+# Lint/CI generated artifacts
+test-layout-audit.json
+.cache/
