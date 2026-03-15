@@ -361,7 +361,7 @@ class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
         from apps.orders import views  # noqa: PLC0415
 
         source = inspect.getsource(views._create_and_process_order)
-        # The idempotency fallback block hash uses only customer_id, cart_version, session_key
+        # The idempotency fallback block hash uses customer_id, cart_version, user_id, session_key
         # Locate the sha256 hash lines — they must not reference 'time' or 'now()'
         hash_lines = [
             line for line in source.splitlines()

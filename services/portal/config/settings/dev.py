@@ -133,9 +133,8 @@ except Exception as e:
 
     logging.getLogger(__name__).debug(f"🔍 [Dev Security] Validation check: {e}")
 
-# No authentication backends - portal is stateless
+# Portal authenticates via Platform API + DB-backed sessions (see ADR-0017)
 
-# No session configuration - portal is stateless
 CSRF_COOKIE_SECURE = False
 
 # CSRF trusted origins for development

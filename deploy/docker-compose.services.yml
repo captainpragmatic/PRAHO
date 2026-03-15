@@ -4,12 +4,12 @@
 # Full-stack local environment with network isolation and no Redis dependency.
 # NOT for production — uses dev settings and DEBUG=1.
 # For production, see: docker-compose.single-server.yml or container-service.yml
-# Platform: Full Django + DB access | Portal: API-only, no DB access
+# Platform: Full Django + PostgreSQL | Portal: API-only, local SQLite for sessions
 
 # ⚠️ SECURITY ARCHITECTURE:
-# - Platform service: Full Django app with DB access (admin, provisioning)
-# - Portal service: Customer-facing API only, NO database access
-# - Network isolation: Portal cannot access platform-network (DB isolation)
+# - Platform service: Full Django app with PostgreSQL (admin, provisioning)
+# - Portal service: Customer-facing, local SQLite for sessions only (no business DB)
+# - Network isolation: Portal cannot access platform-network (PostgreSQL isolation)
 
 services:
   # ===============================================================================
