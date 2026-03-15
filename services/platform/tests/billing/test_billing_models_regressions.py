@@ -43,7 +43,7 @@ class CurrencyModelAdditionalTestCase(TestCase):
     def test_currency_meta_attributes(self):
         """Test Currency model meta attributes"""
         meta = Currency._meta
-        self.assertEqual(meta.db_table, 'currency')
+        self.assertEqual(meta.db_table, 'billing_currencies')
         # Accept both English and Romanian translations
         self.assertIn(str(meta.verbose_name), ['Currency', 'Monedă'])
         self.assertIn(str(meta.verbose_name_plural), ['Currencies', 'Monede'])
@@ -188,7 +188,7 @@ class InvoiceSequenceModelAdditionalTestCase(TestCase):
     def test_invoice_sequence_meta_attributes(self):
         """Test InvoiceSequence model meta attributes"""
         meta = InvoiceSequence._meta
-        self.assertEqual(meta.db_table, 'invoice_sequence')
+        self.assertEqual(meta.db_table, 'billing_invoice_sequences')
         # Accept both English and Romanian translations
         self.assertIn(str(meta.verbose_name), ['Invoice Sequence', 'Secvență factură'])
         self.assertIn(str(meta.verbose_name_plural), ['Invoice Sequences', 'Secvențe factură'])
@@ -238,7 +238,7 @@ class ProformaSequenceModelAdditionalTestCase(TestCase):
     def test_proforma_sequence_meta_attributes(self):
         """Test ProformaSequence model meta attributes"""
         meta = ProformaSequence._meta
-        self.assertEqual(meta.db_table, 'proforma_sequence')
+        self.assertEqual(meta.db_table, 'billing_proforma_sequences')
         # Accept both English and Romanian translations
         self.assertIn(str(meta.verbose_name), ['Proforma Sequence', 'Secvență proformă'])
         self.assertIn(str(meta.verbose_name_plural), ['Proforma Sequences', 'Secvențe proformă'])

@@ -44,7 +44,7 @@ class InvoiceSequence(models.Model):
     last_value = models.BigIntegerField(default=0)
 
     class Meta:
-        db_table = "invoice_sequence"
+        db_table = "billing_invoice_sequences"
         verbose_name = _("Invoice Sequence")
         verbose_name_plural = _("Invoice Sequences")
 
@@ -163,7 +163,7 @@ class Invoice(models.Model):
     )
 
     class Meta:
-        db_table = "invoice"
+        db_table = "billing_invoices"
         verbose_name = _("Invoice")
         verbose_name_plural = _("Invoices")
         indexes = (
@@ -437,7 +437,7 @@ class InvoiceLine(models.Model):
     line_total_cents = models.BigIntegerField(default=0)
 
     class Meta:
-        db_table = "invoice_line"
+        db_table = "billing_invoice_lines"
         verbose_name = _("Invoice Line")
         verbose_name_plural = _("Invoice Lines")
         indexes = (

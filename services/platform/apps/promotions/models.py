@@ -1618,7 +1618,7 @@ class CustomerLoyalty(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "promotion_customer_loyalty"
+        db_table = "promotion_customer_loyalties"
         verbose_name = _("Customer Loyalty")
         verbose_name_plural = _("Customer Loyalties")
         unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("customer", "program"),)

@@ -140,7 +140,7 @@ class WebAuthnCredential(models.Model):
     objects = models.Manager()  # Explicit manager for mypy
 
     class Meta:
-        db_table = "webauthn_credentials"  # Keep original table name from migration
+        db_table = "user_webauthn_credentials"
         verbose_name = "WebAuthn Credential"
         verbose_name_plural = "WebAuthn Credentials"
         constraints: ClassVar = [models.UniqueConstraint(fields=["user", "credential_id"], name="uniq_user_credential")]

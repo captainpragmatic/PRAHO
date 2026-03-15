@@ -26,6 +26,8 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.partitioning import EventPartitionService
+
 if TYPE_CHECKING:
     pass
 
@@ -1090,7 +1092,7 @@ class LogRetentionService:
         """Get current retention status for all categories"""
         from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: avoids circular import
 
-        status = {}
+        status: dict[str, Any] = {}
 
         for category, config in self.retention_config.items():
             retention_days = config.get("retention_days", 365)
@@ -1106,6 +1108,18 @@ class LogRetentionService:
                 "total_events": total,
                 "events_past_retention": past_retention,
                 "compliance_status": "compliant" if past_retention == 0 else "action_required",
+            }
+
+        partition_status = EventPartitionService().get_status()
+        for table_name, table_details in partition_status.items():
+            status[f"table:{table_name}"] = {
+                "retention_days": table_details.get("archive_retention_days"),
+                "action": "partition_rotation",
+                "legal_basis": "Operational partition retention",
+                "total_events": len(table_details.get("attached_partitions", [])),
+                "events_past_retention": 0,
+                "compliance_status": table_details.get("status", "unknown"),
+                "partition_status": table_details,
             }
 
         return status

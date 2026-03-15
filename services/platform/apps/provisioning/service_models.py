@@ -100,7 +100,7 @@ class ServicePlan(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "service_plans"
+        db_table = "provisioning_service_plans"
         verbose_name = _("Service Plan")
         verbose_name_plural = _("Service Plans")
         ordering: ClassVar[tuple[str, ...]] = ("plan_type", "sort_order", "price_monthly")
@@ -218,7 +218,7 @@ class Server(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "servers"
+        db_table = "provisioning_servers"
         verbose_name = _("Server")
         verbose_name_plural = _("Servers")
         ordering: ClassVar[tuple[str, ...]] = ("location", "name")
@@ -365,7 +365,7 @@ class Service(ConcurrentTransitionMixin, models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "services"
+        db_table = "provisioning_services"
         verbose_name = _("Service")
         verbose_name_plural = _("Services")
         ordering: ClassVar[tuple[str, ...]] = ("-created_at",)

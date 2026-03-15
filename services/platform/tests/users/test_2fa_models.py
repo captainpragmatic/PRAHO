@@ -209,7 +209,7 @@ class EnhancedWebAuthnCredentialTest(TestCase):
         meta = WebAuthnCredential._meta
 
         # Check table name
-        self.assertEqual(meta.db_table, 'webauthn_credentials')
+        self.assertEqual(meta.db_table, 'user_webauthn_credentials')
 
         # Check verbose names
         self.assertEqual(str(meta.verbose_name), 'WebAuthn Credential')

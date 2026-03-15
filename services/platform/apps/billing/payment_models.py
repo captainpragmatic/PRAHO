@@ -120,7 +120,7 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     _original_payment_values: _PaymentSnapshot | None = None
 
     class Meta:
-        db_table = "payment"
+        db_table = "billing_payments"
         verbose_name = _("Payment")
         verbose_name_plural = _("Payments")
         indexes = (
@@ -350,7 +350,7 @@ class CreditLedger(models.Model):
     )
 
     class Meta:
-        db_table = "credit_ledger"
+        db_table = "billing_credit_ledgers"
         verbose_name = _("Credit Entry")
         verbose_name_plural = _("Credit Entries")
         indexes = (models.Index(fields=["customer", "-created_at"]),)
@@ -423,7 +423,7 @@ class PaymentRetryPolicy(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "payment_retry_policies"
+        db_table = "billing_payment_retry_policies"
         verbose_name = _("Payment Retry Policy")
         verbose_name_plural = _("Payment Retry Policies")
         ordering = ("name",)
@@ -493,7 +493,7 @@ class PaymentRetryAttempt(models.Model):
     _original_retry_status: str | None = None
 
     class Meta:
-        db_table = "payment_retry_attempts"
+        db_table = "billing_payment_retry_attempts"
         verbose_name = _("Payment Retry Attempt")
         verbose_name_plural = _("Payment Retry Attempts")
         unique_together = (("payment", "attempt_number"),)
@@ -561,7 +561,7 @@ class PaymentCollectionRun(models.Model):
     config_snapshot = models.JSONField(default=dict, blank=True, help_text=_("Configuration used for this run"))
 
     class Meta:
-        db_table = "payment_collection_runs"
+        db_table = "billing_payment_collections"
         verbose_name = _("Payment Collection Run")
         verbose_name_plural = _("Payment Collection Runs")
         indexes = (

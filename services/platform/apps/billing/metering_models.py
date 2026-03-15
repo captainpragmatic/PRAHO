@@ -175,7 +175,7 @@ class UsageMeter(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "usage_meters"
+        db_table = "billing_usage_meters"
         verbose_name = _("Usage Meter")
         verbose_name_plural = _("Usage Meters")
         ordering = ("category", "name")
@@ -273,7 +273,7 @@ class UsageEvent(models.Model):
     )
 
     class Meta:
-        db_table = "usage_events"
+        db_table = "billing_usage_events"
         verbose_name = _("Usage Event")
         verbose_name_plural = _("Usage Events")
         ordering = ("-timestamp",)
@@ -421,7 +421,7 @@ class UsageAggregation(models.Model):
     meta = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        db_table = "usage_aggregations"
+        db_table = "billing_usage_aggregations"
         verbose_name = _("Usage Aggregation")
         verbose_name_plural = _("Usage Aggregations")
         ordering = ("-period_start",)
@@ -724,7 +724,7 @@ class PricingTier(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "pricing_tiers"
+        db_table = "billing_pricing_tiers"
         verbose_name = _("Pricing Tier")
         verbose_name_plural = _("Pricing Tiers")
         ordering = ("meter", "name")
@@ -776,7 +776,7 @@ class PricingTierBracket(models.Model):
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
-        db_table = "pricing_tier_brackets"
+        db_table = "billing_pricing_tier_brackets"
         verbose_name = _("Pricing Bracket")
         verbose_name_plural = _("Pricing Brackets")
         ordering = ("pricing_tier", "sort_order", "from_quantity")
@@ -865,7 +865,7 @@ class UsageThreshold(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "usage_thresholds"
+        db_table = "billing_usage_thresholds"
         verbose_name = _("Usage Threshold")
         verbose_name_plural = _("Usage Thresholds")
         ordering = ("meter", "threshold_value")
@@ -947,7 +947,7 @@ class UsageAlert(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "usage_alerts"
+        db_table = "billing_usage_alerts"
         verbose_name = _("Usage Alert")
         verbose_name_plural = _("Usage Alerts")
         ordering = ("-created_at",)
