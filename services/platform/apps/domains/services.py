@@ -15,6 +15,8 @@ Provides business logic for domain operations including:
 
 from __future__ import annotations
 
+import hashlib
+import hmac as hmac_mod
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -25,6 +27,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.encryption import DecryptionError
 from apps.settings.services import SettingsService
 
 from .models import TLD, Domain, DomainOrderItem, Registrar
@@ -674,9 +677,32 @@ class DomainRegistrarGateway:
 
     @staticmethod
     def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
-        """🔐 Verify webhook signature using registrar's webhook secret"""
-        logger.info(f"🌐 [Gateway] Would verify webhook signature for {registrar.name}")
+        """Verify webhook signature using registrar's HMAC-SHA256 webhook secret.
 
-        # TODO: Implement actual signature verification
-        # For now, return True as placeholder (webhook verification disabled)
-        return True
+        Fail-closed: returns False on any error (missing secret, decryption failure, mismatch).
+        Uses timing-safe comparison to prevent side-channel attacks.
+        """
+        if not registrar.webhook_secret or not signature:
+            logger.warning(f"⚠️ [Gateway] Missing webhook secret or signature for {registrar.name}")
+            return False
+
+        try:
+            decrypted = registrar.get_decrypted_webhook_secret()
+        except DecryptionError:
+            logger.error(
+                f"🔥 [Gateway] Webhook secret decryption failed for {registrar.name} — encryption key may have rotated"
+            )
+            return False
+
+        if not decrypted or not decrypted.strip():
+            logger.error(f"🔥 [Gateway] Webhook secret for {registrar.name} decrypted to empty value")
+            return False
+
+        webhook_secret = decrypted.encode("utf-8")
+
+        try:
+            expected = hmac_mod.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+            return hmac_mod.compare_digest(f"sha256={expected}", signature)
+        except Exception:
+            logger.exception(f"🔥 [Gateway] Signature verification error for {registrar.name}")
+            return False
