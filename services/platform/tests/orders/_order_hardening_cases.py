@@ -610,7 +610,7 @@ class CreateOrderIntegrityErrorScopeTest(TestCase):
         idempotency_key = "h1-non-idempotency-key12345"
 
         check_constraint_exc = IntegrityError(
-            'new row for relation "orders_order" violates check constraint "subtotal_non_negative"'
+            'new row for relation "orders" violates check constraint "order_subtotal_non_negative"'
         )
 
         request = self._make_create_request(idempotency_key)
