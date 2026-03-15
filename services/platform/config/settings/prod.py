@@ -126,6 +126,7 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
 # Ensure SecurityMiddleware is FIRST in middleware stack
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",  # MUST be first
+    "corsheaders.middleware.CorsMiddleware",
     "apps.common.middleware.RequestIDMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -187,6 +188,14 @@ X_FRAME_OPTIONS = "DENY"
 
 # Legacy browser XSS protection (deprecated but still useful)
 SECURE_BROWSER_XSS_FILTER = True
+
+# ===============================================================================
+# CORS CONFIGURATION (Cross-Origin Resource Sharing)
+# ===============================================================================
+
+# Only allow cross-origin requests from the Portal domain
+CORS_ALLOWED_ORIGINS = [f"https://{PORTAL_DOMAIN}"]
+CORS_ALLOW_CREDENTIALS = True
 
 # ===============================================================================
 # SESSION SECURITY CONFIGURATION
