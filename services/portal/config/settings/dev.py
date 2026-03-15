@@ -90,8 +90,8 @@ if is_testing:
         "IS_RUNNING_TESTS": True,
     }
 
-    # Keep DB-backed sessions in tests so cache.clear() in security tests
-    # does not wipe authentication session state.
+    # DB-backed sessions in tests — matches base/prod and ensures session_key
+    # is available for SecurityMiddleware and rate-limiting tests.
     SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
     # Disable rate limiting during tests
@@ -133,9 +133,8 @@ except Exception as e:
 
     logging.getLogger(__name__).debug(f"🔍 [Dev Security] Validation check: {e}")
 
-# No authentication backends - portal is stateless
+# Portal authenticates via Platform API + DB-backed sessions (see ADR-0017)
 
-# No session configuration - portal is stateless
 CSRF_COOKIE_SECURE = False
 
 # CSRF trusted origins for development

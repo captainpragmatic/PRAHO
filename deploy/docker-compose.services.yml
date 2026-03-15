@@ -4,12 +4,12 @@
 # Full-stack local environment with network isolation and no Redis dependency.
 # NOT for production — uses dev settings and DEBUG=1.
 # For production, see: docker-compose.single-server.yml or container-service.yml
-# Platform: Full Django + DB access | Portal: API-only, no DB access
+# Platform: Full Django + PostgreSQL | Portal: API-only, local SQLite for sessions
 
 # ⚠️ SECURITY ARCHITECTURE:
-# - Platform service: Full Django app with DB access (admin, provisioning)
-# - Portal service: Customer-facing API only, NO database access
-# - Network isolation: Portal cannot access platform-network (DB isolation)
+# - Platform service: Full Django app with PostgreSQL (admin, provisioning)
+# - Portal service: Customer-facing, local SQLite for sessions only (no business DB)
+# - Network isolation: Portal cannot access platform-network (PostgreSQL isolation)
 
 services:
   # ===============================================================================
@@ -86,6 +86,7 @@ services:
     volumes:
       - portal_static_volume:/app/staticfiles
       - portal_logs_volume:/app/logs
+      - portal_sessions_volume:/app/data
     environment:
       - DEBUG=1
       - PLATFORM_API_BASE_URL=http://platform:8700/api
@@ -94,7 +95,8 @@ services:
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SERVICE_NAME=portal
-      # No DB_* vars - portal has no DB access
+      - SESSION_DB_PATH=/app/data/portal.sqlite3
+      # No DB_* vars - portal has no business DB access
       # No PYTHONPATH - portal cannot import platform code
     depends_on:
       platform:
@@ -164,3 +166,5 @@ volumes:
     name: praho_portal_static_volume
   portal_logs_volume:
     name: praho_portal_logs_volume
+  portal_sessions_volume:
+    name: praho_portal_sessions_volume

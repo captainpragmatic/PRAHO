@@ -96,8 +96,10 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         if self._should_skip_security(request):
             return None
 
-        # Only apply to authenticated sessions
-        if not request.session.session_key:
+        # Only apply to authenticated sessions.
+        # Guard on "user_id" rather than session_key so the middleware stays
+        # backend-agnostic (signed-cookie sessions always return session_key=None).
+        if "user_id" not in request.session:
             return None
 
         try:
@@ -119,9 +121,9 @@ class SessionSecurityMiddleware(MiddlewareMixin):
             return None
 
         except Exception as e:
-            logger.error(f"🔥 [Session] Security middleware error: {e}")
-            # Don't block request on middleware errors, but log them
-            return None
+            logger.error(f"🔥 [Session] Security middleware error: {e}", exc_info=True)
+            # Fail CLOSED: programming bugs must not silently grant access (ADR-0017)
+            return self._handle_security_violation(request, "middleware_error")
 
     def _should_skip_security(self, request: HttpRequest) -> bool:
         """Check if security validation should be skipped for this path"""
@@ -232,7 +234,7 @@ class SessionSecurityMiddleware(MiddlewareMixin):
         """Handle expired sessions gracefully"""
 
         # Log timeout
-        session_key = getattr(request.session, "session_key", "unknown")[:8]
+        session_key = (getattr(request.session, "session_key", None) or "unknown")[:8]
         logger.info(f"🕒 [Session] Session timeout for {session_key}...")
 
         # Clear expired session

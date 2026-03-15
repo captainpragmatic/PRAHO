@@ -72,6 +72,9 @@ services:
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://*.ondigitalocean.app
       - DJANGO_SECURE_SSL_REDIRECT=false
       - SERVICE_NAME=portal
+      - SESSION_DB_PATH=/app/data/portal.sqlite3
+    volumes:
+      - portal_sessions:/app/data
     expose:
       - "8701"
     deploy:
@@ -88,3 +91,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+
+volumes:
+  portal_sessions:

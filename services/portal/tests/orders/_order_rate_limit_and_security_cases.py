@@ -119,12 +119,13 @@ class TestCartSessionRateLimit(SimpleTestCase):
         mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         session = SessionStore()
+        session["user_id"] = 42
         session.create()
-        session_key = session.session_key
 
         # Saturate the counter atomically as the middleware itself does
+        # Rate limiter keys on user_id, not session_key
         limit = APIRateLimitMiddleware.CART_SESSION_RATE_LIMIT
-        cart_cache_key = f"cart_session_{session_key}"
+        cart_cache_key = f"cart_session_{session['user_id']}"
         cache.set(cart_cache_key, limit, timeout=60)
 
         request = HttpRequest()
@@ -146,12 +147,12 @@ class TestCartSessionRateLimit(SimpleTestCase):
         mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         session = SessionStore()
+        session["user_id"] = 43
         session.create()
-        session_key = session.session_key
 
-        # Set counter well below limit
+        # Set counter well below limit — keyed on user_id
         limit = APIRateLimitMiddleware.CART_SESSION_RATE_LIMIT
-        cart_cache_key = f"cart_session_{session_key}"
+        cart_cache_key = f"cart_session_{session['user_id']}"
         cache.set(cart_cache_key, limit - 5, timeout=60)
 
         request = HttpRequest()
@@ -171,29 +172,31 @@ class TestCartSessionRateLimit(SimpleTestCase):
         response = mw._check_cart_session_rate_limit(request)
         self.assertIsNone(response)
 
-    def test_different_sessions_have_independent_limits(self) -> None:
-        """Each session has its own counter — saturating session A must not block session B."""
+    def test_different_users_have_independent_limits(self) -> None:
+        """Each user has its own counter — saturating user A must not block user B."""
         from apps.common.rate_limiting import APIRateLimitMiddleware  # noqa: PLC0415
 
         mw = APIRateLimitMiddleware(lambda r: HttpResponse())
 
         session_a = SessionStore()
+        session_a["user_id"] = 100
         session_a.create()
         session_b = SessionStore()
+        session_b["user_id"] = 200
         session_b.create()
 
         limit = APIRateLimitMiddleware.CART_SESSION_RATE_LIMIT
 
-        # Saturate session A
-        cache.set(f"cart_session_{session_a.session_key}", limit, timeout=60)
+        # Saturate user A — keyed on user_id, not session_key
+        cache.set(f"cart_session_{session_a['user_id']}", limit, timeout=60)
 
         request_a = HttpRequest()
         request_a.session = session_a  # type: ignore[assignment]  # Django test: inject SessionStore
         request_b = HttpRequest()
         request_b.session = session_b  # type: ignore[assignment]  # Django test: inject SessionStore
 
-        self.assertIsNotNone(mw._check_cart_session_rate_limit(request_a), "Session A should be blocked")
-        self.assertIsNone(mw._check_cart_session_rate_limit(request_b), "Session B should be allowed")
+        self.assertIsNotNone(mw._check_cart_session_rate_limit(request_a), "User A should be blocked")
+        self.assertIsNone(mw._check_cart_session_rate_limit(request_b), "User B should be allowed")
 
     def test_cart_session_rate_limit_constant_is_30(self) -> None:
         """CART_SESSION_RATE_LIMIT must equal 30 per the chaos monkey spec."""
@@ -323,28 +326,28 @@ class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
     def setUp(self) -> None:
         cache.clear()
 
-    def _compute_expected_key(self, customer_id: str, cart_version: str, session_key: str) -> str:
+    def _compute_expected_key(self, customer_id: str, cart_version: str, user_id: str, sess_key: str = "") -> str:
         """Replicate the fallback key formula from views._create_and_process_order."""
         return hashlib.sha256(
-            f"{customer_id}:{cart_version}:{session_key}".encode()
+            f"{customer_id}:{cart_version}:{user_id}:{sess_key}".encode()
         ).hexdigest()[:64]
 
     def test_same_inputs_produce_same_key(self) -> None:
         """Calling the hash formula twice with identical inputs yields the same key."""
-        key1 = self._compute_expected_key("42", "abc123version", "sessionkeyXYZ")
-        key2 = self._compute_expected_key("42", "abc123version", "sessionkeyXYZ")
+        key1 = self._compute_expected_key("42", "abc123version", "123")
+        key2 = self._compute_expected_key("42", "abc123version", "123")
         self.assertEqual(key1, key2)
 
     def test_different_cart_version_produces_different_key(self) -> None:
         """A changed cart_version must produce a different idempotency key."""
-        key1 = self._compute_expected_key("42", "version_v1", "session_abc")
-        key2 = self._compute_expected_key("42", "version_v2", "session_abc")
+        key1 = self._compute_expected_key("42", "version_v1", "123")
+        key2 = self._compute_expected_key("42", "version_v2", "123")
         self.assertNotEqual(key1, key2)
 
     def test_different_customer_produces_different_key(self) -> None:
         """A different customer_id must produce a different idempotency key."""
-        key1 = self._compute_expected_key("42", "version_v1", "session_abc")
-        key2 = self._compute_expected_key("99", "version_v1", "session_abc")
+        key1 = self._compute_expected_key("42", "version_v1", "123")
+        key2 = self._compute_expected_key("99", "version_v1", "123")
         self.assertNotEqual(key1, key2)
 
     def test_key_does_not_include_time_component(self) -> None:
@@ -358,7 +361,7 @@ class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
         from apps.orders import views  # noqa: PLC0415
 
         source = inspect.getsource(views._create_and_process_order)
-        # The idempotency fallback block hash uses only customer_id, cart_version, session_key
+        # The idempotency fallback block hash uses customer_id, cart_version, user_id, session_key
         # Locate the sha256 hash lines — they must not reference 'time' or 'now()'
         hash_lines = [
             line for line in source.splitlines()
@@ -370,7 +373,7 @@ class TestIdempotencyFallbackKeyNoTimestamp(SimpleTestCase):
 
     def test_key_truncated_to_64_chars(self) -> None:
         """The fallback key is SHA-256 hex truncated to 64 characters."""
-        key = self._compute_expected_key("42", "some_version", "session_key_1")
+        key = self._compute_expected_key("42", "some_version", "456")
         self.assertEqual(len(key), 64)
 
 
