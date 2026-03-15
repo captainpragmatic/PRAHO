@@ -177,7 +177,7 @@ class PortalAuthenticationMiddleware:
         Session validation fields:
         - validated_at: Last successful validation timestamp
         - next_validate_at: When next validation should occur (with jitter)
-        - state_version: Incrementing version for cache invalidation
+        - membership_hash: Hash of user's memberships for cache invalidation
         - session_created_at: When session was first created
         """
         now = django_timezone.now()
@@ -185,7 +185,6 @@ class PortalAuthenticationMiddleware:
         # Get or initialize session validation metadata
         validated_at = self._get_session_datetime(request, "validated_at")
         next_validate_at = self._get_session_datetime(request, "next_validate_at")
-        state_version = request.session.get("state_version", 1)
         session_created_at = self._get_session_datetime(request, "session_created_at", now)
 
         # Initialize session metadata if missing
@@ -194,7 +193,7 @@ class PortalAuthenticationMiddleware:
             request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)
             request.session["next_validate_at"] = next_validate_at.isoformat()
-            return self._perform_validation(request, customer_id, now, state_version)
+            return self._perform_validation(request, customer_id, now)
 
         # Check if we're within soft TTL (no validation needed)
         if now <= next_validate_at:
@@ -206,14 +205,14 @@ class PortalAuthenticationMiddleware:
         if now <= soft_deadline:
             # Try to revalidate in background, but allow request through
             if self._should_revalidate_async(customer_id):
-                self._perform_validation(request, customer_id, now, state_version)
+                self._perform_validation(request, customer_id, now)
             return True
 
         # Check if we're within hard grace period (force validation)
         hard_deadline = next_validate_at + timedelta(seconds=self.HARD_TTL_GRACE)
         if now <= hard_deadline:
             logger.info(f"⏰ [Auth] Customer {customer_id} past soft TTL, forcing validation")
-            return self._perform_validation(request, customer_id, now, state_version)
+            return self._perform_validation(request, customer_id, now)
 
         # Past hard deadline - force logout for security
         logger.warning(f"🚨 [Auth] Customer {customer_id} past hard TTL deadline, forcing logout")
@@ -251,20 +250,38 @@ class PortalAuthenticationMiddleware:
         cache.set(lock_key, time.time() + self.VALIDATION_TIMEOUT, timeout=self.VALIDATION_TIMEOUT)
         return True
 
-    def _perform_validation(self, request: HttpRequest, customer_id: str, now: datetime, state_version: int) -> bool:
+    def _perform_validation(self, request: HttpRequest, customer_id: str, now: datetime) -> bool:
         """
         Perform actual Platform API validation and update session metadata.
         """
         try:
             # Call secure Platform API validation (HMAC-signed, no ID enumeration)
-            validation_response = api_client.validate_session_secure(customer_id, state_version)
+            validation_response = api_client.validate_session_secure(customer_id)
             is_valid = validation_response and validation_response.get("active", False)
 
             if is_valid:
                 # Update session with successful validation
                 request.session["validated_at"] = now.isoformat()
                 request.session["next_validate_at"] = self._calculate_next_validation_time(now).isoformat()
-                request.session["state_version"] = state_version + 1
+
+                # Compare membership_hash — if it changed, clear cached memberships
+                # so decorators force-refresh roles on next access check.
+                new_hash = validation_response.get("membership_hash")
+                old_hash = request.session.get("membership_hash")
+                if new_hash:
+                    if old_hash is None:
+                        # First validation — just store the hash, don't invalidate
+                        request.session["membership_hash"] = new_hash
+                    elif new_hash != old_hash:
+                        # Hash changed — memberships were modified, invalidate cache
+                        request.session["membership_hash"] = new_hash
+                        request.session.pop("user_memberships", None)
+                        request.session.pop("user_memberships_fetched_at", None)
+                        logger.info(
+                            "🔄 [Auth] Membership hash changed for user %s, invalidated cached memberships",
+                            customer_id,
+                        )
+
                 request.session.modified = True
 
                 logger.debug(f"✅ [Auth] Customer {customer_id} validated successfully")
