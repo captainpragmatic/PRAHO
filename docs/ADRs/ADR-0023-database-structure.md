@@ -66,7 +66,7 @@ All Django models **must** declare an explicit `Meta.db_table`. The value follow
 
 ## Complete Table Catalog
 
-All 118 tables across 15 apps.
+All 119 tables across 15 apps.
 
 ### audit — 11 tables
 

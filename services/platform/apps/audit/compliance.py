@@ -1111,14 +1111,19 @@ class LogRetentionService:
             }
 
         partition_status = EventPartitionService().get_status()
+        # Map backend status to compliance semantics:
+        # "partitioned" / "unsupported_backend" → compliant (working as designed)
+        # "not_partitioned" / "missing" → action_required
+        _compliant_statuses = {"partitioned", "unsupported_backend"}
         for table_name, table_details in partition_status.items():
+            raw_status = table_details.get("status", "unknown")
             status[f"table:{table_name}"] = {
                 "retention_days": table_details.get("archive_retention_days"),
                 "action": "partition_rotation",
                 "legal_basis": "Operational partition retention",
                 "total_partitions": len(table_details.get("attached_partitions", [])),
                 "partitions_past_retention": 0,
-                "compliance_status": table_details.get("status", "unknown"),
+                "compliance_status": "compliant" if raw_status in _compliant_statuses else "action_required",
                 "partition_status": table_details,
             }
 

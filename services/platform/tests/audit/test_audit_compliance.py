@@ -1119,6 +1119,9 @@ class TestLogRetentionServiceGetStatus(TestCase):
         # Partition table entries are always present (from EventPartitionService)
         partition_entries = {k: v for k, v in status.items() if k.startswith("table:")}
         self.assertGreater(len(partition_entries), 0)
+        # Partition entries must use proper compliance semantics (not raw backend status)
+        for entry in partition_entries.values():
+            self.assertIn(entry["compliance_status"], ("compliant", "action_required"))
 
 
 # ---------------------------------------------------------------------------
