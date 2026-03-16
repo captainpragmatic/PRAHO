@@ -108,7 +108,7 @@ class Refund(models.Model):
     )
 
     class Meta:
-        db_table = "refunds"
+        db_table = "billing_refunds"
         verbose_name = _("Refund")
         verbose_name_plural = _("Refunds")
         indexes = (
@@ -307,7 +307,7 @@ class RefundNote(models.Model):
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, related_name="refund_notes")
 
     class Meta:
-        db_table = "refund_notes"
+        db_table = "billing_refund_notes"
         verbose_name = _("Refund Note")
         verbose_name_plural = _("Refund Notes")
         indexes = (
@@ -363,7 +363,7 @@ class RefundStatusHistory(models.Model):
     )
 
     class Meta:
-        db_table = "refund_status_history"
+        db_table = "billing_refund_status_history"
         verbose_name = _("Refund Status History")
         verbose_name_plural = _("Refund Status Histories")
         indexes = (

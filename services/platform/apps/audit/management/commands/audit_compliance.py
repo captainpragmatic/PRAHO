@@ -266,9 +266,10 @@ class Command(BaseCommand):
             self.stdout.write("")
             self.stdout.write("Retention status (dry run):")
             for category, info in status.items():
-                if info["events_past_retention"] > 0:
+                past = info.get("events_past_retention", info.get("partitions_past_retention", 0))
+                if past > 0:
                     self.stdout.write(
-                        f"  {category}: {info['events_past_retention']} events "
+                        f"  {category}: {past} events "
                         f"past {info['retention_days']}-day retention "
                         f"(action: {info['action']})"
                     )
@@ -307,8 +308,10 @@ class Command(BaseCommand):
             self.stdout.write(f"  Retention: {info['retention_days']} days")
             self.stdout.write(f"  Action: {info['action']}")
             self.stdout.write(f"  Legal Basis: {info['legal_basis']}")
-            self.stdout.write(f"  Total Events: {info['total_events']}")
-            self.stdout.write(f"  Past Retention: {info['events_past_retention']}")
+            self.stdout.write(f"  Total Events: {info.get('total_events', info.get('total_partitions', 0))}")
+            self.stdout.write(
+                f"  Past Retention: {info.get('events_past_retention', info.get('partitions_past_retention', 0))}"
+            )
             self.stdout.write(f"  Status: {status_color(info['compliance_status'])}")
             self.stdout.write("")
 

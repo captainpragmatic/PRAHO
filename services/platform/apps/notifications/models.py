@@ -240,7 +240,7 @@ class EmailTemplate(models.Model):
     )
 
     class Meta:
-        db_table = "email_template"
+        db_table = "notification_email_templates"
         verbose_name = _("Email Template")
         verbose_name_plural = _("Email Templates")
         unique_together: ClassVar[tuple[tuple[str, ...], ...]] = (("key", "locale"),)
@@ -385,7 +385,7 @@ class EmailLog(models.Model):
     )
 
     class Meta:
-        db_table = "email_log"
+        db_table = "notification_email_logs"
         verbose_name = _("Email Log")
         verbose_name_plural = _("Email Logs")
         indexes: ClassVar[tuple[models.Index, ...]] = (
@@ -593,7 +593,7 @@ class EmailCampaign(models.Model):
     )
 
     class Meta:
-        db_table = "email_campaign"
+        db_table = "notification_email_campaigns"
         verbose_name = _("Email Campaign")
         verbose_name_plural = _("Email Campaigns")
         indexes: ClassVar[tuple[models.Index, ...]] = (
@@ -697,7 +697,7 @@ class EmailSuppression(models.Model):
     provider_response = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        db_table = "email_suppression"
+        db_table = "notification_email_suppressions"
         verbose_name = _("Email Suppression")
         verbose_name_plural = _("Email Suppressions")
         indexes: ClassVar[tuple[models.Index, ...]] = (
@@ -866,7 +866,7 @@ class EmailPreference(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "email_preference"
+        db_table = "notification_email_preferences"
         verbose_name = _("Email Preference")
         verbose_name_plural = _("Email Preferences")
 
@@ -943,7 +943,7 @@ class UnsubscribeToken(models.Model):
     used_at = models.DateTimeField(null=True, blank=True, help_text=_("When this token was consumed"))
 
     class Meta:
-        db_table = "unsubscribe_token"
+        db_table = "notification_unsubscribe_tokens"
         verbose_name = _("Unsubscribe Token")
         verbose_name_plural = _("Unsubscribe Tokens")
         indexes: ClassVar[tuple[models.Index, ...]] = (

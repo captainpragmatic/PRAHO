@@ -49,7 +49,7 @@ class SupportCategory(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "support_categories"
+        db_table = "ticket_categories"
         verbose_name = _("Support Category")
         verbose_name_plural = _("Support Categories")
         ordering: ClassVar[tuple[str, ...]] = ("sort_order", "name")

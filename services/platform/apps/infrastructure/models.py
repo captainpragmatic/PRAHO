@@ -90,6 +90,7 @@ class CloudProvider(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "infrastructure_cloud_providers"
         verbose_name = _("Cloud Provider")
         verbose_name_plural = _("Cloud Providers")
         ordering = ["name"]
@@ -144,6 +145,7 @@ class NodeRegion(models.Model):
     is_active = models.BooleanField(default=True, verbose_name=_("Active"))
 
     class Meta:
+        db_table = "infrastructure_node_regions"
         verbose_name = _("Node Region")
         verbose_name_plural = _("Node Regions")
         unique_together = [["provider", "provider_region_id"]]
@@ -218,6 +220,7 @@ class NodeSize(models.Model):
     sort_order = models.PositiveIntegerField(default=0, verbose_name=_("Sort Order"))
 
     class Meta:
+        db_table = "infrastructure_node_sizes"
         verbose_name = _("Node Size")
         verbose_name_plural = _("Node Sizes")
         ordering = ["provider", "sort_order"]
@@ -260,6 +263,7 @@ class PanelType(models.Model):
     is_active = models.BooleanField(default=True, verbose_name=_("Active"))
 
     class Meta:
+        db_table = "infrastructure_panel_types"
         verbose_name = _("Panel Type")
         verbose_name_plural = _("Panel Types")
         ordering = ["name"]
@@ -512,6 +516,7 @@ class NodeDeployment(models.Model):
     destroyed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Destroyed At"))
 
     class Meta:
+        db_table = "infrastructure_node_deployments"
         verbose_name = _("Node Deployment")
         verbose_name_plural = _("Node Deployments")
         ordering = ["-created_at"]
@@ -753,6 +758,7 @@ class NodeDeploymentLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "infrastructure_node_deployment_logs"
         verbose_name = _("Node Deployment Log")
         verbose_name_plural = _("Node Deployment Logs")
         ordering = ["created_at"]
@@ -809,6 +815,7 @@ class NodeDeploymentCostRecord(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "infrastructure_node_deployment_costs"
         verbose_name = _("Node Deployment Cost Record")
         verbose_name_plural = _("Node Deployment Cost Records")
         ordering = ["-period_end"]
@@ -849,6 +856,7 @@ class DriftCheck(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "infrastructure_drift_checks"
         verbose_name = _("Drift Check")
         verbose_name_plural = _("Drift Checks")
         ordering = ["-created_at"]
@@ -922,6 +930,7 @@ class DriftReport(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "infrastructure_drift_reports"
         verbose_name = _("Drift Report")
         verbose_name_plural = _("Drift Reports")
         ordering = ["-created_at"]
@@ -1000,6 +1009,7 @@ class DriftRemediationRequest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "infrastructure_drift_remediations"
         verbose_name = _("Drift Remediation Request")
         verbose_name_plural = _("Drift Remediation Requests")
         ordering = ["-created_at"]
@@ -1043,6 +1053,7 @@ class DriftSnapshot(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Expires At"))
 
     class Meta:
+        db_table = "infrastructure_drift_snapshots"
         verbose_name = _("Drift Snapshot")
         verbose_name_plural = _("Drift Snapshots")
         ordering = ["-created_at"]

@@ -100,6 +100,7 @@ class WebhookEvent(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "integration_webhook_events"
         verbose_name = _("🔄 Webhook Event")
         verbose_name_plural = _("🔄 Webhook Events")
 
@@ -277,6 +278,7 @@ class WebhookDelivery(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "integration_webhook_deliveries"
         verbose_name = _("📤 Webhook Delivery")
         verbose_name_plural = _("📤 Webhook Deliveries")
         ordering: ClassVar[tuple[str, ...]] = ("-scheduled_at",)

@@ -224,7 +224,7 @@ class EFacturaDocument(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "billing_efactura_document"
+        db_table = "billing_efactura_documents"
         verbose_name = _("e-Factura Document")
         verbose_name_plural = _("e-Factura Documents")
         ordering = ["-created_at"]

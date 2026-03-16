@@ -26,6 +26,8 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.partitioning import EventPartitionService
+
 if TYPE_CHECKING:
     pass
 
@@ -1090,7 +1092,7 @@ class LogRetentionService:
         """Get current retention status for all categories"""
         from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: avoids circular import
 
-        status = {}
+        status: dict[str, Any] = {}
 
         for category, config in self.retention_config.items():
             retention_days = config.get("retention_days", 365)
@@ -1106,6 +1108,23 @@ class LogRetentionService:
                 "total_events": total,
                 "events_past_retention": past_retention,
                 "compliance_status": "compliant" if past_retention == 0 else "action_required",
+            }
+
+        partition_status = EventPartitionService().get_status()
+        # Map backend status to compliance semantics:
+        # "partitioned" / "unsupported_backend" → compliant (working as designed)
+        # "not_partitioned" / "missing" → action_required
+        _compliant_statuses = {"partitioned", "unsupported_backend"}
+        for table_name, table_details in partition_status.items():
+            raw_status = table_details.get("status", "unknown")
+            status[f"table:{table_name}"] = {
+                "retention_days": table_details.get("archive_retention_days"),
+                "action": "partition_rotation",
+                "legal_basis": "Operational partition retention",
+                "total_partitions": len(table_details.get("attached_partitions", [])),
+                "partitions_past_retention": 0,
+                "compliance_status": "compliant" if raw_status in _compliant_statuses else "action_required",
+                "partition_status": table_details,
             }
 
         return status

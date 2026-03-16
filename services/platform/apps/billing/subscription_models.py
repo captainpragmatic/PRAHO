@@ -344,7 +344,7 @@ class Subscription(models.Model):
     )
 
     class Meta:
-        db_table = "subscriptions"
+        db_table = "billing_subscriptions"
         verbose_name = _("Subscription")
         verbose_name_plural = _("Subscriptions")
         ordering = ("-created_at",)
@@ -926,7 +926,7 @@ class SubscriptionChange(models.Model):
     )
 
     class Meta:
-        db_table = "subscription_changes"
+        db_table = "billing_subscription_changes"
         verbose_name = _("Subscription Change")
         verbose_name_plural = _("Subscription Changes")
         ordering = ("-created_at",)
@@ -1096,7 +1096,7 @@ class PriceGrandfathering(models.Model):
     )
 
     class Meta:
-        db_table = "price_grandfathering"
+        db_table = "billing_price_locks"
         verbose_name = _("Price Grandfathering")
         verbose_name_plural = _("Price Grandfatherings")
         unique_together = (("customer", "product"),)
@@ -1195,7 +1195,7 @@ class SubscriptionItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "subscription_items"
+        db_table = "billing_subscription_items"
         verbose_name = _("Subscription Item")
         verbose_name_plural = _("Subscription Items")
         unique_together = (("subscription", "product"),)

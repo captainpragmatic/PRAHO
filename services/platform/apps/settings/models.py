@@ -52,6 +52,7 @@ class SettingCategory(models.Model):
     )
 
     class Meta:
+        db_table = "setting_categories"
         verbose_name = _("Setting Category")
         verbose_name_plural = _("Setting Categories")
         ordering: ClassVar = ["display_order", "name"]
@@ -150,6 +151,7 @@ class SystemSetting(models.Model):
     updated_at = models.DateTimeField(_("Updated At"), auto_now=True, help_text=_("When this setting was last updated"))
 
     class Meta:
+        db_table = "setting_entries"
         verbose_name = _("System Setting")
         verbose_name_plural = _("System Settings")
         ordering: ClassVar = ["category", "key"]

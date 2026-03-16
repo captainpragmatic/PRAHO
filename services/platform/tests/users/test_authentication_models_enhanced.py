@@ -779,7 +779,7 @@ class ModelEdgeCasesTest(TestCase):
         self.assertEqual(str(UserModel._meta.verbose_name_plural), 'Users')
 
         # CustomerMembership model
-        self.assertEqual(CustomerMembership._meta.db_table, 'customer_membership')
+        self.assertEqual(CustomerMembership._meta.db_table, 'user_customer_memberships')
 
         # UserProfile model
         self.assertEqual(UserProfile._meta.db_table, 'user_profiles')
