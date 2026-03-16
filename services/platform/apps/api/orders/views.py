@@ -293,11 +293,37 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
         return Response({"error": "Calculation failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | None]:
+    """Validate and resolve a currency code to a Currency instance.
+
+    Returns (currency, None) on success or (None, error_response) on failure.
+    """
+    if not isinstance(raw_code, str):
+        return None, Response(
+            {"success": False, "errors": ["Currency code must be a string"], "warnings": []},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    code = raw_code.strip().upper()
+    if not CurrencyCode.is_supported(code):
+        return None, Response(
+            {"success": False, "errors": [f"Unsupported currency: {code}"], "warnings": []},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        return Currency.objects.get(code=code), None
+    except Currency.DoesNotExist:
+        logger.error("Currency %s passes enum check but has no DB record", code)
+        return None, Response(
+            {"success": False, "errors": [f"Currency {code} is not configured"], "warnings": []},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -321,26 +347,9 @@ def preflight_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: mul
             )
 
         # Create a preview order data structure (without saving to DB)
-        # Get currency from request (default to RON for Romanian customers)
-        currency_code_raw = request.data.get("currency", "RON")
-        if not isinstance(currency_code_raw, str):
-            return Response(
-                {"success": False, "errors": [f"Unsupported currency: {currency_code_raw!r}"], "warnings": []},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        currency_code = currency_code_raw.strip().upper()
-        if not CurrencyCode.is_supported(currency_code):
-            return Response(
-                {"success": False, "errors": [f"Unsupported currency: {currency_code}"], "warnings": []},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            currency = Currency.objects.get(code=currency_code)
-        except Currency.DoesNotExist:
-            return Response(
-                {"success": False, "errors": [f"Unsupported currency: {currency_code}"], "warnings": []},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        currency, error_response = _resolve_currency(request.data.get("currency", "RON"))
+        if error_response is not None:
+            return error_response
 
         # Build billing address from customer profile
         billing_address = OrderService.build_billing_address_from_customer(customer)

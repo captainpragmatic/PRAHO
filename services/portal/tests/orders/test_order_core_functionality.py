@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.test import Client, SimpleTestCase, override_settings
 from django.utils import timezone
 
@@ -151,6 +152,23 @@ class TestOrderInputValidation(SimpleTestCase):
 
         with self.assertRaises(Exception):  # Should raise validation error
             OrderInputValidator.validate_quantity(-1)
+
+    def test_quantity_validation_string_post_data(self):
+        """PR #112 regression: POST data arrives as strings, not integers."""
+        # String integers should be accepted
+        self.assertEqual(OrderInputValidator.validate_quantity("3"), 3)
+        self.assertEqual(OrderInputValidator.validate_quantity("1000"), 1000)
+
+        # Invalid strings should raise ValidationError, not ValueError
+        with self.assertRaises(ValidationError):
+            OrderInputValidator.validate_quantity("abc")
+        with self.assertRaises(ValidationError):
+            OrderInputValidator.validate_quantity("1.5")
+        with self.assertRaises(ValidationError):
+            OrderInputValidator.validate_quantity("")
+        # Over MAX_QUANTITY (1000) should also raise
+        with self.assertRaises(ValidationError):
+            OrderInputValidator.validate_quantity("1001")
 
     def test_billing_period_validation(self):
         """Test billing period validation"""
