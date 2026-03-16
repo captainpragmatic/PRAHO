@@ -6,11 +6,11 @@
 
 > **Diagrams:**
 > - [`entity-relationships.mmd`](../architecture/diagrams/entity-relationships.mmd) — ER diagram using db_table names, shows FK relationships
-> - [`database-tables.mmd`](../architecture/diagrams/database-tables.mmd) — flat app-grouped taxonomy of all 118 tables
+> - [`database-tables.mmd`](../architecture/diagrams/database-tables.mmd) — flat app-grouped taxonomy of all 119 tables
 
 ## Context
 
-PRAHO Platform uses Django ORM with PostgreSQL. All 118 concrete models across 15 Django apps
+PRAHO Platform uses Django ORM with PostgreSQL. All 119 concrete models across 15 Django apps
 need explicit, consistent `db_table` values so that:
 
 - DBAs and SQL consumers can identify which app owns a table at a glance
@@ -32,7 +32,7 @@ All Django models **must** declare an explicit `Meta.db_table`. The value follow
 
 ### Rules
 
-1. **App prefix** — always the Django app label (`billing_`, `audit_`, `provisioning_`, etc.)
+1. **App prefix** — the singular stem of the Django app label (`customer_`, `user_`, `billing_`, `audit_`, etc.). For apps where the label is already singular (billing, audit, infrastructure), the prefix matches the label exactly.
 2. **Bare plural** — no redundant app name repetition in the entity part
 3. **Root entities** — models that *are* the app's primary entity use the app name alone
    (e.g. `customers`, `users`, `orders`, `products`, `tickets`, `domains`)

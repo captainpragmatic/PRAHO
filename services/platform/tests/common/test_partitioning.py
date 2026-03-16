@@ -8,7 +8,7 @@ from django.core.management import call_command
 from django.test import SimpleTestCase
 from django.utils import timezone
 
-from apps.common.partitioning import EventPartitionService
+from apps.common.partitioning import EventPartitionPolicy, EventPartitionService
 
 
 class TestEventPartitionService(SimpleTestCase):
@@ -59,3 +59,67 @@ class TestManageEventPartitionsCommand(SimpleTestCase):
         out = StringIO()
         call_command("manage_event_partitions", *args, stdout=out)
         return out.getvalue()
+
+
+class TestEventPartitionPolicyValidation(SimpleTestCase):
+    """Verify __post_init__ rejects invalid SQL identifiers."""
+
+    def test_valid_identifiers_accepted(self) -> None:
+        policy = EventPartitionPolicy(
+            slug="test_events",
+            table_name="test_events",
+            partition_column="created_at",
+            keep_attached_months=3,
+            create_ahead_months=3,
+        )
+        self.assertEqual(policy.table_name, "test_events")
+
+    def test_invalid_table_name_rejected(self) -> None:
+        with self.assertRaises(ValueError, msg="Should reject SQL injection in table_name"):
+            EventPartitionPolicy(
+                slug="test",
+                table_name="test; DROP TABLE users--",
+                partition_column="created_at",
+                keep_attached_months=3,
+                create_ahead_months=3,
+            )
+
+    def test_invalid_partition_column_rejected(self) -> None:
+        with self.assertRaises(ValueError, msg="Should reject uppercase in column name"):
+            EventPartitionPolicy(
+                slug="test",
+                table_name="test_events",
+                partition_column="CREATED_AT",
+                keep_attached_months=3,
+                create_ahead_months=3,
+            )
+
+    def test_empty_slug_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            EventPartitionPolicy(
+                slug="",
+                table_name="test_events",
+                partition_column="created_at",
+                keep_attached_months=3,
+                create_ahead_months=3,
+            )
+
+
+class TestEventPartitionServiceEdgeCases(SimpleTestCase):
+    """Test partition service failure modes."""
+
+    def test_ensure_future_returns_empty_on_sqlite(self) -> None:
+        """On SQLite (non-PostgreSQL), ensure_future_partitions is a no-op."""
+        service = EventPartitionService()
+        result = service.ensure_future_partitions(dry_run=True)
+        self.assertEqual(result, [])
+
+    def test_plan_operations_with_none_reference_time(self) -> None:
+        """plan_operations with None reference_time should use current time."""
+        service = EventPartitionService()
+        plan = service.plan_operations(reference_time=None)
+        # Should produce a valid plan for all 3 policies
+        self.assertEqual(len(plan), 3)
+        for details in plan.values():
+            self.assertIn("create_partitions", details)
+            self.assertIn("detach_before", details)

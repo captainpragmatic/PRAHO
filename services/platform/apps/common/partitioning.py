@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -22,6 +23,14 @@ class EventPartitionPolicy:
     create_ahead_months: int
     archive_retention_days: int | None = None
     archive_required: bool = True
+
+    _IDENT_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+    def __post_init__(self) -> None:
+        for field_name in ("table_name", "partition_column", "slug"):
+            value = getattr(self, field_name)
+            if not self._IDENT_RE.match(value):
+                raise ValueError(f"Invalid SQL identifier in {field_name}: {value!r}")
 
     @property
     def archive_root(self) -> Path:
@@ -117,6 +126,8 @@ class EventPartitionService:
                     month_start = add_months(current_month, offset)
                     month_end = add_months(month_start, 1)
                     partition_name = self._partition_name(policy, month_start)
+                    # DDL: identifiers from frozen policy constants validated by __post_init__,
+                    # not user input. PostgreSQL does not support parameterized identifiers.
                     sql = (
                         f"CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF {policy.table_name} "
                         f"FOR VALUES FROM ('{month_start.isoformat()}') TO ('{month_end.isoformat()}');"

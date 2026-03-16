@@ -1110,9 +1110,15 @@ class TestLogRetentionServiceGetStatus(TestCase):
 
     @override_settings(AUDIT_LOG_RETENTION={})
     def test_get_retention_status_no_config(self) -> None:
+        """With empty retention config, only partition table entries are returned."""
         svc = LogRetentionService()
         status = svc.get_retention_status()
-        self.assertEqual(status, {})
+        # No event-category entries (those come from AUDIT_LOG_RETENTION config)
+        category_entries = {k: v for k, v in status.items() if not k.startswith("table:")}
+        self.assertEqual(category_entries, {})
+        # Partition table entries are always present (from EventPartitionService)
+        partition_entries = {k: v for k, v in status.items() if k.startswith("table:")}
+        self.assertGreater(len(partition_entries), 0)
 
 
 # ---------------------------------------------------------------------------

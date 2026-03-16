@@ -307,8 +307,10 @@ class Command(BaseCommand):
             self.stdout.write(f"  Retention: {info['retention_days']} days")
             self.stdout.write(f"  Action: {info['action']}")
             self.stdout.write(f"  Legal Basis: {info['legal_basis']}")
-            self.stdout.write(f"  Total Events: {info['total_events']}")
-            self.stdout.write(f"  Past Retention: {info['events_past_retention']}")
+            self.stdout.write(f"  Total Events: {info.get('total_events', info.get('total_partitions', 0))}")
+            self.stdout.write(
+                f"  Past Retention: {info.get('events_past_retention', info.get('partitions_past_retention', 0))}"
+            )
             self.stdout.write(f"  Status: {status_color(info['compliance_status'])}")
             self.stdout.write("")
 

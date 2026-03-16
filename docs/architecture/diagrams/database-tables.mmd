@@ -1,6 +1,7 @@
 %% PRAHO Platform - Database Table Taxonomy
-%% Updated: 2026-03-11
-%% All 118 db_table values grouped by app — authoritative flat catalog
+%% Updated: 2026-03-15
+%% All 119 db_table values grouped by app — authoritative flat catalog
+%% Generated from: grep -rn "db_table" services/platform/apps/ --include="*.py"
 %% For naming convention and model-to-table mapping see: docs/ADRs/ADR-0023-database-structure.md
 %% For entity relationships see: entity-relationships.mmd
 
@@ -12,15 +13,15 @@ flowchart LR
         aic[audit_integrity_checks]
         arp[audit_retention_policies]
         asq[audit_search_queries]
-        aa[audit_alerts]
+        aal[audit_alerts]
         acl[audit_compliance_logs]
-        ashc[audit_siem_hash_chain_states]
         acr[audit_compliance_reports]
+        ash[audit_siem_hash_chain_states]
         ase[audit_siem_export_logs]
         acc[audit_cookie_consents]
     end
 
-    subgraph billing["billing (24 tables)"]
+    subgraph billing["billing (32 tables)"]
         direction TB
         bc[billing_currencies]
         bfx[billing_fx_rates]
@@ -32,20 +33,28 @@ flowchart LR
         bua[billing_usage_aggregations]
         bcy[billing_cycles]
         bpt[billing_pricing_tiers]
-        bptb[billing_pricing_tier_brackets]
+        bpb[billing_pricing_tier_brackets]
         but[billing_usage_thresholds]
-        bual[billing_usage_alerts]
+        bul[billing_usage_alerts]
         bp[billing_payments]
         bcl[billing_credit_ledgers]
-        bprp[billing_payment_retry_policies]
-        bpra[billing_payment_retry_attempts]
+        brp[billing_payment_retry_policies]
+        bra[billing_payment_retry_attempts]
         bpc[billing_payment_collections]
         bps[billing_proforma_sequences]
         bpi[billing_proforma_invoices]
         bpl[billing_proforma_lines]
         br[billing_refunds]
-        bsub[billing_subscriptions]
+        brn[billing_refund_notes]
+        brsh[billing_refund_status_history]
+        bs[billing_subscriptions]
+        bsc[billing_subscription_changes]
+        bprl[billing_price_locks]
+        bsi[billing_subscription_items]
         btr[billing_tax_rules]
+        bvv[billing_vat_validations]
+        bed[billing_efactura_documents]
+        beo[billing_efactura_oauth_tokens]
     end
 
     subgraph common["common (2 tables)"]
@@ -54,16 +63,14 @@ flowchart LR
         ccal[common_credential_access_logs]
     end
 
-    subgraph customers["customers (8 tables)"]
+    subgraph customers["customers (6 tables)"]
         direction TB
         cu[customers]
         ca[customer_addresses]
-        cpm[customer_payment_methods]
-        cn[customer_notes]
-        ctp[customer_tax_profiles]
         cbp[customer_billing_profiles]
-        cic[customer_import_columns]
-        cir[customer_import_rows]
+        cn[customer_notes]
+        cpm[customer_payment_methods]
+        ctp[customer_tax_profiles]
     end
 
     subgraph domains["domains (5 tables)"]
@@ -75,33 +82,40 @@ flowchart LR
         doi[domain_order_items]
     end
 
-    subgraph infrastructure["infrastructure (5 tables)"]
+    subgraph infrastructure["infrastructure (11 tables)"]
         direction TB
-        idc[infrastructure_datacenters]
-        iip[infrastructure_ip_pools]
-        iia[infrastructure_ip_allocations]
-        inh[infrastructure_network_health_checks]
-        inhi[infrastructure_network_health_incidents]
+        icp[infrastructure_cloud_providers]
+        inr[infrastructure_node_regions]
+        ins[infrastructure_node_sizes]
+        ipt[infrastructure_panel_types]
+        ind[infrastructure_node_deployments]
+        indl[infrastructure_node_deployment_logs]
+        indc[infrastructure_node_deployment_costs]
+        idc[infrastructure_drift_checks]
+        idr[infrastructure_drift_reports]
+        idre[infrastructure_drift_remediations]
+        ids[infrastructure_drift_snapshots]
     end
 
-    subgraph integrations["integrations (3 tables)"]
+    subgraph integrations["integrations (2 tables)"]
         direction TB
-        iwh[integration_webhooks]
         iwe[integration_webhook_events]
-        iwl[integration_webhook_delivery_logs]
+        iwd[integration_webhook_deliveries]
     end
 
-    subgraph notifications["notifications (4 tables)"]
+    subgraph notifications["notifications (6 tables)"]
         direction TB
-        nt[notification_templates]
-        ntt[notification_template_translations]
-        nl[notification_logs]
-        np[notification_preferences]
+        net[notification_email_templates]
+        nel[notification_email_logs]
+        nec[notification_email_campaigns]
+        nes[notification_email_suppressions]
+        nep[notification_email_preferences]
+        nut[notification_unsubscribe_tokens]
     end
 
     subgraph orders["orders (3 tables)"]
         direction TB
-        or_[orders]
+        or[orders]
         oi[order_items]
         osh[order_status_history]
     end
@@ -110,62 +124,63 @@ flowchart LR
         direction TB
         pr[products]
         pp[product_prices]
-        prr[product_relationships]
-        pb[product_bundles]
+        pre[product_relationships]
+        pbu[product_bundles]
         pbi[product_bundle_items]
     end
 
-    subgraph promotions["promotions (7 tables)"]
+    subgraph promotions["promotions (12 tables)"]
         direction TB
-        prc[promotion_codes]
-        pru[promotion_usages]
-        prcl[promotion_customer_loyalties]
-        prlp[promotion_loyalty_programs]
-        prlt[promotion_loyalty_tiers]
-        prle[promotion_loyalty_events]
-        prr2[promotion_referrals]
+        pca[promotion_campaigns]
+        pco[promotion_coupons]
+        pcr[promotion_coupon_redemptions]
+        pru[promotion_rules]
+        prc[promotion_referral_codes]
+        pref[promotion_referrals]
+        pgc[promotion_gift_cards]
+        pgt[promotion_gift_card_transactions]
+        plp[promotion_loyalty_programs]
+        plt[promotion_loyalty_tiers]
+        pcl[promotion_customer_loyalties]
+        pltr[promotion_loyalty_transactions]
     end
 
-    subgraph provisioning["provisioning (11 tables)"]
+    subgraph provisioning["provisioning (12 tables)"]
         direction TB
+        ps[provisioning_servers]
+        pse[provisioning_services]
+        pst[provisioning_tasks]
         psp[provisioning_service_plans]
-        psv[provisioning_servers]
-        ps[provisioning_services]
-        pt[provisioning_tasks]
+        psr[provisioning_service_relationships]
+        psd[provisioning_service_domains]
+        psg[provisioning_service_groups]
+        psgm[provisioning_service_group_members]
         pvs[provisioning_virtualmin_servers]
         pva[provisioning_virtualmin_accounts]
         pvj[provisioning_virtualmin_jobs]
         pvd[provisioning_virtualmin_drift_records]
-        psr[provisioning_service_relationships]
-        psd[provisioning_service_domains]
-        psg[provisioning_service_groups]
     end
 
-    subgraph settings_app["settings (6 tables)"]
+    subgraph settings["settings (2 tables)"]
         direction TB
-        sc[settings_configs]
-        sa[settings_announcements]
-        sib[settings_ip_blocks]
-        sls[settings_login_security]
-        sbt[settings_branding_themes]
-        smt[settings_maintenance_tasks]
+        sc[setting_categories]
+        se[setting_entries]
     end
 
     subgraph tickets["tickets (5 tables)"]
         direction TB
         ti[tickets]
-        tcat[ticket_categories]
-        tc[ticket_comments]
+        tc[ticket_categories]
+        tco[ticket_comments]
         ta[ticket_attachments]
         tw[ticket_worklogs]
     end
 
-    subgraph users["users (6 tables)"]
+    subgraph users["users (5 tables)"]
         direction TB
         us[users]
         ucm[user_customer_memberships]
         up[user_profiles]
         ull[user_login_logs]
         uwc[user_webauthn_credentials]
-        utd[user_totp_devices]
     end

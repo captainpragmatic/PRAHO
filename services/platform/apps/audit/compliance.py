@@ -1116,8 +1116,8 @@ class LogRetentionService:
                 "retention_days": table_details.get("archive_retention_days"),
                 "action": "partition_rotation",
                 "legal_basis": "Operational partition retention",
-                "total_events": len(table_details.get("attached_partitions", [])),
-                "events_past_retention": 0,
+                "total_partitions": len(table_details.get("attached_partitions", [])),
+                "partitions_past_retention": 0,
                 "compliance_status": table_details.get("status", "unknown"),
                 "partition_status": table_details,
             }
