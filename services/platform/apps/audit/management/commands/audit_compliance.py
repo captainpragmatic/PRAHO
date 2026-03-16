@@ -266,9 +266,10 @@ class Command(BaseCommand):
             self.stdout.write("")
             self.stdout.write("Retention status (dry run):")
             for category, info in status.items():
-                if info["events_past_retention"] > 0:
+                past = info.get("events_past_retention", info.get("partitions_past_retention", 0))
+                if past > 0:
                     self.stdout.write(
-                        f"  {category}: {info['events_past_retention']} events "
+                        f"  {category}: {past} events "
                         f"past {info['retention_days']}-day retention "
                         f"(action: {info['action']})"
                     )
