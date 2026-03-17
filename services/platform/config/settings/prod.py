@@ -582,9 +582,9 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
-        # Application logging
+        # Application logging (error_file ensures ERROR+ goes to dedicated error log)
         "apps": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "error_file"],
             "level": "INFO",
             "propagate": False,
         },
@@ -614,6 +614,16 @@ LOGGING = {
         },
     },
 }
+
+# Ensure Sentry captures ERROR+ from application loggers (propagate=False blocks root handler)
+if HAS_SENTRY and SENTRY_DSN:
+    LOGGING["handlers"]["sentry"] = {
+        "level": "ERROR",
+        "class": "sentry_sdk.integrations.logging.SentryHandler",
+    }
+    for _logger_name in ("apps", "apps.audit", "apps.users", "apps.common.middleware", "apps.audit.siem"):
+        if _logger_name in LOGGING["loggers"]:
+            LOGGING["loggers"][_logger_name]["handlers"].append("sentry")
 
 # ===============================================================================
 # AUDIT LOG RETENTION CONFIGURATION 📅

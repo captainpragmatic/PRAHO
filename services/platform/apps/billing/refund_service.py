@@ -145,7 +145,7 @@ class RefundService:
                 return RefundService._execute_order_refund_internal(order, refund_data)
 
         except Exception:
-            logger.exception("Order refund processing failed")
+            logger.exception("Order refund processing failed for order_id=%s", order_id)
             return Err("Failed to process refund: internal error")
 
     @staticmethod
@@ -168,7 +168,7 @@ class RefundService:
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
         except Exception:
-            logger.exception("Order lookup for refund failed")
+            logger.exception("Order lookup for refund failed for order_id=%s", order_id)
             return Err("Failed to process refund: database error")
 
     @staticmethod
@@ -313,7 +313,7 @@ class RefundService:
                 return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
         except Exception:
-            logger.exception("Invoice refund processing failed")
+            logger.exception("Invoice refund processing failed for invoice_id=%s", invoice_id)
             return Err("Failed to process refund: internal error")
 
     @staticmethod
@@ -330,7 +330,7 @@ class RefundService:
         except Invoice.DoesNotExist:
             return Err("Failed to process refund: Invoice not found")
         except Exception:
-            logger.exception("Invoice lookup for refund failed")
+            logger.exception("Invoice lookup for refund failed for invoice_id=%s", invoice_id)
             return Err("Failed to process refund: database error")
 
     @staticmethod
@@ -434,7 +434,7 @@ class RefundService:
             return RefundService._check_entity_refund_eligibility(entity, entity_type)
 
         except Exception:
-            logger.exception("Refund eligibility check failed")
+            logger.exception("Refund eligibility check failed for %s_id=%s", entity_type, entity_id)
             return Err("Error checking eligibility")
 
     @staticmethod
@@ -542,7 +542,7 @@ class RefundService:
 
             return Ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
         except Exception:
-            logger.exception("Order refund eligibility validation failed")
+            logger.exception("Order refund eligibility validation failed for order_id=%s", order.pk)
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -683,7 +683,7 @@ class RefundService:
             )
 
         except Exception:
-            logger.exception("Invoice refund eligibility validation failed")
+            logger.exception("Invoice refund eligibility validation failed for invoice_id=%s", invoice.pk)
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -741,7 +741,11 @@ class RefundService:
 
             return Ok(final_result)
         except Exception:
-            logger.exception("Bidirectional refund processing failed")
+            logger.exception(
+                "Bidirectional refund processing failed for order_id=%s invoice_id=%s",
+                order.pk if order else None,
+                invoice.pk if invoice else None,
+            )
             return Err("Failed to process refund")
 
     @staticmethod
@@ -807,12 +811,18 @@ class RefundService:
 
         except Exception as db_error:
             error_msg = str(db_error)
+            entity_label = "order" if order else "invoice"
+            entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
             if "FOREIGN KEY constraint failed" in error_msg:
+                logger.exception("Refund record creation failed: FK constraint for %s_id=%s", entity_label, entity_pk)
                 return Err("Failed to process bidirectional refund")
             elif "Cannot assign" in error_msg:
+                logger.exception(
+                    "Refund record creation failed: assignment error for %s_id=%s", entity_label, entity_pk
+                )
                 return Err("Order update failed" if order else "Invoice update failed")
             else:
-                logger.exception("Refund record creation failed")
+                logger.exception("Refund record creation failed for %s_id=%s", entity_label, entity_pk)
                 return Err("Failed to process bidirectional refund")
 
     @staticmethod
@@ -894,7 +904,7 @@ class RefundService:
 
             return Err("Order update failed")
         except Exception:
-            logger.exception("Order refund status update failed")
+            logger.exception("Order refund status update failed for order_id=%s", order.pk)
             return Err("Failed to update order status")
 
     @staticmethod
@@ -933,7 +943,7 @@ class RefundService:
 
             return Err("Invoice update failed")
         except Exception:
-            logger.exception("Invoice refund status update failed")
+            logger.exception("Invoice refund status update failed for invoice_id=%s", invoice.pk)
             return Err("Invoice update failed")
 
     @staticmethod
@@ -1046,7 +1056,7 @@ class RefundService:
             )
 
         except Exception:
-            logger.exception("Order refund validation and preparation failed")
+            logger.exception("Order refund validation and preparation failed for order_id=%s", order.pk)
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -1094,7 +1104,7 @@ class RefundService:
             )
 
         except Exception:
-            logger.exception("Invoice refund validation and preparation failed")
+            logger.exception("Invoice refund validation and preparation failed for invoice_id=%s", invoice.pk)
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -1166,7 +1176,9 @@ class RefundService:
             return gateway_result
 
         except Exception:
-            logger.exception("Payment gateway refund processing failed")
+            logger.exception(
+                "Payment gateway refund processing failed for payment_id=%s", payment.pk if payment else None
+            )
             return Err("Failed to process payment refund")
 
     @staticmethod
@@ -1350,7 +1362,7 @@ class RefundQueryService:
 
             return Ok(refunds)
         except Exception:
-            logger.exception("Entity refund history retrieval failed")
+            logger.exception("Entity refund history retrieval failed for %s_id=%s", entity_type, entity_id)
             return Err("Failed to get refund history")
 
 
