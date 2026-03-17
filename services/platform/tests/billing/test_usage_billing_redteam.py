@@ -636,7 +636,7 @@ class MeteringServiceEdgeCasesTestCase(TestCase):
         self.assertFalse(result.is_ok())
 
 
-class AggregationConsistencyTestCase(TransactionTestCase):
+class AggregationConsistencyTestCase(TestCase):
     """Test aggregation consistency under various conditions."""
 
     def setUp(self):

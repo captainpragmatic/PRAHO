@@ -15,7 +15,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.metering_models import (
@@ -239,7 +239,7 @@ class TestGetAllowanceFromServicePlan(TestCase):
 # _get_subscription_item_for_meter
 # ============================================================================
 
-class TestGetSubscriptionItemForMeter(TransactionTestCase):
+class TestGetSubscriptionItemForMeter(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -290,7 +290,7 @@ class TestGetSubscriptionItemForMeter(TransactionTestCase):
 # MeteringService
 # ============================================================================
 
-class TestMeteringServiceRecordEvent(TransactionTestCase):
+class TestMeteringServiceRecordEvent(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -397,7 +397,7 @@ class TestMeteringServiceRecordEvent(TransactionTestCase):
         assert result.is_ok()
 
 
-class TestMeteringServiceBulkEvents(TransactionTestCase):
+class TestMeteringServiceBulkEvents(TestCase):
     def setUp(self):
         self.customer = _make_customer()
         self.meter = _make_meter()
@@ -425,7 +425,7 @@ class TestMeteringServiceBulkEvents(TransactionTestCase):
         assert len(results) == 1
 
 
-class TestScheduleAggregationUpdate(TransactionTestCase):
+class TestScheduleAggregationUpdate(TestCase):
     def setUp(self):
         self.svc = MeteringService()
 
@@ -444,7 +444,7 @@ class TestScheduleAggregationUpdate(TransactionTestCase):
         mock_sync.assert_called_once_with(event)
 
 
-class TestUpdateAggregationSync(TransactionTestCase):
+class TestUpdateAggregationSync(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -499,7 +499,7 @@ class TestUpdateAggregationSync(TransactionTestCase):
         assert not event.is_processed
 
 
-class TestApplyEventToAggregation(TransactionTestCase):
+class TestApplyEventToAggregation(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -572,7 +572,7 @@ class TestApplyEventToAggregation(TransactionTestCase):
         assert agg.total_value == Decimal("1")
 
 
-class TestCheckThresholdsAsync(TransactionTestCase):
+class TestCheckThresholdsAsync(TestCase):
     def test_handles_django_q_unavailable(self):
         svc = MeteringService()
         customer = MagicMock(id=1)
@@ -586,7 +586,7 @@ class TestCheckThresholdsAsync(TransactionTestCase):
 # AggregationService
 # ============================================================================
 
-class TestAggregationService(TransactionTestCase):
+class TestAggregationService(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -667,7 +667,7 @@ class TestAggregationService(TransactionTestCase):
 # RatingEngine
 # ============================================================================
 
-class TestRatingEngine(TransactionTestCase):
+class TestRatingEngine(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -767,7 +767,7 @@ class TestRatingEngine(TransactionTestCase):
         assert self.engine._apply_rounding(Decimal("3.7"), "banana", Decimal("1")) == Decimal("3.7")
 
 
-class TestRatingEngineTieredCharge(TransactionTestCase):
+class TestRatingEngineTieredCharge(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.meter = _make_meter()
@@ -862,7 +862,7 @@ class TestRatingEngineTieredCharge(TransactionTestCase):
         assert charge == 42
 
 
-class TestRateBillingCycle(TransactionTestCase):
+class TestRateBillingCycle(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -903,7 +903,7 @@ class TestRateBillingCycle(TransactionTestCase):
 # UsageAlertService
 # ============================================================================
 
-class TestUsageAlertService(TransactionTestCase):
+class TestUsageAlertService(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()
@@ -995,7 +995,7 @@ class TestUsageAlertService(TransactionTestCase):
         assert not is_breached
 
 
-class TestUsageAlertServiceNotification(TransactionTestCase):
+class TestUsageAlertServiceNotification(TestCase):
     def setUp(self):
         self.currency = _make_currency()
         self.customer = _make_customer()

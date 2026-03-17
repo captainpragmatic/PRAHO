@@ -8,7 +8,7 @@ import uuid
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
-from django.test import TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.currency_models import Currency
@@ -17,7 +17,7 @@ from apps.customers.models import Customer
 from apps.products.models import Product
 
 
-class SubscriptionResumeTestCase(TransactionTestCase):
+class SubscriptionResumeTestCase(TestCase):
     """Test Subscription.resume() paused duration handling."""
 
     def setUp(self):
