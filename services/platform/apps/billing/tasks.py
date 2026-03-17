@@ -491,7 +491,7 @@ def _store_validation(  # noqa: PLR0913
             "is_active": is_valid,
             "company_name": company_name,
             "company_address": company_address,
-            "validation_source": "vies" if source == "vies" else "manual",
+            "validation_source": source,
             "response_data": response_data or {},
             "expires_at": expires_at,
         },
@@ -1057,13 +1057,11 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
 
     logger.info("[VAT] Starting periodic VIES re-verification")
 
-    expired = (
+    expired = list(
         VATValidation.objects.filter(
             expires_at__lt=timezone.now(),
             is_valid=True,
-        )
-        .select_related()
-        .values_list("vat_number", "country_code")[:100]
+        ).values_list("vat_number", "country_code")[:100]
     )
 
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415

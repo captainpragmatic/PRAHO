@@ -65,10 +65,10 @@ class VIESGateway:
         logger.info("[VIES] Querying API: %s%s", country_code, vat_number)
         try:
             response = safe_request(
-                "GET",
+                "POST",
                 VIES_API_URL,
                 policy=STRICT_EXTERNAL,
-                params={"countryCode": country_code, "vatNumber": vat_number},
+                json={"countryCode": country_code, "vatNumber": vat_number},
             )
             response.raise_for_status()
             data: dict[str, Any] = response.json()

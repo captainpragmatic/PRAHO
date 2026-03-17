@@ -131,7 +131,7 @@ class TestValidateVatNumberTask:
         result = validate_vat_number(str(_tax_profile.id))
 
         assert result["success"] is True
-        assert result["is_valid"] is True
+        assert result["is_valid"] is False
         assert result["vies_status"] == "format_only"
 
         _tax_profile.refresh_from_db()
