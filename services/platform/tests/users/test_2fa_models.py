@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 import pyotp
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.backends.db import SessionStore
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
@@ -154,7 +154,7 @@ class EnhancedWebAuthnCredentialTest(TestCase):
         )
 
         # Try to create duplicate credential_id for same user
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             WebAuthnCredential.objects.create(
                 user=self.user,
                 credential_id='duplicate_test',  # Same credential_id

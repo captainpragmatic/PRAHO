@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -134,7 +134,7 @@ class CloudProviderModelTests(TestCase):
         """Test that provider code must be unique"""
         create_test_provider(code="het")
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             create_test_provider(code="het", name="Another Provider")
 
     def test_provider_str_representation(self):
@@ -252,7 +252,7 @@ class PanelTypeModelTests(TestCase):
         """Test that panel name must be unique"""
         create_test_panel(name="Test Panel")
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             create_test_panel(name="Test Panel")
 
 
@@ -303,7 +303,7 @@ class NodeDeploymentModelTests(TestCase):
         """Test that hostname must be unique"""
         self.create_deployment(hostname="prd-sha-het-de-fsn1-002", node_number=2)
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             self.create_deployment(hostname="prd-sha-het-de-fsn1-002", node_number=3)
 
     def test_deployment_status_choices(self):

@@ -45,33 +45,35 @@ from apps.products.models import Product
 from tests.helpers.fsm_helpers import force_status
 
 
+def _metering_service_setup(test_instance):
+    """Shared setup for metering service test classes."""
+    test_instance.currency, _ = Currency.objects.get_or_create(
+        code="RON", defaults={"symbol": "lei", "decimals": 2}
+    )
+    test_instance.customer = Customer.objects.create(
+        name="Test Customer",
+        customer_type="individual",
+        primary_email="test@example.com",
+        status="active",
+    )
+    test_instance.meter = UsageMeter.objects.create(
+        name="api_requests",
+        display_name="API Requests",
+        aggregation_type="sum",
+        unit="requests",
+        is_active=True,
+        is_billable=True,
+        event_grace_period_hours=24,
+    )
+    test_instance.service = MeteringService()
+
+
 class MeteringServiceTestCase(TestCase):
     """Test MeteringService functionality."""
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name="Test Customer",
-            customer_type="individual",
-            primary_email="test@example.com",
-            status="active",
-        )
-
-        self.meter = UsageMeter.objects.create(
-            name="api_requests",
-            display_name="API Requests",
-            aggregation_type="sum",
-            unit="requests",
-            is_active=True,
-            is_billable=True,
-            event_grace_period_hours=24,
-        )
-
-        self.service = MeteringService()
+        _metering_service_setup(self)
 
     def test_record_event_success(self):
         """Test successful event recording."""
@@ -230,28 +232,7 @@ class MeteringServiceTransactionTests(TransactionTestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name="Test Customer",
-            customer_type="individual",
-            primary_email="test@example.com",
-            status="active",
-        )
-
-        self.meter = UsageMeter.objects.create(
-            name="api_requests",
-            display_name="API Requests",
-            aggregation_type="sum",
-            unit="requests",
-            is_active=True,
-            is_billable=True,
-            event_grace_period_hours=24,
-        )
-
-        self.service = MeteringService()
+        _metering_service_setup(self)
 
     def test_record_event_idempotency_race_condition(self):
         """

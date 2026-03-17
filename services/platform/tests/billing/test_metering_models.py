@@ -68,7 +68,7 @@ class UsageMeterModelTestCase(TestCase):
             unit="gb",
         )
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             UsageMeter.objects.create(
                 name="bandwidth_gb",
                 display_name="Bandwidth 2",

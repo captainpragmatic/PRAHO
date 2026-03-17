@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -52,7 +52,7 @@ class CurrencyModelAdditionalTestCase(TestCase):
         """Test Currency primary key uniqueness"""
         Currency.objects.get_or_create(code='USD', defaults={'symbol': '$', 'decimals': 2})
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             Currency.objects.create(code='USD', symbol='$', decimals=2)
 
     def test_currency_decimal_precision(self):
@@ -105,7 +105,7 @@ class FXRateModelAdditionalTestCase(TestCase):
         )
 
         # Should raise IntegrityError for duplicate
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             FXRate.objects.create(
                 base_code=self.usd,
                 quote_code=self.eur,
@@ -154,7 +154,7 @@ class InvoiceSequenceModelAdditionalTestCase(TestCase):
         """Test InvoiceSequence scope uniqueness constraint"""
         InvoiceSequence.objects.create(scope='test_scope')
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             InvoiceSequence.objects.create(scope='test_scope')
 
     def test_get_next_number_concurrency_safety(self):
@@ -207,7 +207,7 @@ class ProformaSequenceModelAdditionalTestCase(TestCase):
         """Test ProformaSequence scope uniqueness constraint"""
         ProformaSequence.objects.create(scope='proforma_test_scope')
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             ProformaSequence.objects.create(scope='proforma_test_scope')
 
     def test_get_next_number_logging(self):

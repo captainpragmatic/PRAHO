@@ -5,7 +5,7 @@
 from datetime import date
 from decimal import Decimal
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.billing.models import Currency, FXRate
@@ -88,7 +88,7 @@ class FXRateTestCase(TestCase):
         )
 
         # Try to create duplicate
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             FXRate.objects.create(
                 base_code=self.eur,
                 quote_code=self.ron,

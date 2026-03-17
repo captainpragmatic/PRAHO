@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import Mock, patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -226,7 +226,7 @@ class RefundQueryServiceTestCase(TestCase):
 
 
 
-class RefundServiceErrorHandlingTestCase(TransactionTestCase):
+class RefundServiceErrorHandlingTestCase(TestCase):
     """Test suite for RefundService error handling and edge cases"""
 
     def test_refund_service_transaction_rollback(self) -> None:

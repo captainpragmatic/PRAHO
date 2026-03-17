@@ -3,7 +3,7 @@
 # ===============================================================================
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.billing.models import InvoiceSequence, ProformaSequence
@@ -43,7 +43,7 @@ class InvoiceSequenceTestCase(TestCase):
         )
 
         # Should not be able to create another sequence with same scope
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             InvoiceSequence.objects.create(
                 scope='default',
                 last_value=1
@@ -138,7 +138,7 @@ class ProformaSequenceTestCase(TestCase):
         )
 
         # Should not be able to create another sequence with same scope
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             ProformaSequence.objects.create(
                 scope='default',
                 last_value=1

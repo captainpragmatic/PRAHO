@@ -11,11 +11,8 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-
-from apps.common.request_ip import get_safe_client_ip
+from django.db import IntegrityError, transaction
 from django.test import TestCase
-
-from apps.common.request_ip import get_safe_client_ip
 from django.utils import timezone
 
 from apps.common.request_ip import get_safe_client_ip
@@ -504,9 +501,7 @@ class EnhancedCustomerMembershipTest(TestCase):
         )
 
         # Try to create duplicate - should raise error
-        from django.db import IntegrityError
-
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             CustomerMembership.objects.create(
                 user=self.user,
                 customer=self.customer,

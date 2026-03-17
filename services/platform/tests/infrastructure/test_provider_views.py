@@ -13,7 +13,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.db import connection
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 
@@ -355,8 +355,6 @@ class TestDeploymentCreateUniqueHostnames(_DeploymentTestMixin, TestCase):
 
     def test_deployment_create_unique_hostnames(self) -> None:
         """Two deployments cannot share the same hostname."""
-        from django.db import IntegrityError
-
         self._create_deployment(status="completed", hostname="prd-sha-het-de-fsn1-001")
 
         provider = CloudProvider.objects.get(code="HET")
@@ -364,7 +362,7 @@ class TestDeploymentCreateUniqueHostnames(_DeploymentTestMixin, TestCase):
         size = NodeSize.objects.get(provider_type_id="cpx21")
         panel = PanelType.objects.get(panel_type="virtualmin")
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             NodeDeployment.objects.create(
                 environment="prd", node_type="sha", provider=provider,
                 node_size=size, region=region, panel_type=panel,

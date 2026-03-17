@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.customers.models import (
@@ -363,7 +363,7 @@ class CustomerAddressTestCase(TestCase):
             postal_code='010101',
             is_current=True,
         )
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             CustomerAddress.objects.create(
                 customer=self.customer,
                 address_type='primary',
