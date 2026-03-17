@@ -332,6 +332,7 @@ SECRET_KEY = "django-insecure-dev-key-change-for-production"
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:8701",
     "http://127.0.0.1:8701",
+    "http://100.73.13.8:8701",  # Tailscale IP — parity with CSRF_TRUSTED_ORIGINS
 ]
 CORS_ALLOW_CREDENTIALS = True
 

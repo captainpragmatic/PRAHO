@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Node Sizes" %}{% endblock %}
 
@@ -12,13 +13,7 @@
                 <h1 class="text-3xl font-bold text-white">{% trans "Node Sizes" %}</h1>
                 <p class="text-slate-400 mt-1">{% trans "Manage available server sizes and pricing" %}</p>
             </div>
-            <a href="{{ create_url }}"
-               class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-                {% trans "Add Size" %}
-            </a>
+            {% trans "Add Size" as add_label %}{% button add_label variant="primary" href=create_url %}
         </div>
 
         <!-- Table -->
@@ -60,13 +55,13 @@
                             </td>
                             <td class="px-6 py-4">
                                 {% if size.is_active %}
-                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-500/20 text-green-400">{% trans "Active" %}</span>
+                                    {% trans "Active" as status_label %}{% badge status_label variant="success" %}
                                 {% else %}
-                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-slate-500/20 text-slate-400">{% trans "Inactive" %}</span>
+                                    {% trans "Inactive" as status_label %}{% badge status_label variant="secondary" %}
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 text-right">
-                                <a href="{% url 'infrastructure:size_edit' size.id %}" class="text-blue-400 hover:text-blue-300 text-sm">{% trans "Edit" %}</a>
+                                {% url 'infrastructure:size_edit' size.id as edit_url %}{% trans "Edit" as edit_label %}{% button edit_label variant="secondary" size="sm" href=edit_url %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -79,7 +74,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
                 </svg>
                 <p class="mt-2 text-slate-400">{% trans "No sizes configured" %}</p>
-                <a href="{{ create_url }}" class="mt-4 inline-block text-blue-400 hover:text-blue-300">{% trans "Add your first size" %} &rarr;</a>
+                {% trans "Add your first size" as first_size_label %}{% button first_size_label variant="primary" size="sm" href=create_url %}
             </div>
             {% endif %}
         </div>

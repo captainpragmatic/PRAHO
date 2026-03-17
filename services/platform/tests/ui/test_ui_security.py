@@ -5,7 +5,7 @@ Tests all security enhancements implemented for the UI components.
 
 from django.contrib.auth import get_user_model
 from django.template import Context, Template
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils.html import escape
 
 from apps.ui.templatetags.ui_components import button, icon
@@ -230,41 +230,61 @@ class TemplateSecurityTests(TestCase):
                             self.fail(f"Dangerous pattern '{pattern}' found unescaped in output for payload: {payload}")
 
 
+_CORS_TEST_MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+]
+
+
 class CORSSecurityTests(TestCase):
     """🔒 Tests for CORS configuration security"""
 
     def test_cors_settings_documented(self):
-        """Test that CORS settings are properly configured (documentation test)"""
-        # This test documents the expected CORS behavior
-        # In development: explicit origins for localhost (not CORS_ALLOW_ALL_ORIGINS)
-        # In production: should be restricted to production domains
+        """Dev settings use explicit CORS origins, not CORS_ALLOW_ALL_ORIGINS."""
+        from config.settings import dev
 
-        # Import development settings to verify configuration
-        try:
-            from config.settings import dev
+        self.assertTrue(hasattr(dev, "CORS_ALLOWED_ORIGINS"))
+        self.assertFalse(
+            getattr(dev, "CORS_ALLOW_ALL_ORIGINS", False),
+            "Development must not use CORS_ALLOW_ALL_ORIGINS (invalid with credentials)",
+        )
 
-            # Development should use explicit CORS origins (not ALLOW_ALL)
-            self.assertTrue(hasattr(dev, 'CORS_ALLOWED_ORIGINS'))
-            self.assertFalse(
-                getattr(dev, 'CORS_ALLOW_ALL_ORIGINS', False),
-                "Development should not use CORS_ALLOW_ALL_ORIGINS",
-            )
+    @override_settings(
+        MIDDLEWARE=_CORS_TEST_MIDDLEWARE,
+        CORS_ALLOWED_ORIGINS=["http://localhost:8701"],
+        CORS_ALLOW_CREDENTIALS=True,
+    )
+    def test_cors_rejects_unknown_origin(self):
+        """CorsMiddleware blocks requests from unauthorized origins."""
+        response = self.client.get("/accounts/login/", HTTP_ORIGIN="https://evil.com")
+        self.assertNotIn("Access-Control-Allow-Origin", response)
 
-        except ImportError:
-            self.skipTest("Development settings not available")
+    @override_settings(
+        MIDDLEWARE=_CORS_TEST_MIDDLEWARE,
+        CORS_ALLOWED_ORIGINS=["http://localhost:8701"],
+        CORS_ALLOW_CREDENTIALS=True,
+    )
+    def test_cors_allows_portal_origin(self):
+        """CorsMiddleware allows requests from Portal origin."""
+        response = self.client.get("/accounts/login/", HTTP_ORIGIN="http://localhost:8701")
+        self.assertEqual(response.get("Access-Control-Allow-Origin"), "http://localhost:8701")
 
-    def test_production_cors_should_be_restricted(self):
-        """Documentation test for production CORS requirements"""
-        # This test serves as documentation that production CORS should be restricted
-        # When moving to production, ensure CORS_ALLOWED_ORIGINS is used instead
-        # of CORS_ALLOW_ALL_ORIGINS
-
-        production_cors_example = [
-            "https://yourdomain.com",
-            "https://www.yourdomain.com",
-            "https://admin.yourdomain.com"
-        ]
-
-        # This test passes to document the requirement
-        self.assertIsInstance(production_cors_example, list)
-        self.assertGreater(len(production_cors_example), 0)
+    @override_settings(
+        MIDDLEWARE=_CORS_TEST_MIDDLEWARE,
+        CORS_ALLOWED_ORIGINS=["http://localhost:8701"],
+        CORS_ALLOW_CREDENTIALS=True,
+    )
+    def test_cors_preflight_returns_allow_methods(self):
+        """CORS preflight OPTIONS request returns allowed methods for Portal origin."""
+        response = self.client.options(
+            "/accounts/login/",
+            HTTP_ORIGIN="http://localhost:8701",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Access-Control-Allow-Methods", response)

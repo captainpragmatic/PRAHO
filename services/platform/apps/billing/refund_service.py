@@ -541,7 +541,9 @@ class RefundService:
 
             return Ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
         except Exception:
-            logger.exception("Order refund eligibility validation failed for order_id=%s", order.pk)
+            logger.exception(
+                "Order refund eligibility validation failed for order_id=%s", getattr(order, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -682,7 +684,9 @@ class RefundService:
             )
 
         except Exception:
-            logger.exception("Invoice refund eligibility validation failed for invoice_id=%s", invoice.pk)
+            logger.exception(
+                "Invoice refund eligibility validation failed for invoice_id=%s", getattr(invoice, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -909,7 +913,7 @@ class RefundService:
 
             return Err("Order update failed")
         except Exception:
-            logger.exception("Order refund status update failed for order_id=%s", order.pk)
+            logger.exception("Order refund status update failed for order_id=%s", getattr(order, "pk", "unknown"))
             return Err("Failed to update order status")
 
     @staticmethod
@@ -948,7 +952,7 @@ class RefundService:
 
             return Err("Invoice update failed")
         except Exception:
-            logger.exception("Invoice refund status update failed for invoice_id=%s", invoice.pk)
+            logger.exception("Invoice refund status update failed for invoice_id=%s", getattr(invoice, "pk", "unknown"))
             return Err("Invoice update failed")
 
     @staticmethod
@@ -986,7 +990,7 @@ class RefundService:
         except (TypeError, AttributeError):
             logger.warning(
                 "Refund amount aggregation failed for order_id=%s, defaulting to 0 — over-refund risk",
-                order.pk,
+                getattr(order, "pk", "unknown"),
                 exc_info=True,
             )
             return 0
@@ -1009,7 +1013,7 @@ class RefundService:
         except (TypeError, AttributeError):
             logger.warning(
                 "Refund amount aggregation failed for invoice_id=%s, defaulting to 0 — over-refund risk",
-                invoice.pk,
+                getattr(invoice, "pk", "unknown"),
                 exc_info=True,
             )
             return 0
@@ -1069,7 +1073,9 @@ class RefundService:
             )
 
         except Exception:
-            logger.exception("Order refund validation and preparation failed for order_id=%s", order.pk)
+            logger.exception(
+                "Order refund validation and preparation failed for order_id=%s", getattr(order, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -1117,7 +1123,9 @@ class RefundService:
             )
 
         except Exception:
-            logger.exception("Invoice refund validation and preparation failed for invoice_id=%s", invoice.pk)
+            logger.exception(
+                "Invoice refund validation and preparation failed for invoice_id=%s", getattr(invoice, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -1190,7 +1198,8 @@ class RefundService:
 
         except Exception:
             logger.exception(
-                "Payment gateway refund processing failed for payment_id=%s", payment.pk if payment else None
+                "Payment gateway refund processing failed for payment_id=%s",
+                getattr(payment, "pk", None) if payment else None,
             )
             return Err("Failed to process payment refund")
 

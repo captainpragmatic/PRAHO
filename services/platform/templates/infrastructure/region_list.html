@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Node Regions" %}{% endblock %}
 
@@ -47,9 +48,9 @@
                                 </td>
                                 <td class="px-6 py-4">
                                     {% if region.is_active %}
-                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-500/20 text-green-400">{% trans "Active" %}</span>
+                                        {% trans "Active" as status_label %}{% badge status_label variant="success" %}
                                     {% else %}
-                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-slate-500/20 text-slate-400">{% trans "Inactive" %}</span>
+                                        {% trans "Inactive" as status_label %}{% badge status_label variant="secondary" %}
                                     {% endif %}
                                 </td>
                                 <td class="px-6 py-4 text-right">

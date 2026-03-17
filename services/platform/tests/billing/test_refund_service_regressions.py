@@ -1009,6 +1009,48 @@ class TestCreateRefundRecord(TestCase):
             r = RefundService._create_refund_record(params)
             assert r.is_err()
             assert "Failed to process bidirectional refund" in r.unwrap_err()
+            assert "something else broke" not in r.unwrap_err(), \
+                "Internal error details must not leak in Err message"
+
+    def test_generic_error_logs_exception(self):
+        """logger.exception() fires with context when refund record creation fails."""
+        from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
+
+        with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.create.side_effect = Exception("unexpected db failure")
+            order_mock = MagicMock()
+            order_mock.pk = 999
+            params = RefundRecordParams(
+                refund_id=uuid.uuid4(), order=order_mock, invoice=None,
+                refund_amount_cents=5000, original_cents=10000,
+                refund_data=None,
+            )
+            with self.assertLogs("apps.billing.refund_service", level="ERROR") as cm:
+                RefundService._create_refund_record(params)
+            self.assertTrue(
+                any("Refund record creation failed" in msg and "order" in msg for msg in cm.output),
+                f"Expected entity-context log message, got: {cm.output}",
+            )
+
+    def test_fk_constraint_error_logs_exception(self):
+        """FK constraint branch logs exception (was previously silent)."""
+        from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
+
+        with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.create.side_effect = Exception("FOREIGN KEY constraint failed")
+            order_mock = MagicMock()
+            order_mock.pk = 888
+            params = RefundRecordParams(
+                refund_id=uuid.uuid4(), order=order_mock, invoice=None,
+                refund_amount_cents=5000, original_cents=10000,
+                refund_data=None,
+            )
+            with self.assertLogs("apps.billing.refund_service", level="ERROR") as cm:
+                RefundService._create_refund_record(params)
+            self.assertTrue(
+                any("FK constraint" in msg for msg in cm.output),
+                f"Expected FK constraint log message, got: {cm.output}",
+            )
 
     def test_currency_creation_on_missing(self):
         """When RON currency doesn't exist, it should be created."""

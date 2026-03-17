@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Email Templates" %}{% endblock %}
 
@@ -54,10 +55,7 @@
                                         {{ template.locale }}
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <a href="{% url 'notifications:template_detail' template.pk %}"
-                                           class="text-blue-600 hover:text-blue-900">
-                                            {% trans "View" %}
-                                        </a>
+                                        {% url 'notifications:template_detail' template.pk as detail_url %}{% trans "View" as view_label %}{% button view_label variant="secondary" size="sm" href=detail_url %}
                                     </td>
                                 </tr>
                             {% endfor %}
