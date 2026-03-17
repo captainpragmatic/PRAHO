@@ -3,7 +3,6 @@
 # ===============================================================================
 
 from decimal import Decimal
-from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages.middleware import MessageMiddleware
@@ -361,15 +360,6 @@ class InvoiceSendViewsTestCase(TestCase):
         middleware = MessageMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         return request
-
-    @patch('apps.billing.services.send_invoice_email')
-    def test_invoice_send_success(self, mock_send_email):
-        """Test successful invoice sending"""
-        mock_send_email.return_value = True
-
-        # This is a placeholder test as we need to check the actual view implementation
-        # The view function for sending invoices would be tested here
-        self.assertTrue(True)  # Placeholder assertion
 
     def test_invoice_send_validation(self):
         """Test invoice send validation"""

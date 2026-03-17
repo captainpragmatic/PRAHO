@@ -21,6 +21,7 @@ from django.test import SimpleTestCase
 TEMPLATES_ROOT = (
     Path(__file__).resolve().parents[2] / "templates"
 )
+SHARED_TEMPLATES_ROOT = Path(__file__).resolve().parents[4] / "shared" / "ui" / "templates"
 COMPONENT_DIR = TEMPLATES_ROOT / "components"
 
 
@@ -30,8 +31,12 @@ COMPONENT_DIR = TEMPLATES_ROOT / "components"
 
 
 def _read_template(relative_path: str) -> str:
-    """Read a template file relative to TEMPLATES_ROOT."""
-    return (TEMPLATES_ROOT / relative_path).read_text()
+    """Read a template file, checking service-specific dir first, then shared."""
+    service_path = TEMPLATES_ROOT / relative_path
+    if service_path.exists():
+        return service_path.read_text()
+    shared_path = SHARED_TEMPLATES_ROOT / relative_path
+    return shared_path.read_text()
 
 
 # ===============================================================================

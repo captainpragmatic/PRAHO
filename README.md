@@ -49,6 +49,14 @@ services/
 └── portal/     # Customer-facing service (:8701) - SQLite sessions only
     ├── apps/   # 9 Django apps (API proxies, no business models)
     └── tests/  # Enforces no business DB access
+
+shared/
+└── ui/          # Shared design system (ADR-0035)
+    ├── templates/components/  # 15 shared component templates
+    └── static/js/components/  # Shared JS modules (modal, toast)
+
+assets/
+└── css/input.css  # Shared Tailwind CSS source (design tokens)
 ```
 
 - **Platform** owns all data (PostgreSQL) and business logic

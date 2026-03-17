@@ -14,6 +14,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 # 🚨 FIX: Update BASE_DIR after move to services/platform/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Up 3 levels to services/platform/
+REPO_ROOT = BASE_DIR.parent.parent  # Up to project root (PRAHO/)
 
 # Application definition
 DJANGO_APPS: list[str] = [
@@ -78,7 +79,8 @@ TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [
-            BASE_DIR / "templates",
+            BASE_DIR / "templates",  # Service-specific (highest priority, can override shared)
+            REPO_ROOT / "shared" / "ui" / "templates",  # Shared design system components
         ],
         "APP_DIRS": True,
         "OPTIONS": {
@@ -188,7 +190,8 @@ LOCALE_PATHS = [
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
-    BASE_DIR / "static",
+    BASE_DIR / "static",  # Service-specific static files (highest priority)
+    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
 ]
 
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"

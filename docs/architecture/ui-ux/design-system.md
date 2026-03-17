@@ -1,10 +1,10 @@
-# Portal UI/UX Design System
+# PRAHO UI/UX Design System
 
 > **Status**: Active specification
 > **Owner**: PRAHO Platform Team
-> **Last updated**: 2026-03-09
+> **Last updated**: 2026-03-17
 > **Companion**: [portal-ui-ux-backlog.md](portal-ui-ux-backlog.md) (implementation roadmap)
-> **Branch**: `feat/ui-ux-design-system-epic`
+> **Architecture**: [ADR-0035](../../ADRs/ADR-0035-unified-design-system.md) (unified design system)
 
 ---
 
@@ -441,25 +441,38 @@ All modal implementations must satisfy:
 
 ## 9) Cross-Service Component Parity
 
-### 9.1 Current State
+> **Architecture**: [ADR-0035](../../ADRs/ADR-0035-unified-design-system.md) — Unified Design System
 
-Portal is a **strict superset** of Platform components:
+### 9.1 Architecture (since 2026-03-17)
 
-| Scope | Platform | Portal |
-|-------|:--------:|:------:|
-| Template tags | 16 | 16 (identical API) |
-| Component templates | 18 | 25 (+7 portal-specific) |
+Shared components live in a **single canonical location** at the repo root. Both services resolve them via Django's template loader directory priority. Drift is structurally impossible — there are no copies to diverge.
 
-**Shared components** (17): alert, badge, breadcrumb, button, card, checkbox, dangerous_action_modal, input, mobile_header, mobile_nav_item, modal, nav_dropdown, pagination, progress_indicator, step_navigation, table, toast.
+```
+shared/ui/templates/components/   # 15 shared components (canonical)
+services/platform/templates/components/  # Platform-only: mobile_header, table_enhanced
+services/portal/templates/components/    # Portal-only: 14 customer-specific components
+```
 
-**Portal-only** (7): account_status_banner, cookie_consent_banner, customer_selector, list_page_filters, list_page_header, list_page_skeleton, portal_mobile_header (dead code).
+**Django resolution order** (per service):
+1. Service-specific `templates/` (highest priority — can override shared)
+2. `shared/ui/templates/` (fallback for shared components)
 
-### 9.2 Alignment Strategy
+### 9.2 Component Distribution
 
-- **Shared components** must stay functionally identical across services.
-- Changes to shared component templates should be mirrored in both services.
-- Portal-only components are intentionally separate (customer-facing concerns).
-- Consider extracting shared components to a symlinked or copied common path in CI.
+**Shared (15)** — in `shared/ui/templates/components/`:
+alert, badge, breadcrumb, button, card, checkbox, dangerous_action_modal, input, mobile_nav_item, modal, nav_dropdown, pagination, step_progress, table, toast.
+
+**Portal-only (14)** — in `services/portal/templates/components/`:
+account_status_banner, cookie_consent_banner, customer_selector, empty_state, form_actions, form_error_summary, list_page_filters, list_page_header, list_page_skeleton, mobile_header, page_header, rate_limit_inline_alert, section_card, stat_tile.
+
+**Platform-only (2)** — in `services/platform/templates/components/`:
+mobile_header, table_enhanced.
+
+### 9.3 Enforcement
+
+- `scripts/check_component_parity.py` — pre-commit hook verifying no accidental shadowing
+- Shared components must NOT exist in service-specific dirs (would shadow the canonical version)
+- To override a shared component for one service: place in service dir and document in `.component-parity-ignore`
 
 ---
 
@@ -467,12 +480,17 @@ Portal is a **strict superset** of Platform components:
 
 | Artifact | Location | Role |
 |----------|----------|------|
-| Design system spec | `docs/architecture/ui-ux/portal-design-system.md` | Policy & token definitions |
+| Design system spec | `docs/architecture/ui-ux/design-system.md` | Policy & token definitions |
+| Architecture decision | `docs/ADRs/ADR-0035-unified-design-system.md` | Structural decisions |
 | Implementation backlog | `docs/architecture/ui-ux/portal-ui-ux-backlog.md` | Prioritized task list |
-| CSS tokens | `assets/css/input.css` | Compiled token source |
-| Tailwind config | `services/portal/tailwind.config.js` | Tailwind theme extensions |
-| Template tag API | `services/portal/apps/ui/templatetags/ui_components.py` | Python component API |
-| Component templates | `services/portal/templates/components/*.html` | HTML implementations |
+| CSS tokens | `assets/css/input.css` | Shared design token source |
+| Tailwind preset | `shared/tailwind.preset.js` | Shared Tailwind configuration |
+| Tailwind config (Portal) | `services/portal/tailwind.config.js` | Portal-specific theme extensions |
+| Tailwind config (Platform) | `services/platform/tailwind.config.js` | Platform-specific theme extensions |
+| Shared component templates | `shared/ui/templates/components/*.html` | Canonical HTML implementations |
+| Shared JS modules | `shared/ui/static/js/components/` | Canonical modal.js, toast.js |
+| Template tag API (Portal) | `services/portal/apps/ui/templatetags/ui_components.py` | Portal Python component API |
+| Template tag API (Platform) | `services/platform/apps/ui/templatetags/ui_components.py` | Platform Python component API |
 | Component tests | `services/portal/tests/ui/` | Regression coverage |
 
 ### 10.1 Token Portability

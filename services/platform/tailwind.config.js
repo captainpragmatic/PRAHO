@@ -1,27 +1,28 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  // Platform-specific Tailwind configuration
+  presets: [require('../../shared/tailwind.preset.js')],
+
   content: [
     // Platform templates
     './services/platform/templates/**/*.html',
     './services/platform/ui/templates/**/*.html',
     './services/platform/apps/**/templates/**/*.html',
-
+    // Shared component templates
+    './shared/ui/templates/**/*.html',
     // Platform Python files with Tailwind classes
     './services/platform/apps/**/*.py',
     './services/platform/ui/**/*.py',
-
     // Platform JavaScript files
     './services/platform/static/js/**/*.js',
     './services/platform/assets/js/**/*.js',
+    // Shared JavaScript files
+    './shared/ui/static/js/**/*.js',
   ],
-
-  darkMode: 'class',
 
   theme: {
     extend: {
       colors: {
-        // Admin platform colors (professional, technical)
+        // Admin platform primary (slightly different hue)
         primary: {
           50: 'hsl(220 90% 97%)',
           100: 'hsl(220 90% 94%)',
@@ -41,7 +42,7 @@ module.exports = {
         'romanian-blue': '#002b7f',
         'romanian-yellow': '#fcd116',
 
-        // Dark admin dashboard colors
+        // Dark admin dashboard surface colors
         bg: {
           DEFAULT: '#0b0c10',
           subtle: '#111217',
@@ -62,7 +63,7 @@ module.exports = {
           strong: '#404354',
         },
 
-        // Business status colors
+        // Semantic status colors (extended with bg/border/content variants)
         success: {
           DEFAULT: '#10b981',
           bg: '#064e3b',
@@ -88,21 +89,17 @@ module.exports = {
           content: '#dbeafe',
         },
 
-        // Currency colors
+        // Business domain colors
         currency: {
           ron: 'hsl(220 90% 56%)',
           eur: '#0066cc',
           usd: '#10b981',
         },
-
-        // VAT status colors
         vat: {
           valid: '#10b981',
           invalid: '#ef4444',
           pending: '#f59e0b',
         },
-
-        // Server status colors
         server: {
           online: '#10b981',
           offline: '#ef4444',
@@ -112,6 +109,7 @@ module.exports = {
       },
 
       fontFamily: {
+        // Platform extends preset fonts with dev-friendly options
         sans: [
           '-apple-system',
           'BlinkMacSystemFont',
@@ -166,32 +164,16 @@ module.exports = {
 
       keyframes: {
         'romanian-fade-in': {
-          '0%': {
-            opacity: '0',
-            transform: 'translateY(10px)',
-          },
-          '100%': {
-            opacity: '1',
-            transform: 'translateY(0)',
-          },
+          '0%': { opacity: '0', transform: 'translateY(10px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         'romanian-slide-up': {
-          '0%': {
-            opacity: '0',
-            transform: 'translateY(20px)',
-          },
-          '100%': {
-            opacity: '1',
-            transform: 'translateY(0)',
-          },
+          '0%': { opacity: '0', transform: 'translateY(20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         'romanian-pulse': {
-          '0%, 100%': {
-            opacity: '1',
-          },
-          '50%': {
-            opacity: '0.5',
-          },
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.5' },
         },
       },
 
@@ -246,10 +228,6 @@ module.exports = {
   },
 
   plugins: [
-    require('@tailwindcss/forms')({
-      strategy: 'class',
-    }),
-    require('@tailwindcss/typography'),
     require('@tailwindcss/aspect-ratio'),
     require('@tailwindcss/container-queries'),
 
@@ -277,15 +255,9 @@ module.exports = {
           color: theme('colors.error.DEFAULT'),
           fontWeight: theme('fontWeight.medium'),
         },
-        '.server-online': {
-          color: theme('colors.server.online'),
-        },
-        '.server-offline': {
-          color: theme('colors.server.offline'),
-        },
-        '.server-maintenance': {
-          color: theme('colors.server.maintenance'),
-        },
+        '.server-online': { color: theme('colors.server.online') },
+        '.server-offline': { color: theme('colors.server.offline') },
+        '.server-maintenance': { color: theme('colors.server.maintenance') },
         '.hover-romanian': {
           '&:hover': {
             backgroundColor: theme('colors.bg.muted'),
@@ -301,7 +273,6 @@ module.exports = {
           },
         },
       };
-
       addUtilities(newUtilities);
     },
   ],

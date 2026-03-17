@@ -234,7 +234,6 @@ class ServiceActivationServiceTestCase(TestCase):
         ServiceActivationService.reactivate_services_for_customer(customer_id)
 
         # If we get here without exceptions, the static methods work correctly
-        self.assertTrue(True)
 
     def test_service_activation_service_with_special_characters_in_reason(self):
         """Test service methods handle special characters in reason strings"""

@@ -7,6 +7,7 @@ from django.test import SimpleTestCase
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 COMPONENTS_DIR = REPO_ROOT / "services" / "portal" / "templates" / "components"
+SHARED_COMPONENTS_DIR = REPO_ROOT / "shared" / "ui" / "templates" / "components"
 ALLOWLIST_FILE = REPO_ROOT / ".component-svg-allowlist"
 
 
@@ -24,11 +25,21 @@ def _load_svg_allowlist() -> set[str]:
 
 
 class ComponentSvgPolicyTests(SimpleTestCase):
+    def _all_component_files(self) -> list[Path]:
+        """Collect component files from both service-specific and shared dirs."""
+        files: dict[str, Path] = {}
+        # Shared first, service-specific overrides
+        for f in sorted(SHARED_COMPONENTS_DIR.glob("*.html")):
+            files[f.name] = f
+        for f in sorted(COMPONENTS_DIR.glob("*.html")):
+            files[f.name] = f
+        return sorted(files.values(), key=lambda p: p.name)
+
     def test_only_allowlisted_components_contain_raw_svg(self) -> None:
         allowlisted = _load_svg_allowlist()
         found_raw_svg: set[str] = set()
 
-        for component_file in sorted(COMPONENTS_DIR.glob("*.html")):
+        for component_file in self._all_component_files():
             content = component_file.read_text(encoding="utf-8")
             if "<svg" in content:
                 found_raw_svg.add(component_file.relative_to(REPO_ROOT).as_posix())
@@ -43,16 +54,17 @@ class ComponentSvgPolicyTests(SimpleTestCase):
         allowlisted = _load_svg_allowlist()
         allowlisted_names = {Path(p).name for p in allowlisted}
 
+        all_files = self._all_component_files()
         migrated_components = [
-            f.name
-            for f in sorted(COMPONENTS_DIR.glob("*.html"))
+            f
+            for f in all_files
             if f.name not in allowlisted_names
             and "{% icon " in f.read_text(encoding="utf-8")
         ]
 
-        for filename in migrated_components:
-            content = (COMPONENTS_DIR / filename).read_text(encoding="utf-8")
-            self.assertIn("{% icon ", content, msg=f"{filename} should render icons via {{% icon %}}")
+        for comp_file in migrated_components:
+            content = comp_file.read_text(encoding="utf-8")
+            self.assertIn("{% icon ", content, msg=f"{comp_file.name} should render icons via {{% icon %}}")
 
     def test_account_status_banner_renders_icon_svg(self) -> None:
         rendered = Template(

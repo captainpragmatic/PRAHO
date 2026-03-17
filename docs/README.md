@@ -11,8 +11,9 @@
 
 ## UI/UX Design System
 
-- [Portal Design System Specification](architecture/ui-ux/portal-design-system.md) -- Tokens, components, API rules, UX standards, governance
-- [Portal UI/UX Implementation Backlog](architecture/ui-ux/portal-ui-ux-backlog.md) -- Phased roadmap (A-D), task breakdown, success metrics
+- [Design System Specification](architecture/ui-ux/design-system.md) -- Tokens, components, API rules, UX standards, governance
+- [UI/UX Implementation Backlog](architecture/ui-ux/portal-ui-ux-backlog.md) -- Phased roadmap (A-D), task breakdown, success metrics
+- [ADR-0035: Unified Design System](ADRs/ADR-0035-unified-design-system.md) -- Shared component architecture
 
 ## Architecture Decision Records
 

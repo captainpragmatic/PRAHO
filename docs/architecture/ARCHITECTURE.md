@@ -57,6 +57,13 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  ├─ nginx/                   # Reverse proxy configuration
 │  ├─ docker-compose.services.yml  # Production services
 │  └─ docker-compose.dev.yml   # Development services
+├─ shared/                      # 🎨 Cross-service shared assets (ADR-0035)
+│  ├─ ui/                      # Shared design system
+│  │  ├─ templates/components/ # 15 shared component templates (canonical)
+│  │  └─ static/js/components/ # Shared JS modules (modal, toast)
+│  └─ tailwind.preset.js       # Shared Tailwind CSS preset
+├─ assets/                      # 🎨 Build inputs
+│  └─ css/input.css            # Shared Tailwind CSS source (design tokens)
 ├─ tests/                      # 🧪 Cross-service testing
 │  └─ integration/             # Integration tests for service communication
 └─ Makefile                    # ⚙️ Service management commands

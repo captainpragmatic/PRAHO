@@ -81,7 +81,6 @@ class N1QueryOptimizationTestCase(TestCase):
             self.users.append(user)
             self.customers.append(customer)
 
-        print("🏗️  Setting up N+1 query optimization test environment...")
 
     def test_is_customer_user_without_prefetch_uses_exists(self):
         """Test that is_customer_user uses efficient exists() query when not prefetched"""
@@ -92,7 +91,6 @@ class N1QueryOptimizationTestCase(TestCase):
             result = user.is_customer_user
             self.assertTrue(result)
 
-        print("✅ is_customer_user without prefetch (1 query): PASSED")
 
     def test_is_customer_user_with_prefetch_uses_cache(self):
         """Test that is_customer_user uses prefetched data when available"""
@@ -104,7 +102,6 @@ class N1QueryOptimizationTestCase(TestCase):
             result = user.is_customer_user
             self.assertTrue(result)
 
-        print("✅ is_customer_user with prefetch (0 queries): PASSED")
 
     def test_primary_customer_without_prefetch_optimized(self):
         """Test that primary_customer uses optimized query when not prefetched"""
@@ -115,7 +112,6 @@ class N1QueryOptimizationTestCase(TestCase):
             customer = user.primary_customer
             self.assertEqual(customer, self.customers[0])
 
-        print("✅ primary_customer without prefetch (1 query): PASSED")
 
     def test_primary_customer_with_prefetch_uses_cache(self):
         """Test that primary_customer uses prefetched data when available"""
@@ -127,7 +123,6 @@ class N1QueryOptimizationTestCase(TestCase):
             customer = user.primary_customer
             self.assertEqual(customer, self.customers[0])
 
-        print("✅ primary_customer with prefetch (0 queries): PASSED")
 
     def test_get_accessible_customers_without_prefetch_optimized(self):
         """Test that get_accessible_customers uses optimized query when not prefetched"""
@@ -139,7 +134,6 @@ class N1QueryOptimizationTestCase(TestCase):
             self.assertEqual(len(customers), 1)
             self.assertEqual(customers[0], self.customers[0])
 
-        print("✅ get_accessible_customers without prefetch (1 query): PASSED")
 
     def test_get_accessible_customers_with_prefetch_uses_cache(self):
         """Test that get_accessible_customers uses prefetched data when available"""
@@ -152,7 +146,6 @@ class N1QueryOptimizationTestCase(TestCase):
             self.assertEqual(len(customers), 1)
             self.assertEqual(customers[0], self.customers[0])
 
-        print("✅ get_accessible_customers with prefetch (0 queries): PASSED")
 
     def test_staff_user_accessible_customers_optimization(self):
         """Test that staff users get optimized query for all customers"""
@@ -164,7 +157,6 @@ class N1QueryOptimizationTestCase(TestCase):
             # Just get the QuerySet, don't evaluate it
             self.assertIn('Customer', str(type(customers_qs)))
 
-        print("✅ Staff user accessible customers optimization: PASSED")
 
     def test_n1_prevention_in_bulk_operations(self):
         """Test that bulk operations prevent N+1 queries"""
@@ -188,7 +180,6 @@ class N1QueryOptimizationTestCase(TestCase):
             # Verify we got data for all users
             self.assertEqual(len(user_customer_data), 3)
 
-        print("✅ Bulk operations N+1 prevention (≤2 queries): PASSED")
 
     def test_performance_comparison_before_after(self):
         """Performance comparison: N+1 queries vs optimized queries"""
@@ -205,8 +196,6 @@ class N1QueryOptimizationTestCase(TestCase):
             for user in unoptimized_users:
                 # Each of these would trigger individual queries without optimization
                 _ = user.is_customer_user
-            query_count_before = len(connection.queries)
-
             reset_queries()
             # ✅ GOOD: With optimization (prefetch)
             optimized_users = User.objects.prefetch_related(
@@ -216,9 +205,6 @@ class N1QueryOptimizationTestCase(TestCase):
                 # These should use prefetched data
                 _ = user.is_customer_user
             query_count_after = len(connection.queries)
-
-            print(f"🚀 Performance improvement: {query_count_before} → {query_count_after} queries")
-            print("✅ Performance comparison test: PASSED")
 
             # With our optimization, should be significantly better
             self.assertLessEqual(query_count_after, 2)  # Should be ≤2 queries total
