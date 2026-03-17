@@ -112,8 +112,8 @@ if "*" in ALLOWED_HOSTS:
 CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in {"localhost", "127.0.0.1"}]
 
 # Explicit domain settings for safe absolute URL construction (emails, links)
-PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "")
-PLATFORM_DOMAIN = os.environ.get("PLATFORM_DOMAIN", "")
+PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "").strip()
+PLATFORM_DOMAIN = os.environ.get("PLATFORM_DOMAIN", "").strip()
 if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
     from django.core.exceptions import ImproperlyConfigured
 
@@ -125,9 +125,9 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
 
 # Ensure SecurityMiddleware is FIRST in middleware stack
 MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware",  # MUST be first
+    "apps.common.middleware.RequestIDMiddleware",  # Request ID first for all responses
+    "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
-    "apps.common.middleware.RequestIDMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

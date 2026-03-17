@@ -5,7 +5,6 @@ Handles refund processing, eligibility checks, and bidirectional synchronization
 
 from __future__ import annotations
 
-import contextlib
 import enum
 import logging
 import uuid
@@ -801,10 +800,16 @@ class RefundService:
                 created_by=refund_data.get("initiated_by") if refund_data else None,  # type: ignore[misc]
             )
 
-            # Create status history
-            with contextlib.suppress(DatabaseError):
+            # Create status history (ADR-0016: audit trail must not be silently dropped)
+            try:
                 RefundStatusHistory.objects.create(
                     refund=refund, previous_status="", new_status="pending", change_reason="Refund initiated"
+                )
+            except DatabaseError:
+                logger.warning(
+                    "Failed to create refund status history for refund_id=%s — audit trail gap",
+                    refund.pk,
+                    exc_info=True,
                 )
 
             return Ok(None)
@@ -979,7 +984,11 @@ class RefundService:
         try:
             return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError):
-            # Handle cases where order doesn't have proper relationships or Sum returns unexpected type
+            logger.warning(
+                "Refund amount aggregation failed for order_id=%s, defaulting to 0 — over-refund risk",
+                order.pk,
+                exc_info=True,
+            )
             return 0
 
     @staticmethod
@@ -998,7 +1007,11 @@ class RefundService:
         try:
             return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError):
-            # Handle cases where invoice doesn't have proper relationships or Sum returns unexpected type
+            logger.warning(
+                "Refund amount aggregation failed for invoice_id=%s, defaulting to 0 — over-refund risk",
+                invoice.pk,
+                exc_info=True,
+            )
             return 0
 
     @staticmethod
