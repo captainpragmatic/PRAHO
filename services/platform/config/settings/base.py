@@ -29,6 +29,7 @@ DJANGO_APPS: list[str] = [
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
     "rest_framework.authtoken",  # 🔐 Token authentication for API access
+    "corsheaders",
     "ipware",
     "django_q",  # Async task processing
 ]
@@ -58,6 +59,7 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE: list[str] = [
     "apps.common.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
