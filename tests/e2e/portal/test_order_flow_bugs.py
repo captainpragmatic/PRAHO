@@ -300,17 +300,27 @@ def test_ds1_vat_rate_displayed_on_checkout(page: Page) -> None:
         print(f"  SKIP: Redirected from cart to {page.url}")
         return
 
-    # Wait for HTMX to load cart totals (the partial loads asynchronously)
-    page.wait_for_timeout(2000)
+    # Wait for HTMX to load cart totals (hx-trigger="load" fires async POST to calculate_totals).
+    # The response replaces #cart-totals with the rendered partial containing VAT info.
+    # Wait for the HTMX response to arrive, not just a fixed timeout.
+    try:
+        page.wait_for_response(lambda r: "cart/calculate" in r.url, timeout=15000)
+        page.wait_for_timeout(500)  # Allow HTMX swap to settle
+    except Exception:
+        # If the response never comes, the assertion below will catch it
+        page.wait_for_timeout(3000)
 
-    # Look for VAT display — the cart_totals.html partial shows "VAT (21%)"
-    vat_text = page.locator('text="VAT (21%)"').first
-    if not vat_text.is_visible(timeout=5000):
-        # Also accept Romanian format or percentage-only format
-        vat_text = page.locator('[id="cart-totals"]').locator('text=/VAT|TVA|21%/')
-        assert vat_text.count() > 0, (
-            "DS-1 REGRESSION: VAT rate not visible on cart review page. "
-            "Romanian compliance requires '21%' to appear in the order summary."
-        )
+    # Look for VAT display — the cart_totals.html partial shows "{% trans 'VAT' %} (21%)"
+    # which renders as "VAT (21%)" in English or "TVA (21%)" in Romanian locale.
+    cart_totals = page.locator("#cart-totals")
+    vat_visible = cart_totals.locator("text=/(?:VAT|TVA).*21%/").count() > 0
+    if not vat_visible:
+        # Also check for percentage alone (some layouts may split the text)
+        vat_visible = cart_totals.locator("text=/21\\s*%/").count() > 0
+
+    assert vat_visible, (
+        "DS-1 REGRESSION: VAT rate not visible on cart review page. "
+        "Romanian compliance requires '21%' (or 'TVA 21%') to appear in the order summary."
+    )
 
     print("  VAT rate (21%) is visible on cart review — DS-1 not regressed")
