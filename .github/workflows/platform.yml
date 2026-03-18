@@ -14,6 +14,7 @@ on:
     branches: [master, staging]
     paths:
       - 'services/platform/**'
+      - 'shared/**'
       - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -22,6 +23,7 @@ on:
     branches: [master]
     paths:
       - 'services/platform/**'
+      - 'shared/**'
       - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
