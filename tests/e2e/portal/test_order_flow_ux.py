@@ -6,7 +6,7 @@ pages. Each test is independent and performs a fresh customer login. No database
 access is used — all assertions are made against the live rendered UI.
 """
 
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import (
     BASE_URL,
@@ -149,34 +149,26 @@ def test_ux2_mini_cart_opens_and_closes(page: Page) -> None:
     page.wait_for_load_state("networkidle")
 
     # Locate the cart toggle button and the mini cart container
-    cart_button = page.locator("button[onclick='toggleMiniCart()']")
+    # The cart widget uses Alpine.js: @click="miniCartOpen = !miniCartOpen" / x-show
+    cart_button = page.locator("#cart-widget button")
     mini_cart = page.locator("#mini-cart")
 
     assert cart_button.count() > 0, "Cart toggle button should be present on catalog page"
     assert mini_cart.count() > 0, "Mini cart container (#mini-cart) should be present"
 
-    # Initially the mini cart is hidden
-    assert "hidden" in (mini_cart.get_attribute("class") or ""), (
-        "Mini cart should start hidden"
-    )
+    # Initially the mini cart is not visible (Alpine.js x-show controls visibility)
+    expect(mini_cart).not_to_be_visible()
 
     # Click the cart button to open
     cart_button.click()
     page.wait_for_timeout(300)
-
-    assert "hidden" not in (mini_cart.get_attribute("class") or ""), (
-        "UX-2 FAIL: Mini cart should be visible after clicking the cart button"
-    )
+    expect(mini_cart).to_be_visible()
     print("  Mini cart opened successfully")
 
     # Click outside the cart widget to close it
-    # The page header text is outside the cart widget
     page.locator("h1").first.click()
     page.wait_for_timeout(500)
-
-    assert "hidden" in (mini_cart.get_attribute("class") or ""), (
-        "UX-2 FAIL: Mini cart should be hidden after clicking outside the cart widget"
-    )
+    expect(mini_cart).not_to_be_visible()
     print("  Mini cart closed after clicking outside — UX-2 passes")
 
 

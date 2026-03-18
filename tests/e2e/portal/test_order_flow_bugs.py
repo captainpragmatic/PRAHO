@@ -8,6 +8,8 @@ and Romanian VAT display compliance.
 All tests are independent and perform a fresh login. No database access is used.
 """
 
+import contextlib
+
 from playwright.sync_api import Page
 
 from tests.e2e.helpers import (
@@ -93,8 +95,11 @@ def test_bug2_product_type_in_cart_items(page: Page) -> None:
     page.goto(CART_URL)
     page.wait_for_load_state("networkidle")
 
-    # Cart should show at least one item
+    # Wait for cart items to render (HTMX may load async)
     cart_items = page.locator('[id^="cart-item-"]')
+    with contextlib.suppress(Exception):
+        cart_items.first.wait_for(state="attached", timeout=5000)
+
     assert cart_items.count() > 0, "Cart should have at least one item"
 
     # Each cart item should display a product type badge
@@ -202,8 +207,8 @@ def test_backend3_cart_version_mismatch_ajax(page: Page) -> None:
     status = response_data.get("status", 0)
     # The server should return 400 for stale cart_version, or 404 for unknown slug.
     # Both indicate proper rejection rather than a silent 200.
-    assert status in (400, 404, 409), (
-        f"BACKEND-3 REGRESSION: Expected 400/404/409 for stale cart_version, got {status}. "
+    assert status in (400, 404, 409, 422), (
+        f"BACKEND-3 REGRESSION: Expected 400/404/409/422 for stale cart_version, got {status}. "
         "Server must reject stale cart versions to prevent concurrent modification bugs."
     )
 

@@ -28,6 +28,7 @@ from django.utils import timezone  # noqa: E402
 
 from apps.billing.models import Currency, Invoice, InvoiceLine, Payment  # noqa: E402
 from apps.billing.proforma_models import ProformaInvoice  # noqa: E402
+from apps.billing.refund_models import Refund  # noqa: E402
 from apps.common.tax_service import TaxService  # noqa: E402
 from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
 from apps.orders.models import Order, OrderItem  # noqa: E402
@@ -373,17 +374,24 @@ class TestRefundWorkflow(TestCase):
             status='succeeded',
         )
 
-        # Create refund payment (negative amount)
-        refund = Payment.objects.create(
+        # Transition payment to refunded state via FSM helper
+        force_status(payment, 'refunded')
+        payment.refresh_from_db()
+
+        # Create a Refund record with positive amount
+        refund = Refund.objects.create(
             customer=self.customer,
             invoice=invoice,
+            payment=payment,
             currency=self.currency,
-            amount_cents=-10000,  # Negative for refund
-            payment_method='stripe',
-            status='refunded',
+            amount_cents=10000,
+            original_amount_cents=10000,
+            refund_type='full',
+            reason='customer_request',
+            reference_number='REF-E2E-FULL-001',
         )
 
-        assert refund.amount_cents == -payment.amount_cents
+        assert refund.amount_cents == payment.amount_cents
 
     def test_partial_refund_workflow(self):
         """Test partial refund of paid invoice"""
@@ -411,15 +419,23 @@ class TestRefundWorkflow(TestCase):
             status='succeeded',
         )
 
-        # Create partial refund
-        refund = Payment.objects.create(
+        # Retrieve the payment created above and transition to partially_refunded
+        payment = Payment.objects.get(invoice=invoice, amount_cents=10000)
+        force_status(payment, 'partially_refunded')
+        payment.refresh_from_db()
+
+        # Create a Refund record with positive partial amount
+        refund = Refund.objects.create(
             customer=self.customer,
             invoice=invoice,
+            payment=payment,
             currency=self.currency,
-            amount_cents=-5000,  # Half refund
-            payment_method='stripe',
-            status='refunded',
+            amount_cents=5000,
+            original_amount_cents=10000,
+            refund_type='partial',
+            reason='customer_request',
+            reference_number='REF-E2E-PARTIAL-001',
         )
 
-        assert refund.amount_cents == -5000
-        assert abs(refund.amount_cents) < invoice.total_cents
+        assert refund.amount_cents == 5000
+        assert refund.amount_cents < invoice.total_cents
