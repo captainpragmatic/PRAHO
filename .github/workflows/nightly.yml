@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  DJANGO_SETTINGS_MODULE: config.settings.test
+  DJANGO_SETTINGS_MODULE: config.settings.ci
   DJANGO_SECRET_KEY: test-secret-key-for-ci
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
@@ -91,16 +91,19 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16-alpine
         env:
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: test
           POSTGRES_DB: test_db
-          POSTGRES_USER: postgres
+          POSTGRES_USER: test
+          POSTGRES_INITDB_ARGS: "--nosync"
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
+          --health-interval 5s
+          --health-timeout 3s
           --health-retries 5
+          --shm-size=256mb
+          --tmpfs /var/lib/postgresql/data
         ports:
           - 5432:5432
 
@@ -123,10 +126,10 @@ jobs:
 
     - name: Set up database
       env:
-        DJANGO_SETTINGS_MODULE: config.settings.base
+        DJANGO_SETTINGS_MODULE: config.settings.ci
         DB_NAME: test_db
-        DB_USER: postgres
-        DB_PASSWORD: postgres
+        DB_USER: test
+        DB_PASSWORD: test
         DB_HOST: localhost
       run: |
         cd services/platform
@@ -139,7 +142,7 @@ jobs:
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.test --verbosity=2 --parallel
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.ci --verbosity=2
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
 
@@ -151,16 +154,16 @@ jobs:
     - name: Integration tests
       env:
         DB_NAME: test_db
-        DB_USER: postgres
-        DB_PASSWORD: postgres
+        DB_USER: test
+        DB_PASSWORD: test
         DB_HOST: localhost
       run: make test-integration
 
     - name: Cache and security tests
       env:
         DB_NAME: test_db
-        DB_USER: postgres
-        DB_PASSWORD: postgres
+        DB_USER: test
+        DB_PASSWORD: test
         DB_HOST: localhost
       run: |
         make test-cache

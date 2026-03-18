@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -46,6 +46,7 @@ help:
 	@echo "  make test-fast         - Full test suite (all 5 phases, failfast + parallel)"
 	@echo "  make test-platform     - Platform tests only (parallel, no keepdb)"
 	@echo "  make test-platform-fast - Platform tests only (failfast + keepdb + parallel)"
+	@echo "  make test-ci           - Platform tests with PostgreSQL (production parity)"
 	@echo "  make test-ci-focused MODULES='tests.X tests.Y' - Focused CI test run"
 	@echo "  make test-file FILE=tests.X.test_Y - Run a specific test file"
 	@echo "  make test-platform-pytest - Test platform service with pytest"
@@ -273,7 +274,7 @@ dev-with-logs: check-env build-css
 test-platform:
 	@echo "🧪 [Platform] Testing with database cache (no Redis)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --parallel
+	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --parallel
 	@echo "✅ Platform tests completed successfully!"
 
 test-file:
@@ -405,11 +406,13 @@ test:
 	@$(MAKE) test-security
 	@echo "🎉 All test phases completed successfully!"
 
+PLATFORM_TEST_SETTINGS ?= config.settings.test
+
 test-fast:
 	@echo "⚡ [All] Fast test suite (failfast + parallel, all phases)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📋 Phase 1: Platform service tests (failfast + parallel)"
-	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --failfast --parallel
+	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --failfast --parallel
 	@echo "📋 Phase 2: Portal service tests"
 	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest -v --maxfail=5
 	@echo "📋 Phase 3: Integration tests"
@@ -436,11 +439,18 @@ test-ci-focused:
 ifndef MODULES
 	$(error MODULES is required. Usage: make test-ci-focused MODULES="tests.billing tests.common")
 endif
-	@$(PYTHON_PLATFORM_MANAGE) test $(MODULES) --settings=config.settings.test --verbosity=2 --failfast --parallel
+	@$(PYTHON_PLATFORM_MANAGE) test $(MODULES) --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --failfast --parallel
 	@echo "✅ Focused tests completed!"
 
 show-test-deps:
 	@$(PYTHON_SHARED) scripts/affected_test_modules.py --show-graph
+
+test-ci:
+	@echo "🐘 [Platform] CI test run (PostgreSQL + DatabaseCache)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "⚠️  Requires PostgreSQL running locally (or via Docker)"
+	@PLATFORM_TEST_SETTINGS=config.settings.ci $(MAKE) test-platform
+	@echo "✅ CI tests completed (PostgreSQL)!"
 
 # ===============================================================================
 # DATABASE & ASSETS 🗄️

@@ -36,7 +36,7 @@ permissions:
   checks: read
 
 env:
-  DJANGO_SETTINGS_MODULE: config.settings.test
+  DJANGO_SETTINGS_MODULE: config.settings.ci
   DJANGO_SECRET_KEY: test-secret-key-for-ci
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
@@ -61,7 +61,11 @@ jobs:
               // Safety: comment body accessed via JS object, never in shell
               const comment = context.payload.comment.body.trim();
               const isPR = !!context.payload.issue.pull_request;
-              if (comment === '/full-test' && isPR) {
+              const isOpen = context.payload.issue.state === 'open';
+              // Only allow collaborators+ to trigger (prevents untrusted code execution)
+              const assoc = context.payload.comment.author_association;
+              const isTrusted = ['MEMBER', 'OWNER', 'COLLABORATOR'].includes(assoc);
+              if (comment === '/full-test' && isPR && isOpen && isTrusted) {
                 const pr = await github.rest.pulls.get({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -99,16 +103,19 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16-alpine
         env:
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: test
           POSTGRES_DB: test_db
-          POSTGRES_USER: postgres
+          POSTGRES_USER: test
+          POSTGRES_INITDB_ARGS: "--nosync"
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
+          --health-interval 5s
+          --health-timeout 3s
           --health-retries 5
+          --shm-size=256mb
+          --tmpfs /var/lib/postgresql/data
         ports:
           - 5432:5432
 
@@ -134,10 +141,10 @@ jobs:
 
     - name: Set up database for integration tests
       env:
-        DJANGO_SETTINGS_MODULE: config.settings.base
+        DJANGO_SETTINGS_MODULE: config.settings.ci
         DB_NAME: test_db
-        DB_USER: postgres
-        DB_PASSWORD: postgres
+        DB_USER: test
+        DB_PASSWORD: test
         DB_HOST: localhost
       run: |
         cd services/platform
@@ -147,10 +154,10 @@ jobs:
     - name: Run full test suite (make test-fast — all 5 phases)
       env:
         DB_NAME: test_db
-        DB_USER: postgres
-        DB_PASSWORD: postgres
+        DB_USER: test
+        DB_PASSWORD: test
         DB_HOST: localhost
-      run: make test-fast
+      run: make test-fast PLATFORM_TEST_SETTINGS=config.settings.ci
 
     - name: Type checking (all services)
       run: make check-types
