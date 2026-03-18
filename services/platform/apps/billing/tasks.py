@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from apps.customers.profile_models import CustomerTaxProfile
@@ -407,12 +407,15 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
         # Step 3: VIES API verification
         vies = VIESGateway.check_vat(country_code, vat_digits)
 
+        source: Literal["vies", "format_check", "manual", "cached"]
         if vies.api_available:
             source = "vies"
             is_valid = vies.is_valid
             status = "valid" if vies.is_valid else "invalid"
         else:
-            # VIES down — record format-only result but do NOT grant reverse charge
+            # VIES down — record format-only result but do NOT grant reverse charge.
+            # Naming note: "format_check" is VATValidation.validation_source (HOW it was validated);
+            # "format_only" is CustomerTaxProfile.vies_verification_status (WHAT the result means).
             source = "format_check"
             is_valid = False  # Format passed but VIES not confirmed — not valid for reverse charge
             status = "format_only"
@@ -481,7 +484,7 @@ def _store_validation(  # noqa: PLR0913
     full_vat_number: str,
     *,
     is_valid: bool,
-    source: str,
+    source: Literal["vies", "format_check", "manual", "cached"],
     company_name: str = "",
     company_address: str = "",
     response_data: dict[str, Any] | None = None,

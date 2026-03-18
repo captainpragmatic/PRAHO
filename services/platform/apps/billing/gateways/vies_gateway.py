@@ -60,7 +60,11 @@ class VIESGateway:
         cached = cache.get(cache_key)
         if isinstance(cached, dict):
             logger.debug("[VIES] Cache hit: %s%s", country_code, vat_number)
-            return VIESResponse(**cached)
+            try:
+                return VIESResponse(**cached)
+            except TypeError:
+                logger.warning("[VIES] Corrupt cache entry for %s%s — evicting", country_code, vat_number)
+                cache.delete(cache_key)
 
         logger.info("[VIES] Querying API: %s%s", country_code, vat_number)
         try:

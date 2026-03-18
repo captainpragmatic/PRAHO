@@ -5,6 +5,27 @@ Supports EU cross-border VAT validation (issue #88).
 
 from django.db import migrations, models
 
+# EU-27 VAT prefix codes (EL for Greece, not ISO GR).
+# Inlined here so the migration is self-contained and doesn't import app code.
+_EU_VAT_PREFIXES = frozenset({
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES",
+    "FI", "FR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT",
+    "NL", "PL", "PT", "RO", "SE", "SI", "SK",
+})
+
+
+def _backfill_not_applicable(apps, schema_editor):
+    """Set vies_verification_status='not_applicable' for non-EU / no-VAT profiles."""
+    CustomerTaxProfile = apps.get_model("customers", "CustomerTaxProfile")
+    to_update = []
+    for profile in CustomerTaxProfile.objects.all():
+        prefix = profile.vat_number[:2].upper() if profile.vat_number else ""
+        if not prefix or prefix not in _EU_VAT_PREFIXES:
+            profile.vies_verification_status = "not_applicable"
+            to_update.append(profile)
+    if to_update:
+        CustomerTaxProfile.objects.bulk_update(to_update, ["vies_verification_status"])
+
 
 class Migration(migrations.Migration):
     dependencies = [
@@ -48,4 +69,5 @@ class Migration(migrations.Migration):
                 verbose_name="VIES status",
             ),
         ),
+        migrations.RunPython(_backfill_not_applicable, migrations.RunPython.noop),
     ]
