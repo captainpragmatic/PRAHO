@@ -60,7 +60,7 @@ EU_COUNTRIES: frozenset[str] = frozenset(
 _VAT_PREFIX_RE = re.compile(r"^([A-Z]{2})([A-Z0-9]+)$")
 
 
-@dataclass
+@dataclass(frozen=True)
 class VATFormatResult:
     """Result of VAT format validation."""
 
@@ -82,7 +82,12 @@ def parse_vat_number(raw: str, *, default_country: str = "RO") -> tuple[str, str
 
     Returns:
         Tuple of (country_code, vat_body).
+
+    Raises:
+        ValueError: If raw is None or empty.
     """
+    if not raw:
+        raise ValueError("VAT number must not be empty")
     cleaned = re.sub(r"[\s\-.]", "", raw.strip()).upper()
 
     match = _VAT_PREFIX_RE.match(cleaned)

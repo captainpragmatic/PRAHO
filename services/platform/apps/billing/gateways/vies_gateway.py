@@ -14,7 +14,7 @@ from typing import Any
 
 from django.core.cache import cache
 
-from apps.common.outbound_http import STRICT_EXTERNAL, OutboundSecurityError, safe_request
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,11 @@ VIES_CACHE_PREFIX = "vies:"
 VIES_CACHE_TTL_VALID = 24 * 60 * 60  # 24 hours
 VIES_CACHE_TTL_INVALID = 60 * 60  # 1 hour
 
+# Narrow SSRF policy: only ec.europa.eu is a valid target for VIES checks.
+VIES_POLICY = OutboundPolicy(name="vies", allowed_domains=frozenset({"ec.europa.eu"}))
 
-@dataclass
+
+@dataclass(frozen=True)
 class VIESResponse:
     """Standardised result from a VIES API call."""
 
@@ -71,7 +74,7 @@ class VIESGateway:
             response = safe_request(
                 "POST",
                 VIES_API_URL,
-                policy=STRICT_EXTERNAL,
+                policy=VIES_POLICY,
                 json={"countryCode": country_code, "vatNumber": vat_number},
             )
             response.raise_for_status()

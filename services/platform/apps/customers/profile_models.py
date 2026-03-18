@@ -99,6 +99,7 @@ class CustomerTaxProfile(SoftDeleteModel):
             models.Index(fields=["cnp"]),
             models.Index(fields=["cui"]),
             models.Index(fields=["vat_number"]),
+            models.Index(fields=["vies_verification_status"], name="customer_tax_vies_status_idx"),
         )
 
     def validate_cui(self) -> bool:
