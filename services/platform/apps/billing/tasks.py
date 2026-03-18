@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from apps.customers.profile_models import CustomerTaxProfile
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 from django_q.tasks import async_task
@@ -382,15 +386,16 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
         # Step 2: Offline format validation
         fmt = validate_vat_format(country_code, vat_digits)
         if not fmt.is_valid:
-            _store_validation(
-                fmt.country_code,
-                vat_digits,
-                fmt.full_vat_number,
-                is_valid=False,
-                source="format_check",
-                response_data={"error": fmt.error_message},
-            )
-            _update_tax_profile_vies(tax_profile, status="invalid")
+            with transaction.atomic():
+                _store_validation(
+                    fmt.country_code,
+                    vat_digits,
+                    fmt.full_vat_number,
+                    is_valid=False,
+                    source="format_check",
+                    response_data={"error": fmt.error_message},
+                )
+                _update_tax_profile_vies(tax_profile, status="invalid")
             logger.info("[VAT] Format invalid: %s — %s", fmt.full_vat_number, fmt.error_message)
             return {
                 "success": True,
@@ -436,22 +441,25 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
 
         logger.info("[VAT] Validated %s: %s (source=%s)", fmt.full_vat_number, status, source)
 
-        AuditService.log_simple_event(
-            event_type="vat_validation_completed",
-            user=None,
-            content_object=tax_profile,
-            description=f"VAT validation: {fmt.full_vat_number} -> {status}",
-            actor_type="system",
-            metadata={
-                "tax_profile_id": str(tax_profile.id),
-                "vat_number": fmt.full_vat_number,
-                "country_code": country_code,
-                "is_valid": is_valid,
-                "source": source,
-                "customer_id": str(tax_profile.customer_id),
-                "source_app": "billing",
-            },
-        )
+        try:
+            AuditService.log_simple_event(
+                event_type="vat_validation_completed",
+                user=None,
+                content_object=tax_profile,
+                description=f"VAT validation: {fmt.full_vat_number} -> {status}",
+                actor_type="system",
+                metadata={
+                    "tax_profile_id": str(tax_profile.id),
+                    "vat_number": fmt.full_vat_number,
+                    "country_code": country_code,
+                    "is_valid": is_valid,
+                    "source": source,
+                    "customer_id": str(tax_profile.customer_id),
+                    "source_app": "billing",
+                },
+            )
+        except Exception:
+            logger.exception("[VAT] Audit log failed for %s — validation result already persisted", fmt.full_vat_number)
 
         return {
             "success": True,
@@ -499,7 +507,7 @@ def _store_validation(  # noqa: PLR0913
 
 
 def _update_tax_profile_vies(
-    tax_profile: Any,
+    tax_profile: CustomerTaxProfile,
     *,
     status: str,
     company_name: str = "",
@@ -507,10 +515,11 @@ def _update_tax_profile_vies(
     """Update CustomerTaxProfile VIES verification fields.
 
     Status values and their effect on reverse_charge_eligible:
-      - "valid": VIES confirmed → eligible = True
-      - "invalid": VIES rejected → eligible = False
-      - "format_only": VIES unavailable, format passed → eligible = False (no VIES proof)
-      - any other: unknown → eligible = False (fail-closed)
+      - "valid": VIES confirmed → eligible = True, vies_verified_at set to now
+      - "invalid": VIES rejected → eligible = False, vies_verified_at cleared
+      - "format_only": VIES unavailable, format passed → eligible = False (no VIES proof), vies_verified_at cleared
+      - "not_applicable": non-EU VAT → eligible = False, vies_verified_at cleared
+      - any other: unknown → eligible = False (fail-closed), vies_verified_at cleared
     """
     tax_profile.vies_verification_status = status
     tax_profile.vies_verified_name = company_name
@@ -521,8 +530,10 @@ def _update_tax_profile_vies(
         update_fields.extend(["vies_verified_at", "reverse_charge_eligible"])
     else:
         # All non-"valid" statuses revoke reverse charge eligibility (fail-closed)
+        # Clear vies_verified_at so stale timestamps don't imply current validity
         tax_profile.reverse_charge_eligible = False
-        update_fields.append("reverse_charge_eligible")
+        tax_profile.vies_verified_at = None
+        update_fields.extend(["reverse_charge_eligible", "vies_verified_at"])
     tax_profile.save(update_fields=update_fields)
 
 
@@ -1060,17 +1071,25 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
     expired = list(
         VATValidation.objects.filter(
             expires_at__lt=timezone.now(),
-            is_valid=True,
-        ).values_list("vat_number", "country_code")[:100]
+        )
+        .filter(
+            # Re-verify currently-valid records AND format_only records (VIES was down at initial check)
+            # but NOT records that failed format validation (status="invalid") — those won't improve.
+            Q(is_valid=True) | Q(validation_source="format_check")
+        )
+        .values_list("vat_number", "country_code")[:100]
     )
 
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
     queued = 0
     for vat_number, country_code in expired:
-        # Find the tax profile with exact VAT number match (not icontains which can match wrong profile)
         full_vat = f"{country_code}{vat_number}"
-        profile = CustomerTaxProfile.objects.filter(vat_number=full_vat).first()
+        # Only re-queue profiles that are valid or format_only (not hard-invalid format failures)
+        profile = CustomerTaxProfile.objects.filter(
+            vat_number=full_vat,
+            vies_verification_status__in=["valid", "format_only"],
+        ).first()
         if profile:
             async_task("apps.billing.tasks.validate_vat_number", str(profile.id))
             queued += 1

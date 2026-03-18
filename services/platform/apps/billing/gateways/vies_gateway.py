@@ -14,7 +14,7 @@ from typing import Any
 
 from django.core.cache import cache
 
-from apps.common.outbound_http import STRICT_EXTERNAL, safe_request
+from apps.common.outbound_http import STRICT_EXTERNAL, OutboundSecurityError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,9 @@ class VIESGateway:
             cache.set(cache_key, asdict(result), ttl)
             return result
 
+        except OutboundSecurityError:
+            logger.error("[VIES] SSRF policy violation for %s%s — request blocked", country_code, vat_number)
+            raise  # Never mask security violations
         except Exception as exc:
             logger.warning("[VIES] API unavailable for %s%s: %s", country_code, vat_number, exc)
             return VIESResponse(
@@ -95,5 +98,5 @@ class VIESGateway:
                 country_code=country_code,
                 vat_number=vat_number,
                 api_available=False,
-                error_message=str(exc),
+                error_message="VIES service temporarily unavailable",
             )

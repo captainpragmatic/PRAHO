@@ -19,7 +19,10 @@ from apps.common.cui_validator import CUIValidator
 
 logger = logging.getLogger(__name__)
 
-# EU-27 member state country codes
+# EU-27 member state VAT prefix codes.
+# NOTE: Greece uses "EL" (from "Ellada") as its VAT prefix in the EU system,
+# not the ISO-3166 code "GR". Both the VIES REST API and python-stdnum expect
+# "EL" for Greek VAT numbers (e.g., "EL094259216").
 EU_COUNTRIES: frozenset[str] = frozenset(
     {
         "AT",
@@ -30,10 +33,10 @@ EU_COUNTRIES: frozenset[str] = frozenset(
         "DE",
         "DK",
         "EE",
+        "EL",  # Greece — EU VAT prefix is EL (not ISO code GR)
         "ES",
         "FI",
         "FR",
-        "GR",
         "HR",
         "HU",
         "IE",

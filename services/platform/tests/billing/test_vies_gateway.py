@@ -69,7 +69,8 @@ class TestVIESGateway(SimpleTestCase):
 
         self.assertFalse(result.is_valid)
         self.assertFalse(result.api_available)
-        self.assertIn("VIES is down", result.error_message)
+        # Generic message hides infrastructure details (M6 fix — don't leak IPs/DNS)
+        self.assertIn("temporarily unavailable", result.error_message)
 
     @patch("apps.billing.gateways.vies_gateway.cache")
     @patch("apps.billing.gateways.vies_gateway.safe_request")

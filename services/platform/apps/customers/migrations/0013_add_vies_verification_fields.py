@@ -8,7 +8,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("customers", "0012_fix_soft_delete_unique_constraints"),
+        ("customers", "0002_initial"),
     ]
 
     operations = [

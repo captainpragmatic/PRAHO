@@ -428,7 +428,12 @@ class ValidateVatNumberTests(TestCase):
 
     @patch("apps.billing.gateways.vies_gateway.VIESGateway.check_vat")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_generic_exception_returns_error(self, mock_audit: MagicMock, mock_vies: MagicMock) -> None:
+    def test_audit_failure_does_not_poison_result(self, mock_audit: MagicMock, mock_vies: MagicMock) -> None:
+        """Audit log failure must not affect the validation result (H1 fix).
+
+        The validation was already persisted inside transaction.atomic(); an audit
+        log write failure afterwards must not cause the task to report failure.
+        """
         from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
 
         mock_vies.return_value = VIESResponse(
@@ -444,8 +449,9 @@ class ValidateVatNumberTests(TestCase):
         profile = self._make_tax_profile(vat_number="RO1234567")
         result = validate_vat_number(str(profile.id))
 
-        self.assertFalse(result["success"])
-        self.assertIn("network failure", result["error"])
+        # Validation succeeded; audit failure is swallowed and logged but not propagated
+        self.assertTrue(result["success"])
+        self.assertNotIn("error", result)
 
 
 # ---------------------------------------------------------------------------
