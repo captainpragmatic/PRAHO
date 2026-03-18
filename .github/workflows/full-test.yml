@@ -139,21 +139,9 @@ jobs:
     - name: Lint all services
       run: make lint
 
-    - name: Set up database for integration tests
-      env:
-        DJANGO_SETTINGS_MODULE: config.settings.ci
-        DB_NAME: test_db
-        DB_USER: test
-        DB_PASSWORD: test
-        DB_HOST: localhost
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py migrate --no-input
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py createcachetable
-
     - name: Run full test suite (make test-fast — all 5 phases)
       env:
-        DB_NAME: test_db
+        DB_NAME: postgres
         DB_USER: test
         DB_PASSWORD: test
         DB_HOST: localhost

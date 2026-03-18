@@ -124,18 +124,6 @@ jobs:
         uv python install
         uv sync --all-groups
 
-    - name: Set up database
-      env:
-        DJANGO_SETTINGS_MODULE: config.settings.ci
-        DB_NAME: test_db
-        DB_USER: test
-        DB_PASSWORD: test
-        DB_HOST: localhost
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py migrate --no-input
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py createcachetable
-
     - name: Full lint (all 7 phases)
       run: make lint
 
@@ -153,7 +141,7 @@ jobs:
 
     - name: Integration tests
       env:
-        DB_NAME: test_db
+        DB_NAME: postgres
         DB_USER: test
         DB_PASSWORD: test
         DB_HOST: localhost
@@ -161,7 +149,7 @@ jobs:
 
     - name: Cache and security tests
       env:
-        DB_NAME: test_db
+        DB_NAME: postgres
         DB_USER: test
         DB_PASSWORD: test
         DB_HOST: localhost

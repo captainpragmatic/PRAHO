@@ -22,7 +22,8 @@ from .test import *  # noqa: F403
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "test_db"),
+        # Connect to the admin DB; Django's test runner creates test_<NAME> automatically.
+        "NAME": os.environ.get("DB_NAME", "postgres"),
         "USER": os.environ.get("DB_USER", "test"),
         "PASSWORD": os.environ.get("DB_PASSWORD", "test"),
         "HOST": os.environ.get("DB_HOST", "localhost"),
@@ -33,7 +34,6 @@ DATABASES = {
             "options": "-c synchronous_commit=off",
         },
         "TEST": {
-            "NAME": "test_db",
             "SERIALIZE": False,
         },
     }
@@ -52,15 +52,17 @@ if "MIGRATION_MODULES" in dir():
     del MIGRATION_MODULES  # noqa: F821
 
 # ===============================================================================
-# CACHE — DatabaseCache (production parity)
+# CACHE — LocMemCache (functional cache, no table required)
 # ===============================================================================
-# Production uses DatabaseCache; test.py uses DummyCache.
-# CI validates cache serialization, rate limiting, and deduplication logic.
+# Production uses DatabaseCache; test.py uses DummyCache (no-op).
+# CI uses LocMemCache to validate cache serialization, rate limiting, and
+# deduplication logic without requiring createcachetable (which can't run
+# inside Django's test runner before tests start).
 
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
-        "LOCATION": "django_cache_table",
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "ci-cache",
         "KEY_PREFIX": "pragmatichost_ci",
         "OPTIONS": {
             "MAX_ENTRIES": 1000,

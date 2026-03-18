@@ -121,7 +121,7 @@ jobs:
 
     env:
       DJANGO_SETTINGS_MODULE: config.settings.ci
-      DB_NAME: test_db
+      DB_NAME: postgres
       DB_USER: test
       DB_PASSWORD: test
       DB_HOST: localhost
@@ -141,12 +141,6 @@ jobs:
       run: |
         uv python install
         uv sync --group platform --group dev
-
-    - name: Set up database and cache table
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py migrate --no-input
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py createcachetable
 
     - name: Run full platform tests with coverage (PostgreSQL)
       run: |
