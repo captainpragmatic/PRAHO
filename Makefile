@@ -446,7 +446,7 @@ show-test-deps:
 	@$(PYTHON_SHARED) scripts/affected_test_modules.py --show-graph
 
 test-ci:
-	@echo "🐘 [Platform] CI test run (PostgreSQL via Docker)..."
+	@echo "🐘 [Platform] CI test run (PostgreSQL via Docker, serial)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📦 Starting PostgreSQL container..."
 	@docker run --name praho-test-pg -d --rm \
@@ -459,8 +459,10 @@ test-ci:
 		docker exec praho-test-pg pg_isready -U test >/dev/null 2>&1 && break; \
 		sleep 1; \
 	done
-	@DB_NAME=postgres DB_USER=test DB_PASSWORD=test DB_HOST=localhost \
-		PLATFORM_TEST_SETTINGS=config.settings.ci $(MAKE) test-platform; \
+	@echo "🧪 Running platform tests against PostgreSQL (no --parallel)..."
+	@cd services/platform && DB_NAME=postgres DB_USER=test DB_PASSWORD=test DB_HOST=localhost \
+		PYTHONPATH=$$(pwd) $(PWD)/$(VENV_DIR)/bin/python manage.py test tests \
+		--settings=config.settings.ci --verbosity=2; \
 		EXIT=$$?; \
 		docker stop praho-test-pg >/dev/null 2>&1 || true; \
 		exit $$EXIT
