@@ -99,17 +99,17 @@ APP_DEPENDENCIES: dict[str, list[str]] = {
     ],
 }
 
-# Apps whose change triggers the full suite (universal dependencies).
-FULL_SUITE_APPS: set[str] = {"common", "audit", "settings"}
+# Apps whose change triggers the full suite — derived from the graph to prevent divergence.
+FULL_SUITE_APPS: set[str] = {app for app, deps in APP_DEPENDENCIES.items() if deps == ["*"]}
 
 # Always include these modules in any focused run.
-ALWAYS_TEST: list[str] = ["common"]
+ALWAYS_TEST: frozenset[str] = frozenset({"common"})
 
 # If more than this many unique test modules are affected, run full suite.
 # Analysis: most apps expand to 3-9 modules due to interconnected imports.
 # Threshold 8 means mid-tier apps (domains=4, tickets=6, provisioning=7) get
 # focused runs while heavily-connected apps (billing=9, users=10) trigger FULL.
-FULL_SUITE_THRESHOLD = 8
+FULL_SUITE_THRESHOLD: int = 8
 
 # Paths outside platform apps that force a full suite.
 FULL_SUITE_PATH_PATTERNS: list[str] = [
@@ -119,6 +119,8 @@ FULL_SUITE_PATH_PATTERNS: list[str] = [
     r"^shared/",
     r"^services/platform/config/",
     r"^services/platform/tests/(factories|helpers|mocks|fixtures)/",
+    r"^services/platform/tests/conftest\.py$",
+    r"^services/platform/tests/__init__\.py$",
     r"^services/platform/conftest\.py$",
 ]
 
@@ -139,6 +141,7 @@ def classify_file(path: str) -> str | None:
     Returns:
         - An app name (str) if the file belongs to a platform app or test module
         - "FULL" if the file triggers the full suite
+        - "UNKNOWN:name" if the app/module is not in the dependency graph
         - None if the file is irrelevant (portal, docs, etc.)
     """
     for pattern in _FULL_PATTERNS:
@@ -148,13 +151,18 @@ def classify_file(path: str) -> str | None:
     m = PLATFORM_APP_RE.match(path)
     if m:
         app = m.group(1)
-        return app if app in ALL_TEST_MODULES else None
+        if app in ALL_TEST_MODULES:
+            return app
+        # Unknown app — not in dependency graph. Flag it so CI can warn.
+        return f"UNKNOWN:{app}"
 
     m = PLATFORM_TEST_RE.match(path)
     if m:
         module = m.group(1)
         # Shared infra directories already caught by FULL_SUITE_PATH_PATTERNS.
-        return module if module in ALL_TEST_MODULES else None
+        if module in ALL_TEST_MODULES:
+            return module
+        return f"UNKNOWN:{module}"
 
     return None
 
@@ -194,6 +202,7 @@ def determine_modules(changed_files: list[str]) -> tuple[str, dict[str, object]]
     """
     changed_apps: set[str] = set()
     full_triggers: list[str] = []
+    unknown_apps: list[str] = []
     skipped: list[str] = []
 
     for path in changed_files:
@@ -206,13 +215,25 @@ def determine_modules(changed_files: list[str]) -> tuple[str, dict[str, object]]
             full_triggers.append(path)
         elif classification is None:
             skipped.append(path)
+        elif classification.startswith("UNKNOWN:"):
+            unknown_apps.append(classification.removeprefix("UNKNOWN:"))
         else:
             changed_apps.add(classification)
+
+    # Unknown apps trigger FULL to be safe — missing from dependency graph
+    if unknown_apps:
+        print(
+            f"WARNING: Unknown platform apps not in dependency graph: {unknown_apps}. "
+            "Update APP_DEPENDENCIES in scripts/affected_test_modules.py",
+            file=sys.stderr,
+        )
+        full_triggers.append(f"unknown apps: {unknown_apps}")
 
     debug: dict[str, object] = {
         "changed_files": len(changed_files),
         "changed_apps": sorted(changed_apps),
         "full_triggers": full_triggers,
+        "unknown_apps": unknown_apps,
         "skipped": len(skipped),
     }
 

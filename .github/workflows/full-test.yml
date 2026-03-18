@@ -28,6 +28,13 @@ on:
   issue_comment:
     types: [created]
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: read
+  checks: read
+
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
   DJANGO_SECRET_KEY: test-secret-key-for-ci
@@ -62,13 +69,17 @@ jobs:
                 });
                 core.setOutput('should_run', 'true');
                 core.setOutput('ref', pr.data.head.sha);
-                // Acknowledge with rocket emoji
-                await github.rest.reactions.createForIssueComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: context.payload.comment.id,
-                  content: 'rocket',
-                });
+                // Acknowledge with rocket emoji (non-fatal if permissions missing)
+                try {
+                  await github.rest.reactions.createForIssueComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: context.payload.comment.id,
+                    content: 'rocket',
+                  });
+                } catch (e) {
+                  core.warning(`Could not add reaction: ${e.message}`);
+                }
               } else {
                 core.setOutput('should_run', 'false');
               }

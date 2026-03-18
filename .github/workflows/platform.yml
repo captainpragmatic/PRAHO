@@ -38,21 +38,7 @@ env:
 jobs:
   platform-test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+    # No PostgreSQL needed — config.settings.test uses SQLite in-memory
 
     steps:
     - uses: actions/checkout@v4
@@ -105,7 +91,7 @@ jobs:
         PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $MODULES --settings=config.settings.test --verbosity=2 --failfast --parallel
 
     - name: Run full platform tests with coverage
-      if: steps.affected.outputs.modules == 'FULL'
+      if: steps.affected.outputs.modules == 'FULL' || steps.affected.outputs.modules == ''
       run: |
         cd services/platform
         PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=2 --parallel

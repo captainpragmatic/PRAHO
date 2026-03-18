@@ -64,10 +64,10 @@ jobs:
           # Build JSON array of branches that need testing
           BRANCHES="[]"
           if [ "$((MASTER_COMMITS + PR_COUNT))" -gt 0 ]; then
-            BRANCHES=$(echo "$BRANCHES" | jq '. + ["master"]')
+            BRANCHES=$(echo "$BRANCHES" | jq -c '. + ["master"]')
           fi
           if [ "$STAGING_COMMITS" -gt 0 ]; then
-            BRANCHES=$(echo "$BRANCHES" | jq '. + ["staging"]')
+            BRANCHES=$(echo "$BRANCHES" | jq -c '. + ["staging"]')
           fi
 
           echo "branches=$BRANCHES" >> "$GITHUB_OUTPUT"
@@ -136,27 +136,41 @@ jobs:
     - name: Full lint (all 7 phases)
       run: make lint
 
-    - name: Full test suite (no failfast — complete picture)
+    - name: Platform tests with coverage (no failfast — complete picture)
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.test --verbosity=2 --parallel
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
+
+    - name: Portal tests
+      run: |
+        cd services/portal
+        PYTHONPATH= PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
+
+    - name: Integration tests
       env:
         DB_NAME: test_db
         DB_USER: postgres
         DB_PASSWORD: postgres
         DB_HOST: localhost
-      run: make test
+      run: make test-integration
+
+    - name: Cache and security tests
+      env:
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+      run: |
+        make test-cache
+        make test-security
 
     - name: Type checking (all services)
       run: make check-types
 
     - name: Security lint
       run: make lint-security
-      continue-on-error: true
-
-    - name: Platform coverage report
-      run: |
-        cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=1 --parallel
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
       continue-on-error: true
 
     - name: Upload nightly reports
