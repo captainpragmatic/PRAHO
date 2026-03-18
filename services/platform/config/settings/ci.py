@@ -28,7 +28,9 @@ DATABASES = {
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
         "OPTIONS": {
-            "options": "-c fsync=off -c synchronous_commit=off -c full_page_writes=off",
+            # synchronous_commit=off is session-level (safe to set per-connection).
+            # fsync/full_page_writes are server-level — set via POSTGRES_INITDB_ARGS in CI.
+            "options": "-c synchronous_commit=off",
         },
         "TEST": {
             "NAME": "test_db",
