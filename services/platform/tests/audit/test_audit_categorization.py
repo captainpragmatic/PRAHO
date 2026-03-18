@@ -103,7 +103,7 @@ class TestAuditEventCategorizationModel(TestCase):
             if connection.vendor == 'postgresql':
                 cursor.execute("""
                     SELECT indexname FROM pg_indexes
-                    WHERE tablename = 'audit_event'
+                    WHERE tablename = 'audit_events'
                     ORDER BY indexname
                 """)
                 index_names = [row[0] for row in cursor.fetchall()]

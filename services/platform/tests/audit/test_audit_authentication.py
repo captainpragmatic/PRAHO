@@ -457,7 +457,7 @@ class AuthenticationAuditQueryPerformanceTest(TestCase):
                 # PostgreSQL-specific query
                 cursor.execute("""
                     SELECT indexname FROM pg_indexes
-                    WHERE tablename = 'audit_event'
+                    WHERE tablename = 'audit_events'
                     AND indexname LIKE 'idx_audit_%'
                 """)
                 indexes = [row[0] for row in cursor.fetchall()]
@@ -465,7 +465,7 @@ class AuthenticationAuditQueryPerformanceTest(TestCase):
                 # MySQL-specific query
                 cursor.execute("""
                     SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
-                    WHERE TABLE_NAME = 'audit_event'
+                    WHERE TABLE_NAME = 'audit_events'
                     AND INDEX_NAME LIKE 'idx_audit_%'
                 """)
                 indexes = [row[0] for row in cursor.fetchall()]

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import unittest
 from datetime import datetime
 from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.db import connection
 from django.test import SimpleTestCase
 from django.utils import timezone
 
@@ -24,6 +26,7 @@ class TestEventPartitionService(SimpleTestCase):
         self.assertIn("audit_events_2026_03", plan["audit_events"]["create_partitions"])
         self.assertIn("billing_usage_events_2026_06", plan["billing_usage_events"]["create_partitions"])
 
+    @unittest.skipUnless(connection.vendor == "sqlite", "SQLite-specific test: get_status short-circuits on non-PG")
     def test_status_reports_unsupported_backend_on_sqlite(self) -> None:
         service = EventPartitionService()
 
@@ -108,6 +111,7 @@ class TestEventPartitionPolicyValidation(SimpleTestCase):
 class TestEventPartitionServiceEdgeCases(SimpleTestCase):
     """Test partition service failure modes."""
 
+    @unittest.skipUnless(connection.vendor == "sqlite", "SQLite-specific test: ensure_future short-circuits on non-PG")
     def test_ensure_future_returns_empty_on_sqlite(self) -> None:
         """On SQLite (non-PostgreSQL), ensure_future_partitions is a no-op."""
         service = EventPartitionService()
