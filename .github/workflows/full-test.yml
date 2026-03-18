@@ -36,7 +36,7 @@ permissions:
   checks: read
 
 env:
-  DJANGO_SETTINGS_MODULE: config.settings.ci
+  DJANGO_SETTINGS_MODULE: config.settings.test
   DJANGO_SECRET_KEY: test-secret-key-for-ci
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
@@ -100,24 +100,8 @@ jobs:
     needs: gate
     if: needs.gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test_db
-          POSTGRES_USER: test
-          POSTGRES_INITDB_ARGS: "--nosync"
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-          --shm-size=256mb
-          --tmpfs /var/lib/postgresql/data
-        ports:
-          - 5432:5432
+    # No PostgreSQL — platform tests use SQLite (config.settings.test).
+    # PostgreSQL parity testing is in nightly.yml (pending test suite hardening).
 
     steps:
     - uses: actions/checkout@v4
@@ -140,12 +124,7 @@ jobs:
       run: make lint
 
     - name: Run full test suite (make test-fast — all 5 phases)
-      env:
-        DB_NAME: postgres
-        DB_USER: test
-        DB_PASSWORD: test
-        DB_HOST: localhost
-      run: make test-fast PLATFORM_TEST_SETTINGS=config.settings.ci
+      run: make test-fast
 
     - name: Type checking (all services)
       run: make check-types

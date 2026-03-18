@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  DJANGO_SETTINGS_MODULE: config.settings.ci
+  DJANGO_SETTINGS_MODULE: config.settings.test
   DJANGO_SECRET_KEY: test-secret-key-for-ci
   PLATFORM_API_URL: http://localhost:8000
   PLATFORM_API_KEY: test-integration-key
@@ -130,7 +130,7 @@ jobs:
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.ci --verbosity=2
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.test --verbosity=2
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
 
