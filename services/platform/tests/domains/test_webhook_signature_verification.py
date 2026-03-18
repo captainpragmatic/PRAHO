@@ -177,6 +177,15 @@ class WebhookViewSignatureIntegrationTests(TestCase):
             self.payload,
             HTTP_X_HUB_SIGNATURE_256=signature,
         )
-        # Domain doesn't exist so we get 400 (not 403), proving signature passed
-        self.assertIn(response.status_code, [200, 400])
-        self.assertNotEqual(response.status_code, 403)
+        # Signature passes; domain doesn't exist → 400 (processing error, not auth error)
+        self.assertEqual(response.status_code, 400)
+
+    def test_webhook_view_accepts_valid_signature_via_x_signature_header(self) -> None:
+        """X-Signature header is the fallback when X-Hub-Signature-256 is absent."""
+        signature = self._sign(self.payload)
+        response = self._post_webhook(
+            self.payload,
+            HTTP_X_SIGNATURE=signature,
+        )
+        # Signature passes via fallback header; domain doesn't exist → 400
+        self.assertEqual(response.status_code, 400)

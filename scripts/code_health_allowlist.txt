@@ -7,4 +7,7 @@
 # IMPORTANT: Do NOT add new entries without a linked issue/PR and review.
 # Adding allowlist entries for new findings defeats the purpose of the scan.
 
-# (empty — all known stubs resolved)
+# Signature verification stub resolved (#92). Domain API stubs tracked in #93:
+# - services/platform/apps/domains/services.py:648 (register_domain)
+# - services/platform/apps/domains/services.py:662 (renew_domain)
+# - services/platform/apps/domains/services.py:672 (check_domain_availability)

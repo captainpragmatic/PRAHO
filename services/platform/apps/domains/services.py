@@ -16,7 +16,7 @@ Provides business logic for domain operations including:
 from __future__ import annotations
 
 import hashlib
-import hmac as hmac_mod
+import hmac
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -677,9 +677,10 @@ class DomainRegistrarGateway:
 
     @staticmethod
     def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
-        """Verify webhook signature using registrar's HMAC-SHA256 webhook secret.
+        """🔐 Verify webhook signature using registrar's HMAC-SHA256 webhook secret.
 
-        Fail-closed: returns False on any error (missing secret, decryption failure, mismatch).
+        Fail-closed: returns False on any error (missing secret, missing signature,
+        decryption failure, empty secret, mismatch, or unexpected exception).
         Uses timing-safe comparison to prevent side-channel attacks.
         """
         if not registrar.webhook_secret or not signature:
@@ -698,11 +699,7 @@ class DomainRegistrarGateway:
             logger.error(f"🔥 [Gateway] Webhook secret for {registrar.name} decrypted to empty value")
             return False
 
-        webhook_secret = decrypted.encode("utf-8")
+        webhook_secret = decrypted.strip().encode("utf-8")
 
-        try:
-            expected = hmac_mod.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-            return hmac_mod.compare_digest(f"sha256={expected}", signature)
-        except Exception:
-            logger.exception(f"🔥 [Gateway] Signature verification error for {registrar.name}")
-            return False
+        expected = hmac.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(f"sha256={expected}", signature)
