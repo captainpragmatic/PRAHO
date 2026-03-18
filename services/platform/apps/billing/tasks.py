@@ -458,7 +458,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
                     "source_app": "billing",
                 },
             )
-        except Exception:
+        except Exception:  # Audit logging is best-effort; validation already persisted in DB above
             logger.exception("[VAT] Audit log failed for %s — validation result already persisted", fmt.full_vat_number)
 
         return {
