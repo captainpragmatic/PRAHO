@@ -350,6 +350,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
         currency, error_response = _resolve_currency(request.data.get("currency", "RON"))
         if error_response is not None:
             return error_response
+        assert currency is not None  # _resolve_currency guarantees non-None when error_response is None
 
         # Build billing address from customer profile
         billing_address = OrderService.build_billing_address_from_customer(customer)

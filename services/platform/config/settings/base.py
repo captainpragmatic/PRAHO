@@ -14,6 +14,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 # 🚨 FIX: Update BASE_DIR after move to services/platform/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Up 3 levels to services/platform/
+REPO_ROOT = BASE_DIR.parent.parent  # Up to project root (PRAHO/)
 
 # Application definition
 DJANGO_APPS: list[str] = [
@@ -29,6 +30,7 @@ DJANGO_APPS: list[str] = [
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
     "rest_framework.authtoken",  # 🔐 Token authentication for API access
+    "corsheaders",  # Defense-in-depth: protects staff sessions from cross-site credential-riding
     "ipware",
     "django_q",  # Async task processing
 ]
@@ -57,6 +59,7 @@ INSTALLED_APPS: list[str] = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE: list[str] = [
     "apps.common.middleware.RequestIDMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # CORS preflight must run before SecurityMiddleware
     "django.middleware.security.SecurityMiddleware",
     "apps.common.middleware.CSPNonceMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
@@ -77,7 +80,8 @@ TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [
-            BASE_DIR / "templates",
+            BASE_DIR / "templates",  # Service-specific (highest priority, can override shared)
+            REPO_ROOT / "shared" / "ui" / "templates",  # Shared design system components
         ],
         "APP_DIRS": True,
         "OPTIONS": {
@@ -188,7 +192,8 @@ LOCALE_PATHS = [
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
-    BASE_DIR / "static",
+    BASE_DIR / "static",  # Service-specific static files (highest priority)
+    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
 ]
 
 STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"

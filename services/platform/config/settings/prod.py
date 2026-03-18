@@ -112,8 +112,8 @@ if "*" in ALLOWED_HOSTS:
 CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host not in {"localhost", "127.0.0.1"}]
 
 # Explicit domain settings for safe absolute URL construction (emails, links)
-PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "")
-PLATFORM_DOMAIN = os.environ.get("PLATFORM_DOMAIN", "")
+PORTAL_DOMAIN = os.environ.get("PORTAL_DOMAIN", "").strip()
+PLATFORM_DOMAIN = os.environ.get("PLATFORM_DOMAIN", "").strip()
 if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
     from django.core.exceptions import ImproperlyConfigured
 
@@ -123,10 +123,14 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
         f"These are used for absolute URL construction in emails and links."
     )
 
-# Ensure SecurityMiddleware is FIRST in middleware stack
+# Middleware order: RequestID first (IDs all responses), CORS before Security (preflight handling),
+# CSPNonce before SecurityHeaders (nonce generated before CSP header is built).
 MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware",  # MUST be first
-    "apps.common.middleware.RequestIDMiddleware",
+    "apps.common.middleware.RequestIDMiddleware",  # Request ID first for all responses
+    "corsheaders.middleware.CorsMiddleware",  # CORS preflight must run before SecurityMiddleware
+    "django.middleware.security.SecurityMiddleware",
+    "apps.common.middleware.CSPNonceMiddleware",
+    "apps.common.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -135,8 +139,6 @@ MIDDLEWARE = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
     "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "apps.common.middleware.CSPNonceMiddleware",
-    "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",
     "apps.common.middleware.GDPRComplianceMiddleware",
@@ -188,6 +190,14 @@ X_FRAME_OPTIONS = "DENY"
 
 # Legacy browser XSS protection (deprecated but still useful)
 SECURE_BROWSER_XSS_FILTER = True
+
+# ===============================================================================
+# CORS CONFIGURATION (Cross-Origin Resource Sharing)
+# ===============================================================================
+
+# Only allow cross-origin requests from the Portal domain
+CORS_ALLOWED_ORIGINS = [f"https://{PORTAL_DOMAIN}"]
+CORS_ALLOW_CREDENTIALS = True
 
 # ===============================================================================
 # SESSION SECURITY CONFIGURATION
@@ -574,9 +584,9 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
-        # Application logging
+        # Application logging (error_file ensures ERROR+ goes to dedicated error log)
         "apps": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "error_file"],
             "level": "INFO",
             "propagate": False,
         },
@@ -606,6 +616,16 @@ LOGGING = {
         },
     },
 }
+
+# Ensure Sentry captures ERROR+ from application loggers (propagate=False blocks root handler)
+if HAS_SENTRY and SENTRY_DSN:
+    LOGGING["handlers"]["sentry"] = {
+        "level": "ERROR",
+        "class": "sentry_sdk.integrations.logging.SentryHandler",
+    }
+    for _logger_name in ("apps", "apps.audit", "apps.users", "apps.common.middleware", "apps.audit.siem"):
+        if _logger_name in LOGGING["loggers"]:
+            LOGGING["loggers"][_logger_name]["handlers"].append("sentry")
 
 # ===============================================================================
 # AUDIT LOG RETENTION CONFIGURATION 📅

@@ -14,6 +14,7 @@ from django.utils.translation import gettext_lazy as _
 # ===============================================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = BASE_DIR.parent.parent  # Up to project root (PRAHO/)
 
 # Application definition - Portal service apps only
 DJANGO_APPS: list[str] = [
@@ -68,7 +69,8 @@ TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [
-            BASE_DIR / "templates",
+            BASE_DIR / "templates",  # Service-specific (highest priority, can override shared)
+            REPO_ROOT / "shared" / "ui" / "templates",  # Shared design system components
         ],
         "APP_DIRS": True,
         "OPTIONS": {
@@ -175,7 +177,8 @@ LOCALE_PATHS = [
 
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [
-    BASE_DIR / "static",  # Changed from "assets" to "static"
+    BASE_DIR / "static",  # Service-specific static files (highest priority)
+    REPO_ROOT / "shared" / "ui" / "static",  # Shared JS components (modal.js, toast.js)
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
