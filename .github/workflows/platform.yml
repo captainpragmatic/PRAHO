@@ -3,6 +3,9 @@
 # ===============================================================================
 # Tests and type checking for the platform service.
 # Linting is consolidated in integration.yml (make lint).
+#
+# Uses affected-module detection to run only relevant tests on push/PR.
+# Full suite runs on workflow_dispatch or when universal apps change.
 
 name: Platform Service CI/CD
 
@@ -11,6 +14,7 @@ on:
     branches: [master, staging]
     paths:
       - 'services/platform/**'
+      - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/platform.yml'
@@ -18,9 +22,11 @@ on:
     branches: [master]
     paths:
       - 'services/platform/**'
+      - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/platform.yml'
+  workflow_dispatch:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
@@ -48,6 +54,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -60,12 +68,47 @@ jobs:
         uv python install
         uv sync --group platform --group dev
 
-    - name: Run platform unit tests with coverage
+    - name: Detect affected test modules
+      id: affected
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          echo "modules=FULL" >> "$GITHUB_OUTPUT"
+          echo "Manual dispatch — running full suite"
+          exit 0
+        fi
+        if [ "$EVENT_NAME" = "pull_request" ]; then
+          git fetch origin "$PR_BASE_SHA" --depth=1 2>/dev/null || true
+          CHANGED=$(git diff --name-only "$PR_BASE_SHA"...HEAD)
+        else
+          CHANGED=$(git diff --name-only HEAD~1)
+        fi
+        if [ -z "$CHANGED" ]; then
+          echo "modules=FULL" >> "$GITHUB_OUTPUT"
+          echo "No changed files detected — running full suite"
+          exit 0
+        fi
+        MODULES=$(echo "$CHANGED" | "$UV_PROJECT_ENVIRONMENT/bin/python" scripts/affected_test_modules.py --verbose)
+        echo "modules=$MODULES" >> "$GITHUB_OUTPUT"
+        echo "Affected modules: $MODULES"
+
+    - name: Run focused platform tests
+      if: steps.affected.outputs.modules != 'FULL' && steps.affected.outputs.modules != ''
+      env:
+        MODULES: ${{ steps.affected.outputs.modules }}
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage run manage.py test tests --verbosity=2
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage xml -o coverage-platform.xml
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage report --show-missing
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $MODULES --settings=config.settings.test --verbosity=2 --failfast --parallel
+
+    - name: Run full platform tests with coverage
+      if: steps.affected.outputs.modules == 'FULL'
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=2 --parallel
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-platform.xml
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing
 
     - name: Platform type checking (make check-types-platform)
       run: make check-types-platform
@@ -101,7 +144,7 @@ jobs:
     - name: Run Bandit SAST Security Scan
       run: |
         cd services/platform
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
+        "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
 
     - name: Upload Security Reports
       uses: actions/upload-artifact@v4

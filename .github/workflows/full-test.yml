@@ -1,0 +1,159 @@
+# ===============================================================================
+# FULL TEST SUITE — MERGE GATE
+# ===============================================================================
+# Runs the complete test suite (all 5 phases) as a safety gate before merging.
+#
+# Three trigger mechanisms:
+#   1. merge_group  — GitHub Merge Queue (automatic before squash merge)
+#   2. workflow_dispatch — Manual trigger from Actions tab
+#   3. issue_comment — Comment "/full-test" on a PR
+#
+# Security note: comment body is only accessed via actions/github-script (JS),
+# never interpolated into shell run: blocks. SHA refs come from GitHub API calls.
+
+name: Full Test Suite (Merge Gate)
+
+on:
+  merge_group:
+
+  workflow_dispatch:
+    inputs:
+      run_e2e:
+        description: 'Also run E2E tests?'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+  issue_comment:
+    types: [created]
+
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.test
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
+  PLATFORM_API_URL: http://localhost:8000
+  PLATFORM_API_KEY: test-integration-key
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: filter issue_comment events — only run for "/full-test" on PRs
+  # ---------------------------------------------------------------------------
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      ref: ${{ steps.check.outputs.ref }}
+    steps:
+      - name: Evaluate trigger
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === 'issue_comment') {
+              // Safety: comment body accessed via JS object, never in shell
+              const comment = context.payload.comment.body.trim();
+              const isPR = !!context.payload.issue.pull_request;
+              if (comment === '/full-test' && isPR) {
+                const pr = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.issue.number,
+                });
+                core.setOutput('should_run', 'true');
+                core.setOutput('ref', pr.data.head.sha);
+                // Acknowledge with rocket emoji
+                await github.rest.reactions.createForIssueComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: context.payload.comment.id,
+                  content: 'rocket',
+                });
+              } else {
+                core.setOutput('should_run', 'false');
+              }
+            } else {
+              // merge_group or workflow_dispatch — always run
+              core.setOutput('should_run', 'true');
+              core.setOutput('ref', context.sha);
+            }
+
+  # ---------------------------------------------------------------------------
+  # Full suite: lint + all 5 test phases + type checking
+  # ---------------------------------------------------------------------------
+  full-suite:
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.gate.outputs.ref }}
+        fetch-depth: 0
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+
+    - name: Lint all services
+      run: make lint
+
+    - name: Set up database for integration tests
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.base
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py migrate --no-input
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py createcachetable
+
+    - name: Run full test suite (make test-fast — all 5 phases)
+      env:
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+      run: make test-fast
+
+    - name: Type checking (all services)
+      run: make check-types
+
+    - name: Post result to PR (comment trigger only)
+      if: always() && github.event_name == 'issue_comment'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}' === 'success' ? '✅' : '❌';
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.payload.issue.number,
+            body: `${status} **Full test suite: ${{ job.status }}**\n\n[View run](${runUrl})`,
+          });

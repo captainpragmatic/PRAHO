@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-platform test-platform-fast test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -42,17 +42,22 @@ help:
 	@echo "  make dev-portal      - Run portal service only (:8701)"
 	@echo ""
 	@echo "🧪 TESTING (SERVICE-ISOLATED):"
-	@echo "  make test            - Test all services (Django test runner)"
-	@echo "  make test-platform   - Test platform service with DB access (Django)"
+	@echo "  make test              - Full test suite (all 5 phases, no failfast)"
+	@echo "  make test-fast         - Full test suite (all 5 phases, failfast + parallel)"
+	@echo "  make test-platform     - Platform tests only (parallel, no keepdb)"
+	@echo "  make test-platform-fast - Platform tests only (failfast + keepdb + parallel)"
+	@echo "  make test-ci-focused MODULES='tests.X tests.Y' - Focused CI test run"
+	@echo "  make test-file FILE=tests.X.test_Y - Run a specific test file"
 	@echo "  make test-platform-pytest - Test platform service with pytest"
-	@echo "  make test-portal     - Test portal service (NO DB access)"
-	@echo "  make test-integration - Test platform→portal API communication"
-	@echo "  make test-e2e        - All E2E tests (requires both services)"
-	@echo "  make test-with-e2e   - Alias for make test-e2e"
+	@echo "  make test-portal       - Test portal service (NO DB access)"
+	@echo "  make test-integration  - Test platform→portal API communication"
+	@echo "  make test-e2e          - All E2E tests (requires both services)"
+	@echo "  make test-with-e2e     - Alias for make test-e2e"
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-orm      - ORM E2E tests (no server needed)"
-	@echo "  make test-security   - Validate service isolation"
+	@echo "  make test-security     - Validate service isolation"
+	@echo "  make show-test-deps    - Print the test dependency graph"
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
@@ -268,7 +273,7 @@ dev-with-logs: check-env build-css
 test-platform:
 	@echo "🧪 [Platform] Testing with database cache (no Redis)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --parallel --keepdb
+	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --parallel
 	@echo "✅ Platform tests completed successfully!"
 
 test-file:
@@ -401,14 +406,45 @@ test:
 	@echo "🎉 All test phases completed successfully!"
 
 test-fast:
-	@echo "⚡ [Platform] Fast test run (failfast + keepdb + parallel)..."
+	@echo "⚡ [All] Fast test suite (failfast + parallel, all phases)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ifdef FILE
+	@$(PYTHON_PLATFORM_MANAGE) test $(FILE) --settings=config.settings.test --verbosity=2 --failfast --keepdb
+else
+	@echo "📋 Phase 1: Platform service tests (failfast + parallel)"
+	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --failfast --parallel
+	@echo "📋 Phase 2: Portal service tests"
+	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/ -v --maxfail=5
+	@echo "📋 Phase 3: Integration tests"
+	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v --maxfail=5
+	@echo "📋 Phase 4: Database cache tests"
+	@$(MAKE) test-cache
+	@echo "📋 Phase 5: Security validation"
+	@$(MAKE) test-security
+	@echo "🎉 All fast test phases completed!"
+endif
+
+test-platform-fast:
+	@echo "⚡ [Platform] Fast local run (failfast + keepdb + parallel)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ifdef FILE
 	@$(PYTHON_PLATFORM_MANAGE) test $(FILE) --settings=config.settings.test --verbosity=2 --failfast --keepdb
 else
 	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=config.settings.test --verbosity=2 --failfast --keepdb --parallel
 endif
-	@echo "✅ Fast tests completed!"
+	@echo "✅ Fast platform tests completed!"
+
+test-ci-focused:
+	@echo "🎯 [Platform] Focused CI test run: $(MODULES)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ifndef MODULES
+	$(error MODULES is required. Usage: make test-ci-focused MODULES="tests.billing tests.common")
+endif
+	@$(PYTHON_PLATFORM_MANAGE) test $(MODULES) --settings=config.settings.test --verbosity=2 --failfast --parallel
+	@echo "✅ Focused tests completed!"
+
+show-test-deps:
+	@$(PYTHON_SHARED) scripts/affected_test_modules.py --show-graph
 
 # ===============================================================================
 # DATABASE & ASSETS 🗄️

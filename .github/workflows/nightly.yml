@@ -1,0 +1,170 @@
+# ===============================================================================
+# NIGHTLY FULL SUITE — COMPREHENSIVE TESTING + COVERAGE
+# ===============================================================================
+# Runs the complete test suite WITHOUT failfast for a full picture.
+# Includes security lint and coverage reporting.
+#
+# Schedule: 2:30 AM UTC daily (4:30 AM Bucharest time)
+# Skips automatically if no commits in the last 24h (saves runner minutes).
+# workflow_dispatch always runs regardless of activity.
+# Security: No untrusted input — triggers are cron and workflow_dispatch only.
+
+name: Nightly Full Suite
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.test
+  DJANGO_SECRET_KEY: test-secret-key-for-ci
+  PLATFORM_API_URL: http://localhost:8000
+  PLATFORM_API_KEY: test-integration-key
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-linux
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Check if there was any activity in the last 24 hours
+  # ---------------------------------------------------------------------------
+  check-activity:
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.check.outputs.branches }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for recent activity per branch
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # workflow_dispatch: test both branches
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo 'branches=["master","staging"]' >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch — testing master + staging"
+            exit 0
+          fi
+
+          # Check commits in the last 24h per branch
+          SINCE=$(date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+            || date -u -v-24H '+%Y-%m-%dT%H:%M:%SZ')
+          MASTER_COMMITS=$(git log origin/master --since="$SINCE" --oneline 2>/dev/null | wc -l)
+          STAGING_COMMITS=$(git log origin/staging --since="$SINCE" --oneline 2>/dev/null | wc -l)
+
+          # PR activity counts toward master (PRs target master)
+          PR_COUNT=$(gh api "repos/${{ github.repository }}/pulls?state=all&sort=updated&direction=desc&per_page=10" \
+            --jq "[.[] | select(.updated_at > \"$SINCE\")] | length" 2>/dev/null || echo "0")
+
+          echo "master commits: $MASTER_COMMITS, staging commits: $STAGING_COMMITS, active PRs: $PR_COUNT"
+
+          # Build JSON array of branches that need testing
+          BRANCHES="[]"
+          if [ "$((MASTER_COMMITS + PR_COUNT))" -gt 0 ]; then
+            BRANCHES=$(echo "$BRANCHES" | jq '. + ["master"]')
+          fi
+          if [ "$STAGING_COMMITS" -gt 0 ]; then
+            BRANCHES=$(echo "$BRANCHES" | jq '. + ["staging"]')
+          fi
+
+          echo "branches=$BRANCHES" >> "$GITHUB_OUTPUT"
+          if [ "$BRANCHES" = "[]" ]; then
+            echo "No activity in last 24h — skipping nightly suite"
+          else
+            echo "Active branches: $BRANCHES"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Full nightly suite (only if activity detected)
+  # ---------------------------------------------------------------------------
+  nightly:
+    needs: check-activity
+    if: needs.check-activity.outputs.branches != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(needs.check-activity.outputs.branches) }}
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ matrix.branch }}
+        fetch-depth: 0
+
+    - name: Install uv and sync dependencies
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python and install dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+
+    - name: Set up database
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.base
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py migrate --no-input
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py createcachetable
+
+    - name: Full lint (all 7 phases)
+      run: make lint
+
+    - name: Full test suite (no failfast — complete picture)
+      env:
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+      run: make test
+
+    - name: Type checking (all services)
+      run: make check-types
+
+    - name: Security lint
+      run: make lint-security
+      continue-on-error: true
+
+    - name: Platform coverage report
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=1 --parallel
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
+      continue-on-error: true
+
+    - name: Upload nightly reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: nightly-reports-${{ matrix.branch }}
+        path: |
+          services/platform/coverage-nightly.xml
+        if-no-files-found: warn
+        retention-days: 30

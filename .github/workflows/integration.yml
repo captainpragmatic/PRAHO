@@ -27,6 +27,7 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/integration.yml'
+  workflow_dispatch:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
