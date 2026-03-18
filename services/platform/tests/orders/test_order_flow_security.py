@@ -212,6 +212,39 @@ class StripePaymentVerificationTest(TestCase):
         self.assertTrue(response.data["success"])
         mock_factory.assert_not_called()
 
+    def test_confirm_verifies_stored_pi_when_request_omits_it(self) -> None:
+        """Bug 1 regression: Stripe verification uses order.payment_intent_id, not request payload.
+
+        Attack scenario: order already has a payment_intent_id stored from a previous step,
+        attacker omits payment_intent_id from the confirm request hoping to skip Stripe check.
+        The view must still verify the stored PI — not skip verification because the field
+        is absent from the request body.
+        """
+        order = _make_pending_order(
+            self.customer,
+            self.currency,
+            payment_method="card",
+            payment_intent_id="pi_storedButNotInRequest12",
+        )
+        # Request deliberately omits payment_intent_id
+        request = self._make_request({"payment_status": "succeeded"})
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=False, status="requires_payment_method", error="Not paid",
+        )
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        # Must reject — Stripe said not succeeded, even though request omitted the PI
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Payment verification failed", response.data["error"])
+        mock_gateway.confirm_payment.assert_called_once_with("pi_storedButNotInRequest12")
+
 
 # ===============================================================================
 # C2: UNIFIED ORDER NUMBER GENERATION
