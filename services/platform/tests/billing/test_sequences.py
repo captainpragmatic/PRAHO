@@ -3,7 +3,7 @@
 # ===============================================================================
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.billing.models import InvoiceSequence, ProformaSequence
@@ -43,7 +43,7 @@ class InvoiceSequenceTestCase(TestCase):
         )
 
         # Should not be able to create another sequence with same scope
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             InvoiceSequence.objects.create(
                 scope='default',
                 last_value=1
@@ -138,7 +138,7 @@ class ProformaSequenceTestCase(TestCase):
         )
 
         # Should not be able to create another sequence with same scope
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             ProformaSequence.objects.create(
                 scope='default',
                 last_value=1
@@ -351,3 +351,29 @@ class SequenceIntegrationTestCase(TestCase):
         long_prefix = 'VERY_LONG_PREFIX_FOR_TESTING'
         number = sequence.get_next_number(long_prefix)
         self.assertEqual(number, f'{long_prefix}-000002')  # Should work with long prefix
+
+
+# ===============================================================================
+# MIGRATED FROM test_sequences_concurrency.py
+# ===============================================================================
+
+
+class InvoiceSequenceConcurrencyMigratedTests(TestCase):
+    """Tests migrated from test_sequences_concurrency.py"""
+
+    def test_sequential_numbers_unique_and_incrementing(self) -> None:
+        seq = InvoiceSequence.objects.create(scope='test_conc', last_value=0)
+
+        numbers: list[str] = [seq.get_next_number('TST') for _ in range(10)]
+
+        # Ensure uniqueness and ascending sequence
+        self.assertEqual(len(numbers), len(set(numbers)))
+        expected_last = 10
+        self.assertEqual(seq.last_value, expected_last)
+
+    def test_prefix_and_padding(self) -> None:
+        seq = InvoiceSequence.objects.create(scope='pad_test', last_value=999)
+        number = seq.get_next_number('PAD')
+        # Should increment to 1000 and padded accordingly
+        self.assertTrue(number.startswith('PAD-'))
+        self.assertTrue(number.endswith('001000'))

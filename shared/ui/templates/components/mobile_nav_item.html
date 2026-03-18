@@ -5,15 +5,17 @@ MOBILE NAVIGATION ITEM COMPONENT
 Reusable mobile navigation item following DRY principles
 
 Usage:
-{% include 'components/mobile_nav_item.html' with url='dashboard' title='Dashboard' subtitle='Overview & analytics' icon='home' %}
+{% include 'components/mobile_nav_item.html' with url='dashboard' title='Dashboard' subtitle='Overview & analytics' icon_name='dashboard' %}
 
 Required Parameters:
 - url: Django URL name or full URL
 - title: Main text to display
 - subtitle: Secondary description text
-- icon: SVG icon content (HTML)
+- icon_name: Icon name for {% icon %} tag (preferred)
+- icon: Raw SVG icon content as HTML (legacy fallback)
 
 Optional Parameters:
+- icon_css: CSS classes for the icon (default: "text-slate-300 group-hover:text-white")
 - staff_only: Boolean, defaults to False
 - disabled: Boolean for coming soon items, defaults to False
 - extra_classes: Additional CSS classes
@@ -28,7 +30,7 @@ Optional Parameters:
         <div class="mobile-nav-item group opacity-50 cursor-not-allowed">
             <div class="flex items-center space-x-5 p-4">
                 <div class="flex-shrink-0 w-16 h-16 bg-slate-700/50 rounded-2xl flex items-center justify-center">
-                    {{ icon|safe }}
+                    {% if icon_name %}{% icon icon_name size="xl" css_class=icon_css|default:"text-slate-300 group-hover:text-white" %}{% else %}{{ icon|safe }}{% endif %}
                 </div>
                 <div class="flex-1 min-w-0">
                     <div class="text-xl font-semibold text-slate-400">{{ title }}</div>
@@ -44,7 +46,7 @@ Optional Parameters:
             <button type="submit" class="mobile-nav-item group w-full text-left {{ extra_classes }}">
                 <div class="flex items-center space-x-5 p-4">
                     <div class="flex-shrink-0 w-16 h-16 {{ button_bg|default:'bg-slate-700/50' }} rounded-2xl flex items-center justify-center group-hover:{{ button_hover_bg|default:'bg-slate-600/60' }} transition-colors shadow-lg">
-                        {{ icon|safe }}
+                        {% if icon_name %}{% icon icon_name size="xl" css_class=icon_css|default:"text-slate-300 group-hover:text-white" %}{% else %}{{ icon|safe }}{% endif %}
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="text-xl font-semibold {{ text_color|default:'text-slate-200' }} group-hover:{{ text_hover_color|default:'text-white' }}">{{ title }}</div>
@@ -57,7 +59,7 @@ Optional Parameters:
         <a href="{% if url_name %}{% url url_name %}{% else %}{{ url }}{% endif %}" class="mobile-nav-item group {{ extra_classes }}">
             <div class="flex items-center space-x-5 p-4">
                 <div class="flex-shrink-0 w-16 h-16 bg-slate-700/50 rounded-2xl flex items-center justify-center group-hover:bg-slate-600/60 transition-colors shadow-lg">
-                    {{ icon|safe }}
+                    {% if icon_name %}{% icon icon_name size="xl" css_class=icon_css|default:"text-slate-300 group-hover:text-white" %}{% else %}{{ icon|safe }}{% endif %}
                 </div>
                 <div class="flex-1 min-w-0">
                     <div class="text-xl font-semibold text-slate-200 group-hover:text-white">{{ title }}</div>

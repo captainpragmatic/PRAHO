@@ -7,7 +7,7 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -892,7 +892,7 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
         constraints (invoice_subtotal_non_negative, etc.). This test verifies
         the constraint works as expected.
         """
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             Invoice.objects.create(
                 customer=self.customer,
                 currency=self.currency,

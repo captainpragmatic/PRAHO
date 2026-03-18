@@ -1,7 +1,12 @@
 # ===============================================================================
-# PLATFORM SERVICE CI/CD - FULL DJANGO WITH DATABASE
+# PLATFORM SERVICE CI/CD
 # ===============================================================================
-# Tests and type checking for the platform service.
+# All events:  SQLite (fast, reliable — matches local dev + test.py settings)
+# PRs:         Affected-module detection for focused test runs (~30s)
+# Master push: Full suite + coverage
+#
+# PostgreSQL production-parity testing is in nightly.yml and full-test.yml
+# (requires test suite hardening — tracked as tech debt).
 # Linting is consolidated in integration.yml (make lint).
 
 name: Platform Service CI/CD
@@ -11,16 +16,21 @@ on:
     branches: [master, staging]
     paths:
       - 'services/platform/**'
+      - 'shared/**'
+      - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/platform.yml'
   pull_request:
-    branches: [master]
+    branches: [master, staging]
     paths:
       - 'services/platform/**'
+      - 'shared/**'
+      - 'scripts/affected_test_modules.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/platform.yml'
+  workflow_dispatch:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.test
@@ -31,23 +41,10 @@ jobs:
   platform-test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-          POSTGRES_USER: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Install uv and sync dependencies
       uses: astral-sh/setup-uv@v7
@@ -60,14 +57,40 @@ jobs:
         uv python install
         uv sync --group platform --group dev
 
-    - name: Run platform unit tests with coverage
+    - name: Detect affected test modules
+      id: affected
+      if: github.event_name == 'pull_request'
+      env:
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        git fetch origin "$PR_BASE_SHA" --depth=1 || true
+        CHANGED=$(git diff --name-only "$PR_BASE_SHA"...HEAD)
+        if [ -z "$CHANGED" ]; then
+          echo "modules=FULL" >> "$GITHUB_OUTPUT"
+          echo "No changed files detected — running full suite"
+          exit 0
+        fi
+        MODULES=$(echo "$CHANGED" | "$UV_PROJECT_ENVIRONMENT/bin/python" scripts/affected_test_modules.py --verbose)
+        echo "modules=$MODULES" >> "$GITHUB_OUTPUT"
+        echo "Affected modules: $MODULES"
+
+    - name: Run focused platform tests
+      if: github.event_name == 'pull_request' && steps.affected.outputs.modules != 'FULL' && steps.affected.outputs.modules != ''
+      env:
+        MODULES: ${{ steps.affected.outputs.modules }}
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage run manage.py test tests --verbosity=2
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage xml -o coverage-platform.xml
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/coverage report --show-missing
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $MODULES --verbosity=2 --failfast --parallel
 
-    - name: Platform type checking (make check-types-platform)
+    - name: Run full platform tests with coverage
+      if: github.event_name != 'pull_request' || steps.affected.outputs.modules == 'FULL' || steps.affected.outputs.modules == ''
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=2 --parallel
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-platform.xml
+        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing
+
+    - name: Platform type checking
       run: make check-types-platform
 
     - name: Upload platform artifacts
@@ -101,7 +124,7 @@ jobs:
     - name: Run Bandit SAST Security Scan
       run: |
         cd services/platform
-        ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/bandit -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
+        "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
 
     - name: Upload Security Reports
       uses: actions/upload-artifact@v4

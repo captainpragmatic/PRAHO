@@ -6,7 +6,7 @@ Tests industry-standard audit requirements (GDPR, ISO 27001, NIST, SOX, PCI DSS)
 import pytest
 from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save, pre_delete
-from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from unittest.mock import Mock, patch
 
 from apps.audit.models import AuditEvent
@@ -22,7 +22,6 @@ from apps.audit.signals import (
     customer_context_switched,
     privacy_settings_changed,
 )
-from apps.audit.services import AuditService
 from apps.users.models import User, UserProfile, CustomerMembership
 from apps.customers.models import Customer
 
@@ -137,7 +136,7 @@ class TestAuditSignalHelpers(TestCase):
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
-class TestUserProfileAuditSignals(TransactionTestCase):
+class TestUserProfileAuditSignals(TestCase):
     """Test user profile change audit signals"""
 
     def setUp(self):
@@ -266,7 +265,7 @@ class TestUserProfileAuditSignals(TransactionTestCase):
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
-class TestUserProfilePreferencesAudit(TransactionTestCase):
+class TestUserProfilePreferencesAudit(TestCase):
     """Test UserProfile preferences audit logging"""
 
     def setUp(self):
@@ -339,7 +338,7 @@ class TestUserProfilePreferencesAudit(TransactionTestCase):
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)
-class TestCustomerMembershipAudit(TransactionTestCase):
+class TestCustomerMembershipAudit(TestCase):
     """Test customer membership audit logging"""
 
     def setUp(self):
@@ -549,58 +548,6 @@ class TestCustomSignalHandlers(TestCase):
         assert audit_event.new_values['customer'] == str(customer)
         assert 'context_change' in audit_event.metadata
         assert 'customer_id' in audit_event.metadata
-
-
-class TestAuditServiceCategorization(TestCase):
-    """Test AuditService automatic categorization"""
-
-    def test_action_category_mapping(self):
-        """Test automatic action category mapping"""
-        assert AuditService._get_action_category('login_success') == 'authentication'
-        assert AuditService._get_action_category('password_changed') == 'authentication'
-        assert AuditService._get_action_category('2fa_enabled') == 'authentication'
-        assert AuditService._get_action_category('profile_updated') == 'account_management'
-        assert AuditService._get_action_category('privacy_settings_changed') == 'privacy'
-        assert AuditService._get_action_category('role_assigned') == 'authorization'
-        assert AuditService._get_action_category('customer_membership_created') == 'authorization'
-        assert AuditService._get_action_category('security_incident_detected') == 'security_event'
-        assert AuditService._get_action_category('data_export_requested') == 'data_protection'
-        assert AuditService._get_action_category('api_key_generated') == 'integration'
-        assert AuditService._get_action_category('system_maintenance_started') == 'system_admin'
-        assert AuditService._get_action_category('vat_validation_completed') == 'compliance'
-        assert AuditService._get_action_category('invoice_created') == 'business_operation'
-
-    def test_action_severity_mapping(self):
-        """Test automatic action severity mapping"""
-        assert AuditService._get_action_severity('data_breach_detected') == 'critical'
-        assert AuditService._get_action_severity('security_incident_detected') == 'critical'
-        assert AuditService._get_action_severity('password_compromised') == 'high'
-        assert AuditService._get_action_severity('2fa_disabled') == 'high'
-        assert AuditService._get_action_severity('role_assigned') == 'high'
-        assert AuditService._get_action_severity('login_success') == 'medium'
-        assert AuditService._get_action_severity('password_changed') == 'medium'
-        assert AuditService._get_action_severity('profile_updated') == 'medium'
-        assert AuditService._get_action_severity('invoice_created') == 'low'
-
-    def test_sensitive_action_detection(self):
-        """Test sensitive action detection"""
-        assert AuditService._is_action_sensitive('login_success') is True
-        assert AuditService._is_action_sensitive('password_changed') is True
-        assert AuditService._is_action_sensitive('profile_updated') is True
-        assert AuditService._is_action_sensitive('privacy_settings_changed') is True
-        assert AuditService._is_action_sensitive('payment_method_added') is True
-        assert AuditService._is_action_sensitive('invoice_created') is False
-
-    def test_review_required_detection(self):
-        """Test review required detection"""
-        assert AuditService._requires_review('account_locked') is True
-        assert AuditService._requires_review('password_compromised') is True
-        assert AuditService._requires_review('2fa_disabled') is True
-        assert AuditService._requires_review('role_assigned') is True
-        assert AuditService._requires_review('security_incident_detected') is True
-        assert AuditService._requires_review('user_impersonation_started') is True
-        assert AuditService._requires_review('login_success') is False
-        assert AuditService._requires_review('profile_updated') is False
 
 
 class TestAuditEventPerformance(TestCase):

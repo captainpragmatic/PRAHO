@@ -4,13 +4,22 @@ PRAHO PLATFORM - UI Components Template Tags
 HTMX-powered reusable components for Romanian hosting provider interface
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django import template
+from django.forms import CheckboxInput, Select, Textarea
+from django.template.base import FilterExpression
+from django.template.base import token_kwargs as django_token_kwargs
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe  # For XSS prevention
+from django.utils.translation import gettext_lazy as _
+
+if TYPE_CHECKING:
+    pass
 
 from apps.common.constants import FILE_SIZE_CONVERSION_FACTOR
 
@@ -469,6 +478,367 @@ def modal(modal_id: str, title: str, *, config: ModalConfig | None = None, **kwa
     }
 
 
+# ===============================================================================
+# FORM ERROR SUMMARY
+# ===============================================================================
+
+
+@register.inclusion_tag("components/form_error_summary.html")
+def form_error_summary(form: Any) -> dict[str, Any]:
+    """
+    Render a top-of-form error summary (non-field errors + all field errors).
+
+    Usage:
+        {% form_error_summary form %}
+    """
+    errors: list[str] = []
+    if hasattr(form, "non_field_errors"):
+        errors.extend(str(err) for err in form.non_field_errors())
+    if hasattr(form, "errors"):
+        for field_name, field_errors in form.errors.items():
+            if field_name != "__all__":
+                errors.extend(str(err) for err in field_errors)
+    return {"errors": errors, "has_errors": bool(errors)}
+
+
+# ===============================================================================
+# FORM FIELD BRIDGE (Django BoundField → input component)
+# ===============================================================================
+
+
+@register.inclusion_tag("components/input.html")
+def form_field(field: Any, *, icon_left: str | None = None, **kwargs: str) -> dict[str, Any]:
+    """
+    Bridge tag: renders a Django BoundField via the {% input_field %} component.
+
+    Usage:
+        {% form_field form.email icon_left="mail" %}
+        {% form_field form.password icon_left="lock" placeholder="Enter password" %}
+        {% form_field form.customer_type %}   {# select widget auto-detected #}
+    """
+    widget = field.field.widget
+    name: str = field.html_name
+    html_id: str = field.id_for_label or f"id_{name}"
+
+    # ── Detect input_type from widget class ──
+    input_type = "text"
+    if isinstance(widget, Textarea):
+        input_type = "textarea"
+    elif isinstance(widget, Select):
+        input_type = "select"
+    elif isinstance(widget, CheckboxInput):
+        input_type = "checkbox"
+    else:
+        # Honour widget.input_type (email, password, number, etc.)
+        wt = getattr(widget, "input_type", "text")
+        if wt:
+            input_type = wt
+
+    # ── Build options list for <select> ──
+    options: list[dict[str, str]] | None = None
+    if input_type == "select":
+        choices = getattr(field.field, "choices", [])
+        options = [{"value": str(v), "label": str(lbl)} for v, lbl in choices]
+
+    # ── Extract first error (if any) ──
+    first_error: str | None = None
+    if field.errors:
+        first_error = str(field.errors[0])
+
+    # ── Current value ──
+    value = field.value()
+    value_str: str = str(value) if value is not None else ""
+
+    # ── Label text ──
+    label = str(field.label) if field.label else None
+
+    # ── Help text ──
+    help_text = str(field.help_text) if field.help_text else None
+
+    return {
+        "name": name,
+        "input_type": input_type,
+        "value": value_str,
+        "label": label,
+        "placeholder": kwargs.get("placeholder", getattr(widget, "attrs", {}).get("placeholder", "")),
+        "required": field.field.required,
+        "disabled": kwargs.get("disabled", False),
+        "readonly": kwargs.get("readonly", False),
+        "error": first_error,
+        "help_text": help_text,
+        "icon_left": icon_left,
+        "icon_right": kwargs.get("icon_right"),
+        "css_class": kwargs.get("css_class", ""),
+        "html_id": html_id,
+        "autocomplete": kwargs.get("autocomplete", getattr(widget, "attrs", {}).get("autocomplete", "")),
+        "autofocus": kwargs.get("autofocus", getattr(widget, "attrs", {}).get("autofocus", False)),
+        "hx_get": "",
+        "hx_post": "",
+        "hx_trigger": "",
+        "hx_target": "",
+        "hx_swap": "",
+        "options": options,
+        "romanian_validation": False,
+        "has_error": bool(first_error),
+        "container_class": kwargs.get("container_class", ""),
+        "help_text_below": None,
+    }
+
+
+# ===============================================================================
+# FORM CHECKBOX BRIDGE (Django BoundField → checkbox component)
+# ===============================================================================
+
+
+@register.inclusion_tag("components/checkbox.html")
+def form_checkbox(field: Any, **kwargs: Any) -> dict[str, Any]:
+    """
+    Bridge tag: renders a Django BoundField checkbox via {% checkbox_field %}.
+
+    Usage:
+        {% form_checkbox form.remember_me %}
+        {% form_checkbox form.data_processing_consent %}
+    """
+    name: str = field.html_name
+    html_id: str = field.id_for_label or f"id_{name}"
+
+    first_error: str | None = None
+    if field.errors:
+        first_error = str(field.errors[0])
+
+    label = str(field.label) if field.label else None
+    help_text = str(field.help_text) if field.help_text else None
+
+    # Determine checked state
+    value = field.value()
+    checked = bool(value) if value is not None else False
+
+    return {
+        "name": name,
+        "label": kwargs.get("label", label),
+        "value": "on",
+        "checked": checked,
+        "required": field.field.required,
+        "disabled": kwargs.get("disabled", False),
+        "error": first_error,
+        "help_text": help_text,
+        "variant": kwargs.get("variant", "primary"),
+        "css_class": kwargs.get("css_class", ""),
+        "container_class": kwargs.get("container_class", ""),
+        "html_id": html_id,
+        "hx_get": "",
+        "hx_post": "",
+        "hx_trigger": "",
+        "hx_target": "",
+        "hx_swap": "",
+        "data_attrs": kwargs.get("data_attrs", {}),
+    }
+
+
+# ===============================================================================
+# PAGE HEADER (block tag with actions slot)
+# ===============================================================================
+
+
+class PageHeaderNode(template.Node):
+    """Renders a page header with an actions slot between the opening and closing tags."""
+
+    def __init__(
+        self,
+        kwargs: dict[str, FilterExpression],
+        nodelist_actions: template.NodeList,
+    ) -> None:
+        self.kwargs = kwargs
+        self.nodelist_actions = nodelist_actions
+
+    def render(self, context: template.Context) -> str:
+        resolved: dict[str, Any] = {k: v.resolve(context) for k, v in self.kwargs.items()}
+        actions_html = self.nodelist_actions.render(context)
+
+        assert context.template is not None, "page_header tag requires a template context"
+        t = context.template.engine.get_template("components/page_header.html")
+        with context.update(
+            {
+                "ph_title": resolved.get("title", ""),
+                "ph_subtitle": resolved.get("subtitle", ""),
+                "ph_icon": resolved.get("icon", ""),
+                "ph_css_class": resolved.get("css_class", ""),
+                "ph_actions": mark_safe(actions_html),  # noqa: S308  — rendered from Django templates, not user input
+            }
+        ):
+            return t.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render(), not Jinja2
+
+
+@register.tag("page_header")
+def do_page_header(parser: template.base.Parser, token: template.base.Token) -> PageHeaderNode:
+    """
+    Block tag for standardized page headers with actions slot.
+
+    Usage:
+        {% page_header title="Invoice #001" subtitle="Invoice details" icon="document" %}
+          {% button "Edit" variant="primary" %}
+        {% end_page_header %}
+    """
+    bits = token.split_contents()
+    remaining_bits = bits[1:]
+    kwargs = django_token_kwargs(remaining_bits, parser)
+    if remaining_bits:
+        raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    nodelist = parser.parse(("end_page_header",))
+    parser.delete_first_token()
+    return PageHeaderNode(kwargs, nodelist)
+
+
+# ===============================================================================
+# SECTION CARD (block tag with content slot)
+# ===============================================================================
+
+
+class SectionCardNode(template.Node):
+    """Renders a section card with a content slot between opening and closing tags."""
+
+    def __init__(
+        self,
+        kwargs: dict[str, FilterExpression],
+        nodelist_content: template.NodeList,
+    ) -> None:
+        self.kwargs = kwargs
+        self.nodelist_content = nodelist_content
+
+    def render(self, context: template.Context) -> str:
+        resolved: dict[str, Any] = {k: v.resolve(context) for k, v in self.kwargs.items()}
+        content_html = self.nodelist_content.render(context)
+
+        assert context.template is not None, "section_card tag requires a template context"
+        t = context.template.engine.get_template("components/section_card.html")
+        with context.update(
+            {
+                "sc_title": resolved.get("title", ""),
+                "sc_icon": resolved.get("icon", ""),
+                "sc_collapsible": resolved.get("collapsible", False),
+                "sc_padding": resolved.get("padding", "p-6"),
+                "sc_css_class": resolved.get("css_class", ""),
+                "sc_html_id": resolved.get("html_id", ""),
+                "sc_content": mark_safe(content_html),  # noqa: S308
+            }
+        ):
+            return t.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render(), not Jinja2
+
+
+@register.tag("section_card")
+def do_section_card(parser: template.base.Parser, token: template.base.Token) -> SectionCardNode:
+    """
+    Block tag for standardized section cards with titled headers.
+
+    Usage:
+        {% section_card title="Customer Details" icon="user" %}
+          <p>Card content here...</p>
+        {% end_section_card %}
+    """
+    bits = token.split_contents()
+    remaining_bits = bits[1:]
+    kwargs = django_token_kwargs(remaining_bits, parser)
+    if remaining_bits:
+        raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    nodelist = parser.parse(("end_section_card",))
+    parser.delete_first_token()
+    return SectionCardNode(kwargs, nodelist)
+
+
+# ===============================================================================
+# STAT TILE
+# ===============================================================================
+
+
+@register.inclusion_tag("components/stat_tile.html")
+def stat_tile(  # noqa: PLR0913
+    label: str,
+    value: str,
+    *,
+    icon: str = "",
+    meta: str = "",
+    trend: str = "",
+    variant: str = "default",
+    css_class: str = "",
+) -> dict[str, Any]:
+    """
+    Stat metric tile for dashboards and detail pages.
+
+    Usage:
+        {% stat_tile "Total Due" "1.234,56 RON" icon="currency" variant="warning" %}
+    """
+    return {
+        "label": label,
+        "value": value,
+        "icon": icon,
+        "meta": meta,
+        "trend": trend,
+        "variant": variant,
+        "css_class": css_class,
+    }
+
+
+# ===============================================================================
+# EMPTY STATE
+# ===============================================================================
+
+
+@register.inclusion_tag("components/empty_state.html")
+def empty_state(  # noqa: PLR0913
+    title: str,
+    *,
+    icon: str = "inbox",
+    body: str = "",
+    action_url: str = "",
+    action_text: str = "",
+    css_class: str = "",
+) -> dict[str, Any]:
+    """
+    Empty state placeholder for lists and tables with no data.
+
+    Usage:
+        {% empty_state "No invoices" icon="document" body="No invoices issued yet." %}
+    """
+    return {
+        "title": title,
+        "icon": icon,
+        "body": body,
+        "action_url": action_url,
+        "action_text": action_text,
+        "css_class": css_class,
+    }
+
+
+# ===============================================================================
+# FORM ACTIONS
+# ===============================================================================
+
+
+@register.inclusion_tag("components/form_actions.html")
+def form_actions(  # noqa: PLR0913
+    submit_label: str = "",
+    cancel_url: str = "",
+    cancel_label: str = "",
+    submit_variant: str = "primary",
+    align: str = "right",
+    css_class: str = "",
+) -> dict[str, Any]:
+    """
+    Render a standardised form submit/cancel row.
+
+    Usage:
+        {% form_actions submit_label="Save Changes" cancel_url=back_url %}
+    """
+    return {
+        "submit_label": submit_label,
+        "cancel_url": cancel_url,
+        "cancel_label": cancel_label,
+        "submit_variant": submit_variant,
+        "align": align,
+        "css_class": css_class,
+    }
+
+
 @register.inclusion_tag("components/table_enhanced.html")
 def table_enhanced(
     columns: list[dict[str, Any]],
@@ -705,10 +1075,14 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     ),
     "logout": "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
     "check": "M5 13l4 4L19 7",
+    "success": "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
     "x": "M6 18L18 6M6 6l12 12",
+    "close": "M6 18L18 6M6 6l12 12",
     "warning": "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+    "alert-triangle": "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
     "clock": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
     "lightning": "M13 10V3L4 14h7v7l9-11h-7z",
+    "bell": "M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6.002 6.002 0 0 0-4-5.659V4a2 2 0 1 0-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 1 1-6 0m6 0H9",
     "users": "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z",
     "user": "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
     "building": "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 00-1-1h-2a1 1 0 00-1 1v5m4 0H9",
@@ -719,21 +1093,34 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     "chat": "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
     "receipt": "M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z",
     "plus": "M12 4v16m8-8H4",
+    "minus": "M20 12H4",
+    "trash": "M6 7h12m-9 0V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0l1 12a2 2 0 002 2h2a2 2 0 002-2l1-12",
     "orders": "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z",
+    "shopping-cart": "M3 3h2l.4 2m0 0h13.2l-1.6 8H6.4M5.4 5L6.4 13m0 0l-1 5h11.6M6.4 13h10.6M9 21a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z",
     "lock": "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
     "refresh": "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+    "loading": "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
     "search": "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+    "filter": "M3 4a1 1 0 011-1h16a1 1 0 01.8 1.6L14 13.5V19a1 1 0 01-1.447.894l-3-1.5A1 1 0 019 17.5v-4L3.2 4.6A1 1 0 013 4z",
+    "sort": "M7 4h10M7 10h7M7 16h4m6 0V6m0 10l-3-3m3 3l3-3",
     "external": "M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14",
+    "external-link": "M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14",
     "download": "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
+    "upload": "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-6l-4-4m0 0L8 10m4-4v12",
     "globe": "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "domain": "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
     "server": "M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01",
     "mail": "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
+    "email": "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
     "arrow-left": "M10 19l-7-7m0 0l7-7m-7 7h18",
-    "arrow-right": "M14 5l7 7m0 0l-7 7m7-7H3",
-    "chevron-left": "M15 19l-7-7 7-7",
-    "chevron-right": "M9 5l7 7-7 7",
     "phone": "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z",
     "info": "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "calendar": "M8 7V3m8 4V3m-9 8h10m-12 9h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v11a2 2 0 002 2z",
+    "copy": "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2M10 8h8a2 2 0 012 2v8a2 2 0 01-2 2h-8a2 2 0 01-2-2v-8a2 2 0 012-2z",
+    "grid": "M4 6h5v5H4V6zm0 7h5v5H4v-5zm7-7h5v5h-5V6zm0 7h5v5h-5v-5",
+    "file-text": "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    "ticket": "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+    "list": "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
     "ban": "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636",
     "credit-card": "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
     "question": "M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
@@ -741,6 +1128,64 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     "book": "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
     "chart": "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
     "currency": "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    # ── A.5 additions: migrated from raw <svg> in feature templates ──
+    "chevron-left": "M15 19l-7-7 7-7",
+    "chevron-down": "M19 9l-7 7-7-7",
+    "chevron-up": "M5 15l7-7 7 7",
+    "chevron-right": "M9 5l7 7-7 7",
+    "menu": "M4 6h16M4 12h16M4 18h16",
+    "arrow-up": "M5 10l7-7m0 0l7 7m-7-7v18",
+    "arrow-down": "M19 14l-7 7m0 0l-7-7m7 7V3",
+    "arrow-right": "M14 5l7 7m0 0l-7 7m7-7H3",
+    "map-pin": (
+        "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z",
+        "M15 11a3 3 0 11-6 0 3 3 0 016 0z",
+    ),
+    "edit": "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+    "exclamation-circle": "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "paperclip": "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13",
+    "shield-check": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+    "shield": "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+    "star": "M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.801 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.539 1.118l-2.8-2.034a1 1 0 00-1.176 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.719c-.783-.57-.38-1.81.588-1.81H7.03a1 1 0 00.95-.69l1.07-3.292z",
+    "key": "M15 7a5 5 0 10-9.95 1H3v2h2v2h2v2h2.05A5.002 5.002 0 0015 7z",
+    "swap": "M8 9l4-4 4 4m0 6l-4 4-4-4",
+    "pause": "M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z",
+    "x-circle": "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z",
+    "danger": "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z",
+    "send": "M12 19l9 2-9-18-9 18 9-2zm0 0v-8",
+    "adjustments": (
+        "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4",
+    ),
+    "flag": "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9",
+    "eye": (
+        "M15 12a3 3 0 11-6 0 3 3 0 016 0z",
+        "M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
+    ),
+}
+
+# ── Heroicons Mini (20x20, filled) ──────────────────────────────────────────
+_FILLED_ICON_PATHS: dict[str, str | tuple[str, ...]] = {
+    "check-circle": "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+    "x-circle": "M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z",
+    "exclamation-triangle": "M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z",
+    "information-circle": "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z",
+    "x-mark": "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
+    "user": "M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z",
+    "shield-check": "M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+    "chat-bubble": "M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1-1h-.257A6 6 0 1118 8zM7 9a1 1 0 100 2 1 1 0 000-2zm7 1a1 1 0 11-2 0 1 1 0 012 0zm-3 1a1 1 0 100 2 1 1 0 000-2z",
+    "arrow-up": (
+        "M8.707 7.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l2-2a1 1 0 00-1.414-1.414L11 7.586V3a1 1 0 10-2 0v4.586l-.293-.293z",
+        "M3 5a2 2 0 012-2h1a1 1 0 010 2H5v7h2l1 2h4l1-2h2V5h-1a1 1 0 110-2h1a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5z",
+    ),
+    "currency-dollar": (
+        "M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z",
+        "M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z",
+    ),
+    "list-bullet": "M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z",
+    "code-bracket": "M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z",
+    "document-text": "M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z",
+    "arrow-path": "M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z",
+    "question-mark-circle": "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z",
 }
 
 _ICON_SIZES: dict[str, str] = {
@@ -752,21 +1197,62 @@ _ICON_SIZES: dict[str, str] = {
     "2xl": "w-10 h-10",
 }
 
+# ── Spinner sizes ───────────────────────────────────────────────────────────
+_SPINNER_SIZES: dict[str, tuple[str, str]] = {
+    "xs": ("w-3 h-3", "border"),
+    "sm": ("w-4 h-4", "border-2"),
+    "md": ("w-5 h-5", "border-2"),
+    "lg": ("w-6 h-6", "border-[3px]"),
+    "xl": ("w-8 h-8", "border-4"),
+}
+
+_SPINNER_COLORS: dict[str, str] = {
+    "current": "border-current",
+    "blue": "border-blue-500",
+    "white": "border-white",
+    "green": "border-green-500",
+    "slate": "border-slate-600",
+}
+
 
 @register.simple_tag
-def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> str:
+def icon(name: str, *, size: str = "md", css_class: str = "", style: str = "outline", **kwargs: Any) -> str:
     """
-    Inline SVG icon component backed by Heroicons v1 outline paths.
+    Inline SVG icon component backed by Heroicons paths.
 
     Usage:
         {% icon "user" size="lg" %}
-        {% icon "invoices" css_class="text-blue-400" %}
+        {% icon "check-circle" style="filled" css_class="text-green-400" %}
 
     Args:
-        name: Icon name from _ICON_PATHS catalog
+        name: Icon name from icon catalog
         size: xs|sm|md|lg|xl|2xl
         css_class: Additional CSS classes
+        style: "outline" (24x24 stroke) or "filled" (20x20 fill)
     """
+    if style == "filled":
+        paths = _FILLED_ICON_PATHS.get(name)
+        if paths is None:
+            return ""
+
+        classes = f"inline-block {_ICON_SIZES.get(size, _ICON_SIZES['md'])}"
+        if css_class:
+            classes += f" {css_class}"
+
+        if isinstance(paths, tuple):
+            path_html = "".join(
+                format_html('<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />', p) for p in paths
+            )
+        else:
+            path_html = format_html('<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />', paths)
+
+        return format_html(
+            '<svg class="{}" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">{}</svg>',
+            classes,
+            mark_safe(path_html),  # noqa: S308  — escaped template output
+        )
+
+    # Default: outline style
     paths = _ICON_PATHS.get(name)
     if paths is None:
         return ""
@@ -788,7 +1274,37 @@ def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> 
     return format_html(
         '<svg class="{}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">{}</svg>',
         classes,
-        mark_safe(path_html),  # Safe: component renders escaped content  # noqa: S308  # Safe: escaped template output
+        mark_safe(path_html),  # noqa: S308  — escaped template output
+    )
+
+
+@register.simple_tag
+def spinner(*, size: str = "sm", css_class: str = "", color: str = "current", **kwargs: Any) -> str:
+    """
+    Accessible loading spinner component.
+
+    Usage:
+        {% spinner %}
+        {% spinner size="lg" color="blue" %}
+        {% spinner size="md" color="white" css_class="mr-2" %}
+
+    Args:
+        size: xs|sm|md|lg|xl
+        color: current|blue|white|green|slate
+        css_class: Additional CSS classes
+    """
+    dim, border = _SPINNER_SIZES.get(size, _SPINNER_SIZES["sm"])
+    border_color = _SPINNER_COLORS.get(color, _SPINNER_COLORS["current"])
+
+    classes = f"animate-spin rounded-full {dim} {border} {border_color} border-t-transparent"
+    if css_class:
+        classes += f" {css_class}"
+
+    sr_text = _("Loading...")
+    return format_html(
+        '<div class="{}" role="status"><span class="sr-only">{}</span></div>',
+        classes,
+        sr_text,
     )
 
 
@@ -845,6 +1361,38 @@ def format_bytes(bytes_value: int) -> str:
         return f"{int(size)} {units[unit_index]}"
     else:
         return f"{size:.1f} {units[unit_index]}"
+
+
+@register.inclusion_tag("components/filter_select.html")
+def filter_select(  # noqa: PLR0913
+    name: str,
+    options: list[dict[str, Any]],
+    *,
+    selected: str = "",
+    label: str = "",
+    placeholder: str = "",
+    css_class: str = "",
+    html_id: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Filter select dropdown for list pages (HTMX-compatible).
+
+    Renders a styled <select> with label, typically inside a <form> that
+    handles HTMX submission via hx-trigger="change from:select".
+
+    Usage:
+        {% filter_select "status" status_choices selected=status_filter label="Status" placeholder="All" %}
+    """
+    return {
+        "name": name,
+        "options": options,
+        "selected": str(selected) if selected else "",
+        "label": label,
+        "placeholder": placeholder,
+        "css_class": css_class,
+        "html_id": html_id or f"filter-{name}",
+    }
 
 
 @register.inclusion_tag("components/badge.html")

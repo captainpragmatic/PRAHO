@@ -20,7 +20,7 @@ from unittest.mock import Mock, patch
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import HttpResponse
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from config.settings.test import LOCMEM_TEST_CACHE
 from django.urls import reverse
@@ -555,7 +555,7 @@ class SecurityMonitoringTest(TestCase):
         self.assertIn('TEST ALERT TYPE', call_args)
 
 
-class IntegrationSecurityTest(TransactionTestCase):
+class IntegrationSecurityTest(TestCase):
     """🔒 Integration tests for end-to-end security workflows"""
 
     def setUp(self):

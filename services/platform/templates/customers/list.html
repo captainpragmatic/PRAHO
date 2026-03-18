@@ -167,21 +167,16 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="5" class="px-6 py-12 text-center">
-              <div class="text-slate-400">
-                {% if search_query %}
-                <div class="mb-4">{% icon "search" size="2xl" %}</div>
-                <p>{% filter force_escape %}{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}{% endfilter %}</p>
-                {% else %}
-                <div class="mb-4">{% icon "users" size="2xl" %}</div>
-                <p>{% trans 'No customers yet' %}</p>
-                <p class="mt-2">
-                  <a href="{% url 'customers:create' %}" class="text-blue-400 hover:text-blue-300">
-                    {% trans 'Create the first customer' %} →
-                  </a>
-                </p>
-                {% endif %}
-              </div>
+            <td colspan="5" class="px-6 py-12">
+              {% if search_query %}
+                {% filter force_escape %}{% blocktrans asvar no_results %}No customers found for "{{ search_query }}"{% endblocktrans %}{% endfilter %}
+                {% empty_state no_results icon="search" %}
+              {% else %}
+                {% trans 'No customers yet' as no_cust %}
+                {% url 'customers:create' as create_url %}
+                {% trans 'Create the first customer' as create_label %}
+                {% empty_state no_cust icon="users" action_url=create_url action_text=create_label %}
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -293,55 +288,21 @@
       </div>
     </div>
     {% empty %}
-    <!-- Empty State -->
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
-      <div class="text-slate-400">
-        {% if search_query %}
-        <div class="mb-4">{% icon "search" size="2xl" %}</div>
-        <p>{% filter force_escape %}{% blocktrans %}No customers found for search "{{ search_query }}"{% endblocktrans %}{% endfilter %}</p>
-        {% else %}
-        <div class="mb-4">{% icon "users" size="2xl" %}</div>
-        <p>{% trans 'No customers yet' %}</p>
-        <p class="mt-4">
-          <a href="{% url 'customers:create' %}" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
-            {% trans 'Create the first customer' %}
-          </a>
-        </p>
-        {% endif %}
-      </div>
-    </div>
+    {% if search_query %}
+      {% filter force_escape %}{% blocktrans asvar no_results %}No customers found for "{{ search_query }}"{% endblocktrans %}{% endfilter %}
+      {% empty_state no_results icon="search" %}
+    {% else %}
+      {% trans 'No customers yet' as no_cust %}
+      {% url 'customers:create' as create_url %}
+      {% trans 'Create the first customer' as create_label %}
+      {% empty_state no_cust icon="users" action_url=create_url action_text=create_label %}
+    {% endif %}
     {% endfor %}
   </div>
 
   <!-- Pagination -->
-  {% if customers.has_other_pages %}
-  <div class="mt-6 bg-slate-800 rounded-lg border border-slate-700 p-4">
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-      <div class="text-sm text-slate-400 text-center sm:text-left">
-        {% filter force_escape %}{% blocktrans with customers.number as page_number and customers.paginator.num_pages as num_pages %}
-        Page {{ page_number }} of {{ num_pages }}
-        {% endblocktrans %}{% endfilter %}
-      </div>
-
-      <div class="flex justify-center sm:justify-end space-x-2">
-        {% if customers.has_previous %}
-        {% if search_query %}
-        {% trans "← Previous" as bt8 %}{% button bt8 variant="secondary" href="?page={{ customers.previous_page_number }}&search={{ search_query }}" size="sm" %}
-        {% else %}
-        {% trans "← Previous" as bt9 %}{% button bt9 variant="secondary" href="?page={{ customers.previous_page_number }}" size="sm" %}
-        {% endif %}
-        {% endif %}
-
-        {% if customers.has_next %}
-        {% if search_query %}
-        {% trans "Next →" as bt10 %}{% button bt10 variant="secondary" href="?page={{ customers.next_page_number }}&search={{ search_query }}" size="sm" %}
-        {% else %}
-        {% trans "Next →" as bt11 %}{% button bt11 variant="secondary" href="?page={{ customers.next_page_number }}" size="sm" %}
-        {% endif %}
-        {% endif %}
-      </div>
-    </div>
-  </div>
-  {% endif %}
+  {% with extra="&search="|add:search_query %}
+  {% include "components/pagination.html" with page_obj=customers extra_params=extra %}
+  {% endwith %}
 </div>
 {% endblock %}

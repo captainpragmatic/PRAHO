@@ -1,23 +1,14 @@
 {% load i18n %}
+{% load ui_components %}
 <div id="status-section"
      {% if is_in_progress %}hx-get="{% url 'infrastructure:deployment_status_partial' deployment.id %}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}
      class="bg-slate-800 rounded-lg border border-slate-700 p-6">
     <div class="flex items-center justify-between mb-4">
         <div class="flex items-center">
-            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold
-                {% if status_variant == 'success' %}bg-green-500/20 text-green-400
-                {% elif status_variant == 'danger' %}bg-red-500/20 text-red-400
-                {% elif status_variant == 'warning' %}bg-yellow-500/20 text-yellow-400
-                {% elif status_variant == 'info' %}bg-blue-500/20 text-blue-400
-                {% else %}bg-slate-500/20 text-slate-400{% endif %}">
-                {{ deployment.get_status_display }}
-            </span>
+            {% badge deployment.get_status_display variant=status_variant %}
             {% if is_in_progress %}
             <span class="ml-3 text-slate-400 text-sm flex items-center">
-                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+                {% spinner size="sm" color="blue" css_class="-ml-1 mr-2" %}
                 {% trans "In progress..." %}
             </span>
             {% endif %}

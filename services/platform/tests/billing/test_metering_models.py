@@ -14,7 +14,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -68,7 +68,7 @@ class UsageMeterModelTestCase(TestCase):
             unit="gb",
         )
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             UsageMeter.objects.create(
                 name="bandwidth_gb",
                 display_name="Bandwidth 2",
@@ -154,7 +154,7 @@ class UsageMeterModelTestCase(TestCase):
         self.assertEqual(meter.stripe_meter_event_name, "api_calls")
 
 
-class UsageEventModelTestCase(TransactionTestCase):
+class UsageEventModelTestCase(TestCase):
     """Test UsageEvent model functionality."""
 
     def setUp(self):
@@ -269,7 +269,7 @@ class UsageEventModelTestCase(TransactionTestCase):
         self.assertIsNotNone(event.processed_at)
 
 
-class SubscriptionModelTestCase(TransactionTestCase):
+class SubscriptionModelTestCase(TestCase):
     """Test Subscription and related models."""
 
     def setUp(self):
@@ -385,7 +385,7 @@ class SubscriptionModelTestCase(TransactionTestCase):
             )
 
 
-class BillingCycleModelTestCase(TransactionTestCase):
+class BillingCycleModelTestCase(TestCase):
     """Test BillingCycle model."""
 
     def setUp(self):
@@ -509,7 +509,7 @@ class BillingCycleModelTestCase(TransactionTestCase):
         self.assertEqual(cycle.total, Decimal("47.11"))
 
 
-class UsageAggregationModelTestCase(TransactionTestCase):
+class UsageAggregationModelTestCase(TestCase):
     """Test UsageAggregation model."""
 
     def setUp(self):
@@ -618,7 +618,7 @@ class UsageAggregationModelTestCase(TransactionTestCase):
             )
 
 
-class PricingTierModelTestCase(TransactionTestCase):
+class PricingTierModelTestCase(TestCase):
     """Test PricingTier and PricingTierBracket models."""
 
     def setUp(self):
@@ -732,7 +732,7 @@ class PricingTierModelTestCase(TransactionTestCase):
         self.assertEqual(tier.pricing_model, "package")
 
 
-class UsageThresholdAndAlertTestCase(TransactionTestCase):
+class UsageThresholdAndAlertTestCase(TestCase):
     """Test UsageThreshold and UsageAlert models."""
 
     def setUp(self):

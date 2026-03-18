@@ -158,9 +158,8 @@
           {% trans "Search" as bt2 %}{% button bt2 type="submit" variant="primary" size="sm" %}
 
           {% if search_query or current_status %}
-          <a href="{% url 'orders:order_list' %}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-            {% icon "x" %} {% trans "Clear" %}
-          </a>
+          {% url 'orders:order_list' as clear_url %}
+          {% trans "Clear" as clear_label %}{% button clear_label variant="secondary" href=clear_url size="sm" icon="x" %}
           {% endif %}
         </div>
       </div>
@@ -378,46 +377,13 @@
     </div>
 
     <!-- Pagination -->
-    {% if orders.has_other_pages %}
-      <div class="mt-6 lg:mt-8">
-        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
-          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div class="text-sm text-slate-400 text-center sm:text-left">
-              {% filter force_escape %}{% blocktrans with page_obj.number as page_number and paginator.num_pages as num_pages %}
-              Page {{ page_number }} of {{ num_pages }}
-              {% endblocktrans %}{% endfilter %}
-            </div>
-
-            <div class="flex justify-center sm:justify-end space-x-2">
-              {% if orders.has_previous %}
-                {% if search_query or current_status %}
-                  {% url 'orders:order_list' as base_url %}
-                  <a href="{{ base_url }}?page={{ orders.previous_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-                    ← {% trans "Previous" %}
-                  </a>
-                {% else %}
-                  <a href="?page={{ orders.previous_page_number }}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-                    ← {% trans "Previous" %}
-                  </a>
-                {% endif %}
-              {% endif %}
-
-              {% if orders.has_next %}
-                {% if search_query or current_status %}
-                  {% url 'orders:order_list' as base_url %}
-                  <a href="{{ base_url }}?page={{ orders.next_page_number }}{% if search_query %}&search={{ search_query }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-                    {% trans "Next" %} →
-                  </a>
-                {% else %}
-                  <a href="?page={{ orders.next_page_number }}" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-                    {% trans "Next" %} →
-                  </a>
-                {% endif %}
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
+    {% if search_query or current_status %}
+      {% with search_param="&search="|add:search_query status_param="&status="|add:current_status %}
+      {% with extra=search_param|add:status_param %}
+      {% include "components/pagination.html" with page_obj=orders extra_params=extra %}
+      {% endwith %}{% endwith %}
+    {% else %}
+      {% include "components/pagination.html" with page_obj=orders %}
     {% endif %}
 
   {% else %}
@@ -449,9 +415,8 @@
         {% endif %}
 
         {% if search_query or current_status %}
-          <a href="{% url 'orders:order_list' %}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
-            {% icon "refresh" %} {% trans "Show All Orders" %}
-          </a>
+          {% url 'orders:order_list' as all_orders_url %}
+          {% trans "Show All Orders" as show_all_label %}{% button show_all_label variant="secondary" href=all_orders_url icon="refresh" %}
         {% endif %}
       </div>
     </div>

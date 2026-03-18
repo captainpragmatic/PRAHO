@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.api.orders.views import IDEMPOTENCY_KEY_MAX_LENGTH
@@ -163,7 +163,7 @@ class IdempotencyKeyAtomicCreationTests(TestCase):
             currency="RON",
             idempotency_key=key,
         )
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             OrderService.create_order(data2)
 
 

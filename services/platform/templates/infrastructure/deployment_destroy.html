@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Destroy Node" %} - {{ deployment.hostname }}{% endblock %}
 
@@ -15,9 +16,7 @@
         <!-- Warning -->
         <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-6 mb-6">
             <div class="flex">
-                <svg class="h-6 w-6 text-red-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
+                {% icon "warning" size="lg" css_class="text-red-400 mr-3 flex-shrink-0" %}
                 <div>
                     <h3 class="text-red-400 font-semibold">{% trans "Warning: Destructive Action" %}</h3>
                     <p class="text-red-300 mt-2">{% trans "You are about to permanently destroy this node. This will:" %}</p>

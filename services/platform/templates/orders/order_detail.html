@@ -42,32 +42,17 @@
 
         {% if order.status not in "cancelled,refunded,completed" %}
           {% if order.status == "draft" %}
-            <button
-              hx-get="{% url 'orders:order_validate' pk=order.id %}"
-              hx-target="#preflight-container"
-              hx-swap="innerHTML"
-              class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-green-600 text-white bg-green-700 hover:bg-green-600 focus:ring-2 focus:ring-green-500">
-              {% icon "check" %} {% trans "Run Validation" %}
-            </button>
+            {% url 'orders:order_validate' pk=order.id as validate_url %}
+            {% trans "Run Validation" as validate_btn %}{% button validate_btn variant="success" icon="check" hx_get=validate_url hx_target="#preflight-container" hx_swap="innerHTML" %}
           {% endif %}
-          <button
-            type="button"
-            id="changeStatusBtn"
-            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
-            {% icon "refresh" %} {% trans "Change Status" %}
-          </button>
+          {% trans "Change Status" as change_status_btn %}{% button change_status_btn variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
         {% endif %}
       {% elif not is_staff and order.status in "completed,partially_refunded" %}
         <!-- Refund Request Button for Customers -->
         {% trans "Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
 
         {% if order.status not in "cancelled,refunded,completed" %}
-          <button
-            type="button"
-            id="changeStatusBtn"
-            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-600 text-white bg-slate-700 hover:bg-slate-600 focus:ring-2 focus:ring-blue-500">
-            {% icon "refresh" %} {% trans "Change Status" %}
-          </button>
+          {% trans "Change Status" as change_status_btn2 %}{% button change_status_btn2 variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
         {% endif %}
       {% endif %}
     </div>

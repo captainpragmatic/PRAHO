@@ -138,12 +138,7 @@
                  class="flex-1 flex justify-center py-3 px-4 border border-slate-600 text-sm font-medium rounded-lg text-slate-300 hover:bg-slate-700 hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
                 ← {% trans 'Cancel' %}
               </a>
-              <button type="submit"
-                      class="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-                      onclick="return confirmRegenerate()">
-                <span class="mr-2">{% icon "refresh" %}</span>
-                {% trans 'Regenerate Codes' %}
-              </button>
+              {% trans 'Regenerate Codes' as regen_btn %}{% button regen_btn variant="primary" type="submit" icon="refresh" class_="flex-1" attrs="onclick=\"return confirmRegenerate()\"" %}
             </div>
           </form>
         </div>

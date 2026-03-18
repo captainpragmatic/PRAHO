@@ -16,11 +16,8 @@
 
       <div class="flex space-x-3">
         {% if can_manage_services %}
-        <a href="{% url 'provisioning:service_create' %}"
-           class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
-          <span class="mr-2">{% icon "plus" %}</span>
-          {% trans 'New Service' %}
-        </a>
+        {% url 'provisioning:service_create' as create_service_url %}
+        {% trans 'New Service' as new_service_label %}{% button new_service_label variant="primary" href=create_service_url icon="plus" %}
         {% endif %}
       </div>
     </div>
@@ -73,17 +70,11 @@
 
   <!-- Quick Actions -->
   <div class="mt-6 flex space-x-4">
-    <a href="{% url 'provisioning:servers' %}"
-      class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
-      <span class="mr-2">{% icon "server" %}</span>
-      {% trans 'Servers' %}
-    </a>
+    {% url 'provisioning:servers' as servers_url %}
+    {% trans 'Servers' as servers_label %}{% button servers_label variant="secondary" href=servers_url icon="server" %}
 
-    <a href="{% url 'provisioning:plans' %}"
-      class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md inline-flex items-center transition-colors">
-      <span class="mr-2">{% icon "orders" %}</span>
-      {% trans 'Plans' %}
-    </a>
+    {% url 'provisioning:plans' as plans_url %}
+    {% trans 'Plans' as plans_label %}{% button plans_label variant="secondary" href=plans_url icon="orders" %}
   </div>
 </div>
 {% endblock %}

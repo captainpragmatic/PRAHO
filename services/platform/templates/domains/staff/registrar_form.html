@@ -19,11 +19,7 @@
     <form method="post" novalidate class="space-y-6">
       {% csrf_token %}
 
-      {% if form.non_field_errors %}
-        <div class="mb-4 text-sm text-red-700 bg-red-50 dark:bg-red-900/30 dark:text-red-300 rounded p-3">
-          {{ form.non_field_errors }}
-        </div>
-      {% endif %}
+      {% form_error_summary form %}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         {% input_field name="display_name" label=_("Display name") value=form.display_name.value html_id="id_display_name" required=True error=form.display_name.errors.0 %}
@@ -54,15 +50,12 @@
 
       {% input_field name="default_nameservers" input_type="textarea" label=_("Default nameservers") value=form.default_nameservers.value html_id="id_default_nameservers" rows=3 placeholder='["ns1.example.com", "ns2.example.com"]' help_text=form.fields.default_nameservers.help_text error=form.default_nameservers.errors.0 %}
 
-      <div class="pt-2 flex items-center gap-3">
-        {% if is_edit %}
-          {% trans "Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
-        {% else %}
-          {% trans "Save Registrar" as bt2 %}{% button bt2 variant="primary" type="submit" %}
-        {% endif %}
-        {% url 'domains:registrar_list' as registrar_list_url %}
-        {% trans "Cancel" as bt3 %}{% button bt3 variant="secondary" href=registrar_list_url %}
-      </div>
+      {% url 'domains:registrar_list' as registrar_list_url %}
+      {% if is_edit %}
+        {% form_actions submit_label=_("Save Changes") cancel_url=registrar_list_url %}
+      {% else %}
+        {% form_actions submit_label=_("Save Registrar") cancel_url=registrar_list_url %}
+      {% endif %}
     </form>
   </div>
 </div>

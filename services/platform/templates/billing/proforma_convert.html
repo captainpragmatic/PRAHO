@@ -72,9 +72,7 @@
         </div>
         <div class="flex justify-between">
           <span class="text-slate-400">{% trans 'Status:' %}</span>
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-900 text-yellow-200">
-            {% icon "clock" %} {% trans 'Valid' %}
-          </span>
+          {% trans "Valid" as bt_valid %}{% badge bt_valid variant="warning" icon="clock" %}
         </div>
         <div class="border-t border-slate-600 pt-3 mt-3">
           <div class="flex justify-between font-semibold">
@@ -110,9 +108,7 @@
         </div>
         <div class="flex justify-between">
           <span class="text-slate-400">{% trans 'Status:' %}</span>
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900 text-blue-200">
-            {% icon "mail" %} {% trans 'Issued' %}
-          </span>
+          {% trans "Issued" as bt_issued %}{% badge bt_issued variant="info" icon="mail" %}
         </div>
         <div class="border-t border-slate-600 pt-3 mt-3">
           <div class="flex justify-between font-semibold">

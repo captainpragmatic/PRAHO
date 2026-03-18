@@ -27,13 +27,7 @@
         {% csrf_token %}
 
         <!-- Form Errors -->
-        {% if form.non_field_errors %}
-        <div class="bg-red-900 border border-red-700 rounded-md p-3">
-          {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">{% icon "x" %} {{ error }}</p>
-          {% endfor %}
-        </div>
-        {% endif %}
+        {% form_error_summary form %}
 
         <!-- Basic Information -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -121,12 +115,7 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
-          <button type="submit"
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors">
-            {% icon "check" %} {% trans 'Save Changes' %}
-          </button>
-        </div>
+        {% form_actions submit_label=_("Save Changes") %}
       </form>
     </div>
   </div>

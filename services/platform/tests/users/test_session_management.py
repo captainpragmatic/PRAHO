@@ -291,13 +291,8 @@ class SessionSecurityServiceTestCase(TestCase):
         """Test invalidation of other user sessions"""
         # Test that the method exists and can be called
         # Session invalidation depends on Redis/DB backend which is complex to test
-        try:
-            SessionSecurityService._invalidate_other_user_sessions(self.user.id, 'test_session')
-            # If no exception is raised, the method works
-            self.assertTrue(True)
-        except Exception as e:
-            # Method should handle errors gracefully
-            self.assertIsInstance(e, Exception)
+        # Should not raise — method handles errors gracefully
+        SessionSecurityService._invalidate_other_user_sessions(self.user.id, 'test_session')
 
 
 class SessionSecurityMiddlewareTestCase(TestCase):

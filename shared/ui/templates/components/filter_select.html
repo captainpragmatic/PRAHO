@@ -1,0 +1,33 @@
+{% comment %}
+Filter Select Component — HTMX-compatible filter dropdown for list pages.
+Used inside <form> elements that handle HTMX submission.
+
+Parameters:
+  name        — form field name (required)
+  label       — optional label text above the select
+  placeholder — first empty option text (e.g., "All Types")
+  options     — list of {value, label} dicts
+  selected    — currently selected value
+  css_class   — additional CSS classes on the wrapper div
+  html_id     — optional id for the select element
+
+Usage:
+  {% filter_select "status" label="Status" placeholder="All" options=status_choices selected=status_filter %}
+{% endcomment %}
+{% load i18n %}
+<div class="{{ css_class|default:'w-full sm:w-auto' }}">
+  {% if label %}
+  <label{% if html_id %} for="{{ html_id }}"{% endif %} class="block text-sm font-medium text-slate-300 mb-2">
+    {{ label }}
+  </label>
+  {% endif %}
+  <select name="{{ name }}"{% if html_id %} id="{{ html_id }}"{% endif %}
+    class="w-full sm:w-auto px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm">
+    {% if placeholder %}
+    <option value="">{{ placeholder }}</option>
+    {% endif %}
+    {% for opt in options %}
+    <option value="{{ opt.value }}"{% if opt.value == selected %} selected{% endif %}>{{ opt.label }}</option>
+    {% endfor %}
+  </select>
+</div>

@@ -11,6 +11,7 @@ on:
     branches: [master, staging]
     paths:
       - 'services/portal/**'
+      - 'shared/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/portal.yml'
@@ -18,9 +19,11 @@ on:
     branches: [master]
     paths:
       - 'services/portal/**'
+      - 'shared/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/portal.yml'
+  workflow_dispatch:
 
 env:
   DJANGO_SETTINGS_MODULE: config.settings.dev

@@ -503,9 +503,8 @@ class UserProfileViewTest(BaseViewTestCase):
         # Check profile was updated
         self.user.refresh_from_db()
         profile.refresh_from_db()
-        # Form may not update due to validation or view logic
-        # Just check that the view processed the request
-        self.assertTrue(True)  # View handled POST without error
+        # Verify the view processed the POST request successfully
+        self.assertIn(response.status_code, (200, 302))
 
 
 # ===============================================================================

@@ -146,38 +146,15 @@
               <label for="{{ form.token.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Enter verification code from your app:' %}
               </label>
-              <input type="text"
-                     name="{{ form.token.name }}"
-                     id="{{ form.token.id_for_label }}"
-                     class="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white text-center text-lg font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                     placeholder="000000"
-                     maxlength="6"
-                     pattern="[0-9]{6}"
-                     autocomplete="one-time-code"
-                     required>
-
-              {% if form.token.errors %}
-                <div class="mt-2 text-sm text-red-400">
-                  {% for error in form.token.errors %}
-                    <p>{{ error }}</p>
-                  {% endfor %}
-                </div>
-              {% endif %}
+              {% trans "000000" as token_placeholder %}
+              {% input_field name=form.token.name input_type="text" placeholder=token_placeholder required=True html_id=form.token.id_for_label error=form.token.errors.0 css_class="text-center text-lg font-mono tracking-wider" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" %}
             </div>
 
-            {% if form.non_field_errors %}
-              <div class="text-sm text-red-400">
-                {% for error in form.non_field_errors %}
-                  <p>{{ error }}</p>
-                {% endfor %}
-              </div>
-            {% endif %}
+            {% form_error_summary form %}
 
             <div class="flex gap-3">
-              <button type="submit"
-                      class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-slate-800">
-                {% trans 'Verify & Enable MFA' %}
-              </button>
+              {% trans "Verify & Enable MFA" as verify_label %}
+              {% button verify_label type="submit" variant="success" class_="flex-1" %}
             </div>
           </form>
 

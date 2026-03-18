@@ -115,7 +115,7 @@
         <!-- Monthly Cost -->
         {% if service.monthly_price %}
           {% trans 'Monthly' as st1_label %}
-          {% with cur=service.currency_code|default:"RON" val=service.monthly_price|romanian_currency:cur %}{% stat_tile st1_label val icon="currency" variant="success" %}{% endwith %}
+          {% with cur=service.currency_code|default:"RON" %}{% with val=service.monthly_price|romanian_currency:cur %}{% stat_tile st1_label val icon="currency" variant="success" %}{% endwith %}{% endwith %}
         {% else %}
           {% trans 'Monthly' as st1_label %}{% trans 'N/A' as st1_val %}
           {% stat_tile st1_label st1_val icon="currency" variant="default" %}

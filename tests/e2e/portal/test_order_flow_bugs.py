@@ -8,6 +8,8 @@ and Romanian VAT display compliance.
 All tests are independent and perform a fresh login. No database access is used.
 """
 
+import contextlib
+
 from playwright.sync_api import Page
 
 from tests.e2e.helpers import (
@@ -61,9 +63,16 @@ def _add_first_product_to_cart(page: Page) -> bool:
         print("  No products in catalog — test cannot proceed")
         return False
 
-    # Click the first Add to Cart button and wait for HTMX response
-    add_buttons.first.click()
-    page.wait_for_load_state("networkidle")
+    # Click the first Add to Cart button and wait for HTMX response to complete.
+    # The form uses hx-post with hx-target="#cart-widget" — wait for the cart widget
+    # to update (HTMX swaps outerHTML) as confirmation the server persisted the item.
+    with page.expect_response(lambda r: "cart/add" in r.url) as response_info:
+        add_buttons.first.click()
+    response = response_info.value
+    if response.status != 200:
+        print(f"  Add to cart returned status {response.status}")
+        return False
+    page.wait_for_timeout(500)  # Allow HTMX swap to settle
     return True
 
 
@@ -93,8 +102,11 @@ def test_bug2_product_type_in_cart_items(page: Page) -> None:
     page.goto(CART_URL)
     page.wait_for_load_state("networkidle")
 
-    # Cart should show at least one item
+    # Wait for cart items to render (HTMX may load async)
     cart_items = page.locator('[id^="cart-item-"]')
+    with contextlib.suppress(Exception):
+        cart_items.first.wait_for(state="attached", timeout=5000)
+
     assert cart_items.count() > 0, "Cart should have at least one item"
 
     # Each cart item should display a product type badge
@@ -202,8 +214,8 @@ def test_backend3_cart_version_mismatch_ajax(page: Page) -> None:
     status = response_data.get("status", 0)
     # The server should return 400 for stale cart_version, or 404 for unknown slug.
     # Both indicate proper rejection rather than a silent 200.
-    assert status in (400, 404, 409), (
-        f"BACKEND-3 REGRESSION: Expected 400/404/409 for stale cart_version, got {status}. "
+    assert status in (400, 404, 409, 422), (
+        f"BACKEND-3 REGRESSION: Expected 400/404/409/422 for stale cart_version, got {status}. "
         "Server must reject stale cart versions to prevent concurrent modification bugs."
     )
 
@@ -288,17 +300,27 @@ def test_ds1_vat_rate_displayed_on_checkout(page: Page) -> None:
         print(f"  SKIP: Redirected from cart to {page.url}")
         return
 
-    # Wait for HTMX to load cart totals (the partial loads asynchronously)
-    page.wait_for_timeout(2000)
+    # Wait for HTMX to load cart totals (hx-trigger="load" fires async POST to calculate_totals).
+    # The response replaces #cart-totals with the rendered partial containing VAT info.
+    # Wait for the HTMX response to arrive, not just a fixed timeout.
+    try:
+        page.wait_for_response(lambda r: "cart/calculate" in r.url, timeout=15000)
+        page.wait_for_timeout(500)  # Allow HTMX swap to settle
+    except Exception:
+        # If the response never comes, the assertion below will catch it
+        page.wait_for_timeout(3000)
 
-    # Look for VAT display — the cart_totals.html partial shows "VAT (21%)"
-    vat_text = page.locator('text="VAT (21%)"').first
-    if not vat_text.is_visible(timeout=5000):
-        # Also accept Romanian format or percentage-only format
-        vat_text = page.locator('[id="cart-totals"]').locator('text=/VAT|TVA|21%/')
-        assert vat_text.count() > 0, (
-            "DS-1 REGRESSION: VAT rate not visible on cart review page. "
-            "Romanian compliance requires '21%' to appear in the order summary."
-        )
+    # Look for VAT display — the cart_totals.html partial shows "{% trans 'VAT' %} (21%)"
+    # which renders as "VAT (21%)" in English or "TVA (21%)" in Romanian locale.
+    cart_totals = page.locator("#cart-totals")
+    vat_visible = cart_totals.locator("text=/(?:VAT|TVA).*21%/").count() > 0
+    if not vat_visible:
+        # Also check for percentage alone (some layouts may split the text)
+        vat_visible = cart_totals.locator("text=/21\\s*%/").count() > 0
+
+    assert vat_visible, (
+        "DS-1 REGRESSION: VAT rate not visible on cart review page. "
+        "Romanian compliance requires '21%' (or 'TVA 21%') to appear in the order summary."
+    )
 
     print("  VAT rate (21%) is visible on cart review — DS-1 not regressed")

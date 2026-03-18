@@ -147,12 +147,7 @@
                  class="flex-1 flex justify-center py-3 px-4 border border-slate-600 text-sm font-medium rounded-lg text-slate-300 hover:bg-slate-700 hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
                 ← {% trans 'Cancel' %}
               </a>
-              <button type="submit"
-                      class="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
-                      onclick="return confirmDisable()">
-                <span class="mr-2">{% icon "lock" %}</span>
-                {% trans 'Disable MFA' %}
-              </button>
+              {% trans 'Disable MFA' as disable_mfa_btn %}{% button disable_mfa_btn variant="danger" type="submit" icon="lock" class_="flex-1" attrs="onclick=\"return confirmDisable()\"" %}
             </div>
           </form>
         </div>
@@ -235,9 +230,7 @@ document.getElementById('token').addEventListener('input', function(e) {
     <div class="rounded-lg bg-blue-900 border border-blue-600 p-4">
       <div class="flex">
         <div class="flex-shrink-0">
-          <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-          </svg>
+{% icon "information-circle" style="filled" size="md" css_class="text-blue-400" %}
         </div>
         <div class="ml-3">
           <h3 class="text-sm font-medium text-blue-200">

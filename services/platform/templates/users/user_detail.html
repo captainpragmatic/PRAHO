@@ -6,7 +6,16 @@
 {% block content %}
 <div class="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
   <h1 class="text-2xl font-bold text-white mb-4">{% trans 'User Detail' %}</h1>
-  <div class="bg-slate-800 rounded-lg p-4 text-slate-200">
-    <p><strong>{% trans 'Email' %}:</strong> {{ user_detail.email }}</p>
+  <div class="bg-slate-800 rounded-lg p-4 text-slate-200 space-y-2">
+    <div><strong>{% trans 'Email' %}:</strong> {{ user_detail.email }}</div>
+    <div><strong>{% trans 'Name' %}:</strong> {{ user_detail.first_name }} {{ user_detail.last_name }}</div>
+    {% if user_detail.staff_role %}
+    <div><strong>{% trans 'Role' %}:</strong> {% trans 'Staff' %} ({{ user_detail.staff_role }})</div>
+    {% endif %}
+    {% if user_detail.customer_memberships.exists %}
+    <div><strong>{% trans 'Customer' %}:</strong> {% trans 'Member' %} ({{ user_detail.customer_memberships.count }} {% trans 'organizations' %})</div>
+    {% endif %}
+    <div><strong>{% trans 'Login' %}:</strong> {% trans 'Activity' %} — {% trans 'Last login' %}: {{ user_detail.last_login|default:"-" }}</div>
   </div>
+</div>
 {% endblock %}

@@ -35,26 +35,20 @@
                 <p class="text-slate-300 text-lg">{{ service.domain }}</p>
                 <div class="flex flex-wrap items-center text-slate-400 text-sm mt-2 space-x-2">
                     <span class="flex items-center">
-                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                        </svg>
+                        <span class="mr-1">{% icon "calendar" size="sm" %}</span>
                         {{ service.created_at|date:"d.m.Y H:i" }}
                     </span>
                     {% if service.updated_at != service.created_at %}
                         <span class="text-slate-500">•</span>
                         <span class="flex items-center">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
+                            <span class="mr-1">{% icon "clock" size="sm" %}</span>
                             {{ service.updated_at|date:"d.m.Y H:i" }}
                         </span>
                     {% endif %}
                     {% if service.provisioning_task_id %}
                         <span class="text-slate-500">•</span>
                         <span class="flex items-center">
-                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                            </svg>
+                            <span class="mr-1">{% icon "clipboard" size="sm" %}</span>
                             {% trans 'Task:' %} <code class="text-slate-300">{{ service.provisioning_task_id|truncatechars:12 }}</code>
                         </span>
                     {% endif %}
@@ -106,13 +100,9 @@
                     <pre class="text-xs text-red-300 whitespace-pre-wrap font-mono">{{ service.provisioning_errors }}</pre>
                 </div>
                 {% if can_manage %}
-                <div class="mt-3">
-                    <button class="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded transition-colors">
-                        {% icon "refresh" %} {% trans 'Retry Provisioning' %}
-                    </button>
-                    <button class="text-sm text-red-300 hover:text-red-200 ml-2 underline">
-                        {% icon "document" %} {% trans 'Add Admin Notes' %}
-                    </button>
+                <div class="mt-3 flex items-center gap-2">
+                    {% trans "Retry Provisioning" as retry_btn %}{% button retry_btn variant="danger" size="sm" icon="refresh" %}
+                    {% trans "Add Admin Notes" as notes_btn %}{% button notes_btn variant="secondary" size="sm" icon="document" %}
                 </div>
                 {% endif %}
             </div>
@@ -131,9 +121,7 @@
                     <h3 class="text-lg font-semibold text-white flex items-center">
                         {% icon "building" %} {% trans 'Customer' %}
                     </h3>
-                    <span class="text-xs bg-green-600 text-white px-2 py-1 rounded-full">
-                        🇷🇴 RO
-                    </span>
+                    {% badge "🇷🇴 RO" variant="success" size="xs" rounded="full" %}
                 </div>
 
                 <div class="space-y-3">
@@ -146,9 +134,7 @@
                         <p class="text-sm text-slate-400">{% trans 'CUI' %}</p>
                         <div class="flex items-center space-x-2">
                             <p class="font-mono text-white">{{ service.customer.cui|cui_format }}</p>
-                            <span class="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">
-                                {% icon "check" %} Valid
-                            </span>
+                            {% badge "✓ Valid" variant="primary" size="xs" %}
                         </div>
                     </div>
 
@@ -213,9 +199,7 @@
                     <h3 class="text-lg font-semibold text-white flex items-center">
                         {% icon "orders" %} {% trans 'Service Plan' %}
                     </h3>
-                    <span class="text-sm bg-purple-600 text-white px-3 py-1 rounded-full">
-                        {{ service.service_plan.get_plan_type_display }}
-                    </span>
+                    {% badge service.service_plan.get_plan_type_display variant="primary" size="sm" rounded="full" %}
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
@@ -341,9 +325,7 @@
                     <!-- Creation -->
                     <div class="flex items-start space-x-3">
                         <div class="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                            </svg>
+                            {% icon "plus" size="sm" css_class="text-white" %}
                         </div>
                         <div>
                             <p class="text-white font-medium">{% trans 'Service Created' %}</p>

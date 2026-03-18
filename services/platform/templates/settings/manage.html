@@ -76,7 +76,7 @@
             <!-- Loading Indicator -->
             <div id="loading-indicator" class="htmx-indicator">
                 <div class="flex items-center justify-center py-8">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    {% spinner size="xl" color="blue" %}
                     <span class="ml-3 text-slate-400">{% trans "Loading settings..." %}</span>
                 </div>
             </div>
@@ -91,7 +91,7 @@
                          hx-indicator="#loading-indicator"
                          hx-swap="outerHTML">
                         <div class="flex items-center justify-center py-8">
-                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                            {% spinner size="xl" color="blue" %}
                             <span class="ml-3 text-slate-400">{% trans "Loading settings..." %}</span>
                         </div>
                     </div>

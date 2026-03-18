@@ -13,7 +13,7 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from django.test import TransactionTestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -45,33 +45,35 @@ from apps.products.models import Product
 from tests.helpers.fsm_helpers import force_status
 
 
-class MeteringServiceTestCase(TransactionTestCase):
+def _metering_service_setup(test_instance):
+    """Shared setup for metering service test classes."""
+    test_instance.currency, _ = Currency.objects.get_or_create(
+        code="RON", defaults={"symbol": "lei", "decimals": 2}
+    )
+    test_instance.customer = Customer.objects.create(
+        name="Test Customer",
+        customer_type="individual",
+        primary_email="test@example.com",
+        status="active",
+    )
+    test_instance.meter = UsageMeter.objects.create(
+        name="api_requests",
+        display_name="API Requests",
+        aggregation_type="sum",
+        unit="requests",
+        is_active=True,
+        is_billable=True,
+        event_grace_period_hours=24,
+    )
+    test_instance.service = MeteringService()
+
+
+class MeteringServiceTestCase(TestCase):
     """Test MeteringService functionality."""
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name="Test Customer",
-            customer_type="individual",
-            primary_email="test@example.com",
-            status="active",
-        )
-
-        self.meter = UsageMeter.objects.create(
-            name="api_requests",
-            display_name="API Requests",
-            aggregation_type="sum",
-            unit="requests",
-            is_active=True,
-            is_billable=True,
-            event_grace_period_hours=24,
-        )
-
-        self.service = MeteringService()
+        _metering_service_setup(self)
 
     def test_record_event_success(self):
         """Test successful event recording."""
@@ -150,6 +152,87 @@ class MeteringServiceTestCase(TransactionTestCase):
             UsageEvent.objects.filter(idempotency_key="duplicate-test-key").count(),
             1
         )
+
+    def test_record_event_timestamp_too_old(self):
+        """Test event with timestamp outside grace period."""
+        old_timestamp = timezone.now() - timedelta(hours=48)  # 48 hours ago
+
+        result = self.service.record_event(UsageEventData(
+            meter_name="api_requests",
+            customer_id=str(self.customer.id),
+            value=Decimal("100"),
+            timestamp=old_timestamp,
+        ))
+
+        self.assertTrue(result.is_err())
+        self.assertIn("too old", result.error.lower())
+
+    def test_record_event_timestamp_in_future(self):
+        """Test event with future timestamp."""
+        future_timestamp = timezone.now() + timedelta(hours=1)
+
+        result = self.service.record_event(UsageEventData(
+            meter_name="api_requests",
+            customer_id=str(self.customer.id),
+            value=Decimal("100"),
+            timestamp=future_timestamp,
+        ))
+
+        self.assertTrue(result.is_err())
+        self.assertIn("future", result.error.lower())
+
+    def test_record_bulk_events(self):
+        """Test bulk event recording."""
+        events = [
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal(str(i)),
+                idempotency_key=f"bulk-key-{i}",
+            )
+            for i in range(1, 6)
+        ]
+
+        results, success, errors = self.service.record_bulk_events(events)
+
+        self.assertEqual(success, 5)
+        self.assertEqual(errors, 0)
+        self.assertEqual(len(results), 5)
+
+    def test_record_bulk_events_with_errors(self):
+        """Test bulk event recording with some failures."""
+        events = [
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+                idempotency_key="bulk-good-1",
+            ),
+            UsageEventData(
+                meter_name="nonexistent",  # This will fail
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+            ),
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal("200"),
+                idempotency_key="bulk-good-2",
+            ),
+        ]
+
+        _results, success, errors = self.service.record_bulk_events(events)
+
+        self.assertEqual(success, 2)
+        self.assertEqual(errors, 1)
+
+
+class MeteringServiceTransactionTests(TransactionTestCase):
+    """Tests requiring TransactionTestCase (concurrent thread access)."""
+
+    def setUp(self):
+        """Set up test data."""
+        _metering_service_setup(self)
 
     def test_record_event_idempotency_race_condition(self):
         """
@@ -231,81 +314,8 @@ class MeteringServiceTestCase(TransactionTestCase):
             event_count = UsageEvent.objects.filter(idempotency_key=idempotency_key).count()
             self.assertEqual(event_count, 1, f"Expected 1 event, found {event_count}")
 
-    def test_record_event_timestamp_too_old(self):
-        """Test event with timestamp outside grace period."""
-        old_timestamp = timezone.now() - timedelta(hours=48)  # 48 hours ago
 
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-            timestamp=old_timestamp,
-        ))
-
-        self.assertTrue(result.is_err())
-        self.assertIn("too old", result.error.lower())
-
-    def test_record_event_timestamp_in_future(self):
-        """Test event with future timestamp."""
-        future_timestamp = timezone.now() + timedelta(hours=1)
-
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-            timestamp=future_timestamp,
-        ))
-
-        self.assertTrue(result.is_err())
-        self.assertIn("future", result.error.lower())
-
-    def test_record_bulk_events(self):
-        """Test bulk event recording."""
-        events = [
-            UsageEventData(
-                meter_name="api_requests",
-                customer_id=str(self.customer.id),
-                value=Decimal(str(i)),
-                idempotency_key=f"bulk-key-{i}",
-            )
-            for i in range(1, 6)
-        ]
-
-        results, success, errors = self.service.record_bulk_events(events)
-
-        self.assertEqual(success, 5)
-        self.assertEqual(errors, 0)
-        self.assertEqual(len(results), 5)
-
-    def test_record_bulk_events_with_errors(self):
-        """Test bulk event recording with some failures."""
-        events = [
-            UsageEventData(
-                meter_name="api_requests",
-                customer_id=str(self.customer.id),
-                value=Decimal("100"),
-                idempotency_key="bulk-good-1",
-            ),
-            UsageEventData(
-                meter_name="nonexistent",  # This will fail
-                customer_id=str(self.customer.id),
-                value=Decimal("100"),
-            ),
-            UsageEventData(
-                meter_name="api_requests",
-                customer_id=str(self.customer.id),
-                value=Decimal("200"),
-                idempotency_key="bulk-good-2",
-            ),
-        ]
-
-        _results, success, errors = self.service.record_bulk_events(events)
-
-        self.assertEqual(success, 2)
-        self.assertEqual(errors, 1)
-
-
-class RatingEngineTestCase(TransactionTestCase):
+class RatingEngineTestCase(TestCase):
     """Test RatingEngine functionality."""
 
     def setUp(self):
@@ -533,7 +543,7 @@ class RatingEngineTestCase(TransactionTestCase):
         self.assertEqual(result2, Decimal("6"))
 
 
-class GraduatedPricingTestCase(TransactionTestCase):
+class GraduatedPricingTestCase(TestCase):
     """Test graduated/tiered pricing calculations."""
 
     def setUp(self):
@@ -637,7 +647,7 @@ class GraduatedPricingTestCase(TransactionTestCase):
         self.assertEqual(charge, 100)
 
 
-class UsageInvoiceServiceTestCase(TransactionTestCase):
+class UsageInvoiceServiceTestCase(TestCase):
     """Test UsageInvoiceService functionality."""
 
     def setUp(self):
@@ -780,7 +790,7 @@ class UsageInvoiceServiceTestCase(TransactionTestCase):
         self.assertIn("not found", result.error.lower())
 
 
-class BillingCycleManagerTestCase(TransactionTestCase):
+class BillingCycleManagerTestCase(TestCase):
     """Test BillingCycleManager functionality."""
 
     def setUp(self):
@@ -900,7 +910,7 @@ class BillingCycleManagerTestCase(TransactionTestCase):
         self.assertEqual(errors, 0)
 
 
-class UsageAlertServiceTestCase(TransactionTestCase):
+class UsageAlertServiceTestCase(TestCase):
     """Test UsageAlertService functionality."""
 
     def setUp(self):

@@ -22,7 +22,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.currency_models import Currency
@@ -387,7 +387,7 @@ class SubscriptionStatusPropertiesTestCase(SubscriptionModelTestBase):
 # ===============================================================================
 
 
-class SubscriptionActivateTestCase(TransactionTestCase):
+class SubscriptionActivateTestCase(TestCase):
     """Tests for Subscription.activate()."""
 
     def setUp(self) -> None:
@@ -449,7 +449,7 @@ class SubscriptionActivateTestCase(TransactionTestCase):
         self.assertEqual(call_kwargs["user_email"], "admin@example.com")
 
 
-class SubscriptionStartTrialTestCase(TransactionTestCase):
+class SubscriptionStartTrialTestCase(TestCase):
     """Tests for Subscription.start_trial()."""
 
     def setUp(self) -> None:
@@ -496,7 +496,7 @@ class SubscriptionStartTrialTestCase(TransactionTestCase):
         mock_log.assert_called()
 
 
-class SubscriptionConvertTrialTestCase(TransactionTestCase):
+class SubscriptionConvertTrialTestCase(TestCase):
     """Tests for Subscription.convert_trial()."""
 
     def setUp(self) -> None:
@@ -551,7 +551,7 @@ class SubscriptionConvertTrialTestCase(TransactionTestCase):
             sub.convert_trial()
 
 
-class SubscriptionCancelTestCase(TransactionTestCase):
+class SubscriptionCancelTestCase(TestCase):
     """Tests for Subscription.cancel()."""
 
     def setUp(self) -> None:
@@ -609,7 +609,7 @@ class SubscriptionCancelTestCase(TransactionTestCase):
         self.assertEqual(sub.cancellation_feedback, "Service was too slow")
 
 
-class SubscriptionPauseTestCase(TransactionTestCase):
+class SubscriptionPauseTestCase(TestCase):
     """Tests for Subscription.pause()."""
 
     def setUp(self) -> None:
@@ -659,7 +659,7 @@ class SubscriptionPauseTestCase(TransactionTestCase):
         self.assertEqual(sub.status, "paused")
 
 
-class SubscriptionRenewTestCase(TransactionTestCase):
+class SubscriptionRenewTestCase(TestCase):
     """Tests for Subscription.renew()."""
 
     def setUp(self) -> None:
@@ -700,7 +700,7 @@ class SubscriptionRenewTestCase(TransactionTestCase):
         mock_log.assert_called()
 
 
-class SubscriptionMarkPaymentFailedTestCase(TransactionTestCase):
+class SubscriptionMarkPaymentFailedTestCase(TestCase):
     """Tests for Subscription.mark_payment_failed()."""
 
     def setUp(self) -> None:
@@ -767,7 +767,7 @@ class SubscriptionMarkPaymentFailedTestCase(TransactionTestCase):
         self.assertEqual(sub.failed_payment_count, 3)
 
 
-class SubscriptionRecordPaymentTestCase(TransactionTestCase):
+class SubscriptionRecordPaymentTestCase(TestCase):
     """Tests for Subscription.record_payment()."""
 
     def setUp(self) -> None:
@@ -828,7 +828,7 @@ class SubscriptionRecordPaymentTestCase(TransactionTestCase):
         self.assertEqual(sub.status, "active")
 
 
-class SubscriptionApplyGrandfatheredPriceTestCase(TransactionTestCase):
+class SubscriptionApplyGrandfatheredPriceTestCase(TestCase):
     """Tests for Subscription.apply_grandfathered_price()."""
 
     def setUp(self) -> None:
@@ -1017,7 +1017,7 @@ class SubscriptionChangeCalculateProrationTestCase(SubscriptionModelTestBase):
         self.assertEqual(change.proration_amount_cents, 0)
 
 
-class SubscriptionChangeApplyTestCase(TransactionTestCase):
+class SubscriptionChangeApplyTestCase(TestCase):
     """Tests for SubscriptionChange.apply()."""
 
     def setUp(self) -> None:

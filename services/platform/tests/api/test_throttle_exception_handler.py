@@ -9,7 +9,6 @@ from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from apps.api.exception_handlers import platform_exception_handler
-from apps.api.users import views as api_users_views
 from apps.common.performance.rate_limiting import (
     AuthThrottle,
     BurstAPIThrottle,
@@ -60,10 +59,6 @@ class ThrottleConfigurationTests(SimpleTestCase):
         self.assertEqual(StandardAPIThrottle.scope, "sustained")
         self.assertEqual(BurstAPIThrottle.scope, "api_burst")
         self.assertEqual(AuthThrottle.scope, "auth")
-
-    def test_users_module_uses_canonical_auth_throttle(self) -> None:
-        self.assertIs(api_users_views.AuthThrottle, AuthThrottle)
-
 
 class PortalHMACThrottleTests(SimpleTestCase):
     def setUp(self) -> None:

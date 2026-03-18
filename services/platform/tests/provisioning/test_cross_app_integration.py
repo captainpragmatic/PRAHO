@@ -25,7 +25,6 @@ from django.utils import timezone
 
 from apps.customers.models import Customer
 from apps.billing.models import Invoice, Payment, Currency
-from apps.billing.signals import _trigger_virtualmin_provisioning_on_payment
 from apps.common.types import Ok
 from apps.domains.models import Domain, TLD, Registrar
 from apps.domains.signals import sync_domain_to_virtualmin
@@ -625,72 +624,6 @@ class CrossAppIntegrationPerformanceTest(TestCase):
             code="RON",
             defaults={"name": "Romanian Leu", "symbol": "RON"}
         )
-
-    # TODO: Consider adding query efficiency tests for Django-Q2 task processing
-    def _removed_test_payment_provisioning_trigger_query_efficiency(self, mock_provision_task):
-        """Test that payment-triggered provisioning is query-efficient"""
-        # Create product for order items
-        from apps.products.models import Product
-        product = Product.objects.create(
-            slug="hosting-service",
-            name="Hosting Service",
-            product_type="shared_hosting"
-        )
-
-        # Create multiple services and orders
-        services = []
-        for i in range(5):
-            service_plan = ServicePlan.objects.create(
-                name=f"Plan {i}",
-                plan_type="shared_hosting",
-                price_monthly=Decimal("29.99")
-            )
-
-            service = Service.objects.create(
-                customer=self.customer,
-                service_plan=service_plan,
-                currency=self.currency,
-                service_name=f"Service {i}",
-                domain=f"example{i}.com",
-                username=f"user{i}",
-                price=Decimal("29.99"),
-                status="active"
-            )
-            services.append(service)
-
-        # Create invoice
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            number="INV-001",
-            total_cents=14995,  # 149.95 RON for 5 services
-            currency=self.currency,
-            status="issued"
-        )
-
-        # Create order and items
-        order = Order.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            total_cents=14995,  # €149.95 in cents
-            currency=self.currency,
-            status="completed"
-        )
-
-        for service in services:
-            OrderItem.objects.create(
-                order=order,
-                product=product,
-                service=service,
-                quantity=1,
-                unit_price_cents=2999,  # €29.99 in cents
-            )
-
-        # Test query efficiency using assertNumQueries
-        with self.assertNumQueries(4):  # Should be efficient regardless of number of services
-            _trigger_virtualmin_provisioning_on_payment(invoice)
-
-        # Verify all services were queued for provisioning
-        self.assertEqual(mock_provision_task.call_count, 5)
 
     def test_domain_sync_query_efficiency(self):
         """Test that domain sync is query-efficient"""

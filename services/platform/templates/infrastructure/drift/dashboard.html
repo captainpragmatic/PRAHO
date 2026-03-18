@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Drift Detection Dashboard" %}{% endblock %}
 
@@ -48,13 +49,9 @@
                     </div>
                     <div class="flex items-center space-x-4">
                         {% if item.unresolved_count > 0 %}
-                        <span class="px-2 py-1 text-xs font-medium rounded-full bg-amber-500/10 text-amber-400">
-                            {{ item.unresolved_count }} {% trans "findings" %}
-                        </span>
+                        {% with label=item.unresolved_count|stringformat:"s" %}{% badge label|add:" findings" variant="warning" %}{% endwith %}
                         {% else %}
-                        <span class="px-2 py-1 text-xs font-medium rounded-full bg-green-500/10 text-green-400">
-                            {% trans "No drift" %}
-                        </span>
+                        {% trans "No drift" as bt_nodrift %}{% badge bt_nodrift variant="success" %}
                         {% endif %}
                         {% if item.latest_check %}
                         <span class="text-slate-500 text-xs">

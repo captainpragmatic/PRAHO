@@ -5,7 +5,6 @@ Handles refund processing, eligibility checks, and bidirectional synchronization
 
 from __future__ import annotations
 
-import contextlib
 import enum
 import logging
 import uuid
@@ -145,7 +144,7 @@ class RefundService:
                 return RefundService._execute_order_refund_internal(order, refund_data)
 
         except Exception:
-            # SECURITY: Don't expose internal error details to caller
+            logger.exception("Order refund processing failed for order_id=%s", order_id)
             return Err("Failed to process refund: internal error")
 
     @staticmethod
@@ -168,7 +167,7 @@ class RefundService:
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Order lookup for refund failed for order_id=%s", order_id)
             return Err("Failed to process refund: database error")
 
     @staticmethod
@@ -313,7 +312,7 @@ class RefundService:
                 return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Invoice refund processing failed for invoice_id=%s", invoice_id)
             return Err("Failed to process refund: internal error")
 
     @staticmethod
@@ -330,7 +329,7 @@ class RefundService:
         except Invoice.DoesNotExist:
             return Err("Failed to process refund: Invoice not found")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Invoice lookup for refund failed for invoice_id=%s", invoice_id)
             return Err("Failed to process refund: database error")
 
     @staticmethod
@@ -434,7 +433,7 @@ class RefundService:
             return RefundService._check_entity_refund_eligibility(entity, entity_type)
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund eligibility check failed for %s_id=%s", entity_type, entity_id)
             return Err("Error checking eligibility")
 
     @staticmethod
@@ -510,7 +509,7 @@ class RefundService:
 
             return Ok(stats)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund statistics query failed")
             return Err("Error getting statistics")
 
     # Internal validation methods
@@ -542,7 +541,9 @@ class RefundService:
 
             return Ok(RefundService._create_eligibility_result(False, "Order not eligible", 0, already_refunded))
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception(
+                "Order refund eligibility validation failed for order_id=%s", getattr(order, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -683,7 +684,9 @@ class RefundService:
             )
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception(
+                "Invoice refund eligibility validation failed for invoice_id=%s", getattr(invoice, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -741,7 +744,11 @@ class RefundService:
 
             return Ok(final_result)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception(
+                "Bidirectional refund processing failed for order_id=%s invoice_id=%s",
+                order.pk if order else None,
+                invoice.pk if invoice else None,
+            )
             return Err("Failed to process refund")
 
     @staticmethod
@@ -797,22 +804,35 @@ class RefundService:
                 created_by=refund_data.get("initiated_by") if refund_data else None,  # type: ignore[misc]
             )
 
-            # Create status history
-            with contextlib.suppress(DatabaseError):
+            # Create status history (ADR-0016: audit trail must not be silently dropped)
+            try:
                 RefundStatusHistory.objects.create(
                     refund=refund, previous_status="", new_status="pending", change_reason="Refund initiated"
+                )
+            except DatabaseError:
+                logger.warning(
+                    "Failed to create refund status history for refund_id=%s — audit trail gap",
+                    refund.pk,
+                    exc_info=True,
                 )
 
             return Ok(None)
 
         except Exception as db_error:
             error_msg = str(db_error)
+            entity_label = "order" if order else "invoice"
+            entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
             if "FOREIGN KEY constraint failed" in error_msg:
+                logger.exception("Refund record creation failed: FK constraint for %s_id=%s", entity_label, entity_pk)
                 return Err("Failed to process bidirectional refund")
             elif "Cannot assign" in error_msg:
+                logger.exception(
+                    "Refund record creation failed: assignment error for %s_id=%s", entity_label, entity_pk
+                )
                 return Err("Order update failed" if order else "Invoice update failed")
             else:
-                return Err(f"Failed to process bidirectional refund: {error_msg}")
+                logger.exception("Refund record creation failed for %s_id=%s", entity_label, entity_pk)
+                return Err("Failed to process bidirectional refund")
 
     @staticmethod
     def _process_entity_updates(
@@ -893,7 +913,7 @@ class RefundService:
 
             return Err("Order update failed")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Order refund status update failed for order_id=%s", getattr(order, "pk", "unknown"))
             return Err("Failed to update order status")
 
     @staticmethod
@@ -932,7 +952,7 @@ class RefundService:
 
             return Err("Invoice update failed")
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Invoice refund status update failed for invoice_id=%s", getattr(invoice, "pk", "unknown"))
             return Err("Invoice update failed")
 
     @staticmethod
@@ -968,7 +988,11 @@ class RefundService:
         try:
             return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError):
-            # Handle cases where order doesn't have proper relationships or Sum returns unexpected type
+            logger.warning(
+                "Refund amount aggregation failed for order_id=%s, defaulting to 0 — over-refund risk",
+                getattr(order, "pk", "unknown"),
+                exc_info=True,
+            )
             return 0
 
     @staticmethod
@@ -987,7 +1011,11 @@ class RefundService:
         try:
             return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError):
-            # Handle cases where invoice doesn't have proper relationships or Sum returns unexpected type
+            logger.warning(
+                "Refund amount aggregation failed for invoice_id=%s, defaulting to 0 — over-refund risk",
+                getattr(invoice, "pk", "unknown"),
+                exc_info=True,
+            )
             return 0
 
     @staticmethod
@@ -1045,7 +1073,9 @@ class RefundService:
             )
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception(
+                "Order refund validation and preparation failed for order_id=%s", getattr(order, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -1093,7 +1123,9 @@ class RefundService:
             )
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception(
+                "Invoice refund validation and preparation failed for invoice_id=%s", getattr(invoice, "pk", "unknown")
+            )
             return Err("Failed to validate eligibility")
 
     @staticmethod
@@ -1165,7 +1197,10 @@ class RefundService:
             return gateway_result
 
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception(
+                "Payment gateway refund processing failed for payment_id=%s",
+                getattr(payment, "pk", None) if payment else None,
+            )
             return Err("Failed to process payment refund")
 
     @staticmethod
@@ -1284,7 +1319,7 @@ class RefundQueryService:
             }
             return Ok(stats)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Refund statistics aggregation failed")
             return Err("Error getting refund statistics")
 
     @staticmethod
@@ -1349,7 +1384,7 @@ class RefundQueryService:
 
             return Ok(refunds)
         except Exception:
-            # SECURITY: Don't expose internal error details
+            logger.exception("Entity refund history retrieval failed for %s_id=%s", entity_type, entity_id)
             return Err("Failed to get refund history")
 
 

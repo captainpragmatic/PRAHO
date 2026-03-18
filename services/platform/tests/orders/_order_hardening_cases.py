@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
@@ -78,7 +78,7 @@ class OrderIdempotencyConstraintTest(TestCase):
         """Duplicate idempotency_key for the same customer raises IntegrityError."""
         _make_order(self.customer, self.currency, idempotency_key="test-key-unique-123")
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             _make_order(self.customer, self.currency, idempotency_key="test-key-unique-123")
 
     def test_empty_idempotency_keys_do_not_conflict(self) -> None:

@@ -23,15 +23,15 @@
       </td>
       <td class="px-4 py-3 text-sm">
         {% if doc.status == "accepted" %}
-          <span class="inline-flex items-center rounded-full bg-green-900 px-2 py-0.5 text-xs font-medium text-green-300">{% icon "check" %} {{ doc.status }}</span>
+          {% badge doc.status variant="success" icon="check" %}
         {% elif doc.status == "rejected" %}
-          <span class="inline-flex items-center rounded-full bg-red-900 px-2 py-0.5 text-xs font-medium text-red-300">{% icon "x" %} {{ doc.status }}</span>
+          {% badge doc.status variant="danger" icon="x" %}
         {% elif doc.status == "error" %}
-          <span class="inline-flex items-center rounded-full bg-orange-900 px-2 py-0.5 text-xs font-medium text-orange-300">{% icon "warning" %} {{ doc.status }}</span>
+          {% badge doc.status variant="warning" icon="warning" %}
         {% elif doc.status == "processing" or doc.status == "submitted" %}
-          <span class="inline-flex items-center rounded-full bg-yellow-900 px-2 py-0.5 text-xs font-medium text-yellow-300">{% icon "clock" %} {{ doc.status }}</span>
+          {% badge doc.status variant="warning" icon="clock" %}
         {% else %}
-          <span class="inline-flex items-center rounded-full bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-300">{{ doc.status }}</span>
+          {% badge doc.status variant="secondary" %}
         {% endif %}
       </td>
       <td class="px-4 py-3 text-sm text-slate-400 font-mono text-xs">
@@ -44,9 +44,8 @@
         {{ doc.retry_count }}
       </td>
       <td class="px-4 py-3 text-sm text-right">
-        <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-slate-400 hover:text-white text-xs">
-          {% trans "Details" %}
-        </a>
+        {% url 'billing:efactura_document_detail' pk=doc.pk as detail_url %}
+        {% trans "Details" as details_label %}{% button details_label variant="secondary" href=detail_url size="xs" %}
       </td>
     </tr>
     {% endfor %}

@@ -13,7 +13,7 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -238,7 +238,7 @@ class StripeMeterEventServiceTestCase(TestCase):
         self.assertEqual(errors, 1)
 
 
-class StripeUsageSyncServiceTestCase(TransactionTestCase):
+class StripeUsageSyncServiceTestCase(TestCase):
     """Test StripeUsageSyncService functionality."""
 
     def setUp(self):

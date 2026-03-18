@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Node Deployments" %}{% endblock %}
 
@@ -13,13 +14,7 @@
                 <p class="text-slate-400 mt-1">{% trans "Manage deployed hosting nodes" %}</p>
             </div>
             {% if can_create %}
-            <a href="{{ create_url }}"
-               class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-                {% trans "Deploy New Node" %}
-            </a>
+            {% trans "Deploy New Node" as deploy_label %}{% button deploy_label variant="primary" href=create_url icon="plus" %}
             {% endif %}
         </div>
 
@@ -69,9 +64,7 @@
                            class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                 </div>
                 <div class="flex items-end">
-                    <button type="submit" class="w-full px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
-                        {% trans "Filter" %}
-                    </button>
+                    {% trans "Filter" as filter_label %}{% button filter_label variant="secondary" type="submit" class_="w-full" %}
                 </div>
             </form>
         </div>
@@ -118,9 +111,7 @@
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4">
-                                <span class="px-2 py-1 text-xs font-medium rounded bg-slate-600 text-slate-200">
-                                    {{ item.environment_code|upper }}
-                                </span>
+                                {% with item.environment_code|upper as env_code %}{% badge env_code variant="secondary" size="sm" %}{% endwith %}
                             </td>
                             <td class="px-6 py-4 text-sm text-slate-300">
                                 {{ item.provider }}<br>
@@ -130,22 +121,23 @@
                                 {{ item.ipv4 }}
                             </td>
                             <td class="px-6 py-4">
-                                <span class="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full
-                                    {% if item.status.variant == 'success' %}bg-green-500/20 text-green-400
-                                    {% elif item.status.variant == 'danger' %}bg-red-500/20 text-red-400
-                                    {% elif item.status.variant == 'warning' %}bg-yellow-500/20 text-yellow-400
-                                    {% elif item.status.variant == 'info' %}bg-blue-500/20 text-blue-400
-                                    {% else %}bg-slate-500/20 text-slate-400{% endif %}">
-                                    {{ item.status.text }}
-                                </span>
+                                {% if item.status.variant == 'success' %}
+                                    {% badge item.status.text variant="success" %}
+                                {% elif item.status.variant == 'danger' %}
+                                    {% badge item.status.text variant="danger" %}
+                                {% elif item.status.variant == 'warning' %}
+                                    {% badge item.status.text variant="warning" %}
+                                {% elif item.status.variant == 'info' %}
+                                    {% badge item.status.text variant="info" %}
+                                {% else %}
+                                    {% badge item.status.text variant="secondary" %}
+                                {% endif %}
                             </td>
                             <td class="px-6 py-4 text-sm text-slate-400">
                                 {{ item.created_at|timesince }} ago
                             </td>
                             <td class="px-6 py-4 text-right">
-                                <a href="{{ item.detail_url }}" class="text-blue-400 hover:text-blue-300 text-sm">
-                                    {% trans "View" %}
-                                </a>
+                                {% trans "View" as view_label %}{% button view_label variant="secondary" href=item.detail_url size="sm" %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -154,41 +146,20 @@
             </div>
             {% else %}
             <div class="text-center py-12">
-                <svg class="mx-auto h-12 w-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path>
-                </svg>
+                {% icon "server" size="xl" css_class="mx-auto text-slate-600" %}
                 <p class="mt-2 text-slate-400">{% trans "No deployments found" %}</p>
                 {% if can_create %}
-                <a href="{{ create_url }}" class="mt-4 inline-block text-blue-400 hover:text-blue-300">
-                    {% trans "Deploy your first node" %} &rarr;
-                </a>
+                {% trans "Deploy your first node" as first_node_label %}
+                {% button first_node_label variant="primary" href=create_url class_="mt-4" %}
                 {% endif %}
             </div>
             {% endif %}
         </div>
 
         <!-- Pagination -->
-        {% if deployments_page.has_other_pages %}
-        <div class="flex justify-center mt-6">
-            <nav class="inline-flex rounded-lg shadow-sm">
-                {% if deployments_page.has_previous %}
-                <a href="?page={{ deployments_page.previous_page_number }}{% if filters.environment %}&environment={{ filters.environment }}{% endif %}{% if filters.node_type %}&node_type={{ filters.node_type }}{% endif %}{% if filters.provider %}&provider={{ filters.provider }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}"
-                   class="px-4 py-2 bg-slate-700 text-white rounded-l-lg hover:bg-slate-600">
-                    {% trans "Previous" %}
-                </a>
-                {% endif %}
-                <span class="px-4 py-2 bg-slate-800 text-white">
-                    {% trans "Page" %} {{ deployments_page.number }} {% trans "of" %} {{ deployments_page.paginator.num_pages }}
-                </span>
-                {% if deployments_page.has_next %}
-                <a href="?page={{ deployments_page.next_page_number }}{% if filters.environment %}&environment={{ filters.environment }}{% endif %}{% if filters.node_type %}&node_type={{ filters.node_type }}{% endif %}{% if filters.provider %}&provider={{ filters.provider }}{% endif %}{% if filters.status %}&status={{ filters.status }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}"
-                   class="px-4 py-2 bg-slate-700 text-white rounded-r-lg hover:bg-slate-600">
-                    {% trans "Next" %}
-                </a>
-                {% endif %}
-            </nav>
-        </div>
-        {% endif %}
+        {% with deployments_page as page_obj %}
+        {% include "components/pagination.html" with page_obj=page_obj %}
+        {% endwith %}
     </div>
 </div>
 {% endblock %}

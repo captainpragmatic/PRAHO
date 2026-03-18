@@ -26,4 +26,4 @@ class TestPartitionRetentionStatus(SimpleTestCase):
         self.assertIn("table:audit_events", status)
         self.assertEqual(status["table:audit_events"]["action"], "partition_rotation")
         self.assertEqual(status["table:audit_events"]["retention_days"], 2555)
-        self.assertEqual(status["table:audit_events"]["compliance_status"], "not_partitioned")
+        self.assertEqual(status["table:audit_events"]["compliance_status"], "action_required")

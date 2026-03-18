@@ -137,9 +137,7 @@
                                 {{ category.settings.count }} {% trans "settings" %}
                             </span>
                             <div class="text-slate-400 group-hover:text-blue-400 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
+                                {% icon "chevron-right" size="sm" %}
                             </div>
                         </div>
                     </div>
@@ -180,9 +178,7 @@
                             <!-- Back Button and Breadcrumb -->
                             <div class="flex items-center mb-4">
                                 <button onclick="closeCategorySettings()" class="mr-3 text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700/50 rounded-lg">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                                    </svg>
+                                    {% icon "chevron-left" %}
                                 </button>
                                 <div class="text-sm text-slate-400">
                                     <span id="category-breadcrumb">{% trans "Settings" %} › {% trans "Category" %}</span>

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% load formatting %}
+{% load ui_components %}
 
 {% block title %}{% trans "Payments" %} - PRAHO Platform{% endblock %}
 
@@ -56,13 +57,15 @@
             {{ payment.amount_cents|cents_to_currency|romanian_currency:payment.currency.code }}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-              {% if payment.status == 'succeeded' %}bg-green-100 text-green-800
-              {% elif payment.status == 'pending' %}bg-yellow-100 text-yellow-800
-              {% elif payment.status == 'failed' %}bg-red-100 text-red-800
-              {% else %}bg-gray-100 text-gray-800{% endif %}">
-              {{ payment.get_status_display }}
-            </span>
+            {% if payment.status == 'succeeded' %}
+              {% trans "Succeeded" as status_label %}{% badge status_label variant="success" %}
+            {% elif payment.status == 'pending' %}
+              {% trans "Pending" as status_label %}{% badge status_label variant="warning" %}
+            {% elif payment.status == 'failed' %}
+              {% trans "Failed" as status_label %}{% badge status_label variant="danger" %}
+            {% else %}
+              {% badge payment.get_status_display variant="secondary" %}
+            {% endif %}
           </td>
         </tr>
         {% empty %}

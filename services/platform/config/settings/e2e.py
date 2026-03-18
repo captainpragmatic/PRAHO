@@ -17,5 +17,6 @@ from .dev import *  # noqa: F403  # Django settings pattern
 
 # Explicit E2E defaults
 SECRET_KEY = os.environ.get("E2E_DJANGO_SECRET_KEY", "django-insecure-e2e-key-change-for-production")
+TESTING = True  # Required by force_status() in tests/helpers/fsm_helpers.py
 configure_rate_limiting(globals(), enabled=False)
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []

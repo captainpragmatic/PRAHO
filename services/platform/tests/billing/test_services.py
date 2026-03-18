@@ -19,7 +19,7 @@ import uuid
 from typing import Any
 from unittest.mock import Mock, patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment
@@ -57,10 +57,10 @@ _IMPORTED_SERVICE_CASES = (
 )
 
 
-class RefundServiceComprehensiveCoverageTestCase(TransactionTestCase):
+class RefundServiceComprehensiveCoverageTestCase(TestCase):
     """
     Comprehensive test suite for RefundService targeting 85%+ coverage.
-    Uses TransactionTestCase for proper atomic transaction testing.
+    Uses TestCase — atomic transactions work via savepoints.
     """
 
     def setUp(self) -> None:

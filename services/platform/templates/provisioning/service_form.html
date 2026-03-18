@@ -55,13 +55,10 @@
               <label for="customer_id" class="block text-sm font-medium text-slate-300 mb-1">
                 {% icon "user" %} {% trans 'Customer' %}
               </label>
-              <select name="customer_id" id="customer_id" required
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <select id="customer_id" name="customer_id" required class="w-full rounded-md border border-slate-600 bg-slate-700 text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">{% trans 'Select customer' %}</option>
                 {% for customer in customers %}
-                <option value="{{ customer.pk }}" {% if is_edit and service.customer.pk == customer.pk %}selected{% endif %}>
-                  {{ customer.company_name }} ({{ customer.cui }})
-                </option>
+                <option value="{{ customer.pk }}" {% if is_edit and service.customer_id == customer.pk %}selected{% endif %}>{{ customer.get_display_name }} ({{ customer.cui }})</option>
                 {% endfor %}
               </select>
             </div>
@@ -71,13 +68,10 @@
               <label for="plan_id" class="block text-sm font-medium text-slate-300 mb-1">
                 {% icon "orders" %} {% trans 'Service Plan' %}
               </label>
-              <select name="plan_id" id="plan_id" required
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
+              <select id="plan_id" name="plan_id" required class="w-full rounded-md border border-slate-600 bg-slate-700 text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">{% trans 'Select plan' %}</option>
                 {% for plan in plans %}
-                <option value="{{ plan.pk }}" {% if is_edit and service.service_plan.pk == plan.pk %}selected{% endif %}>
-                  {{ plan.name }} - {{ plan.get_plan_type_display }} ({{ plan.price }} RON/month)
-                </option>
+                <option value="{{ plan.pk }}" {% if is_edit and service.service_plan_id == plan.pk %}selected{% endif %}>{{ plan.name }} - {{ plan.get_plan_type_display }} ({{ plan.price }} RON/{% trans "month" %})</option>
                 {% endfor %}
               </select>
             </div>
@@ -87,33 +81,21 @@
               <label for="domain" class="block text-sm font-medium text-slate-300 mb-1">
                 {% icon "globe" %} {% trans 'Domain' %}
               </label>
-              <input type="text" name="domain" id="domain" required
-                     value="{% if is_edit %}{{ service.domain }}{% endif %}"
-                     class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                     placeholder="{% trans 'example.com' %}">
-              <p class="mt-1 text-xs text-slate-400">
-                {% trans 'Primary domain for this hosting service' %}
-              </p>
+              {% trans "example.com" as domain_placeholder %}
+              {% trans "Primary domain for this hosting service" as domain_help %}
+              {% input_field name="domain" input_type="text" value=service.domain placeholder=domain_placeholder required=True html_id="domain" help_text=domain_help %}
             </div>
           </div>
         </div>
 
         <!-- Form Actions -->
-        <div class="flex items-center justify-between pt-6 border-t border-slate-600">
-          <a href="{% url 'provisioning:services' %}"
-             class="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-md transition-colors">
-            {% trans 'Cancel' %}
-          </a>
-
-          <button type="submit"
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors">
-            {% if is_edit %}
-            {% icon "check" %} {% trans 'Update Service' %}
-            {% else %}
-            {% icon "plus" %} {% trans 'Create Service' %}
-            {% endif %}
-          </button>
-        </div>
+        {% if is_edit %}
+        {% trans "Update Service" as submit_label %}
+        {% else %}
+        {% trans "Create Service" as submit_label %}
+        {% endif %}
+        {% url 'provisioning:services' as back_url %}
+        {% form_actions submit_label=submit_label cancel_url=back_url %}
       </form>
     </div>
   </div>

@@ -13,7 +13,7 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.metering_models import (
@@ -49,7 +49,7 @@ from apps.customers.models import Customer
 from apps.products.models import Product
 
 
-class UpdateAggregationForEventTestCase(TransactionTestCase):
+class UpdateAggregationForEventTestCase(TestCase):
     """Test update_aggregation_for_event task."""
 
     def setUp(self):
@@ -184,7 +184,7 @@ class ProcessPendingUsageEventsTestCase(TestCase):
         self.assertIn("Database error", result["error"])
 
 
-class BillingCycleTasksTestCase(TransactionTestCase):
+class BillingCycleTasksTestCase(TestCase):
     """Test billing cycle management tasks."""
 
     def setUp(self):
@@ -257,7 +257,7 @@ class BillingCycleTasksTestCase(TransactionTestCase):
         self.assertEqual(result["generated"], 3)
 
 
-class RatePendingAggregationsTestCase(TransactionTestCase):
+class RatePendingAggregationsTestCase(TestCase):
     """Test rate_pending_aggregations task."""
 
     def setUp(self):
@@ -367,7 +367,7 @@ class BillingWorkflowTestCase(TestCase):
         mock_advance.assert_called_once()
 
 
-class AlertTasksTestCase(TransactionTestCase):
+class AlertTasksTestCase(TestCase):
     """Test alert-related tasks."""
 
     def setUp(self):
@@ -459,7 +459,7 @@ class AlertTasksTestCase(TransactionTestCase):
         self.assertEqual(result["subscriptions_checked"], 1)
 
 
-class StripeSyncTasksTestCase(TransactionTestCase):
+class StripeSyncTasksTestCase(TestCase):
     """Test Stripe sync tasks."""
 
     def setUp(self):
@@ -581,7 +581,7 @@ class StripeSyncTasksTestCase(TransactionTestCase):
         self.assertIn("synced", result)
 
 
-class VirtualminUsageCollectionTestCase(TransactionTestCase):
+class VirtualminUsageCollectionTestCase(TestCase):
     """Test Virtualmin usage collection task."""
 
     def setUp(self):
@@ -632,7 +632,7 @@ class VirtualminUsageCollectionTestCase(TransactionTestCase):
         self.assertEqual(result["accounts_processed"], 0)
 
 
-class ServiceUsageCollectionTestCase(TransactionTestCase):
+class ServiceUsageCollectionTestCase(TestCase):
     """Test service usage collection task."""
 
     def setUp(self):

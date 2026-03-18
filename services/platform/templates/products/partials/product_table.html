@@ -145,25 +145,16 @@
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
               <div class="flex items-center justify-end space-x-2">
                 <!-- View Detail -->
-                <a href="{% url 'products:product_detail' slug=product.slug %}"
-                   class="text-blue-400 hover:text-blue-300 transition-colors"
-                   title="{% trans 'View Details' %}">
-                  {% icon "search" %}
-                </a>
+                {% url 'products:product_detail' slug=product.slug as product_detail_url %}
+                {% trans "View" as view_label %}{% button view_label variant="secondary" href=product_detail_url size="xs" %}
 
                 <!-- Edit Product -->
-                <a href="{% url 'products:product_edit' slug=product.slug %}"
-                   class="text-green-400 hover:text-green-300 transition-colors"
-                   title="{% trans 'Edit Product' %}">
-                  {% icon "document" %}
-                </a>
+                {% url 'products:product_edit' slug=product.slug as product_edit_url %}
+                {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=product_edit_url size="xs" %}
 
                 <!-- Manage Pricing -->
-                <a href="{% url 'products:product_prices' slug=product.slug %}"
-                   class="text-yellow-400 hover:text-yellow-300 transition-colors"
-                   title="{% trans 'Manage Pricing' %}">
-                  {% icon "currency" %}
-                </a>
+                {% url 'products:product_prices' slug=product.slug as product_prices_url %}
+                {% trans "Price" as price_label %}{% button price_label variant="secondary" href=product_prices_url size="xs" %}
               </div>
             </td>
           </tr>
@@ -242,14 +233,10 @@
                     {% if price.semiannual_discount_percent > 0 or price.annual_discount_percent > 0 %}
                       <div class="flex flex-wrap gap-2 mt-2">
                         {% if price.semiannual_discount_percent > 0 %}
-                          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
-                            {{ price.semiannual_discount_percent }}% {% trans 'off 6mo' %}
-                          </span>
+                          {% with label=price.semiannual_discount_percent|stringformat:"s" %}{% badge label|add:"% off 6mo" variant="success" size="xs" %}{% endwith %}
                         {% endif %}
                         {% if price.annual_discount_percent > 0 %}
-                          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
-                            {{ price.annual_discount_percent }}% {% trans 'off annual' %}
-                          </span>
+                          {% with label=price.annual_discount_percent|stringformat:"s" %}{% badge label|add:"% off annual" variant="success" size="xs" %}{% endwith %}
                         {% endif %}
                       </div>
                     {% endif %}
@@ -274,28 +261,16 @@
         <!-- Actions -->
         <div class="flex items-center justify-center space-x-4 pt-2 border-t border-slate-600">
           <!-- View Detail -->
-          <a href="{% url 'products:product_detail' slug=product.slug %}"
-             class="flex items-center space-x-2 text-blue-400 hover:text-blue-300 transition-colors py-2 px-3 rounded-md hover:bg-slate-600"
-             title="{% trans 'View Details' %}">
-            <span class="text-lg">{% icon "search" %}</span>
-            <span class="text-sm">{% trans 'View' %}</span>
-          </a>
+          {% url 'products:product_detail' slug=product.slug as product_detail_url_m %}
+          {% trans "View" as view_label_m %}{% button view_label_m variant="secondary" href=product_detail_url_m size="sm" %}
 
           <!-- Edit Product -->
-          <a href="{% url 'products:product_edit' slug=product.slug %}"
-             class="flex items-center space-x-2 text-green-400 hover:text-green-300 transition-colors py-2 px-3 rounded-md hover:bg-slate-600"
-             title="{% trans 'Edit Product' %}">
-            <span class="text-lg">{% icon "document" %}</span>
-            <span class="text-sm">{% trans 'Edit' %}</span>
-          </a>
+          {% url 'products:product_edit' slug=product.slug as product_edit_url_m %}
+          {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=product_edit_url_m size="sm" %}
 
           <!-- Manage Pricing -->
-          <a href="{% url 'products:product_prices' slug=product.slug %}"
-             class="flex items-center space-x-2 text-yellow-400 hover:text-yellow-300 transition-colors py-2 px-3 rounded-md hover:bg-slate-600"
-             title="{% trans 'Manage Pricing' %}">
-            <span class="text-lg">{% icon "currency" %}</span>
-            <span class="text-sm">{% trans 'Price' %}</span>
-          </a>
+          {% url 'products:product_prices' slug=product.slug as product_prices_url_m %}
+          {% trans "Price" as price_label_m %}{% button price_label_m variant="secondary" href=product_prices_url_m size="sm" %}
         </div>
       </div>
     {% endfor %}

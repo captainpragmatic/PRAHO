@@ -7,7 +7,7 @@
 # IMPORTANT: Do NOT add new entries without a linked issue/PR and review.
 # Adding allowlist entries for new findings defeats the purpose of the scan.
 
-# domains/services.py — verify_webhook_signature is a known placeholder (TODO: implement ROTLD webhook HMAC)
-# Issue: https://github.com/pragmatichost/praho/issues/TBD  — tracked for next sprint
-services/platform/apps/domains/services.py:676:always-true-auth
-services/platform/apps/domains/services.py:676:todo-stub
+# Signature verification stub resolved (#92). Domain API stubs tracked in #93:
+# - services/platform/apps/domains/services.py:648 (register_domain)
+# - services/platform/apps/domains/services.py:662 (renew_domain)
+# - services/platform/apps/domains/services.py:672 (check_domain_availability)

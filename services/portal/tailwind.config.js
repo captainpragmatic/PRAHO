@@ -1,25 +1,26 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  // Portal-specific Tailwind configuration
+  presets: [require('../../shared/tailwind.preset.js')],
+
   content: [
     // Portal templates
     './services/portal/templates/**/*.html',
     './services/portal/portal/**/templates/**/*.html',
-
+    // Shared component templates
+    './shared/ui/templates/**/*.html',
     // Portal Python files with Tailwind classes
     './services/portal/**/*.py',
-
     // Portal JavaScript files
     './services/portal/static/js/**/*.js',
     './services/portal/assets/js/**/*.js',
+    // Shared JavaScript files
+    './shared/ui/static/js/**/*.js',
   ],
-
-  darkMode: 'class',
 
   theme: {
     extend: {
       colors: {
-        // Customer-facing colors (softer, more welcoming)
+        // Customer-facing primary (softer hue than Platform)
         primary: {
           50: 'hsl(210 100% 97%)',
           100: 'hsl(210 100% 94%)',
@@ -34,7 +35,7 @@ module.exports = {
           950: 'hsl(210 100% 14%)',
         },
 
-        // Portal-specific colors
+        // Portal-specific surface colors
         portal: {
           bg: '#ffffff',
           'bg-dark': '#1a1b23',
@@ -43,29 +44,6 @@ module.exports = {
           border: '#e5e7eb',
           'border-dark': '#313449',
         },
-
-        // Status colors for customer portal
-        success: '#10b981',
-        warning: '#f59e0b',
-        error: '#ef4444',
-        info: '#3b82f6',
-      },
-
-      fontFamily: {
-        sans: [
-          '-apple-system',
-          'BlinkMacSystemFont',
-          '"Segoe UI"',
-          'Roboto',
-          'Ubuntu',
-          'sans-serif',
-        ],
-        mono: [
-          'Consolas',
-          '"Liberation Mono"',
-          'Menlo',
-          'monospace',
-        ],
       },
 
       fontSize: {
@@ -79,41 +57,6 @@ module.exports = {
         'card-padding': 'var(--space-card-padding)',
         'field-stack': 'var(--space-field-stack)',
       },
-
-      animation: {
-        'fade-in': 'fade-in 0.3s ease-out',
-        'slide-up': 'slide-up 0.3s ease-out',
-      },
-
-      keyframes: {
-        'fade-in': {
-          '0%': {
-            opacity: '0',
-            transform: 'translateY(10px)',
-          },
-          '100%': {
-            opacity: '1',
-            transform: 'translateY(0)',
-          },
-        },
-        'slide-up': {
-          '0%': {
-            opacity: '0',
-            transform: 'translateY(20px)',
-          },
-          '100%': {
-            opacity: '1',
-            transform: 'translateY(0)',
-          },
-        },
-      },
     },
   },
-
-  plugins: [
-    require('@tailwindcss/forms')({
-      strategy: 'class',
-    }),
-    require('@tailwindcss/typography'),
-  ],
 };

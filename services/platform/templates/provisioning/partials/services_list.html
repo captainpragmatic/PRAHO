@@ -126,33 +126,19 @@
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             {% if service.status == 'active' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-              {% trans 'Active' %}
-            </span>
+              {% trans "Active" as svc_status %}{% badge svc_status variant="success" %}
             {% elif service.status == 'suspended' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-              {% trans 'Suspended' %}
-            </span>
+              {% trans "Suspended" as svc_status %}{% badge svc_status variant="danger" %}
             {% elif service.status == 'pending' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-              {% trans 'Pending' %}
-            </span>
+              {% trans "Pending" as svc_status %}{% badge svc_status variant="warning" %}
             {% elif service.status == 'provisioning' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-              {% trans 'Provisioning' %}
-            </span>
+              {% trans "Provisioning" as svc_status %}{% badge svc_status variant="info" %}
             {% elif service.status == 'terminated' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-              {% trans 'Terminated' %}
-            </span>
+              {% trans "Terminated" as svc_status %}{% badge svc_status variant="secondary" %}
             {% elif service.status == 'expired' %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
-              {% trans 'Expired' %}
-            </span>
+              {% trans "Expired" as svc_status %}{% badge svc_status variant="warning" %}
             {% else %}
-            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-              {{ service.get_status_display }}
-            </span>
+              {% badge service.get_status_display variant="secondary" %}
             {% endif %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
@@ -161,10 +147,8 @@
           {% if can_manage_services %}
           <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" onclick="event.stopPropagation();">
             <div class="flex space-x-2">
-              <a href="{% url 'provisioning:service_edit' service.pk %}"
-                 class="text-blue-400 hover:text-blue-300 transition-colors">
-                {% icon "document" %}
-              </a>
+              {% url 'provisioning:service_edit' service.pk as edit_url %}
+              {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
               {% if service.status == 'active' %}
               <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
                       class="text-red-400 hover:text-red-300 transition-colors">
@@ -200,34 +184,20 @@
         </div>
         <div class="ml-3">
           {% if service.status == 'active' %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-            {% trans 'Active' %}
-          </span>
-          {% elif service.status == 'suspended' %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-            {% trans 'Suspended' %}
-          </span>
-          {% elif service.status == 'pending' %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
-            {% trans 'Pending' %}
-          </span>
-          {% elif service.status == 'provisioning' %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-            {% trans 'Provisioning' %}
-          </span>
-          {% elif service.status == 'terminated' %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-            {% trans 'Terminated' %}
-          </span>
-          {% elif service.status == 'expired' %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
-            {% trans 'Expired' %}
-          </span>
-          {% else %}
-          <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-            {{ service.get_status_display }}
-          </span>
-          {% endif %}
+          {% trans "Active" as svc_status_m %}{% badge svc_status_m variant="success" %}
+        {% elif service.status == 'suspended' %}
+          {% trans "Suspended" as svc_status_m %}{% badge svc_status_m variant="danger" %}
+        {% elif service.status == 'pending' %}
+          {% trans "Pending" as svc_status_m %}{% badge svc_status_m variant="warning" %}
+        {% elif service.status == 'provisioning' %}
+          {% trans "Provisioning" as svc_status_m %}{% badge svc_status_m variant="info" %}
+        {% elif service.status == 'terminated' %}
+          {% trans "Terminated" as svc_status_m %}{% badge svc_status_m variant="secondary" %}
+        {% elif service.status == 'expired' %}
+          {% trans "Expired" as svc_status_m %}{% badge svc_status_m variant="warning" %}
+        {% else %}
+          {% badge service.get_status_display variant="secondary" %}
+        {% endif %}
         </div>
       </div>
 
@@ -249,10 +219,8 @@
         </div>
         {% if can_manage_services %}
         <div class="flex space-x-2" onclick="event.stopPropagation();">
-          <a href="{% url 'provisioning:service_edit' service.pk %}"
-             class="text-blue-400 hover:text-blue-300 transition-colors text-sm">
-            {% icon "document" %}
-          </a>
+          {% url 'provisioning:service_edit' service.pk as edit_url_m %}
+          {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=edit_url_m %}
           {% if service.status == 'active' %}
           <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
                   class="text-red-400 hover:text-red-300 transition-colors text-sm">
@@ -281,11 +249,8 @@
       {% endif %}
     </div>
     {% if not status_filter and can_manage_services %}
-    <a href="{% url 'provisioning:service_create' %}"
-       class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-md inline-flex items-center transition-colors">
-      <span class="mr-2">{% icon "plus" %}</span>
-      {% trans 'Create the first service' %}
-    </a>
+    {% url 'provisioning:service_create' as create_svc_url %}
+    {% trans "Create the first service" as create_svc_label %}{% button create_svc_label variant="primary" href=create_svc_url %}
     {% endif %}
   </div>
   {% endif %}

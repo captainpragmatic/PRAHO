@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
@@ -97,7 +97,7 @@ class InvoiceTestCase(TestCase):
             number='INV-UNIQUE'
         )
 
-        with self.assertRaises(IntegrityError):
+        with transaction.atomic(), self.assertRaises(IntegrityError):
             Invoice.objects.create(
                 customer=self.customer,
                 currency=self.currency,

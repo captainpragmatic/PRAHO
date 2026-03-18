@@ -67,6 +67,16 @@ def browser_type_launch_args(browser_type_launch_args):
     }
 
 
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    """Pin locale and timezone so tests are deterministic regardless of system language."""
+    return {
+        **browser_context_args,
+        "locale": "en-US",
+        "timezone_id": "Europe/Bucharest",
+    }
+
+
 def pytest_configure(config):
     """Register custom markers for E2E tests."""
     config.addinivalue_line("markers", "e2e: end-to-end test")

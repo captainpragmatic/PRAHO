@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Drift Remediations" %}{% endblock %}
 
@@ -46,9 +47,8 @@
                             {% if req.status == "pending_approval" %}
                             <form method="post" action="{% url 'infrastructure:drift_remediation_approve' req.pk %}">
                                 {% csrf_token %}
-                                <button type="submit" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors" onclick="return confirm('{% trans "Approve this remediation?" %}')">
-                                    {% trans "Approve" %}
-                                </button>
+                                {% trans "Approve this remediation?" as confirm_approve %}
+                                {% trans "Approve" as approve_btn %}{% button approve_btn variant="success" type="submit" size="sm" attrs="onclick=\"return confirm('{{ confirm_approve|escapejs }}')\"" %}
                             </form>
                             <form method="post" action="{% url 'infrastructure:drift_remediation_accept' req.pk %}">
                                 {% csrf_token %}

@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load i18n %}
+{% load ui_components %}
 
 {% block title %}{% trans "Cloud Providers" %}{% endblock %}
 
@@ -15,19 +16,9 @@
             <div class="flex items-center space-x-3">
                 <form method="post" action="{% url 'infrastructure:sync_providers' %}">
                     {% csrf_token %}
-                    <button type="submit" class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white font-medium rounded-lg transition-colors">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                        {% trans "Sync Providers" %}
-                    </button>
+                    {% trans "Sync Providers" as sync_label %}{% button sync_label variant="secondary" icon="refresh" type="submit" %}
                 </form>
-                <a href="{{ create_url }}" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                    </svg>
-                    {% trans "Add Provider" %}
-                </a>
+                {% trans "Add Provider" as add_label %}{% button add_label variant="primary" href=create_url icon="plus" %}
             </div>
         </div>
 
@@ -47,13 +38,9 @@
                         </div>
                     </div>
                     {% if provider.is_active %}
-                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-500/20 text-green-400">
-                        {% trans "Active" %}
-                    </span>
+                    {% trans "Active" as active_label %}{% badge active_label variant="success" %}
                     {% else %}
-                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-slate-500/20 text-slate-400">
-                        {% trans "Inactive" %}
-                    </span>
+                    {% trans "Inactive" as inactive_label %}{% badge inactive_label variant="secondary" %}
                     {% endif %}
                 </div>
 
@@ -73,23 +60,18 @@
                 </div>
 
                 <div class="flex justify-end">
-                    <a href="{% url 'infrastructure:provider_edit' provider.id %}"
-                       class="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors">
-                        {% trans "Edit" %}
-                    </a>
+                    {% url 'infrastructure:provider_edit' provider.id as edit_url %}
+                    {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
                 </div>
             </div>
             {% endfor %}
         </div>
         {% else %}
         <div class="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
-            <svg class="mx-auto h-12 w-12 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-            </svg>
+            {% icon "server" size="xl" css_class="mx-auto text-slate-600" %}
             <p class="mt-2 text-slate-400">{% trans "No providers configured" %}</p>
-            <a href="{{ create_url }}" class="mt-4 inline-block text-blue-400 hover:text-blue-300">
-                {% trans "Add your first provider" %} &rarr;
-            </a>
+            {% trans "Add your first provider" as first_provider_label %}
+            {% button first_provider_label variant="primary" href=create_url css_class="mt-4" %}
         </div>
         {% endif %}
     </div>

@@ -19,9 +19,7 @@
   <form method="post" novalidate class="space-y-6 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6">
     {% csrf_token %}
 
-    {% if form.non_field_errors %}
-      {% alert form.non_field_errors|striptags variant="danger" %}
-    {% endif %}
+    {% form_error_summary form %}
 
     <!-- Core -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -67,15 +65,12 @@
       </div>
     </div>
 
-    <div class="pt-2 flex items-center gap-3">
-      {% if is_edit %}
-        {% trans "Save Changes" as bt1 %}{% button bt1 variant="primary" type="submit" %}
-      {% else %}
-        {% trans "Save TLD" as bt2 %}{% button bt2 variant="primary" type="submit" %}
-      {% endif %}
-      {% url 'domains:tld_list' as tld_list_url %}
-      {% trans "Cancel" as bt3 %}{% button bt3 variant="secondary" href=tld_list_url %}
-    </div>
+    {% url 'domains:tld_list' as tld_list_url %}
+    {% if is_edit %}
+      {% form_actions submit_label=_("Save Changes") cancel_url=tld_list_url %}
+    {% else %}
+      {% form_actions submit_label=_("Save TLD") cancel_url=tld_list_url %}
+    {% endif %}
   </form>
 </div>
 {% endblock %}
