@@ -112,9 +112,9 @@ Dark theme interface for staff/admin audit log monitoring
                 <!-- Action Buttons -->
                 <div class="mt-6 flex justify-center gap-3">
                     {% url 'audit:logs_list' as logs_list_url %}
-                    {% include 'components/button.html' with text='Apply Filters' variant='primary' hx_get=logs_list_url hx_target='#audit-results' hx_include='#audit-filters' %}
-                    {% include 'components/button.html' with text='Reset Filters' variant='secondary' icon='' attrs='onclick="resetFilters()"' %}
-                    {% include 'components/button.html' with text='Export CSV' variant='success' icon='' attrs='onclick="exportCSV()"' %}
+                    {% trans "Apply Filters" as apply_label %}{% button apply_label variant="primary" hx_get=logs_list_url hx_target="#audit-results" attrs='hx-include="#audit-filters"' %}
+                    {% trans "Reset Filters" as reset_label %}{% button reset_label variant="secondary" attrs='onclick="resetFilters()"' %}
+                    {% trans "Export CSV" as export_label %}{% button export_label variant="success" attrs='onclick="exportCSV()"' %}
                 </div>
             </form>
         </div>
@@ -127,7 +127,7 @@ Dark theme interface for staff/admin audit log monitoring
                     <div class="flex items-center space-x-2">
                         <!-- Loading Spinner -->
                         <div id="loading-spinner" class="htmx-indicator">
-                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                            {% spinner size="sm" color="blue" %}
                         </div>
                         <span class="text-sm text-slate-400" id="results-count">{% trans "Loading..." %}</span>
                     </div>
@@ -138,7 +138,7 @@ Dark theme interface for staff/admin audit log monitoring
             <div id="audit-results" class="divide-y divide-slate-700">
                 <!-- Initial content loaded via HTMX -->
                 <div class="p-8 text-center">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                    {% spinner size="xl" color="blue" css_class="mx-auto" %}
                     <p class="text-slate-400 mt-2">{% trans "Loading audit logs..." %}</p>
                 </div>
             </div>

@@ -57,6 +57,8 @@
       <form method="post" class="space-y-6">
         {% csrf_token %}
 
+        {% form_error_summary form %}
+
         <!-- Customer Selection (New Orders) -->
         {% if not order %}
         <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -124,22 +126,14 @@
         <!-- Notes -->
         <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
           <div>
-            <label for="id_notes" class="block text-sm font-medium text-slate-400 mb-2">
-              {% trans "Internal Notes" %}
-            </label>
-            <textarea id="id_notes" name="notes" rows="4"
-                      class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="{% trans 'Internal order notes (visible to staff only)' %}">{% if order %}{{ order.notes }}{% endif %}</textarea>
-            <p class="mt-1 text-xs text-slate-500">{% trans "Internal order notes (visible to staff only)" %}</p>
+            {% trans "Internal Notes" as notes_label %}
+            {% trans "Internal order notes (visible to staff only)" as notes_help %}
+            {% input_field "notes" input_type="textarea" label=notes_label value=order.notes help_text=notes_help html_id="id_notes" %}
           </div>
           <div>
-            <label for="id_customer_notes" class="block text-sm font-medium text-slate-400 mb-2">
-              {% trans "Customer Notes" %}
-            </label>
-            <textarea id="id_customer_notes" name="customer_notes" rows="4"
-                      class="w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="{% trans 'Notes from customer or special instructions' %}">{% if order %}{{ order.customer_notes }}{% endif %}</textarea>
-            <p class="mt-1 text-xs text-slate-500">{% trans "Notes from customer or special instructions" %}</p>
+            {% trans "Customer Notes" as customer_notes_label %}
+            {% trans "Notes from customer or special instructions" as customer_notes_help %}
+            {% input_field "customer_notes" input_type="textarea" label=customer_notes_label value=order.customer_notes help_text=customer_notes_help html_id="id_customer_notes" %}
           </div>
         </div>
 

@@ -165,7 +165,7 @@
                 <div id="inline-edit-form-{{ item.id }}" class="space-y-4">
                   {% comment %}Form content will be loaded here{% endcomment %}
                   <div class="flex items-center justify-center py-4">
-                    <div class="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent"></div>
+                    {% spinner size="lg" color="blue" %}
                     <span class="ml-2 text-sm text-slate-400">{% trans "Loading edit form..." %}</span>
                   </div>
                 </div>
@@ -243,7 +243,7 @@
             <div id="add-item-form-container" class="space-y-4">
               {% comment %}Form will be loaded here{% endcomment %}
               <div class="flex items-center justify-center py-4">
-                <div class="animate-spin rounded-full h-6 w-6 border-2 border-green-500 border-t-transparent"></div>
+                {% spinner size="lg" color="green" %}
                 <span class="ml-2 text-sm text-slate-400">{% trans "Loading form..." %}</span>
               </div>
             </div>
@@ -287,7 +287,7 @@
           <div id="add-item-form-container-empty" class="space-y-4">
             {% comment %}Form will be loaded here{% endcomment %}
             <div class="flex items-center justify-center py-4">
-              <div class="animate-spin rounded-full h-6 w-6 border-2 border-green-500 border-t-transparent"></div>
+              {% spinner size="lg" color="green" %}
               <span class="ml-2 text-sm text-slate-400">{% trans "Loading form..." %}</span>
             </div>
           </div>

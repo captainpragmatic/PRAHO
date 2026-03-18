@@ -136,17 +136,11 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 {% if server.status == 'active' %}
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                        {% icon "check" %} {{ server.get_status_display }}
-                                    </span>
+                                    {% badge server.get_status_display variant="success" icon="check" %}
                                 {% elif server.status == 'maintenance' %}
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                        {% icon "settings" %} {{ server.get_status_display }}
-                                    </span>
+                                    {% badge server.get_status_display variant="warning" icon="settings" %}
                                 {% else %}
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                        {% icon "x" %} {{ server.get_status_display }}
-                                    </span>
+                                    {% badge server.get_status_display variant="danger" icon="x" %}
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
@@ -172,14 +166,10 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div class="flex justify-end space-x-2">
-                                    <a href="{% url 'provisioning:virtualmin_server_detail' server.id %}"
-                                       class="text-blue-400 hover:text-blue-300">
-                                        {% trans "View" %}
-                                    </a>
-                                    <a href="{% url 'provisioning:virtualmin_server_edit' server.id %}"
-                                       class="text-slate-400 hover:text-slate-300">
-                                        {% trans "Edit" %}
-                                    </a>
+                                    {% url 'provisioning:virtualmin_server_detail' server.id as server_detail_url %}
+                                    {% trans "View" as view_label %}{% button view_label variant="secondary" href=server_detail_url size="sm" %}
+                                    {% url 'provisioning:virtualmin_server_edit' server.id as server_edit_url %}
+                                    {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=server_edit_url size="sm" %}
                                 </div>
                             </td>
                         </tr>

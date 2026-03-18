@@ -43,6 +43,7 @@ SHARED_COMPONENTS: list[str] = [
     "checkbox.html",
     "dangerous_action_modal.html",
     "empty_state.html",
+    "filter_select.html",
     "form_actions.html",
     "form_error_summary.html",
     "input.html",

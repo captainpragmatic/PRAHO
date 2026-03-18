@@ -202,9 +202,7 @@
             <div class="text-sm font-medium text-white">{{ change.action }}</div>
             <div class="text-xs text-slate-400">{{ change.timestamp|date:"M d, Y H:i" }}</div>
             {% if change.status == 'completed' %}
-              <span class="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-full mt-2">
-                {% icon "check" %} {% trans 'Completed' %}
-              </span>
+              {% trans "Completed" as bt_completed %}{% badge bt_completed variant="success" icon="check" %}
             {% endif %}
           </div>
           {% endfor %}

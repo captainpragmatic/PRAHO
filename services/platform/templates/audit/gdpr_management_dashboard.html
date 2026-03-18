@@ -200,7 +200,7 @@ Professional interface for staff to manage all user GDPR requests
                     <div class="flex items-center space-x-2">
                         <!-- Loading Spinner -->
                         <div id="loading-spinner" class="htmx-indicator">
-                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                            {% spinner size="sm" color="blue" %}
                         </div>
                         <span class="text-sm text-slate-400" id="results-count">{% trans "Loading..." %}</span>
                     </div>
@@ -211,7 +211,7 @@ Professional interface for staff to manage all user GDPR requests
             <div id="gdpr-results" class="divide-y divide-slate-700">
                 <!-- Initial content loaded via HTMX -->
                 <div class="p-8 text-center">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                    {% spinner size="xl" color="blue" css_class="mx-auto" %}
                     <p class="text-slate-400 mt-2">{% trans "Loading GDPR export requests..." %}</p>
                 </div>
             </div>

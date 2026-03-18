@@ -2,4 +2,4 @@
 # Format: <repo-relative-path> | reason
 
 shared/ui/templates/components/button.html | animated loading spinner
-services/portal/templates/components/form_actions.html | animated loading spinner
+shared/ui/templates/components/form_actions.html | animated loading spinner

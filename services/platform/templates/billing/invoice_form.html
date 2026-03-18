@@ -32,13 +32,7 @@
     {% csrf_token %}
 
     <!-- Form Errors -->
-    {% if form.non_field_errors %}
-    <div class="bg-red-900 border border-red-700 rounded-md p-4">
-      {% for error in form.non_field_errors %}
-      <p class="text-red-100 text-sm">{% icon "x" %} {{ error }}</p>
-      {% endfor %}
-    </div>
-    {% endif %}
+    {% form_error_summary form %}
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Left Column: Customer & Invoice Details -->
@@ -199,23 +193,11 @@
           </h3>
 
           <div class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
-                {% trans 'Public Notes' %} <span class="text-slate-500">({% trans 'shown on invoice' %})</span>
-              </label>
-              <textarea name="public_notes" rows="3"
-                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                        placeholder="{% trans 'Thank you for your business! Payment due within 14 days.' %}"></textarea>
-            </div>
+            {% trans 'shown on invoice' as public_notes_hint %}
+            {% input_field "public_notes" label="Public Notes" input_type="textarea" placeholder="Thank you for your business! Payment due within 14 days." help_text=public_notes_hint %}
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-2">
-                {% trans 'Internal Notes' %} <span class="text-slate-500">({% trans 'not shown on invoice' %})</span>
-              </label>
-              <textarea name="internal_notes" rows="2"
-                        class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                        placeholder="{% trans 'Internal notes for accounting or follow-up' %}"></textarea>
-            </div>
+            {% trans 'not shown on invoice' as internal_notes_hint %}
+            {% input_field "internal_notes" label="Internal Notes" input_type="textarea" placeholder="Internal notes for accounting or follow-up" help_text=internal_notes_hint %}
           </div>
         </div>
       </div>
@@ -293,10 +275,8 @@
 
             <hr class="border-slate-600">
 
-            <a href="{% url 'billing:invoice_list' %}"
-               class="block w-full text-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
-              {% icon "x" %} {% trans 'Cancel' %}
-            </a>
+            {% url 'billing:invoice_list' as cancel_url %}
+            {% trans "Cancel" as cancel_label %}{% button cancel_label variant="secondary" href=cancel_url css_class="w-full" %}
           </div>
         </div>
       </div>

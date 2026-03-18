@@ -116,7 +116,7 @@
     <!-- Loading indicator for health checks (positioned outside the health-status div) -->
     <div id="health-loading" class="htmx-indicator fixed top-4 right-4 z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 shadow-lg">
         <div class="flex items-center text-slate-300 text-sm">
-            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400 mr-2"></div>
+            {% spinner size="sm" color="blue" css_class="mr-2" %}
             {% trans "Running health check..." %}
         </div>
     </div>
@@ -283,13 +283,9 @@
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     {% if domain.is_tracked_in_praho %}
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                            {% icon "check" %} Tracked by PRAHO
-                                        </span>
+                                        {% badge "Tracked by PRAHO" variant="success" icon="check" %}
                                     {% else %}
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                            {% icon "warning" %} Not in PRAHO
-                                        </span>
+                                        {% badge "Not in PRAHO" variant="warning" icon="warning" %}
                                     {% endif %}
                                 </td>
                             </tr>
@@ -352,10 +348,11 @@
                                     {{ account.username }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                        {% if account.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
-                                        {{ account.get_status_display }}
-                                    </span>
+                                    {% if account.is_active %}
+                                        {% badge account.get_status_display variant="success" %}
+                                    {% else %}
+                                        {% badge account.get_status_display variant="danger" %}
+                                    {% endif %}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                                     {{ account.created_at|date:"M d, Y" }}

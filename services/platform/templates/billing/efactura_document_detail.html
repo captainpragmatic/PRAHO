@@ -17,18 +17,15 @@
       </p>
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none flex gap-3">
-      <a href="{% url 'billing:efactura_dashboard' %}" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
-        {% trans "Back to Dashboard" %}
-      </a>
-      <a href="{% url 'billing:invoice_detail' pk=invoice.pk %}" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
-        {% trans "View Invoice" %}
-      </a>
+      {% url 'billing:efactura_dashboard' as efactura_dash_url %}
+      {% trans "Back to Dashboard" as back_dash_btn %}{% button back_dash_btn variant="secondary" href=efactura_dash_url size="sm" %}
+      {% url 'billing:invoice_detail' pk=invoice.pk as invoice_detail_url %}
+      {% trans "View Invoice" as view_inv_btn %}{% button view_inv_btn variant="secondary" href=invoice_detail_url size="sm" %}
       {% if can_retry %}
       <form method="post" action="{% url 'billing:efactura_retry' pk=document.pk %}">
         {% csrf_token %}
-        <button type="submit" class="inline-flex items-center rounded-md bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-500" hx-confirm="{% trans 'Retry this e-Factura submission?' %}">
-          {% icon "refresh" %} {% trans "Retry Submission" %}
-        </button>
+        {% trans "Retry this e-Factura submission?" as confirm_retry %}
+        {% trans "Retry Submission" as retry_btn %}{% button retry_btn variant="warning" icon="refresh" type="submit" hx_confirm=confirm_retry size="sm" %}
       </form>
       {% endif %}
     </div>
@@ -60,19 +57,19 @@
             <dt class="text-sm text-slate-400">{% trans "Status" %}</dt>
             <dd class="mt-1">
               {% if document.status == "accepted" %}
-                <span class="inline-flex items-center rounded-full bg-green-900 px-3 py-1 text-sm font-medium text-green-300">{% icon "check" %} {% trans "Accepted" %}</span>
+                {% trans "Accepted" as lbl %}{% badge lbl variant="success" icon="check" %}
               {% elif document.status == "rejected" %}
-                <span class="inline-flex items-center rounded-full bg-red-900 px-3 py-1 text-sm font-medium text-red-300">{% icon "x" %} {% trans "Rejected" %}</span>
+                {% trans "Rejected" as lbl %}{% badge lbl variant="danger" icon="x" %}
               {% elif document.status == "error" %}
-                <span class="inline-flex items-center rounded-full bg-orange-900 px-3 py-1 text-sm font-medium text-orange-300">{% icon "warning" %} {% trans "Error" %}</span>
+                {% trans "Error" as lbl %}{% badge lbl variant="warning" icon="warning" %}
               {% elif document.status == "processing" %}
-                <span class="inline-flex items-center rounded-full bg-yellow-900 px-3 py-1 text-sm font-medium text-yellow-300">{% icon "clock" %} {% trans "Processing" %}</span>
+                {% trans "Processing" as lbl %}{% badge lbl variant="warning" icon="clock" %}
               {% elif document.status == "submitted" %}
-                <span class="inline-flex items-center rounded-full bg-indigo-900 px-3 py-1 text-sm font-medium text-indigo-300">{% icon "external" %} {% trans "Submitted" %}</span>
+                {% trans "Submitted" as lbl %}{% badge lbl variant="info" icon="external" %}
               {% elif document.status == "queued" %}
-                <span class="inline-flex items-center rounded-full bg-blue-900 px-3 py-1 text-sm font-medium text-blue-300">{% icon "clipboard" %} {% trans "Queued" %}</span>
+                {% trans "Queued" as lbl %}{% badge lbl variant="info" icon="clipboard" %}
               {% else %}
-                <span class="inline-flex items-center rounded-full bg-slate-700 px-3 py-1 text-sm font-medium text-slate-300">{% icon "document" %} {% trans "Draft" %}</span>
+                {% trans "Draft" as lbl %}{% badge lbl variant="secondary" icon="document" %}
               {% endif %}
             </dd>
           </div>
@@ -178,7 +175,11 @@
           <li class="text-sm">
             <span class="text-slate-500">{{ event.received_at|date:"d/m H:i" }}</span>
             <span class="text-slate-300 ml-2">{{ event.event_type }}</span>
-            <span class="{% if event.status == 'processed' %}text-green-400{% else %}text-red-400{% endif %} ml-1 text-xs">{{ event.status }}</span>
+            {% if event.status == 'processed' %}
+                {% badge event.status variant="success" %}
+            {% else %}
+                {% badge event.status variant="danger" %}
+            {% endif %}
           </li>
           {% endfor %}
         </ul>

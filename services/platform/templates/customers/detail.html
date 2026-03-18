@@ -150,9 +150,7 @@
                             <div class="flex items-start sm:items-center gap-3">
                                 <!-- User Avatar/Icon -->
                                 <div class="bg-slate-600 rounded-full p-2 flex-shrink-0">
-                                    <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                                    </svg>
+                                    {% icon "user" size="md" css_class="text-slate-300" %}
                                 </div>
 
                                 <div>
@@ -169,29 +167,20 @@
                             <!-- User Status & Activity -->
                             <div class="mt-3 flex flex-wrap gap-2 text-xs">
                                 {% if membership.user.is_active %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-green-400 bg-green-900/30">
-                                        {% icon "check" %} {% trans "Active" %}
-                                    </span>
+                                    {% trans "Active" as user_active_lbl %}{% badge user_active_lbl variant="success" icon="check" size="xs" %}
                                 {% else %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-red-400 bg-red-900/30">
-                                        {% icon "x" %} {% trans "Inactive" %}
-                                    </span>
+                                    {% trans "Inactive" as user_inactive_lbl %}{% badge user_inactive_lbl variant="danger" icon="x" size="xs" %}
                                 {% endif %}
 
                                 {% if membership.user.two_factor_enabled %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-blue-400 bg-blue-900/30">
-                                        {% icon "lock" %} {% trans "2FA Enabled" %}
-                                    </span>
+                                    {% trans "2FA Enabled" as tfa_lbl %}{% badge tfa_lbl variant="primary" icon="lock" size="xs" %}
                                 {% endif %}
 
                                 {% if membership.user.last_login %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-slate-400 bg-slate-700">
-                                        {% trans "Last login:" %} {{ membership.user.last_login|timesince }} {% trans "ago" %}
-                                    </span>
+                                    {% blocktrans with timesince=membership.user.last_login|timesince asvar last_login_lbl %}Last login: {{ timesince }} ago{% endblocktrans %}
+                                    {% badge last_login_lbl variant="secondary" size="xs" %}
                                 {% else %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-yellow-400 bg-yellow-900/30">
-                                        {% icon "warning" %} {% trans "Never logged in" %}
-                                    </span>
+                                    {% trans "Never logged in" as never_logged_lbl %}{% badge never_logged_lbl variant="warning" icon="warning" size="xs" %}
                                 {% endif %}
                             </div>
                         </div>
@@ -211,9 +200,7 @@
                                     {% elif membership.role == 'tech' %}{% icon "settings" %}
                                     {% else %}{% icon "user" %}{% endif %}
                                     {{ membership.get_role_display }}
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                    </svg>
+                                    {% icon "chevron-down" size="sm" %}
                                 </button>
 
                                 <!-- Role Change Dropdown -->
@@ -269,25 +256,17 @@
                                     <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="false">
-                                        <button type="submit"
-                                                class="text-xs px-2 py-1 text-yellow-400 hover:text-yellow-300 border border-yellow-600 rounded hover:border-yellow-500 transition-colors"
-                                                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-                                                {% trans "Are you sure you want to suspend this user?" as confirm_suspend %}
-                                                onclick="return confirm('{{ confirm_suspend|escapejs }}')">
-                                            {% icon "clock" %} {% trans "Suspend" %}
-                                        </button>
+                                        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
+                                        {% trans "Are you sure you want to suspend this user?" as confirm_suspend %}
+                                        {% trans "Suspend" as suspend_btn %}{% button suspend_btn variant="warning" type="submit" icon="clock" size="xs" attrs="onclick=\"return confirm('{{ confirm_suspend|escapejs }}')\"" %}
                                     </form>
                                 {% else %}
                                     <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="true">
-                                        <button type="submit"
-                                                class="text-xs px-2 py-1 text-green-400 hover:text-green-300 border border-green-600 rounded hover:border-green-500 transition-colors"
-                                                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-                                                {% trans "Are you sure you want to activate this user?" as confirm_activate %}
-                                                onclick="return confirm('{{ confirm_activate|escapejs }}')">
-                                            {% icon "services" %} {% trans "Activate" %}
-                                        </button>
+                                        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
+                                        {% trans "Are you sure you want to activate this user?" as confirm_activate %}
+                                        {% trans "Activate" as activate_btn %}{% button activate_btn variant="success" type="submit" icon="services" size="xs" attrs="onclick=\"return confirm('{{ confirm_activate|escapejs }}')\"" %}
                                     </form>
                                 {% endif %}
 
@@ -310,13 +289,9 @@
                                     <!-- Can remove -->
                                     <form method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" style="display: inline;">
                                         {% csrf_token %}
-                                        <button type="submit"
-                                                class="text-xs px-2 py-1 text-red-400 hover:text-red-300 border border-red-600 rounded hover:border-red-500 transition-colors"
-                                                {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-                                                {% trans "Are you sure you want to remove this user from the customer? They will lose all access to this customer's data." as confirm_remove %}
-                                                onclick="return confirm('{{ confirm_remove|escapejs }}')">
-                                            {% icon "x" %} {% trans "Remove" %}
-                                        </button>
+                                        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
+                                        {% trans "Are you sure you want to remove this user from the customer? They will lose all access to this customer's data." as confirm_remove %}
+                                        {% trans "Remove" as remove_btn %}{% button remove_btn variant="danger" type="submit" icon="x" size="xs" attrs="onclick=\"return confirm('{{ confirm_remove|escapejs }}')\"" %}
                                     </form>
                                 {% endif %}
                             </div>
@@ -683,10 +658,8 @@
 
     <!-- Navigation -->
     <div class="flex justify-between items-center">
-        <a href="{% url 'customers:list' %}"
-            class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md font-medium transition-colors">
-            ← {% trans 'Back to Customers' %}
-        </a>
+        {% url 'customers:list' as customers_list_url %}
+        {% trans "← Back to Customers" as back_btn %}{% button back_btn variant="secondary" href=customers_list_url %}
         <div class="text-slate-500 text-sm">
             {% trans 'Customer' %} #{{ customer.id }}
         </div>

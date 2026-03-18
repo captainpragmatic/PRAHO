@@ -135,7 +135,13 @@
                                 <h3 class="text-lg font-medium text-slate-900 dark:text-white">
                                     {{ registrar.display_name }}
                                 </h3>
-                                {% badge registrar.get_status_display %}
+                                {% if registrar.status == 'active' %}
+                                    {% badge registrar.get_status_display variant="success" %}
+                                {% elif registrar.status == 'suspended' %}
+                                    {% badge registrar.get_status_display variant="warning" %}
+                                {% else %}
+                                    {% badge registrar.get_status_display variant="danger" %}
+                                {% endif %}
                             </div>
 
                             <div class="space-y-1">

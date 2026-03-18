@@ -1182,6 +1182,31 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     ),
 }
 
+# ── Heroicons Mini (20x20, filled) ──────────────────────────────────────────
+_FILLED_ICON_PATHS: dict[str, str | tuple[str, ...]] = {
+    "check-circle": "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+    "x-circle": "M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z",
+    "exclamation-triangle": "M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z",
+    "information-circle": "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z",
+    "x-mark": "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z",
+    "user": "M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z",
+    "shield-check": "M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+    "chat-bubble": "M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1-1h-.257A6 6 0 1118 8zM7 9a1 1 0 100 2 1 1 0 000-2zm7 1a1 1 0 11-2 0 1 1 0 012 0zm-3 1a1 1 0 100 2 1 1 0 000-2z",
+    "arrow-up": (
+        "M8.707 7.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l2-2a1 1 0 00-1.414-1.414L11 7.586V3a1 1 0 10-2 0v4.586l-.293-.293z",
+        "M3 5a2 2 0 012-2h1a1 1 0 010 2H5v7h2l1 2h4l1-2h2V5h-1a1 1 0 110-2h1a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5z",
+    ),
+    "currency-dollar": (
+        "M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z",
+        "M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z",
+    ),
+    "list-bullet": "M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z",
+    "code-bracket": "M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z",
+    "document-text": "M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z",
+    "arrow-path": "M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z",
+    "question-mark-circle": "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z",
+}
+
 _ICON_SIZES: dict[str, str] = {
     "xs": "w-3 h-3",
     "sm": "w-4 h-4",
@@ -1191,21 +1216,62 @@ _ICON_SIZES: dict[str, str] = {
     "2xl": "w-10 h-10",
 }
 
+# ── Spinner sizes ───────────────────────────────────────────────────────────
+_SPINNER_SIZES: dict[str, tuple[str, str]] = {
+    "xs": ("w-3 h-3", "border"),
+    "sm": ("w-4 h-4", "border-2"),
+    "md": ("w-5 h-5", "border-2"),
+    "lg": ("w-6 h-6", "border-[3px]"),
+    "xl": ("w-8 h-8", "border-4"),
+}
+
+_SPINNER_COLORS: dict[str, str] = {
+    "current": "border-current",
+    "blue": "border-blue-500",
+    "white": "border-white",
+    "green": "border-green-500",
+    "slate": "border-slate-600",
+}
+
 
 @register.simple_tag
-def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> str:
+def icon(name: str, *, size: str = "md", css_class: str = "", style: str = "outline", **kwargs: Any) -> str:
     """
-    Inline SVG icon component backed by Heroicons v1 outline paths.
+    Inline SVG icon component backed by Heroicons paths.
 
     Usage:
         {% icon "user" size="lg" %}
-        {% icon "invoices" css_class="text-blue-400" %}
+        {% icon "check-circle" style="filled" css_class="text-green-400" %}
 
     Args:
-        name: Icon name from _ICON_PATHS catalog
+        name: Icon name from icon catalog
         size: xs|sm|md|lg|xl|2xl
         css_class: Additional CSS classes
+        style: "outline" (24x24 stroke) or "filled" (20x20 fill)
     """
+    if style == "filled":
+        paths = _FILLED_ICON_PATHS.get(name)
+        if paths is None:
+            return ""
+
+        classes = f"inline-block {_ICON_SIZES.get(size, _ICON_SIZES['md'])}"
+        if css_class:
+            classes += f" {css_class}"
+
+        if isinstance(paths, tuple):
+            path_html = "".join(
+                format_html('<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />', p) for p in paths
+            )
+        else:
+            path_html = format_html('<path fill-rule="evenodd" clip-rule="evenodd" d="{}" />', paths)
+
+        return format_html(
+            '<svg class="{}" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">{}</svg>',
+            classes,
+            mark_safe(path_html),  # noqa: S308  — escaped template output
+        )
+
+    # Default: outline style
     paths = _ICON_PATHS.get(name)
     if paths is None:
         return ""
@@ -1228,6 +1294,36 @@ def icon(name: str, *, size: str = "md", css_class: str = "", **kwargs: Any) -> 
         '<svg class="{}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">{}</svg>',
         classes,
         mark_safe(path_html),  # noqa: S308 — path_html built from format_html calls above
+    )
+
+
+@register.simple_tag
+def spinner(*, size: str = "sm", css_class: str = "", color: str = "current", **kwargs: Any) -> str:
+    """
+    Accessible loading spinner component.
+
+    Usage:
+        {% spinner %}
+        {% spinner size="lg" color="blue" %}
+        {% spinner size="md" color="white" css_class="mr-2" %}
+
+    Args:
+        size: xs|sm|md|lg|xl
+        color: current|blue|white|green|slate
+        css_class: Additional CSS classes
+    """
+    dim, border = _SPINNER_SIZES.get(size, _SPINNER_SIZES["sm"])
+    border_color = _SPINNER_COLORS.get(color, _SPINNER_COLORS["current"])
+
+    classes = f"animate-spin rounded-full {dim} {border} {border_color} border-t-transparent"
+    if css_class:
+        classes += f" {css_class}"
+
+    sr_text = _("Loading...")
+    return format_html(
+        '<div class="{}" role="status"><span class="sr-only">{}</span></div>',
+        classes,
+        sr_text,
     )
 
 
@@ -1284,6 +1380,38 @@ def format_bytes(bytes_value: int) -> str:
         return f"{int(size)} {units[unit_index]}"
     else:
         return f"{size:.1f} {units[unit_index]}"
+
+
+@register.inclusion_tag("components/filter_select.html")
+def filter_select(  # noqa: PLR0913
+    name: str,
+    options: list[dict[str, Any]],
+    *,
+    selected: str = "",
+    label: str = "",
+    placeholder: str = "",
+    css_class: str = "",
+    html_id: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """
+    Filter select dropdown for list pages (HTMX-compatible).
+
+    Renders a styled <select> with label, typically inside a <form> that
+    handles HTMX submission via hx-trigger="change from:select".
+
+    Usage:
+        {% filter_select "status" status_choices selected=status_filter label="Status" placeholder="All" %}
+    """
+    return {
+        "name": name,
+        "options": options,
+        "selected": str(selected) if selected else "",
+        "label": label,
+        "placeholder": placeholder,
+        "css_class": css_class,
+        "html_id": html_id or f"filter-{name}",
+    }
 
 
 @register.inclusion_tag("components/badge.html")

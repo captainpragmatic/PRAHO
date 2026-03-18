@@ -134,7 +134,7 @@
                     <!-- Loading indicator will be shown here -->
                     <div id="export-detail-{{ request.id }}-loading" class="htmx-indicator">
                         <div class="flex items-center justify-center py-4">
-                            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                            {% spinner size="sm" color="blue" %}
                             <span class="ml-2 text-sm text-slate-400">{% trans "Loading details..." %}</span>
                         </div>
                     </div>
