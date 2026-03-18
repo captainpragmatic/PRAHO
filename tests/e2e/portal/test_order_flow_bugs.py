@@ -63,9 +63,16 @@ def _add_first_product_to_cart(page: Page) -> bool:
         print("  No products in catalog — test cannot proceed")
         return False
 
-    # Click the first Add to Cart button and wait for HTMX response
-    add_buttons.first.click()
-    page.wait_for_load_state("networkidle")
+    # Click the first Add to Cart button and wait for HTMX response to complete.
+    # The form uses hx-post with hx-target="#cart-widget" — wait for the cart widget
+    # to update (HTMX swaps outerHTML) as confirmation the server persisted the item.
+    with page.expect_response(lambda r: "cart/add" in r.url) as response_info:
+        add_buttons.first.click()
+    response = response_info.value
+    if response.status != 200:
+        print(f"  Add to cart returned status {response.status}")
+        return False
+    page.wait_for_timeout(500)  # Allow HTMX swap to settle
     return True
 
 
