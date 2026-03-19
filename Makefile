@@ -46,7 +46,7 @@ help:
 	@echo "  make test-fast         - Full test suite (all 5 phases, failfast + parallel)"
 	@echo "  make test-platform     - Platform tests only (parallel, no keepdb)"
 	@echo "  make test-platform-fast - Platform tests only (failfast + keepdb + parallel)"
-	@echo "  make test-ci           - Platform tests with PostgreSQL (production parity)"
+	@echo "  make test-ci           - Platform tests with PostgreSQL via Docker (auto start/stop)"
 	@echo "  make test-ci-focused MODULES='tests.X tests.Y' - Focused CI test run"
 	@echo "  make test-file FILE=tests.X.test_Y - Run a specific test file"
 	@echo "  make test-platform-pytest - Test platform service with pytest"
@@ -446,11 +446,26 @@ show-test-deps:
 	@$(PYTHON_SHARED) scripts/affected_test_modules.py --show-graph
 
 test-ci:
-	@echo "🐘 [Platform] CI test run (PostgreSQL + DatabaseCache)..."
+	@echo "🐘 [Platform] CI test run (PostgreSQL via Docker, serial)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires PostgreSQL running locally (or via Docker)"
-	@PLATFORM_TEST_SETTINGS=config.settings.ci $(MAKE) test-platform
-	@echo "✅ CI tests completed (PostgreSQL)!"
+	@echo "📦 Starting PostgreSQL container..."
+	@docker run --name praho-test-pg -d --rm \
+		-e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=postgres \
+		-e POSTGRES_INITDB_ARGS="--nosync" \
+		-p 5432:5432 --tmpfs /var/lib/postgresql/data --shm-size=256m \
+		postgres:16-alpine >/dev/null 2>&1 || true
+	@echo "⏳ Waiting for PostgreSQL to be ready..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		docker exec praho-test-pg pg_isready -U test >/dev/null 2>&1 && break; \
+		sleep 1; \
+	done
+	@echo "🧪 Running platform tests against PostgreSQL (no --parallel)..."
+	@cd services/platform && DB_NAME=postgres DB_USER=test DB_PASSWORD=test DB_HOST=localhost \
+		PYTHONPATH=$$(pwd) $(PWD)/$(VENV_DIR)/bin/python manage.py test tests \
+		--settings=config.settings.ci --verbosity=2; \
+		EXIT=$$?; \
+		docker stop praho-test-pg >/dev/null 2>&1 || true; \
+		exit $$EXIT
 
 # ===============================================================================
 # DATABASE & ASSETS 🗄️

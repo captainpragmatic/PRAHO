@@ -33,6 +33,7 @@ DATABASES = {
             # fsync/full_page_writes are server-level — set via POSTGRES_INITDB_ARGS in CI.
             "options": "-c synchronous_commit=off",
         },
+        "CONN_MAX_AGE": 0,  # Close connection after each request
         "TEST": {
             "SERIALIZE": False,
         },
@@ -42,12 +43,9 @@ DATABASES = {
 # ===============================================================================
 # RE-ENABLE MIGRATIONS
 # ===============================================================================
-# test.py sets MIGRATION_MODULES to DisableMigrations for SQLite speed.
-# CI needs real migrations to validate:
-#   - Partial UniqueConstraints (condition=)
-#   - GIN/BRIN indexes
-#   - Table partitioning
-#   - PostgreSQL-specific RunSQL in migrations
+# test.py uses DisableMigrations (syncdb from models) for SQLite speed.
+# PostgreSQL CI needs real migrations to create named indexes, partial
+# constraints, and RunSQL operations that syncdb skips.
 if "MIGRATION_MODULES" in dir():
     del MIGRATION_MODULES  # noqa: F821
 
