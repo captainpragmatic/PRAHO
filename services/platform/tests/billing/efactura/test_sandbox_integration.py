@@ -136,9 +136,14 @@ class EFacturaSandboxIntegrationTest(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass()
+        # IMPORTANT: Check skip condition BEFORE super().setUpClass() to avoid
+        # corrupting the PostgreSQL connection. super().setUpClass() calls
+        # _enter_atomics() which opens an atomic block. Raising SkipTest after
+        # that causes tearDownClass to close the connection in a bad state,
+        # cascading "the connection is closed" errors to all subsequent tests.
         if not SANDBOX_CREDENTIALS_AVAILABLE:
             raise SkipTest("ANAF sandbox credentials not configured (set EFACTURA_SANDBOX_* env vars)")
+        super().setUpClass()
         from apps.billing.efactura.client import EFacturaClient
 
         cls.config = _get_sandbox_config()

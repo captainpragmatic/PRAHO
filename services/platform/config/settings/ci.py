@@ -33,7 +33,7 @@ DATABASES = {
             # fsync/full_page_writes are server-level — set via POSTGRES_INITDB_ARGS in CI.
             "options": "-c synchronous_commit=off",
         },
-        "CONN_MAX_AGE": 0,  # Close connection after each request
+        "CONN_MAX_AGE": 0,  # Close connection after each request (CI — no pooling needed)
         "TEST": {
             "SERIALIZE": False,
         },
