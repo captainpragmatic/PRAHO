@@ -71,6 +71,9 @@ class Payment(ConcurrentTransitionMixin, models.Model):
         ("failed", _("Failed")),
         ("refunded", _("Refunded")),
         ("partially_refunded", _("Partially Refunded")),
+        ("cancelled", _("Cancelled")),
+        ("canceled", _("Canceled")),  # Stripe uses US spelling
+        ("disputed", _("Disputed")),
     )
 
     METHOD_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
