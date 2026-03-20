@@ -45,45 +45,66 @@
                 <!-- Main Navigation Section -->
                 <div class="space-y-4 mb-10">
                     <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
-                        Platform
+                        {% trans 'Dashboard' %}
                     </div>
 
                     <!-- Dashboard -->
                     {% include 'components/mobile_nav_item.html' with url_name='dashboard' title='Dashboard' subtitle='Overview & analytics' icon_name='dashboard' %}
-
-                    <!-- Customers (Staff only) -->
-                    {% include 'components/mobile_nav_item.html' with url_name='customers:list' title='Customers' subtitle='Manage client accounts' staff_only=True icon_name='users' %}
-
-                    <!-- Products (Staff only) -->
-                    {% include 'components/mobile_nav_item.html' with url_name='products:product_list' title='Products' subtitle='Manage hosting packages' staff_only=True icon_name='orders' %}
-
-                    <!-- Orders -->
-                    {% include 'components/mobile_nav_item.html' with url_name='orders:order_list' title='Orders' subtitle='Order management' icon_name='shopping-cart' %}
-
-                    <!-- Billing -->
-                    {% include 'components/mobile_nav_item.html' with url_name='billing:invoice_list' title='Billing' subtitle='Invoices & payments' icon_name='invoices' %}
-
-                    <!-- Domains -->
-                    {% include 'components/mobile_nav_item.html' with url_name='domains:list' title='Domains' subtitle='My domains' icon_name='domain' %}
-
-                    <!-- Services -->
-                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:services' title='Services' subtitle='Hosting & provisioning' icon_name='services' %}
-
-                    <!-- Support -->
-                    {% include 'components/mobile_nav_item.html' with url_name='tickets:list' title='Support' subtitle='Help & tickets' icon_name='question' %}
-
-                    <!-- System Settings (Staff only) -->
-                    {% include 'components/mobile_nav_item.html' with url_name='settings:dashboard' title='System Settings' subtitle='Platform configuration' staff_only=True icon_name='settings' %}
-
-                    <!-- Audit Logs (Staff only) -->
-                    {% include 'components/mobile_nav_item.html' with url_name='audit:logs' title='Audit Logs' subtitle='Security & compliance' staff_only=True icon_name='clipboard' %}
-
-                    <!-- Virtualmin (Staff only) -->
-                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:virtualmin_servers' title='Virtualmin' subtitle='Server management' staff_only=True icon_name='server' %}
-
-                    <!-- Virtualmin Accounts (Staff only) -->
-                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:virtualmin_accounts' title='VM Accounts' subtitle='Hosting accounts' staff_only=True icon_name='building' %}
                 </div>
+
+                <!-- Business Section (Staff only) -->
+                {% if user.is_staff or user.staff_role %}
+                <div class="space-y-4 mb-10">
+                    <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
+                        {% trans 'Business' %}
+                    </div>
+
+                    {% include 'components/mobile_nav_item.html' with url_name='customers:list' title='Customers' subtitle='Manage client accounts' staff_only=True icon_name='users' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='products:product_list' title='Products' subtitle='Manage hosting packages' staff_only=True icon_name='orders' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='orders:order_list' title='Orders' subtitle='Order management' icon_name='shopping-cart' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='billing:invoice_list' title='Invoices' subtitle='Invoices & payments' icon_name='invoices' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:services' title='Services' subtitle='Hosting & provisioning' icon_name='services' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='domains:list' title='Domains' subtitle='Domain management' icon_name='domain' %}
+                </div>
+
+                <!-- Infrastructure Section (Staff only) -->
+                <div class="space-y-4 mb-10">
+                    <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
+                        {% trans 'Infrastructure' %}
+                    </div>
+
+                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:virtualmin_servers' title='Virtualmin Servers' subtitle='Server management' staff_only=True icon_name='server' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:virtualmin_accounts' title='Hosting Accounts' subtitle='Virtual hosting accounts' staff_only=True icon_name='building' %}
+                    {% include 'components/mobile_nav_item.html' with url='/domains/admin/registrars/' title='Registrars' subtitle='Domain registrar partners' staff_only=True icon_name='building' %}
+                    {% include 'components/mobile_nav_item.html' with url='/domains/admin/tlds/' title='TLD Management' subtitle='Top-level domain config' staff_only=True icon_name='globe' %}
+                    {% include 'components/mobile_nav_item.html' with url='/infrastructure/' title='Infrastructure' subtitle='Server infrastructure' staff_only=True icon_name='server' %}
+                </div>
+
+                <!-- Support Section (Staff only) -->
+                <div class="space-y-4 mb-10">
+                    <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
+                        {% trans 'Support & Admin' %}
+                    </div>
+
+                    {% include 'components/mobile_nav_item.html' with url_name='tickets:list' title='All Tickets' subtitle='Customer support tickets' icon_name='chat' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='settings:dashboard' title='System Settings' subtitle='Platform configuration' staff_only=True icon_name='settings' %}
+                    {% include 'components/mobile_nav_item.html' with url='/audit/gdpr_management/' title='GDPR Management' subtitle='Privacy & data compliance' staff_only=True icon_name='lock' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='audit:logs' title='Audit Logs' subtitle='Security & compliance' staff_only=True icon_name='chart' %}
+                </div>
+                {% else %}
+                <!-- Customer Navigation -->
+                <div class="space-y-4 mb-10">
+                    <div class="px-4 py-4 text-sm font-bold text-slate-300 uppercase tracking-wider">
+                        {% trans 'My Account' %}
+                    </div>
+
+                    {% include 'components/mobile_nav_item.html' with url_name='orders:order_list' title='My Orders' subtitle='Order history' icon_name='clipboard' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='billing:invoice_list' title='My Invoices' subtitle='Invoices & payments' icon_name='invoices' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:services' title='My Services' subtitle='Hosting & services' icon_name='services' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='domains:list' title='My Domains' subtitle='Domain management' icon_name='domain' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='tickets:list' title='My Tickets' subtitle='Help & support' icon_name='chat' %}
+                </div>
+                {% endif %}
 
                 <!-- Divider -->
                 <div class="relative my-8">

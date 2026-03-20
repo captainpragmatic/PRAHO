@@ -9,7 +9,7 @@
       aria-expanded="false"
       aria-haspopup="true">
       {% if icon %}
-        <span class="mr-2">{{ icon }}</span>
+        {% icon icon size="sm" css_class="mr-2 opacity-70" %}
       {% endif %}
       {{ title }}
       <span class="ml-1 transition-transform duration-200 inline-flex" :class="{ 'rotate-180': open }">
@@ -38,7 +38,7 @@
              role="menuitem"
              @click="open = false">
             {% if item.icon %}
-              <span class="mr-3">{{ item.icon }}</span>
+              {% icon item.icon size="sm" css_class="mr-3 opacity-70" %}
             {% endif %}
             {{ item.text }}
             {% if item.badge %}

@@ -56,7 +56,8 @@ Optional Parameters:
             </button>
         </form>
     {% else %}
-        <a href="{% if url_name %}{% url url_name %}{% else %}{{ url }}{% endif %}" class="mobile-nav-item group {{ extra_classes }}">
+        {% if url_name %}{% url url_name as resolved_url %}{% endif %}
+        <a href="{% if url_name %}{{ resolved_url }}{% else %}{{ url }}{% endif %}" class="mobile-nav-item group {% if url_name and request.path == resolved_url %}active{% elif not url_name and request.path == url %}active{% endif %} {{ extra_classes }}">
             <div class="flex items-center space-x-5 p-4">
                 <div class="flex-shrink-0 w-16 h-16 bg-slate-700/50 rounded-2xl flex items-center justify-center group-hover:bg-slate-600/60 transition-colors shadow-lg">
                     {% if icon_name %}{% icon icon_name size="xl" css_class=icon_css|default:"text-slate-300 group-hover:text-white" %}{% else %}{{ icon|safe }}{% endif %}
