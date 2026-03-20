@@ -7,11 +7,12 @@ Verifies:
   H7: confirm_order allows valid PI for stripe orders
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
+from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -115,12 +116,17 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         )
         request = self._make_request({"payment_intent_id": "pi_validXYZ1234567890", "payment_status": "succeeded"})
 
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None)
+
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
-             patch("apps.api.orders.views._provision_confirmed_order_item"):
+             patch("apps.api.orders.views._provision_confirmed_order_item"), \
+             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway):
             response = confirm_order(request, str(order.id))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["success"])
+        mock_gateway.confirm_payment.assert_called_once_with("pi_validXYZ1234567890")
 
         order.refresh_from_db()
         self.assertEqual(order.status, "confirmed")
