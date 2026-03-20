@@ -1397,9 +1397,7 @@ class TestHandlePaymentRefund(TestCase):
     def test_fully_refunded_invoice(self, mock_email):
         payment = MagicMock()
         payment.invoice.total_cents = 1000
-        refunded_payment = MagicMock()
-        refunded_payment.amount_cents = 1000
-        payment.invoice.payments.filter.return_value = [refunded_payment]
+        payment.invoice.payments.filter.return_value.aggregate.return_value = {"total": 1000}
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_refund(payment)
         payment.invoice.save.assert_called_once()
@@ -1409,9 +1407,7 @@ class TestHandlePaymentRefund(TestCase):
     def test_partial_refund(self, mock_email):
         payment = MagicMock()
         payment.invoice.total_cents = 1000
-        refunded_payment = MagicMock()
-        refunded_payment.amount_cents = 500
-        payment.invoice.payments.filter.return_value = [refunded_payment]
+        payment.invoice.payments.filter.return_value.aggregate.return_value = {"total": 500}
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_refund(payment)
         payment.invoice.save.assert_not_called()
