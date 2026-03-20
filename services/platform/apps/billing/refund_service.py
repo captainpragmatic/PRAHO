@@ -11,6 +11,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, TypedDict
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django_fsm import TransitionNotAllowed
@@ -127,13 +128,8 @@ class RefundService:
                 # Get order with row lock to prevent concurrent refund race
                 try:
                     order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
-                except Order.DoesNotExist:
+                except ObjectDoesNotExist:
                     return Err("Failed to process refund: Order not found")
-                except Exception as e:
-                    # Some tests/mock paths raise a generic "does not exist" exception.
-                    if "does not exist" in str(e).lower():
-                        return Err("Failed to process refund: Order not found")
-                    raise
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_order_refund(order, refund_data)
@@ -295,13 +291,8 @@ class RefundService:
                     invoice = (
                         Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
                     )
-                except Invoice.DoesNotExist:
+                except ObjectDoesNotExist:
                     return Err("Failed to process refund: Invoice not found")
-                except Exception as e:
-                    # Some tests/mock paths raise a generic "does not exist" exception.
-                    if "does not exist" in str(e).lower():
-                        return Err("Failed to process refund: Invoice not found")
-                    raise
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_invoice_refund(invoice, refund_data)

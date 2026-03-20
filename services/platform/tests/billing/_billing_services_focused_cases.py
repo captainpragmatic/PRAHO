@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase
 
 from apps.billing.models import (
@@ -80,7 +81,7 @@ class RefundServiceFocusedTestCase(TestCase):
     @patch('apps.orders.models.Order.objects.select_related')
     def test_refund_order_order_not_found_error_path(self, mock_select_related: Mock) -> None:
         """Test error path when order is not found"""
-        mock_select_related.return_value.get.side_effect = Exception("Order matching query does not exist")
+        mock_select_related.return_value.get.side_effect = ObjectDoesNotExist("Order matching query does not exist")
 
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,

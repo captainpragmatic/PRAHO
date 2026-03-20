@@ -7,6 +7,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import Mock, patch
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase
 from django.utils import timezone
 
@@ -90,7 +91,7 @@ class RefundServiceComprehensiveTestCase(TestCase):
     @patch('apps.orders.models.Order.objects.select_related')
     def test_refund_order_order_not_found(self, mock_select_related: Mock) -> None:
         """Test refund_order when order doesn't exist"""
-        mock_select_related.return_value.get.side_effect = Exception("Order matching query does not exist")
+        mock_select_related.return_value.get.side_effect = ObjectDoesNotExist("Order matching query does not exist")
 
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,
@@ -138,7 +139,7 @@ class RefundServiceComprehensiveTestCase(TestCase):
     @patch('apps.billing.models.Invoice.objects.select_related')
     def test_refund_invoice_invoice_not_found(self, mock_select_related: Mock, mock_validate: Mock) -> None:
         """Test refund_invoice when invoice doesn't exist"""
-        mock_select_related.return_value.get.side_effect = Exception("Invoice matching query does not exist")
+        mock_select_related.return_value.get.side_effect = ObjectDoesNotExist("Invoice matching query does not exist")
 
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,
