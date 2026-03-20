@@ -377,11 +377,12 @@ class PaymentService:
                             # Use FSM transition dispatch instead of direct assignment
                             method_name = _PAYMENT_TRANSITION_MAP.get(new_status)
                             if not method_name:
-                                logger.warning(
-                                    "⚠️ [PaymentService] confirm_payment: no FSM transition mapped "
-                                    "for target status '%s' on payment %s",
-                                    new_status,
+                                logger.error(
+                                    "🔥 [PaymentService] confirm_payment: unmapped payment status "
+                                    "'%s' from gateway for payment %s — payment left in '%s' (#130/M3)",
+                                    result_status,
                                     payment.id,
+                                    payment.status,
                                 )
                             else:
                                 try:
