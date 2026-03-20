@@ -22,7 +22,7 @@ from unittest.mock import Mock, patch
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.billing.models import Currency, Invoice, Payment
+from apps.billing.models import Currency, Invoice, Payment, Refund
 from apps.billing.services import (
     RefundData,
     RefundEligibility,
@@ -690,14 +690,19 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
         self.assertEqual(amount, 0)
 
     def test_get_order_refunded_amount_with_refunds(self) -> None:
-        """Test _get_order_refunded_amount with refunds in metadata (Line 707-708)."""
+        """Test _get_order_refunded_amount with Refund records (#125)."""
         mock_order = self._create_test_order()
-        mock_order.meta = {
-            'refunds': [
-                {'amount_cents': 5000},
-                {'amount_cents': 3000}
-            ]
-        }
+        currency = Currency.objects.get(code="RON")
+        Refund.objects.create(
+            customer=self.customer, order=mock_order, amount_cents=5000,
+            currency=currency, original_amount_cents=15000,
+            reference_number="REF-TEST-001",
+        )
+        Refund.objects.create(
+            customer=self.customer, order=mock_order, amount_cents=3000,
+            currency=currency, original_amount_cents=15000,
+            reference_number="REF-TEST-002",
+        )
 
         amount = RefundService._get_order_refunded_amount(mock_order)
 
@@ -713,14 +718,18 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
         self.assertEqual(amount, 0)
 
     def test_get_invoice_refunded_amount_with_refunds(self) -> None:
-        """Test _get_invoice_refunded_amount with refunds in metadata (Line 715-716)."""
-        self.invoice.meta = {
-            'refunds': [
-                {'amount_cents': 2000},
-                {'amount_cents': 1500}
-            ]
-        }
-        self.invoice.save()
+        """Test _get_invoice_refunded_amount with Refund records (#125)."""
+        currency = Currency.objects.get(code="RON")
+        Refund.objects.create(
+            customer=self.customer, invoice=self.invoice, amount_cents=2000,
+            currency=currency, original_amount_cents=10000,
+            reference_number="REF-INV-001",
+        )
+        Refund.objects.create(
+            customer=self.customer, invoice=self.invoice, amount_cents=1500,
+            currency=currency, original_amount_cents=10000,
+            reference_number="REF-INV-002",
+        )
 
         amount = RefundService._get_invoice_refunded_amount(self.invoice)
 
