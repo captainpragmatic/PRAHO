@@ -11,7 +11,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, TypedDict
 
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django_fsm import TransitionNotAllowed
 
@@ -818,21 +818,23 @@ class RefundService:
 
             return Ok(None)
 
-        except Exception as db_error:
-            error_msg = str(db_error)
+        except IntegrityError:
+            # FK constraint violated — catches both SQLite and PostgreSQL (#120)
             entity_label = "order" if order else "invoice"
             entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
-            if "FOREIGN KEY constraint failed" in error_msg:
-                logger.exception("Refund record creation failed: FK constraint for %s_id=%s", entity_label, entity_pk)
-                return Err("Failed to process bidirectional refund")
-            elif "Cannot assign" in error_msg:
-                logger.exception(
-                    "Refund record creation failed: assignment error for %s_id=%s", entity_label, entity_pk
-                )
-                return Err("Order update failed" if order else "Invoice update failed")
-            else:
-                logger.exception("Refund record creation failed for %s_id=%s", entity_label, entity_pk)
-                return Err("Failed to process bidirectional refund")
+            logger.exception("Refund record creation failed: FK constraint for %s_id=%s", entity_label, entity_pk)
+            return Err("Failed to process bidirectional refund")
+        except ValueError:
+            # Django ORM assignment error (e.g. assigning wrong type to FK field) (#120)
+            entity_label = "order" if order else "invoice"
+            entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
+            logger.exception("Refund record creation failed: assignment error for %s_id=%s", entity_label, entity_pk)
+            return Err("Order update failed" if order else "Invoice update failed")
+        except Exception:
+            entity_label = "order" if order else "invoice"
+            entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
+            logger.exception("Refund record creation failed for %s_id=%s", entity_label, entity_pk)
+            return Err("Failed to process bidirectional refund")
 
     @staticmethod
     def _process_entity_updates(
@@ -984,16 +986,16 @@ class RefundService:
             if refunds:
                 return sum(r.get("amount_cents", 0) for r in refunds)
 
-        # Check related refunds
+        # Check related refunds — must not silently return 0 on failure (over-refund risk, #119)
         try:
             return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
-        except (TypeError, AttributeError):
-            logger.warning(
-                "Refund amount aggregation failed for order_id=%s, defaulting to 0 — over-refund risk",
+        except (TypeError, AttributeError) as exc:
+            logger.error(
+                "Refund amount aggregation failed for order_id=%s — aborting to prevent over-refund",
                 getattr(order, "pk", "unknown"),
                 exc_info=True,
             )
-            return 0
+            raise RuntimeError(f"Cannot determine refunded amount for order {getattr(order, 'pk', 'unknown')}") from exc
 
     @staticmethod
     def _get_invoice_refunded_amount(invoice: Any) -> int:
@@ -1007,16 +1009,18 @@ class RefundService:
             if refunds:
                 return sum(r.get("amount_cents", 0) for r in refunds)
 
-        # Check related refunds
+        # Check related refunds — must not silently return 0 on failure (over-refund risk, #119)
         try:
             return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
-        except (TypeError, AttributeError):
-            logger.warning(
-                "Refund amount aggregation failed for invoice_id=%s, defaulting to 0 — over-refund risk",
+        except (TypeError, AttributeError) as exc:
+            logger.error(
+                "Refund amount aggregation failed for invoice_id=%s — aborting to prevent over-refund",
                 getattr(invoice, "pk", "unknown"),
                 exc_info=True,
             )
-            return 0
+            raise RuntimeError(
+                f"Cannot determine refunded amount for invoice {getattr(invoice, 'pk', 'unknown')}"
+            ) from exc
 
     @staticmethod
     def _create_order_refund_eligibility(

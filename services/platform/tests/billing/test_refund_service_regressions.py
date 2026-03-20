@@ -959,9 +959,13 @@ class TestCreateRefundRecord(TestCase):
         assert r.is_ok()
 
     def test_foreign_key_error(self):
+        # #120: use IntegrityError (catches both SQLite + PostgreSQL), not string matching
+        from django.db import IntegrityError  # noqa: PLC0415
+
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
+
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
-            mock_qs.create.side_effect = Exception("FOREIGN KEY constraint failed")
+            mock_qs.create.side_effect = IntegrityError("insert violates foreign key constraint")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=MagicMock(), invoice=None,
                 refund_amount_cents=5000, original_cents=10000,
@@ -972,9 +976,10 @@ class TestCreateRefundRecord(TestCase):
             assert "bidirectional" in r.unwrap_err()
 
     def test_cannot_assign_error_order(self):
+        # #120: use ValueError (Django ORM assignment error type), not string matching
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
-            mock_qs.create.side_effect = Exception("Cannot assign something")
+            mock_qs.create.side_effect = ValueError("Cannot assign value to FK field")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=MagicMock(), invoice=None,
                 refund_amount_cents=5000, original_cents=10000,
@@ -985,9 +990,10 @@ class TestCreateRefundRecord(TestCase):
             assert "Order update failed" in r.unwrap_err()
 
     def test_cannot_assign_error_invoice(self):
+        # #120: use ValueError (Django ORM assignment error type), not string matching
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
-            mock_qs.create.side_effect = Exception("Cannot assign something")
+            mock_qs.create.side_effect = ValueError("Cannot assign value to FK field")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=None, invoice=MagicMock(),
                 refund_amount_cents=5000, original_cents=10000,
@@ -1034,10 +1040,12 @@ class TestCreateRefundRecord(TestCase):
 
     def test_fk_constraint_error_logs_exception(self):
         """FK constraint branch logs exception (was previously silent)."""
+        from django.db import IntegrityError  # noqa: PLC0415
+
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
 
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
-            mock_qs.create.side_effect = Exception("FOREIGN KEY constraint failed")
+            mock_qs.create.side_effect = IntegrityError("insert violates foreign key constraint")
             order_mock = MagicMock()
             order_mock.pk = 888
             params = RefundRecordParams(
@@ -1285,11 +1293,13 @@ class TestGetRefundedAmounts(TestCase):
         o = _make_order(c, cur, status="completed", total_cents=10000)
         assert RefundService._get_order_refunded_amount(o) == 0
 
-    def test_order_db_error_returns_zero(self):
+    def test_order_db_error_raises(self):
+        # #119: aggregation failure must raise rather than silently return 0 (over-refund risk)
         order = MagicMock(meta={})
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
             mock_qs.filter.return_value.aggregate.side_effect = TypeError("bad")
-            assert RefundService._get_order_refunded_amount(order) == 0
+            with self.assertRaises(RuntimeError, msg="Should raise to abort refund, not return 0"):
+                RefundService._get_order_refunded_amount(order)
 
     def test_invoice_none(self):
         assert RefundService._get_invoice_refunded_amount(None) == 0
@@ -1309,11 +1319,13 @@ class TestGetRefundedAmounts(TestCase):
         )
         assert RefundService._get_invoice_refunded_amount(inv) == 6000
 
-    def test_invoice_db_error_returns_zero(self):
+    def test_invoice_db_error_raises(self):
+        # #119: aggregation failure must raise rather than silently return 0 (over-refund risk)
         inv = MagicMock(meta={})
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
             mock_qs.filter.return_value.aggregate.side_effect = AttributeError("bad")
-            assert RefundService._get_invoice_refunded_amount(inv) == 0
+            with self.assertRaises(RuntimeError, msg="Should raise to abort refund, not return 0"):
+                RefundService._get_invoice_refunded_amount(inv)
 
 
 # ===========================================================================
