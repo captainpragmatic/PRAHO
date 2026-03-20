@@ -97,7 +97,7 @@ def mock_middleware_api_calls() -> Generator[None]:
         patch.object(
             _api_client,
             "validate_session_secure",
-            return_value={"active": True, "membership_hash": "test"},
+            return_value={"active": True, "membership_hash": "a1b2c3d4e5f60001"},
         ),
         patch.object(
             _api_client,

@@ -170,7 +170,7 @@ class PortalAuthenticationMiddleware:
             login_url = f"{login_url}?{params}"
         return redirect(login_url)
 
-    def validate_customer_with_timing(self, request: HttpRequest, customer_id: str) -> bool:
+    def validate_customer_with_timing(self, request: HttpRequest, user_id: str) -> bool:
         """
         Sophisticated validation with jitter, single-flight locks, and stale-while-revalidate.
 
@@ -193,29 +193,29 @@ class PortalAuthenticationMiddleware:
             request.session["session_created_at"] = (session_created_at or now).isoformat()
             next_validate_at = self._calculate_next_validation_time(now)
             request.session["next_validate_at"] = next_validate_at.isoformat()
-            return self._perform_validation(request, customer_id, now)
+            return self._perform_validation(request, user_id, now)
 
         # Check if we're within soft TTL (no validation needed)
         if now <= next_validate_at:
-            logger.debug(f"✅ [Auth] Customer {customer_id} within soft TTL, skipping validation")
+            logger.debug(f"✅ [Auth] User {user_id} within soft TTL, skipping validation")
             return True
 
         # Check if we're within soft grace period (stale-while-revalidate)
         soft_deadline = next_validate_at + timedelta(seconds=self.SOFT_TTL_GRACE)
         if now <= soft_deadline:
             # Try to revalidate in background, but allow request through
-            if self._should_revalidate_async(customer_id):
-                self._perform_validation(request, customer_id, now)
+            if self._should_revalidate_async(user_id):
+                self._perform_validation(request, user_id, now)
             return True
 
         # Check if we're within hard grace period (force validation)
         hard_deadline = next_validate_at + timedelta(seconds=self.HARD_TTL_GRACE)
         if now <= hard_deadline:
-            logger.info(f"⏰ [Auth] Customer {customer_id} past soft TTL, forcing validation")
-            return self._perform_validation(request, customer_id, now)
+            logger.info(f"⏰ [Auth] User {user_id} past soft TTL, forcing validation")
+            return self._perform_validation(request, user_id, now)
 
         # Past hard deadline - force logout for security
-        logger.warning(f"🚨 [Auth] Customer {customer_id} past hard TTL deadline, forcing logout")
+        logger.warning(f"🚨 [Auth] User {user_id} past hard TTL deadline, forcing logout")
         return False
 
     def _get_session_datetime(self, request: HttpRequest, key: str, default: datetime | None = None) -> datetime | None:
@@ -233,30 +233,30 @@ class PortalAuthenticationMiddleware:
         jitter_seconds = random.randint(0, self.JITTER_MAX)  # noqa: S311
         return now + timedelta(seconds=self.REVALIDATE_EVERY + jitter_seconds)
 
-    def _should_revalidate_async(self, customer_id: str) -> bool:
+    def _should_revalidate_async(self, user_id: str) -> bool:
         """
         Check if we should perform async revalidation using single-flight lock.
-        Prevents multiple concurrent validations for the same customer.
+        Prevents multiple concurrent validations for the same user.
         """
-        lock_key = f"validating:{customer_id}"
+        lock_key = f"validating:{user_id}"
         validating_until = cache.get(lock_key)
 
         if validating_until and time.time() < validating_until:
             # Another request is already validating, skip
-            logger.debug(f"🔄 [Auth] Customer {customer_id} validation already in progress, skipping")
+            logger.debug(f"🔄 [Auth] User {user_id} validation already in progress, skipping")
             return False
 
         # Acquire single-flight lock
         cache.set(lock_key, time.time() + self.VALIDATION_TIMEOUT, timeout=self.VALIDATION_TIMEOUT)
         return True
 
-    def _perform_validation(self, request: HttpRequest, customer_id: str, now: datetime) -> bool:
+    def _perform_validation(self, request: HttpRequest, user_id: str, now: datetime) -> bool:
         """
         Perform actual Platform API validation and update session metadata.
         """
         try:
             # Call secure Platform API validation (HMAC-signed, no ID enumeration)
-            validation_response = api_client.validate_session_secure(customer_id)
+            validation_response = api_client.validate_session_secure(user_id)
             is_valid = validation_response and validation_response.get("active", False)
 
             if is_valid:
@@ -279,29 +279,29 @@ class PortalAuthenticationMiddleware:
                         request.session.pop("user_memberships_fetched_at", None)
                         logger.info(
                             "🔄 [Auth] Membership hash changed for user %s, invalidated cached memberships",
-                            customer_id,
+                            user_id,
                         )
 
                 request.session.modified = True
 
-                logger.debug(f"✅ [Auth] Customer {customer_id} validated successfully")
+                logger.debug(f"✅ [Auth] User {user_id} validated successfully")
                 return True
             else:
-                logger.warning(f"❌ [Auth] Customer {customer_id} validation failed - account disabled/deleted")
+                logger.warning(f"❌ [Auth] User {user_id} validation failed - account disabled/deleted")
                 return False
 
         except PlatformAPIError as e:
             if e.is_rate_limited:
                 raise
-            logger.error(f"🔥 [Auth] Platform API error during validation for {customer_id}: {e}")
+            logger.error(f"🔥 [Auth] Platform API error during validation for {user_id}: {e}")
 
             # Fail-open strategy: Allow access during API outages but don't update metadata
             # This provides availability during platform maintenance windows
-            logger.info(f"🛡️ [Auth] Failing open for customer {customer_id} due to API unavailability")
+            logger.info(f"🛡️ [Auth] Failing open for user {user_id} due to API unavailability")
             return True
 
         except Exception as e:
-            logger.error(f"🔥 [Auth] Unexpected validation error for {customer_id}: {e}")
+            logger.error(f"🔥 [Auth] Unexpected validation error for {user_id}: {e}")
             # Fail CLOSED for unexpected errors — ADR-0017: programming bugs must not grant access
             return False
 

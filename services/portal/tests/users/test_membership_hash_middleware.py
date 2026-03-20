@@ -56,7 +56,7 @@ class MembershipHashMiddlewareTest(SimpleTestCase):
         """When membership_hash changes, user_memberships cache entries are cleared."""
         request = _make_authenticated_request(
             session_data={
-                "membership_hash": "oldhash00000000a",
+                "membership_hash": "aabbccdd11223344",
                 "user_memberships": [{"customer_id": 1, "role": "owner"}],
                 "user_memberships_fetched_at": "2026-03-20T10:00:00+00:00",
             }
@@ -65,20 +65,20 @@ class MembershipHashMiddlewareTest(SimpleTestCase):
 
         with patch(
             "apps.api_client.services.api_client.validate_session_secure",
-            return_value={"active": True, "membership_hash": "newhash00000000b"},
+            return_value={"active": True, "membership_hash": "bbccddee22334455"},
         ):
             middleware._perform_validation(request, "42", django_timezone.now())
 
         assert "user_memberships" not in request.session, "Cache should be cleared when hash changes"
         assert "user_memberships_fetched_at" not in request.session
-        assert request.session["membership_hash"] == "newhash00000000b"
+        assert request.session["membership_hash"] == "bbccddee22334455"
 
     def test_unchanged_hash_preserves_user_memberships_cache(self) -> None:
         """When membership_hash is the same, user_memberships cache is preserved."""
         memberships = [{"customer_id": 1, "role": "owner"}]
         request = _make_authenticated_request(
             session_data={
-                "membership_hash": "samehash0000000a",
+                "membership_hash": "ccddee1122334455",
                 "user_memberships": memberships,
                 "user_memberships_fetched_at": "2026-03-20T10:00:00+00:00",
             }
@@ -87,18 +87,18 @@ class MembershipHashMiddlewareTest(SimpleTestCase):
 
         with patch(
             "apps.api_client.services.api_client.validate_session_secure",
-            return_value={"active": True, "membership_hash": "samehash0000000a"},
+            return_value={"active": True, "membership_hash": "ccddee1122334455"},
         ):
             middleware._perform_validation(request, "42", django_timezone.now())
 
         assert request.session.get("user_memberships") == memberships, "Cache must be preserved when hash is unchanged"
-        assert request.session["membership_hash"] == "samehash0000000a"
+        assert request.session["membership_hash"] == "ccddee1122334455"
 
     def test_absent_hash_in_response_does_not_crash(self) -> None:
         """When Platform response has no membership_hash, middleware handles gracefully."""
         request = _make_authenticated_request(
             session_data={
-                "membership_hash": "existinghash000a",
+                "membership_hash": "ddeeff1122334455",
                 "user_memberships": [{"customer_id": 1, "role": "owner"}],
             }
         )
@@ -114,4 +114,4 @@ class MembershipHashMiddlewareTest(SimpleTestCase):
         # Cache must be untouched — no invalidation when hash is absent
         assert "user_memberships" in request.session
         # Old hash must remain unchanged
-        assert request.session.get("membership_hash") == "existinghash000a"
+        assert request.session.get("membership_hash") == "ddeeff1122334455"
