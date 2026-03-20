@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import math
+import secrets
 import time
 import traceback
 import urllib.parse
@@ -88,6 +89,21 @@ class RequestIDMiddleware:
 # ===============================================================================
 
 
+class CSPNonceMiddleware:
+    """Generate a per-request CSP nonce for inline scripts/styles.
+
+    Must be placed BEFORE SecurityHeadersMiddleware in MIDDLEWARE so the
+    nonce is available when CSP headers are constructed.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        request.csp_nonce = secrets.token_urlsafe(32)
+        return self.get_response(request)
+
+
 class SecurityHeadersMiddleware:
     """Add security headers for Romanian hosting compliance"""
 
@@ -97,18 +113,21 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
 
-        # Content Security Policy - Enhanced security with trusted CDN support
+        # Content Security Policy — nonce-based with unsafe-inline fallback
+        # for templates not yet migrated to nonce attributes.
         if not response.get("Content-Security-Policy"):
+            nonce = getattr(request, "csp_nonce", "")
+            nonce_directive = f"'nonce-{nonce}'" if nonce else ""
             csp = (
                 "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com; "
+                f"style-src 'self' 'unsafe-inline' {nonce_directive} fonts.googleapis.com cdn.tailwindcss.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' unpkg.com cdn.tailwindcss.com; "  # Allow trusted CDNs + Alpine.js
+                f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {nonce_directive} unpkg.com cdn.tailwindcss.com; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
-                "object-src 'none'; "  # Prevent Flash/Java execution
-                "base-uri 'self'; "  # Prevent base tag injection
-                "form-action 'self';"  # Restrict form submissions
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self';"
             )
             response["Content-Security-Policy"] = csp
 

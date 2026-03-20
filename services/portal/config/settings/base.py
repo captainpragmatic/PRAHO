@@ -58,6 +58,7 @@ MIDDLEWARE: list[str] = [
     "apps.common.middleware.SessionSecurityMiddleware",  # Session protection
     # Custom middleware last
     "apps.common.middleware.RequestIDMiddleware",
+    "apps.common.middleware.CSPNonceMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.users.middleware.PortalAuthenticationMiddleware",  # Portal validation
 ]
@@ -78,6 +79,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.template.context_processors.i18n",
                 "django.contrib.messages.context_processors.messages",  # Messages in templates
+                "apps.common.context_processors.csp_nonce",
                 "apps.common.context_processors.portal_context",
             ],
         },

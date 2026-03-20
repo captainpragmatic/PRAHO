@@ -922,7 +922,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911
+def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, C901
     """
     Confirm order after successful payment and trigger service provisioning.
     """
@@ -930,7 +930,8 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
         payment_intent_id = request.data.get("payment_intent_id")
         payment_status = request.data.get("payment_status")
 
-        # Use atomic transaction for order confirmation and service creation
+        # Phase 1: Acquire row lock, validate PI binding, persist to order, then RELEASE.
+        # Short transaction — lock is held only for DB operations, not for network calls.
         with transaction.atomic():
             # Get order with row-level lock to prevent double-confirmation.
             # of=("self",) locks only the Order row, not related tables.
@@ -977,11 +978,70 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Set payment_intent_id (and payment_method if promoted above) before
-            # status change so the audit trail includes them.
+            # Persist PI (and payment_method promotion) before releasing the lock
+            # so Phase 2 and Phase 3 can rely on order.payment_intent_id as source of truth.
             if payment_intent_id is not None:
                 order.payment_intent_id = payment_intent_id
                 order.save(update_fields=["payment_intent_id", "payment_method"])
+
+            # Bug 1 fix: read the PI to verify from the locked ORDER RECORD — not from
+            # the request payload. This closes a bypass where an attacker omits/nulls
+            # payment_intent_id in the request while the order already has one stored.
+            pi_to_verify = order.payment_intent_id
+            order_number_for_log = order.order_number
+        # Phase 1 transaction ends here — DB lock released before any network call.
+
+        # Phase 2: Stripe verification OUTSIDE the DB transaction.
+        # H11: Verify PI status directly with Stripe — prevents confirmation with a forged
+        # payment_status from the Portal (attacker can't skip payment by faking the field).
+        # Bug 2 fix (quorum 4/4): never hold select_for_update across a Stripe network call
+        # - doing so extends the lock over 200-2000ms round-trips and exhausts DB connections.
+        if pi_to_verify:
+            try:
+                from apps.billing.gateways.base import PaymentGatewayFactory  # noqa: PLC0415
+
+                stripe_gateway = PaymentGatewayFactory.create_gateway("stripe")
+                payment_result = stripe_gateway.confirm_payment(pi_to_verify)
+
+                if not payment_result["success"] or payment_result["status"] != "succeeded":
+                    logger.warning(
+                        "[API] Stripe PaymentIntent verification failed for order %s: success=%s, status=%s, error=%s",
+                        order_number_for_log,
+                        payment_result["success"],
+                        payment_result["status"],
+                        payment_result["error"],
+                    )
+                    return Response(
+                        {"success": False, "error": "Payment verification failed"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except (ValueError, ImportError) as e:
+                # Stripe gateway not configured or not installed — fail-closed
+                logger.error(
+                    "[API] Stripe gateway unavailable for order %s: %s",
+                    order_number_for_log,
+                    e,
+                )
+                return Response(
+                    {"success": False, "error": "Payment gateway not configured"},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+        # Phase 3: Re-acquire lock, re-check idempotency, confirm status.
+        # A concurrent request may have confirmed the order between phases 1 and 3;
+        # the re-check ensures we never double-confirm.
+        with transaction.atomic():
+            order = (
+                Order.objects.select_for_update(of=("self",))
+                .prefetch_related("items")
+                .get(id=order_id, customer_id=customer.id)
+            )
+
+            if order.status not in ["pending"]:
+                return Response(
+                    {"success": False, "error": "Order already processed"},
+                    status=status.HTTP_409_CONFLICT,
+                )
 
             # Use OrderService.update_order_status() for proper state machine validation
             # and OrderStatusHistory creation (audit trail for this legally-significant transition).
@@ -991,7 +1051,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
             status_change = StatusChangeData(
                 new_status="confirmed",
-                notes=f"Payment confirmed (PI: {payment_intent_id or 'N/A'}, status: {payment_status})",
+                notes=f"Payment confirmed (PI: {pi_to_verify or 'N/A'}, status: {payment_status})",
                 changed_by=audit_user,
             )
             status_result = OrderService.update_order_status(order, status_change)

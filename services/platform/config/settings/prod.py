@@ -123,11 +123,14 @@ if not PORTAL_DOMAIN or not PLATFORM_DOMAIN:
         f"These are used for absolute URL construction in emails and links."
     )
 
-# Ensure SecurityMiddleware is FIRST in middleware stack
+# Middleware order: RequestID first (IDs all responses), CORS before Security (preflight handling),
+# CSPNonce before SecurityHeaders (nonce generated before CSP header is built).
 MIDDLEWARE = [
     "apps.common.middleware.RequestIDMiddleware",  # Request ID first for all responses
+    "corsheaders.middleware.CorsMiddleware",  # CORS preflight must run before SecurityMiddleware
     "django.middleware.security.SecurityMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
+    "apps.common.middleware.CSPNonceMiddleware",
+    "apps.common.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -136,7 +139,6 @@ MIDDLEWARE = [
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
     "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.common.middleware.AuditMiddleware",
     "apps.common.middleware.SessionSecurityMiddleware",
     "apps.common.middleware.GDPRComplianceMiddleware",

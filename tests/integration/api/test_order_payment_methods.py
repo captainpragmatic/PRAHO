@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
 from apps.api.orders.views import confirm_order
+from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -78,7 +80,12 @@ class OrderPaymentMethodIntegrationTests(TestCase):
         order = self._make_order(payment_method="card", payment_intent_id="pi_match1234567890")
         request = self._confirm_request(payment_intent_id="pi_match1234567890")
 
-        response = confirm_order(request, str(order.id))
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None)
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway), \
+             patch("apps.api.orders.views._provision_confirmed_order_item"):
+            response = confirm_order(request, str(order.id))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["success"])
