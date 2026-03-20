@@ -212,6 +212,47 @@ class StripePaymentVerificationTest(TestCase):
         self.assertTrue(response.data["success"])
         mock_factory.assert_not_called()
 
+    def test_confirm_returns_409_when_order_confirmed_between_phases(self) -> None:
+        """Phase 3 concurrency guard: if order is confirmed between Phase 1 and Phase 3, return 409.
+
+        Simulates a concurrent request confirming the order after Phase 1 releases the lock
+        but before Phase 3 re-acquires it. The re-check in Phase 3 must detect the status
+        change and return 409 instead of double-confirming.
+        """
+        order = _make_pending_order(
+            self.customer,
+            self.currency,
+            payment_method="card",
+            payment_intent_id="pi_concurrencyRaceTest1",
+        )
+        request = self._make_request({
+            "payment_intent_id": "pi_concurrencyRaceTest1",
+            "payment_status": "succeeded",
+        })
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True, status="succeeded", error=None,
+        )
+
+        def confirm_order_between_phases(*args: object, **kwargs: object) -> PaymentConfirmResult:
+            """Side effect: simulate concurrent confirmation during Phase 2 Stripe call."""
+            # While Phase 2 is calling Stripe, another request confirms the order
+            Order.objects.filter(id=order.id).update(status="confirmed")
+            return PaymentConfirmResult(success=True, status="succeeded", error=None)
+
+        mock_gateway.confirm_payment.side_effect = confirm_order_between_phases
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        # Phase 3 re-checks status and finds it's no longer "pending"
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("already processed", response.data["error"])
+
     def test_confirm_verifies_stored_pi_when_request_omits_it(self) -> None:
         """Bug 1 regression: Stripe verification uses order.payment_intent_id, not request payload.
 
@@ -308,8 +349,8 @@ class CSPNonceMiddlewareTest(SimpleTestCase):
         self.assertIsInstance(request.csp_nonce, str)
         self.assertGreater(len(request.csp_nonce), 20)
 
-    def test_security_headers_include_nonce_in_csp(self) -> None:
-        """SecurityHeadersMiddleware includes nonce directive in CSP header."""
+    def test_security_headers_do_not_inject_nonce_yet(self) -> None:
+        """SecurityHeadersMiddleware does NOT inject nonce into CSP until template migration (#104 [M7])."""
         factory = RequestFactory()
         request = factory.get("/")
         request.csp_nonce = "test-nonce-value-12345"
@@ -321,7 +362,8 @@ class CSPNonceMiddlewareTest(SimpleTestCase):
         response = middleware(request)
 
         csp = response.get("Content-Security-Policy", "")
-        self.assertIn("'nonce-test-nonce-value-12345'", csp)
+        self.assertNotIn("nonce-", csp)
+        self.assertIn("default-src 'self'", csp)
 
     def test_security_headers_work_without_nonce(self) -> None:
         """SecurityHeadersMiddleware works if CSPNonceMiddleware is not active."""

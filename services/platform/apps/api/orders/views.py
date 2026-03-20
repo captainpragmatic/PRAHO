@@ -928,7 +928,6 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
     """
     try:
         payment_intent_id = request.data.get("payment_intent_id")
-        payment_status = request.data.get("payment_status")
 
         # Phase 1: Acquire row lock, validate PI binding, persist to order, then RELEASE.
         # Short transaction — lock is held only for DB operations, not for network calls.
@@ -994,8 +993,9 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
         # Phase 2: Stripe verification OUTSIDE the DB transaction.
         # H11: Verify PI status directly with Stripe — prevents confirmation with a forged
         # payment_status from the Portal (attacker can't skip payment by faking the field).
-        # Bug 2 fix (quorum 4/4): never hold select_for_update across a Stripe network call
-        # - doing so extends the lock over 200-2000ms round-trips and exhausts DB connections.
+        # Bug 2 fix (#104): never hold select_for_update across a Stripe network call
+        # — doing so extends the lock over 200-2000ms round-trips and exhausts DB connections.
+        verified_stripe_status = "no_pi"  # Default for bank transfer / non-card orders
         if pi_to_verify:
             try:
                 from apps.billing.gateways.base import PaymentGatewayFactory  # noqa: PLC0415
@@ -1003,18 +1003,20 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 stripe_gateway = PaymentGatewayFactory.create_gateway("stripe")
                 payment_result = stripe_gateway.confirm_payment(pi_to_verify)
 
-                if not payment_result["success"] or payment_result["status"] != "succeeded":
+                if not payment_result.get("success") or payment_result.get("status") != "succeeded":
                     logger.warning(
                         "[API] Stripe PaymentIntent verification failed for order %s: success=%s, status=%s, error=%s",
                         order_number_for_log,
-                        payment_result["success"],
-                        payment_result["status"],
-                        payment_result["error"],
+                        payment_result.get("success"),
+                        payment_result.get("status"),
+                        payment_result.get("error"),
                     )
                     return Response(
                         {"success": False, "error": "Payment verification failed"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
+                # Capture verified status for the audit trail (not the client-supplied value)
+                verified_stripe_status = payment_result.get("status", "unknown")
             except (ValueError, ImportError) as e:
                 # Stripe gateway not configured or not installed — fail-closed
                 logger.error(
@@ -1025,6 +1027,17 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 return Response(
                     {"success": False, "error": "Payment gateway not configured"},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            except Exception:
+                # Unexpected gateway error (network, malformed response, etc.) — fail-closed
+                logger.exception(
+                    "[API] Unexpected Stripe verification error for order %s (PI: %s)",
+                    order_number_for_log,
+                    pi_to_verify,
+                )
+                return Response(
+                    {"success": False, "error": "Payment verification failed unexpectedly. Please retry."},
+                    status=status.HTTP_502_BAD_GATEWAY,
                 )
 
         # Phase 3: Re-acquire lock, re-check idempotency, confirm status.
@@ -1051,7 +1064,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
             status_change = StatusChangeData(
                 new_status="confirmed",
-                notes=f"Payment confirmed (PI: {pi_to_verify or 'N/A'}, status: {payment_status})",
+                notes=f"Payment confirmed (PI: {pi_to_verify or 'N/A'}, verified_status: {verified_stripe_status})",
                 changed_by=audit_user,
             )
             status_result = OrderService.update_order_status(order, status_change)

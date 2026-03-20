@@ -286,13 +286,14 @@ class SecurityHeadersMiddleware:
         if request.is_secure():
             response["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Content Security Policy — nonce-based with unsafe-inline fallback
-        nonce = getattr(request, "csp_nonce", "")
-        nonce_directive = f"'nonce-{nonce}'" if nonce else ""
+        # Content Security Policy — unsafe-inline until templates are migrated
+        # to nonce attributes (see #104 [M7]). CSPNonceMiddleware + context
+        # processor are deployed; nonce injection into CSP deferred until all
+        # inline <script>/<style> tags carry nonce="{{ csp_nonce }}".
         csp_parts = [
             "default-src 'self'",
-            f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {nonce_directive} https://js.stripe.com",
-            f"style-src 'self' 'unsafe-inline' {nonce_directive}",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
+            "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: https:",
             "font-src 'self'",
             "connect-src 'self' https://api.stripe.com",

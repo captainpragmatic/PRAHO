@@ -113,16 +113,16 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
 
-        # Content Security Policy — nonce-based with unsafe-inline fallback
-        # for templates not yet migrated to nonce attributes.
+        # Content Security Policy — unsafe-inline until templates are migrated
+        # to nonce attributes (see #104 [M7]). CSPNonceMiddleware + context
+        # processor are deployed; nonce injection into CSP deferred until all
+        # inline <script>/<style> tags carry nonce="{{ csp_nonce }}".
         if not response.get("Content-Security-Policy"):
-            nonce = getattr(request, "csp_nonce", "")
-            nonce_directive = f"'nonce-{nonce}'" if nonce else ""
             csp = (
                 "default-src 'self'; "
-                f"style-src 'self' 'unsafe-inline' {nonce_directive} fonts.googleapis.com cdn.tailwindcss.com; "
+                "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {nonce_directive} unpkg.com cdn.tailwindcss.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' unpkg.com cdn.tailwindcss.com; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "
