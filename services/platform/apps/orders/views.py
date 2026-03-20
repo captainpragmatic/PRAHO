@@ -287,13 +287,17 @@ def order_list(request: HttpRequest) -> HttpResponse:
     orders = paginator.get_page(page_number)
 
     # Get status counts for filter badges
+    base_qs = Order.objects.filter(customer_id__in=customer_ids)
     status_counts = {
-        "total": Order.objects.filter(customer_id__in=customer_ids).count(),
-        "draft": Order.objects.filter(customer_id__in=customer_ids, status="draft").count(),
-        "pending": Order.objects.filter(customer_id__in=customer_ids, status="pending").count(),
-        "confirmed": Order.objects.filter(customer_id__in=customer_ids, status="confirmed").count(),
-        "processing": Order.objects.filter(customer_id__in=customer_ids, status="processing").count(),
-        "completed": Order.objects.filter(customer_id__in=customer_ids, status="completed").count(),
+        "total": base_qs.count(),
+        "draft": base_qs.filter(status="draft").count(),
+        "pending": base_qs.filter(status="pending").count(),
+        "confirmed": base_qs.filter(status="confirmed").count(),
+        "processing": base_qs.filter(status="processing").count(),
+        "completed": base_qs.filter(status="completed").count(),
+        "failed": base_qs.filter(status="failed").count(),
+        "cancelled": base_qs.filter(status="cancelled").count(),
+        "refunded": base_qs.filter(status="refunded").count(),
     }
 
     context = {
