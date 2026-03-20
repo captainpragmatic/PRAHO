@@ -4,7 +4,7 @@ This folder contains all Architecture Decision Records (ADRs) for the PRAHO plat
 ADRs document significant architectural decisions, their context, and consequences,
 providing a historical record of why the system is built the way it is.
 
-> **Platform**: PRAHO v0.25.0 · **Stack**: Django 5.2 · Python 3.13 · PostgreSQL · HTMX
+> **Platform**: PRAHO v0.26.0 · **Stack**: Django 5.2 · Python 3.13 · PostgreSQL · HTMX
 > **Architecture**: Two-service split (Platform :8700 + Portal :8701)
 > See also: [Architecture docs](../architecture/) for diagrams and deep-dives.
 
@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0034**)
+2. Use the next available number (currently: **ADR-0038**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -62,6 +62,10 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0030](ADR-0030-rate-limiting-architecture.md) | Rate Limiting Architecture and Single Source of Truth | Accepted | 2026-03-05 |
 | [ADR-0031](ADR-0031-api-token-authentication-strategy.md) | API Token Authentication Strategy | Accepted | 2026-03-06 |
 | [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) | Encryption Architecture Consolidation (4→2 Systems) | Accepted | 2026-03-06 |
+| [ADR-0034](ADR-0034-django-fsm2-state-machines.md) | Adopt django-fsm-2 for State Machines | Active | 2026-03-10 |
+| [ADR-0035](ADR-0035-unified-design-system.md) | Unified Design System Architecture | Active | 2026-03-17 |
+| [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) | Tiered CI Testing Strategy | Active | 2026-03-20 |
+| [ADR-0037](ADR-0037-psycopg-v3-migration.md) | psycopg v3 Migration | Active | 2026-03-20 |
 
 ### 🟡 Partially Superseded
 
@@ -124,6 +128,7 @@ Token & Inter-Service Auth
 - [ADR-0002](ADR-0002-strategic-linting-framework.md) — Ruff linting strategy
 - [ADR-0014](ADR-0014-no-test-suppression-policy.md) — No skipping/suppressing tests
 - [ADR-0028](ADR-0028-server-log-checking-e2e.md) — Backend log verification during E2E
+- [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) — Tiered CI: SQLite for PRs, PostgreSQL for nightly
 
 ### 🔒 Security & Authentication
 - [ADR-0004](ADR-0004-custom-2fa-implementation.md) — Custom TOTP 2FA
@@ -143,12 +148,15 @@ Token & Inter-Service Auth
 - [ADR-0015](ADR-0015-configuration-resolution-order.md) — Configuration resolution
 - [ADR-0016](ADR-0016-audit-trail-enforcement.md) — Audit trail enforcement
 - [ADR-0026](ADR-0026-portal-frontend-architecture.md) — HTMX and component architecture for Portal
+- [ADR-0034](ADR-0034-django-fsm2-state-machines.md) — django-fsm-2 state machines for status-driven models
+- [ADR-0035](ADR-0035-unified-design-system.md) — Unified shared component design system
 
 ### 🔧 Type Safety & Tooling
 - [ADR-0003](ADR-0003-comprehensive-type-safety-implementation.md) — Type safety (partially superseded)
 - [ADR-0009](ADR-0009-pragmatic-mypy-strategy.md) — Pragmatic MyPy config
 - [ADR-0010](ADR-0010-django-admin-type-annotations.md) — Admin type annotations
 - [ADR-0013](ADR-0013-uv-package-manager-migration.md) — uv package manager
+- [ADR-0037](ADR-0037-psycopg-v3-migration.md) — psycopg v3 PostgreSQL adapter
 
 ### 💰 Business & Domain
 - [ADR-0019](ADR-0019-virtualmin-automatic-provisioning.md) — VirtualMin provisioning
@@ -161,8 +169,8 @@ Token & Inter-Service Auth
 
 ## Statistics
 
-- **Total ADRs**: 33 (ADR-0001 through ADR-0033)
-- **Active**: 27 (Accepted + Implemented)
+- **Total ADRs**: 37 (ADR-0001 through ADR-0037)
+- **Active**: 31 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0034
+- **Next available**: ADR-0038

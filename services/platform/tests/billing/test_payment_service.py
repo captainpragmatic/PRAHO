@@ -345,6 +345,51 @@ class ConfirmPaymentTests(TestCase):
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.status, "pending")  # unchanged
 
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_terminal_state_idempotency_guard(self, mock_create_gw: MagicMock) -> None:
+        """C2 regression: confirm_payment must handle terminal state idempotently."""
+        from tests.helpers.fsm_helpers import force_status  # noqa: PLC0415
+
+        # Put payment in terminal state "succeeded" — FSM cannot transition succeeded→succeeded
+        force_status(self.payment, "succeeded")
+
+        # Gateway still reports success (Stripe idempotency can replay old events)
+        mock_create_gw.return_value = _make_mock_gateway(
+            confirm_result=_confirm_result(success=True, status="succeeded")
+        )
+
+        PaymentService.confirm_payment("pi_confirm_test")
+
+        # Should be short-circuited by idempotency guard (already terminal)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "succeeded")
+
+    @patch("apps.billing.payment_service.log_security_event")
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_fsm_transition_blocked_returns_failure(self, mock_create_gw: MagicMock, mock_log: MagicMock) -> None:
+        """C2 regression: when FSM blocks a transition (e.g. race condition), result must be success=False."""
+        from django_fsm import TransitionNotAllowed  # noqa: PLC0415
+
+        # Payment stays in "pending" (non-terminal). Gateway says "succeeded".
+        mock_create_gw.return_value = _make_mock_gateway(
+            confirm_result=_confirm_result(success=True, status="succeeded")
+        )
+
+        # Simulate a race condition: another process already transitioned this payment,
+        # so the FSM method raises TransitionNotAllowed.
+        with patch.object(
+            type(self.payment), "succeed", side_effect=TransitionNotAllowed("blocked")
+        ):
+            result = PaymentService.confirm_payment("pi_confirm_test")
+
+        # Must surface the FSM conflict as a failure
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "fsm_conflict")
+        self.assertIn("transition", result.get("error", "").lower())
+        # Payment must remain in "pending" state (transition was blocked)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "pending")
+
 
 # ---------------------------------------------------------------------------
 # create_subscription

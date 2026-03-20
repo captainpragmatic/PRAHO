@@ -408,6 +408,12 @@ class PaymentService:
                                         payment.id,
                                         payment.status,
                                     )
+                                    return PaymentConfirmResult(
+                                        success=False,
+                                        status="fsm_conflict",
+                                        error=f"Payment {payment.id} cannot transition from "
+                                        f"'{old_status}' to '{new_status}' — FSM transition blocked",
+                                    )
 
                 except Payment.DoesNotExist:
                     logger.warning(f"⚠️ Payment not found for intent {payment_intent_id}")

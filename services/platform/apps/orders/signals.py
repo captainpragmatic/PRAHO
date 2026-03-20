@@ -10,6 +10,7 @@ from typing import Any
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
+from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService, BusinessEventData, OrdersAuditService
 from apps.common.validators import log_security_event
@@ -260,10 +261,26 @@ def _trigger_service_provisioning(order: Order) -> None:
 def _handle_order_cancellation(order: Order, old_status: str) -> None:
     """Handle order cancellation cleanup"""
     try:
-        # Cancel any pending provisioning — bulk cancel is intentional for order cancellation
-        order.items.filter(
-            provisioning_status="pending",
-        ).update(provisioning_status="cancelled")  # fsm-bypass: bulk cancel on order cancellation
+        # Cancel items individually via FSM transitions (not bulk update) so that
+        # FSMField guards are respected and both pending + in_progress items are handled.
+        with transaction.atomic():
+            cancellable_items = order.items.select_for_update().filter(
+                provisioning_status__in=["pending", "in_progress"],
+            )
+            for item in cancellable_items:
+                try:
+                    item.cancel_provisioning()
+                    item.save(update_fields=["provisioning_status"])
+                    logger.info(
+                        "✅ [Order] Cancelled provisioning for item %s",
+                        item.id,
+                    )
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Order] Cannot cancel provisioning for item %s (status: %s)",
+                        item.id,
+                        item.provisioning_status,
+                    )
 
         # Send cancellation email
         _send_order_cancelled_email(order)

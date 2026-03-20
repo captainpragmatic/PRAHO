@@ -6,7 +6,7 @@
 
 ## Context
 
-PRAHO has two Django services (Platform and Portal) that independently maintained 17 overlapping UI components. Over time, the copies drifted: Portal adopted `{% icon %}` tags, Alpine.js, external JS modules, and better accessibility. Platform's copies retained hardcoded SVGs, inline scripts, and a red primary button bug.
+PRAHO has two Django services (Platform and Portal) that independently maintained overlapping UI components. Over time, the copies drifted: Portal adopted `{% icon %}` tags, Alpine.js, external JS modules, and better accessibility. Platform's copies retained hardcoded SVGs, inline scripts, and a red primary button bug.
 
 Manual mirroring (per design system governance doc §9.2) failed silently — 14 of 16 shared components had diverged.
 
@@ -19,7 +19,7 @@ Extract shared UI components into `shared/ui/` at the project root. Portal's com
 ```
 shared/
 ├── ui/
-│   ├── templates/components/   # 15 shared component templates (canonical)
+│   ├── templates/components/   # 25 shared component templates (canonical)
 │   └── static/js/components/   # Shared JS modules (modal.js, toast.js)
 ├── tailwind.preset.js          # Shared Tailwind configuration
 
@@ -29,7 +29,7 @@ services/platform/
 └── tailwind.config.js          # Extends shared preset + platform-specific tokens
 
 services/portal/
-├── templates/components/       # Portal-only: 14 customer-specific components
+├── templates/components/       # Portal-only: 4 customer-specific components
 ├── apps/ui/templatetags/       # Portal's templatetag Python (unchanged)
 └── tailwind.config.js          # Extends shared preset + portal-specific tokens
 ```
@@ -82,11 +82,11 @@ Both service configs include `./shared/ui/templates/**/*.html` in content paths 
 
 ## Components
 
-### Shared (15)
-alert, badge, breadcrumb, button, card, checkbox, dangerous_action_modal, input, mobile_nav_item, modal, nav_dropdown, pagination, step_progress, table, toast
+### Shared (25)
+alert, badge, breadcrumb, button, card, checkbox, dangerous_action_modal, empty_state, filter_select, form_actions, form_error_summary, input, list_page_filters, list_page_header, list_page_skeleton, mobile_nav_item, modal, nav_dropdown, page_header, pagination, section_card, stat_tile, step_progress, table, toast
 
-### Portal-Only (14)
-account_status_banner, cookie_consent_banner, customer_selector, empty_state, form_actions, form_error_summary, list_page_filters, list_page_header, list_page_skeleton, mobile_header, page_header, rate_limit_inline_alert, section_card, stat_tile
+### Portal-Only (4)
+account_status_banner, cookie_consent_banner, customer_selector, rate_limit_inline_alert
 
 ### Platform-Only (2)
 mobile_header, table_enhanced

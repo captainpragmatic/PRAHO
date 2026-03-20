@@ -850,14 +850,32 @@ class RefundService:
             "refund_record_created": True,
         }
 
-        # Process order updates - SIMPLIFIED to avoid transaction issues
+        # Process order updates
         if order:
-            result["order_status_updated"] = True
+            order_result = RefundService._update_order_refund_status(order, refund_data=refund_data)
+            if order_result.is_ok():
+                result["order_status_updated"] = True
+            else:
+                logger.warning(
+                    "⚠️ [Refund] Order status update failed for order %s: %s",
+                    order.id,
+                    order_result.unwrap_err() if order_result.is_err() else "unknown",
+                )
+                result["order_status_updated"] = False
             result["order_id"] = order.id
 
-        # Process invoice updates - SIMPLIFIED to avoid transaction issues
+        # Process invoice updates
         if invoice:
-            result["invoice_status_updated"] = True
+            invoice_result = RefundService._update_invoice_refund_status(invoice, refund_data=refund_data)
+            if invoice_result.is_ok():
+                result["invoice_status_updated"] = True
+            else:
+                logger.warning(
+                    "⚠️ [Refund] Invoice status update failed for invoice %s: %s",
+                    invoice.id,
+                    invoice_result.unwrap_err() if invoice_result.is_err() else "unknown",
+                )
+                result["invoice_status_updated"] = False
             result["invoice_id"] = invoice.id
 
         return Ok(result)

@@ -21,6 +21,7 @@ from uuid import UUID
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -1140,11 +1141,14 @@ def _handle_payment_success(payment: Payment) -> None:
                     payment.invoice.save(update_fields=["status", "paid_at"])
 
                     # 🚀 CROSS-APP INTEGRATION: Trigger Virtualmin provisioning on invoice payment
-                    _trigger_virtualmin_provisioning_on_payment(payment.invoice)
+                    # Deferred to post-commit — provisioning must not fire if transaction rolls back
+                    transaction.on_commit(lambda inv=payment.invoice: _trigger_virtualmin_provisioning_on_payment(inv))
 
-        _send_payment_success_email(payment)
-        _update_customer_payment_history(payment.customer, "positive")
-        _cancel_payment_retries(payment)
+        # All external side-effects deferred to post-commit to prevent ghost
+        # emails/analytics if the enclosing transaction rolls back.
+        transaction.on_commit(lambda p=payment: _send_payment_success_email(p))
+        transaction.on_commit(lambda p=payment: _update_customer_payment_history(p.customer, "positive"))
+        transaction.on_commit(lambda p=payment: _cancel_payment_retries(p))
 
         logger.info(f"✅ [Payment] Success: {payment.amount} {payment.currency.code}")
 
@@ -1155,9 +1159,10 @@ def _handle_payment_success(payment: Payment) -> None:
 def _handle_payment_failure(payment: Payment) -> None:
     """Handle failed payment"""
     try:
-        _send_payment_failed_email(payment)
-        _schedule_payment_retry(payment)
-        _update_customer_payment_history(payment.customer, "negative")
+        # All external side-effects deferred to post-commit
+        transaction.on_commit(lambda p=payment: _send_payment_failed_email(p))
+        transaction.on_commit(lambda p=payment: _schedule_payment_retry(p))
+        transaction.on_commit(lambda p=payment: _update_customer_payment_history(p.customer, "negative"))
 
         logger.warning(f"⚠️ [Payment] Failed: {payment.amount} {payment.currency.code}")
 
@@ -1182,7 +1187,8 @@ def _handle_payment_refund(payment: Payment) -> None:
                 else:
                     payment.invoice.save(update_fields=["status"])
 
-        _send_payment_refund_email(payment)
+        # Email deferred to post-commit
+        transaction.on_commit(lambda p=payment: _send_payment_refund_email(p))
 
         logger.info(f"↩️ [Payment] Refunded: {payment.amount} {payment.currency.code}")
 

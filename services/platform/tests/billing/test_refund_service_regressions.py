@@ -1079,7 +1079,8 @@ class TestCreateRefundRecord(TestCase):
 # _process_entity_updates
 # ===========================================================================
 class TestProcessEntityUpdates(TestCase):
-    def test_with_order(self):
+    @patch.object(RefundService, "_update_order_refund_status", return_value=Ok(None))
+    def test_with_order(self, mock_update: MagicMock) -> None:
         order = MagicMock(id=1)
         r = RefundService._process_entity_updates(order, None, "ref-1", None)
         assert r.is_ok()
@@ -1087,16 +1088,21 @@ class TestProcessEntityUpdates(TestCase):
         assert data["order_status_updated"] is True
         assert data["order_id"] == 1
         assert data["invoice_id"] is None
+        mock_update.assert_called_once_with(order, refund_data=None)
 
-    def test_with_invoice(self):
+    @patch.object(RefundService, "_update_invoice_refund_status", return_value=Ok(None))
+    def test_with_invoice(self, mock_update: MagicMock) -> None:
         inv = MagicMock(id=2)
         r = RefundService._process_entity_updates(None, inv, "ref-2", None)
         assert r.is_ok()
         data = r.unwrap()
         assert data["invoice_status_updated"] is True
         assert data["invoice_id"] == 2
+        mock_update.assert_called_once_with(inv, refund_data=None)
 
-    def test_with_both(self):
+    @patch.object(RefundService, "_update_invoice_refund_status", return_value=Ok(None))
+    @patch.object(RefundService, "_update_order_refund_status", return_value=Ok(None))
+    def test_with_both(self, mock_order: MagicMock, mock_inv: MagicMock) -> None:
         order = MagicMock(id=1)
         inv = MagicMock(id=2)
         r = RefundService._process_entity_updates(order, inv, "ref-3", None)
@@ -1105,12 +1111,32 @@ class TestProcessEntityUpdates(TestCase):
         assert data["order_status_updated"] is True
         assert data["invoice_status_updated"] is True
 
-    def test_with_neither(self):
+    def test_with_neither(self) -> None:
         r = RefundService._process_entity_updates(None, None, "ref-4", None)
         assert r.is_ok()
         data = r.unwrap()
         assert data["order_status_updated"] is False
         assert data["invoice_status_updated"] is False
+
+    @patch.object(RefundService, "_update_order_refund_status", return_value=Err("FSM blocked"))
+    def test_order_update_failure_returns_ok_with_false(self, mock_update: MagicMock) -> None:
+        """C3 regression: when order update fails, result still Ok but order_status_updated=False."""
+        order = MagicMock(id=1)
+        r = RefundService._process_entity_updates(order, None, "ref-5", None)
+        assert r.is_ok()
+        data = r.unwrap()
+        assert data["order_status_updated"] is False
+        assert data["order_id"] == 1
+
+    @patch.object(RefundService, "_update_invoice_refund_status", return_value=Err("FSM blocked"))
+    def test_invoice_update_failure_returns_ok_with_false(self, mock_update: MagicMock) -> None:
+        """C3 regression: when invoice update fails, result still Ok but invoice_status_updated=False."""
+        inv = MagicMock(id=2)
+        r = RefundService._process_entity_updates(None, inv, "ref-6", None)
+        assert r.is_ok()
+        data = r.unwrap()
+        assert data["invoice_status_updated"] is False
+        assert data["invoice_id"] == 2
 
 
 # ===========================================================================

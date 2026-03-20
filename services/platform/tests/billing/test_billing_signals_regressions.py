@@ -9,6 +9,7 @@ from decimal import Decimal
 from enum import Enum
 from unittest.mock import MagicMock, patch
 
+from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -1349,7 +1350,8 @@ class TestHandlePaymentSuccess(TestCase):
     def test_invoice_fully_paid(self, mock_vm, mock_email, mock_history, mock_cancel):
         payment = MagicMock()
         payment.invoice.get_remaining_amount.return_value = 0
-        _handle_payment_success(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_success(payment)
         mock_email.assert_called_once()
         mock_history.assert_called_once()
         mock_cancel.assert_called_once()
@@ -1362,7 +1364,8 @@ class TestHandlePaymentSuccess(TestCase):
     def test_partial_payment(self, mock_email, mock_history, mock_cancel):
         payment = MagicMock()
         payment.invoice.get_remaining_amount.return_value = 5000
-        _handle_payment_success(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_success(payment)
         payment.invoice.save.assert_not_called()
 
     @patch("apps.billing.signals._cancel_payment_retries")
@@ -1371,7 +1374,8 @@ class TestHandlePaymentSuccess(TestCase):
     def test_no_invoice(self, mock_email, mock_history, mock_cancel):
         payment = MagicMock()
         payment.invoice = None
-        _handle_payment_success(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_success(payment)
         mock_email.assert_called_once()
 
 
@@ -1381,7 +1385,8 @@ class TestHandlePaymentFailure(TestCase):
     @patch("apps.billing.signals._send_payment_failed_email")
     def test_flow(self, mock_email, mock_retry, mock_history):
         payment = MagicMock()
-        _handle_payment_failure(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_failure(payment)
         mock_email.assert_called_once()
         mock_retry.assert_called_once()
         mock_history.assert_called_once_with(payment.customer, "negative")
@@ -1395,7 +1400,8 @@ class TestHandlePaymentRefund(TestCase):
         refunded_payment = MagicMock()
         refunded_payment.amount_cents = 1000
         payment.invoice.payments.filter.return_value = [refunded_payment]
-        _handle_payment_refund(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_refund(payment)
         payment.invoice.save.assert_called_once()
         payment.invoice.refund_invoice.assert_called_once()
 
@@ -1406,14 +1412,16 @@ class TestHandlePaymentRefund(TestCase):
         refunded_payment = MagicMock()
         refunded_payment.amount_cents = 500
         payment.invoice.payments.filter.return_value = [refunded_payment]
-        _handle_payment_refund(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_refund(payment)
         payment.invoice.save.assert_not_called()
 
     @patch("apps.billing.signals._send_payment_refund_email")
     def test_no_invoice(self, mock_email):
         payment = MagicMock()
         payment.invoice = None
-        _handle_payment_refund(payment)
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_refund(payment)
         mock_email.assert_called_once()
 
 
@@ -2001,6 +2009,62 @@ class TestTriggerVirtualminProvisioningOnPayment(TestCase):
 # ===============================================================================
 # CONSTANTS TEST
 # ===============================================================================
+
+
+class TestPaymentHandlersOnCommitDeferred(TestCase):
+    """C1 regression: payment signal side-effects must be deferred via transaction.on_commit."""
+
+    @patch("apps.billing.signals._cancel_payment_retries")
+    @patch("apps.billing.signals._update_customer_payment_history")
+    @patch("apps.billing.signals._send_payment_success_email")
+    def test_success_side_effects_not_called_on_rollback(
+        self, mock_email: MagicMock, mock_history: MagicMock, mock_cancel: MagicMock
+    ) -> None:
+        """Side-effects must not fire if the enclosing transaction rolls back."""
+        payment = MagicMock()
+        payment.invoice = None
+        payment.amount = "100.00"
+        payment.currency.code = "RON"
+
+        with self.assertRaises(RuntimeError), transaction.atomic():
+                _handle_payment_success(payment)
+                raise RuntimeError("Force rollback")
+
+        # on_commit callbacks should NOT have fired
+        mock_email.assert_not_called()
+        mock_history.assert_not_called()
+        mock_cancel.assert_not_called()
+
+    @patch("apps.billing.signals._update_customer_payment_history")
+    @patch("apps.billing.signals._schedule_payment_retry")
+    @patch("apps.billing.signals._send_payment_failed_email")
+    def test_failure_side_effects_not_called_on_rollback(
+        self, mock_email: MagicMock, mock_retry: MagicMock, mock_history: MagicMock
+    ) -> None:
+        payment = MagicMock()
+        payment.amount = "100.00"
+        payment.currency.code = "RON"
+
+        with self.assertRaises(RuntimeError), transaction.atomic():
+                _handle_payment_failure(payment)
+                raise RuntimeError("Force rollback")
+
+        mock_email.assert_not_called()
+        mock_retry.assert_not_called()
+        mock_history.assert_not_called()
+
+    @patch("apps.billing.signals._send_payment_refund_email")
+    def test_refund_email_not_called_on_rollback(self, mock_email: MagicMock) -> None:
+        payment = MagicMock()
+        payment.invoice = None
+        payment.amount = "100.00"
+        payment.currency.code = "RON"
+
+        with self.assertRaises(RuntimeError), transaction.atomic():
+                _handle_payment_refund(payment)
+                raise RuntimeError("Force rollback")
+
+        mock_email.assert_not_called()
 
 
 class TestConstants(TestCase):
