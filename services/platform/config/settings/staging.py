@@ -50,6 +50,7 @@ PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SEC
 # Staging flags - limited debugging for testing
 DEBUG = False  # Set to True only if needed for staging debugging
 TEMPLATE_DEBUG = False
+TESTING = False  # Defense-in-depth: prevent auth bypass if TESTING leaks (#129)
 
 _allowed_hosts_raw = _os.environ.get("ALLOWED_HOSTS", "").strip()
 if not _allowed_hosts_raw:

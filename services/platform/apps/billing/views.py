@@ -84,8 +84,9 @@ def _get_max_payment_amount_cents() -> int:
 def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
     """Validate portal HMAC + customer membership and return JsonResponse on failure."""
     # Test runner compatibility: these legacy Django views are exercised without
-    # HMAC middleware in coverage tests. Keep strict auth in non-test envs.
-    if settings.TESTING and not getattr(request, "_portal_authenticated", False):
+    # HMAC middleware in coverage tests. TESTING is only True in test.py/e2e.py;
+    # prod.py and staging.py explicitly set TESTING=False as defense-in-depth (#129).
+    if getattr(settings, "TESTING", False) and not getattr(request, "_portal_authenticated", False):
         try:
             data = json.JSONDecoder().decode(request.body.decode("utf-8"))
             customer_id = int(data.get("customer_id"))
