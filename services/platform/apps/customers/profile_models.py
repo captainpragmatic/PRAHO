@@ -60,6 +60,33 @@ class CustomerTaxProfile(SoftDeleteModel):
     # Tax Reverse Charge (for B2B EU)
     reverse_charge_eligible = models.BooleanField(default=False)
 
+    class VIESVerificationStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        VALID = "valid", _("VIES Verified")
+        INVALID = "invalid", _("VIES Invalid")
+        FORMAT_ONLY = "format_only", _("Format Valid (VIES unavailable)")
+        NOT_APPLICABLE = "not_applicable", _("Not Applicable")
+
+    # VIES Verification (EU cross-border VAT)
+    vies_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("VIES verified at"),
+        help_text=_("Timestamp of last successful VIES verification"),
+    )
+    vies_verified_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_("VIES company name"),
+        help_text=_("Company name returned by VIES API"),
+    )
+    vies_verification_status = models.CharField(
+        max_length=25,
+        choices=VIESVerificationStatus.choices,
+        default=VIESVerificationStatus.PENDING,
+        verbose_name=_("VIES status"),
+    )
+
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -72,6 +99,7 @@ class CustomerTaxProfile(SoftDeleteModel):
             models.Index(fields=["cnp"]),
             models.Index(fields=["cui"]),
             models.Index(fields=["vat_number"]),
+            models.Index(fields=["vies_verification_status"], name="customer_tax_vies_status_idx"),
         )
 
     def validate_cui(self) -> bool:

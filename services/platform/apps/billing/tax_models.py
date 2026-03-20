@@ -196,16 +196,18 @@ class VATValidation(models.Model):
     company_name = models.CharField(max_length=255, blank=True, help_text=_("Company name from VIES (if available)"))
     company_address = models.TextField(blank=True, help_text=_("Company address from VIES (if available)"))
 
+    class ValidationSource(models.TextChoices):
+        VIES = "vies", _("VIES API")
+        FORMAT_CHECK = "format_check", _("Format Check Only")
+        MANUAL = "manual", _("Manual Override")
+        CACHED = "cached", _("Previous Validation")
+
     # Validation metadata
     validation_date = models.DateTimeField(auto_now_add=True)
     validation_source = models.CharField(
         max_length=20,
-        choices=[
-            ("vies", _("VIES API")),
-            ("manual", _("Manual Override")),
-            ("cached", _("Previous Validation")),
-        ],
-        default="vies",
+        choices=ValidationSource.choices,
+        default=ValidationSource.VIES,
     )
     response_data = models.JSONField(default=dict, blank=True, help_text=_("Raw API response for audit purposes"))
 

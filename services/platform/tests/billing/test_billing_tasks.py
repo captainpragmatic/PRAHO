@@ -396,16 +396,23 @@ class ValidateVatNumberTests(TestCase):
             vat_number=vat_number,
         )
 
+    @patch("apps.billing.gateways.vies_gateway.VIESGateway.check_vat")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_success_with_vat_number(self, mock_audit: MagicMock) -> None:
-        profile = self._make_tax_profile(vat_number="RO12345678")
+    def test_success_with_vat_number(self, mock_audit: MagicMock, mock_vies: MagicMock) -> None:
+        from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
+
+        mock_vies.return_value = VIESResponse(
+            is_valid=True, country_code="RO", vat_number="1234567",
+            company_name="Test SRL", api_available=True,
+        )
+        profile = self._make_tax_profile(vat_number="RO1234567")
         result = validate_vat_number(str(profile.id))
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["vat_number"], "RO12345678")
+        self.assertEqual(result["vat_number"], "RO1234567")
         self.assertIn("completed", result["message"])
         last_call = _last_audit_call_kwargs(mock_audit)
-        self.assertEqual(last_call["event_type"], "vat_validation_attempted")
+        self.assertEqual(last_call["event_type"], "vat_validation_completed")
 
     def test_no_vat_number_returns_success_with_skip_message(self) -> None:
         profile = self._make_tax_profile(vat_number="")
@@ -419,18 +426,32 @@ class ValidateVatNumberTests(TestCase):
 
         self.assertFalse(result["success"])
 
+    @patch("apps.billing.gateways.vies_gateway.VIESGateway.check_vat")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_generic_exception_returns_error(self, mock_audit: MagicMock) -> None:
+    def test_audit_failure_does_not_poison_result(self, mock_audit: MagicMock, mock_vies: MagicMock) -> None:
+        """Audit log failure must not affect the validation result (H1 fix).
+
+        The validation was already persisted inside transaction.atomic(); an audit
+        log write failure afterwards must not cause the task to report failure.
+        """
+        from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
+
+        mock_vies.return_value = VIESResponse(
+            is_valid=True, country_code="RO", vat_number="1234567",
+            api_available=True,
+        )
+
         def _raise_on_vat(*args: object, **kwargs: object) -> None:
-            if kwargs.get("event_type") == "vat_validation_attempted":
+            if kwargs.get("event_type") == "vat_validation_completed":
                 raise RuntimeError("network failure")
 
         mock_audit.side_effect = _raise_on_vat
-        profile = self._make_tax_profile(vat_number="RO99999999")
+        profile = self._make_tax_profile(vat_number="RO1234567")
         result = validate_vat_number(str(profile.id))
 
-        self.assertFalse(result["success"])
-        self.assertIn("network failure", result["error"])
+        # Validation succeeded; audit failure is swallowed and logged but not propagated
+        self.assertTrue(result["success"])
+        self.assertNotIn("error", result)
 
 
 # ---------------------------------------------------------------------------
