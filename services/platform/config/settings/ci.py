@@ -14,6 +14,13 @@ import os
 from .test import *  # noqa: F403
 
 # ===============================================================================
+# TEST RUNNER — PostgreSQL-safe (Django #30448 workaround)
+# ===============================================================================
+# Custom runner that calls ensure_connection() before each test class to recover
+# from stale connections caused by close_if_unusable_or_obsolete() + CONN_MAX_AGE=0.
+TEST_RUNNER = "tests.runner.PostgreSQLSafeRunner"
+
+# ===============================================================================
 # DATABASE — PostgreSQL (production parity)
 # ===============================================================================
 # Overrides test.py's SQLite in-memory with real PostgreSQL.
@@ -33,7 +40,7 @@ DATABASES = {
             # fsync/full_page_writes are server-level — set via POSTGRES_INITDB_ARGS in CI.
             "options": "-c synchronous_commit=off",
         },
-        "CONN_MAX_AGE": 0,  # Close connection after each request (CI — no pooling needed)
+        "CONN_MAX_AGE": None,  # Keep connections alive — prevents Django #30448 cascade
         "TEST": {
             "SERIALIZE": False,
         },
