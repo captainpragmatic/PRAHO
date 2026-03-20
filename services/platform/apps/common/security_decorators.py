@@ -57,6 +57,15 @@ class SecurityConfig:
     prevent_timing_attacks: bool = True
 
 
+def _extract_request_ip(args: tuple[Any, ...]) -> str | None:
+    """Extract request_ip from positional args (e.g., dataclass request objects)."""
+    for arg in args:
+        ip: str | None = getattr(arg, "request_ip", None)
+        if ip is not None:
+            return ip
+    return None
+
+
 # ===============================================================================
 # COMPREHENSIVE SERVICE SECURITY DECORATOR
 # ===============================================================================
@@ -89,7 +98,7 @@ def secure_service_method(
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Result[Any, str]:
             start_time = time.time()
-            request_ip = kwargs.get("request_ip", "unknown")
+            request_ip: str = kwargs.get("request_ip") or _extract_request_ip(args) or ""
             user = kwargs.get("user")
 
             try:
@@ -290,7 +299,7 @@ def _log_success_event(config: SecurityConfig, method_name: str, user: Any, requ
         log_security_event(
             "method_success",
             {"method": method_name, "validation_type": config.validation_type, "user_id": user.id if user else None},
-            request_ip,
+            request_ip or None,  # Empty string → None (PG rejects "" in GenericIPAddressField)
         )
 
 

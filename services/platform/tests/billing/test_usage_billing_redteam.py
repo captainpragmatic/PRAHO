@@ -191,8 +191,9 @@ class InvoiceCalculationRedTeamTestCase(TestCase):
             status="active",
         )
 
-        # Very large value that might cause overflow
-        large_value = Decimal("99999999999999.99999999")
+        # Large value within the DecimalField bounds (max_digits=18, decimal_places=8
+        # allows up to 10 integer digits; 14-digit values overflow PostgreSQL NUMERIC(18,8))
+        large_value = Decimal("9999999999.99999999")
         event = UsageEvent.objects.create(
             meter=meter,
             customer=customer,

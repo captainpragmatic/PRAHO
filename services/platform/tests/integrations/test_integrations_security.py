@@ -733,7 +733,7 @@ class ComprehensiveSecurityTests(TestCase):
             'Test with émojis 🔒🔐',
             'Romanian diacritics: ăâîșț ĂÂÎȘȚ',
             'Mixed: Test-テスト-тест-测试',
-            '\x00\x01\x02',  # Control characters
+            '\x01\x02\x03',  # Control characters (excluding NUL: PostgreSQL TEXT/VARCHAR rejects \x00)
             '\\u0041\\u0042',  # Escaped Unicode
         ]
 

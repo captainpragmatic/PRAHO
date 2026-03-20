@@ -73,7 +73,7 @@ class PaymentService:
 
             # Calculate total amount in cents (Romanian VAT included)
             amount_cents = order.total_cents
-            currency = str(order.currency or "RON")
+            currency = order.currency.code if order.currency else "RON"
 
             logger.info(
                 f"💳 Creating payment intent for order {order.order_number} ({amount_cents} {currency}) via {gateway}"
@@ -222,7 +222,7 @@ class PaymentService:
                     error="amount_cents does not match order total",
                 )
 
-            resolved_currency = str(order.currency or currency or "RON")
+            resolved_currency = (order.currency.code if order.currency else None) or currency or "RON"
             resolved_order_number = order_number or order.order_number
 
             logger.info(

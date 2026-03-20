@@ -52,7 +52,7 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
             bill_to_address1='Strada Principala 123',
             bill_to_city='Bucuresti',
             bill_to_postal='010101',
-            bill_to_country='Romania'
+            bill_to_country='RO'
         )
 
         # Add invoice lines
@@ -1119,7 +1119,7 @@ class PDFGeneratorIntegrationTestCase(TestCase):
             bill_to_address1='Strada Client 456',
             bill_to_city='Cluj-Napoca',
             bill_to_postal='400000',
-            bill_to_country='România'
+            bill_to_country='RO'
         )
 
         # Add realistic invoice lines

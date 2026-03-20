@@ -83,7 +83,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             bill_to_city='București',
             bill_to_region='Sector 1',
             bill_to_postal='010101',
-            bill_to_country='România',
+            bill_to_country='RO',
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
             paid_at=None,

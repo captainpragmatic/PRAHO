@@ -505,9 +505,12 @@ class CouponService:
 
         # RACE CONDITION FIX: Lock the coupon row to prevent concurrent applications
         # This prevents multiple requests from using the last available coupon use
+        # Use of=("self",) to lock only the Coupon row; without it PostgreSQL raises
+        # "FOR UPDATE cannot be applied to the nullable side of an outer join" because
+        # campaign/currency/assigned_customer are all nullable FKs (LEFT OUTER JOINs).
         try:
             locked_coupon = (
-                Coupon.objects.select_for_update()
+                Coupon.objects.select_for_update(of=("self",))
                 .select_related("campaign", "currency", "assigned_customer")
                 .get(code=normalized_code)
             )

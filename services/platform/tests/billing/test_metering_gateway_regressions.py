@@ -50,7 +50,7 @@ from tests.helpers.fsm_helpers import force_status
 # ---------------------------------------------------------------------------
 
 def _make_currency():
-    return Currency.objects.create(code=f"C{uuid.uuid4().hex[:3].upper()}", symbol="X", decimals=2)
+    return Currency.objects.create(code=uuid.uuid4().hex[:3].upper(), symbol="X", decimals=2)
 
 
 def _make_customer(name="Test Co"):

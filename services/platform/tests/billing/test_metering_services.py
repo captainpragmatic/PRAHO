@@ -309,7 +309,7 @@ class MeteringServiceTransactionTests(TransactionTestCase):
 
             self.assertEqual(len(errors), 0, f"Unexpected errors: {errors}")
             for result in results:
-                self.assertTrue(result.is_ok(), f"Expected success, got error: {result.error}")
+                self.assertTrue(result.is_ok(), f"Expected success, got: {result}")
 
             event_count = UsageEvent.objects.filter(idempotency_key=idempotency_key).count()
             self.assertEqual(event_count, 1, f"Expected 1 event, found {event_count}")

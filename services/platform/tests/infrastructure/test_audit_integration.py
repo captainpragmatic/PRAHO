@@ -35,7 +35,7 @@ User = get_user_model()
 
 def _create_provider() -> CloudProvider:
     provider, _ = CloudProvider.objects.get_or_create(
-        code="hetzner-test",
+        code="het",  # max_length=3
         defaults={
             "name": "Hetzner Test",
             "provider_type": "hetzner",
@@ -67,7 +67,8 @@ def _create_region(provider: CloudProvider) -> NodeRegion:
         provider_region_id="fsn1",
         defaults={
             "name": "Falkenstein",
-            "country_code": "DE",
+            "normalized_code": "fsn1",  # max_length=4
+            "country_code": "DE",  # max_length=2
             "is_active": True,
         },
     )
@@ -92,8 +93,8 @@ def _create_deployment(
     count = NodeDeployment.objects.count() + 1
     defaults: dict[str, Any] = {
         "hostname": f"test-audit-node-{count}",
-        "environment": "production",
-        "node_type": "web",
+        "environment": "prd",
+        "node_type": "sha",
         "node_number": count,
         "provider": provider,
         "node_size": size,

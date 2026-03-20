@@ -151,7 +151,7 @@ class NullServerGuardTests(TestCase):
             quantity=1,
             unit_price_cents=2500,
             setup_cents=0,
-            tax_rate=Decimal("21.00"),
+            tax_rate=Decimal("0.2100"),  # 21% VAT as decimal fraction
             billing_period="monthly",
         )
 
