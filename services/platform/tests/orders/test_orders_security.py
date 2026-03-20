@@ -124,7 +124,7 @@ class OrderSecurityTestCase(TestCase):
         self.order = Order.objects.create(
             customer=self.customer,
             currency=self.currency,
-            status="pending",
+            status="awaiting_payment",
             order_number="SEC-TEST-001"
         )
 

@@ -30,20 +30,22 @@ This template is dynamically loaded and contains only the results section.
                   <!-- Order Status Badge -->
                   {% if order.status == "draft" %}
                     {% trans "Draft" as bt1 %}{% badge bt1 icon="document" variant="secondary" %}
-                  {% elif order.status == "pending" %}
-                    {% trans "Pending" as bt2 %}{% badge bt2 icon="clock" variant="warning" %}
-                  {% elif order.status == "processing" %}
-                    {% trans "Processing" as bt3 %}{% badge bt3 icon="settings" variant="primary" %}
+                  {% elif order.status == "awaiting_payment" %}
+                    {% trans "Awaiting Payment" as bt2 %}{% badge bt2 icon="clock" variant="warning" %}
+                  {% elif order.status == "paid" %}
+                    {% trans "Paid" as bt2b %}{% badge bt2b icon="check" variant="success" %}
+                  {% elif order.status == "in_review" %}
+                    {% trans "In Review" as bt2c %}{% badge bt2c icon="alert" variant="warning" %}
+                  {% elif order.status == "provisioning" %}
+                    {% trans "Provisioning" as bt3 %}{% badge bt3 icon="settings" variant="primary" %}
                   {% elif order.status == "completed" %}
                     {% trans "Completed" as bt4 %}{% badge bt4 icon="check" variant="success" %}
                   {% elif order.status == "cancelled" %}
                     {% trans "Cancelled" as bt5 %}{% badge bt5 icon="x" variant="danger" %}
                   {% elif order.status == "failed" %}
                     {% trans "Failed" as bt6 %}{% badge bt6 variant="danger" %}
-                  {% elif order.status == "refunded" %}
-                    {% trans "Refunded" as bt7 %}{% badge bt7 icon="currency" variant="info" %}
-                  {% elif order.status == "partially_refunded" %}
-                    {% trans "Partially Refunded" as bt8 %}{% badge bt8 variant="warning" %}
+                  {% else %}
+                    {% badge order.status|title variant="secondary" %}
                   {% endif %}
                 </div>
 

@@ -1001,11 +1001,11 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         _sync_orders_on_invoice_status_change(invoice, "draft", "paid")
 
     @patch("apps.billing.signals.OrderService" if False else "apps.orders.services.OrderService")
-    def test_paid_advances_pending_orders(self, mock_os):
+    def test_paid_advances_awaiting_payment_orders(self, mock_os):
         invoice = MagicMock()
         invoice.orders.exists.return_value = True
         order = MagicMock()
-        order.status = "pending"
+        order.status = "awaiting_payment"
         order.order_number = "ORD-001"
         invoice.orders.filter.return_value = [order]
         mock_result = MagicMock()
@@ -1020,7 +1020,7 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         invoice = MagicMock()
         invoice.orders.exists.return_value = True
         order = MagicMock()
-        order.status = "pending"
+        order.status = "awaiting_payment"
         order.order_number = "ORD-002"
         invoice.orders.all.return_value = [order]
         mock_result = MagicMock()

@@ -258,25 +258,25 @@ class OrderNumberingService:
 # Keyed by (source, target) because different source states may need different
 # methods to reach the same target (e.g., draft→pending via submit vs failed→pending via retry).
 _ORDER_TRANSITION_MAP: dict[tuple[str, str], str] = {
-    # Happy path
-    ("draft", "pending"): "submit",
-    ("pending", "confirmed"): "confirm",
-    ("confirmed", "processing"): "start_processing",
-    ("processing", "completed"): "complete",
-    # Cancellation (multiple sources)
+    # Happy path — Phase A rename
+    ("draft", "awaiting_payment"): "submit",
+    ("awaiting_payment", "paid"): "mark_paid",
+    ("paid", "provisioning"): "start_provisioning",
+    ("paid", "in_review"): "flag_for_review",
+    ("in_review", "provisioning"): "approve_review",
+    ("in_review", "cancelled"): "reject_review",
+    ("provisioning", "completed"): "complete",
+    # Cancellation (multiple sources; in_review→cancelled uses reject_review above)
     ("draft", "cancelled"): "cancel",
-    ("pending", "cancelled"): "cancel",
-    ("confirmed", "cancelled"): "cancel",
-    ("processing", "cancelled"): "cancel",
+    ("awaiting_payment", "cancelled"): "cancel",
+    ("paid", "cancelled"): "cancel",
+    ("provisioning", "cancelled"): "cancel",
     ("failed", "cancelled"): "cancel",
     # Failure + retry
-    ("pending", "failed"): "fail",
-    ("processing", "failed"): "fail",
-    ("failed", "pending"): "retry",
-    # Refunds
-    ("completed", "refunded"): "refund_order",
-    ("completed", "partially_refunded"): "partial_refund",
-    ("partially_refunded", "refunded"): "complete_refund",
+    ("awaiting_payment", "failed"): "fail",
+    ("provisioning", "failed"): "fail",
+    ("failed", "awaiting_payment"): "retry",
+    # Refunds removed — handled at Invoice/Payment level, not Order FSM
 }
 
 
@@ -492,13 +492,13 @@ class OrderService:
 
     @staticmethod
     @transaction.atomic
-    def update_order_status(order: Order, status_data: StatusChangeData) -> Result[Order, str]:
+    def update_order_status(order: Order, status_data: StatusChangeData) -> Result[Order, str]:  # noqa: PLR0911
         """Update order status via FSM transition with validation and audit trail."""
         try:
             old_status = order.status
 
-            # Enforce preflight validation on draft → pending
-            if old_status == "draft" and status_data.new_status == "pending":
+            # Enforce preflight validation on draft → awaiting_payment
+            if old_status == "draft" and status_data.new_status == "awaiting_payment":
                 try:
                     from .preflight import (  # noqa: PLC0415  # Deferred: avoids circular import
                         OrderPreflightValidationService,  # Circular: same-app  # Deferred: avoids circular import
@@ -506,7 +506,7 @@ class OrderService:
 
                     OrderPreflightValidationService.assert_valid(order)
                     logger.info(
-                        "✅ [Orders] Preflight validation passed for %s before pending",
+                        "✅ [Orders] Preflight validation passed for %s before awaiting_payment",
                         order.order_number,
                     )
                 except Exception as e:
@@ -536,6 +536,44 @@ class OrderService:
                 return Err(f"Concurrent modification on order {order.order_number} — please retry")
             except TransitionNotAllowed:
                 return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
+
+            # Phase B: Create proforma when order transitions to awaiting_payment.
+            # Per F3: MUST be inside the same transaction, NOT in on_commit callback.
+            # Proforma creation is sync DB-only (~20ms). PDF/email is async (on_commit).
+            if status_data.new_status == "awaiting_payment" and order.total_cents > 0:
+                # H4 fix: Check for existing valid proforma before creating a new one.
+                # Prevents orphan proformas when retrying failed → awaiting_payment.
+                if (
+                    order.proforma
+                    and not order.proforma.is_expired
+                    and order.proforma.status
+                    not in (
+                        "void",
+                        "cancelled",
+                    )
+                ):
+                    logger.info(
+                        "💡 [Orders] Reusing existing proforma %s for order %s",
+                        order.proforma.number,
+                        order.order_number,
+                    )
+                else:
+                    from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+                    proforma_result = ProformaService.create_from_order(order)
+                    if proforma_result.is_err():
+                        # H3 fix: Proforma creation failure aborts the transition.
+                        # An order awaiting_payment without a proforma has no payment document,
+                        # which means the customer has no way to pay. Fail fast.
+                        logger.error(
+                            "🔥 [Orders] Proforma creation failed for %s, aborting status transition: %s",
+                            order.order_number,
+                            proforma_result.unwrap_err(),
+                        )
+                        transaction.set_rollback(True)
+                        return Err(
+                            f"Cannot transition to awaiting_payment: proforma creation failed: {proforma_result.unwrap_err()}"
+                        )
 
             # Create status history entry
             OrderService._create_status_history(
@@ -799,6 +837,108 @@ class OrderServiceCreationService:
         except Exception as e:
             logger.exception(f"🔥 [ServiceCreation] Failed to update service status on payment: {e}")
             return Err(f"Failed to update service status: {e}")
+
+
+# ===============================================================================
+# ORDER PAYMENT CONFIRMATION SERVICE (Phase B)
+# ===============================================================================
+
+
+class OrderPaymentConfirmationService:
+    """Confirms order after payment received, with review gate logic.
+
+    Called by the proforma_payment_received signal receiver. Handles the
+    awaiting_payment → paid → provisioning (or in_review) transitions atomically (F5).
+    """
+
+    @staticmethod
+    @transaction.atomic
+    def confirm_order(order: Order, invoice: Any = None) -> Result[Order, str]:
+        """Confirm an order after payment. Atomic double-transition (F5).
+
+        Why atomic: mark_paid() + start_provisioning() must both succeed or both fail.
+        If only mark_paid succeeds, order is stuck in 'paid' with no recovery path.
+        The 'paid' state is an audit checkpoint visible only in OrderStatusHistory.
+        """
+        try:
+            # Idempotent: already paid/provisioning/completed → return Ok
+            if order.status in ("paid", "in_review", "provisioning", "completed"):
+                logger.info(
+                    "💡 [OrderConfirm] Order %s already in %s, skipping confirmation",
+                    order.order_number,
+                    order.status,
+                )
+                return Ok(order)
+
+            if order.status != "awaiting_payment":
+                return Err(f"Cannot confirm order {order.order_number} from status {order.status}")
+
+            # Link invoice if provided
+            if invoice:
+                order.invoice = invoice
+
+            # Transition: awaiting_payment → paid (audit checkpoint)
+            order.mark_paid()
+
+            # Review gate: configurable threshold determines if admin review is needed.
+            threshold = OrderPaymentConfirmationService._get_review_threshold()
+            if order.total_cents >= threshold:
+                # High-value order → flag for admin review
+                order.flag_for_review()
+                order.save()
+                OrderService._create_status_history(order, "awaiting_payment", "paid", "Payment confirmed", None)
+                OrderService._create_status_history(
+                    order, "paid", "in_review", f"Flagged for review (total >= {threshold} cents)", None
+                )
+                log_security_event(
+                    "order_flagged_for_review",
+                    {
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "total_cents": order.total_cents,
+                        "threshold_cents": threshold,
+                    },
+                )
+            else:
+                # Below threshold → auto-advance to provisioning
+                order.start_provisioning()
+                order.save()
+                OrderService._create_status_history(order, "awaiting_payment", "paid", "Payment confirmed", None)
+                OrderService._create_status_history(
+                    order, "paid", "provisioning", "Auto-provisioning (below review threshold)", None
+                )
+
+            log_security_event(
+                "order_marked_paid",
+                {
+                    "order_id": str(order.id),
+                    "order_number": order.order_number,
+                    "invoice_id": str(invoice.id) if invoice else None,
+                    "total_cents": order.total_cents,
+                },
+            )
+
+            logger.info("✅ [OrderConfirm] Order %s confirmed → %s", order.order_number, order.status)
+            return Ok(order)
+
+        except Exception as e:
+            logger.exception("🔥 [OrderConfirm] Failed to confirm order %s: %s", order.order_number, e)
+            return Err(f"Failed to confirm order: {e}")
+
+    @staticmethod
+    def _get_review_threshold() -> int:
+        """Get the review threshold in cents from SettingsService.
+
+        Why configurable: different businesses have different risk tolerance.
+        Default 500000 (5000 RON) is a reasonable starting point for hosting.
+        """
+        _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 RON  # noqa: N806
+        try:
+            from apps.settings.services import SettingsService  # noqa: PLC0415
+
+            return SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
+        except Exception:
+            return _DEFAULT_REVIEW_THRESHOLD
 
 
 # ===============================================================================

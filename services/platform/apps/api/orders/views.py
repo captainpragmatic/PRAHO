@@ -745,14 +745,14 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             order = result.value
             serializer = OrderDetailSerializer(order)
 
-            # Auto-pending promote if requested
+            # Auto-awaiting_payment promote if requested
             auto_pending = bool(request.data.get("auto_pending"))
             promoted = False
             preflight = None
             if auto_pending:
                 try:
                     status_change = StatusChangeData(
-                        new_status="pending", notes="Auto-pending from API", changed_by=None
+                        new_status="awaiting_payment", notes="Auto-submitted from API", changed_by=None
                     )
                     promote_result = OrderService.update_order_status(order, status_change)
                     if promote_result.is_ok():
@@ -764,7 +764,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                         errs, warns = OrderPreflightValidationService.validate(order)
                         preflight = {"errors": errs, "warnings": warns}
                 except Exception as e:
-                    logger.warning(f"⚠️ [API] Auto-pending failed for {order.order_number}: {e}")
+                    logger.warning(f"⚠️ [API] Auto-submit failed for {order.order_number}: {e}")
 
             # 🔒 SECURITY: Store idempotency key in cache to prevent duplicate orders
             cache_key = f"idempotency:order:{customer.id}:{idempotency_key}"
@@ -971,7 +971,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                     )
 
             # Idempotency guard — prevent double-processing
-            if order.status not in ["pending"]:
+            if order.status not in ["awaiting_payment"]:
                 return Response(
                     {"success": False, "error": "Order already processed"},
                     status=status.HTTP_409_CONFLICT,
@@ -987,15 +987,34 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             # the request payload. This closes a bypass where an attacker omits/nulls
             # payment_intent_id in the request while the order already has one stored.
             pi_to_verify = order.payment_intent_id
+            order_payment_method = order.payment_method
             order_number_for_log = order.order_number
         # Phase 1 transaction ends here — DB lock released before any network call.
+
+        # CRITICAL GUARD: This endpoint is card-only. Non-card orders (bank_transfer, etc.)
+        # must be confirmed through the admin/billing staff path via ProformaPaymentService.
+        # Allowing non-card orders here would let a customer self-confirm an unpaid bank transfer.
+        if not pi_to_verify and order_payment_method and order_payment_method != "card":
+            logger.warning(
+                "[API] Reject confirm attempt on non-card order %s (payment_method=%s, no PI)",
+                order_number_for_log,
+                order_payment_method,
+            )
+            return Response(
+                {
+                    "success": False,
+                    "error": "This order cannot be confirmed via this endpoint. "
+                    "Bank transfer and other non-card orders are confirmed by billing staff.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Phase 2: Stripe verification OUTSIDE the DB transaction.
         # H11: Verify PI status directly with Stripe — prevents confirmation with a forged
         # payment_status from the Portal (attacker can't skip payment by faking the field).
         # Bug 2 fix (#104): never hold select_for_update across a Stripe network call
         # — doing so extends the lock over 200-2000ms round-trips and exhausts DB connections.
-        verified_stripe_status = "no_pi"  # Default for bank transfer / non-card orders
+        verified_stripe_status = "no_pi"  # Default: no PI means no Stripe verification path
         if pi_to_verify:
             try:
                 from apps.billing.gateways.base import PaymentGatewayFactory  # noqa: PLC0415
@@ -1050,36 +1069,35 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 .get(id=order_id, customer_id=customer.id)
             )
 
-            if order.status not in ["pending"]:
+            if order.status not in ["awaiting_payment"]:
                 return Response(
                     {"success": False, "error": "Order already processed"},
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Use OrderService.update_order_status() for proper state machine validation
-            # and OrderStatusHistory creation (audit trail for this legally-significant transition).
-            audit_user = None
-            if hasattr(request, "user") and request.user.is_authenticated:
-                audit_user = request.user
+            # Use OrderPaymentConfirmationService.confirm_order() so the review gate
+            # (high-value orders → in_review) is enforced, and audit trail is created.
+            # Using update_order_status(new_status="paid") directly would skip the review gate.
+            from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-            status_change = StatusChangeData(
-                new_status="confirmed",
-                notes=f"Payment confirmed (PI: {pi_to_verify or 'N/A'}, verified_status: {verified_stripe_status})",
-                changed_by=audit_user,
-            )
-            status_result = OrderService.update_order_status(order, status_change)
-            if isinstance(status_result, Err):
+            confirm_result = OrderPaymentConfirmationService.confirm_order(order, invoice=order.invoice)
+            if isinstance(confirm_result, Err):
                 logger.warning(
-                    "⚠️ [API] Status update failed for order %s: %s",
+                    "⚠️ [API] Payment confirmation failed for order %s: %s",
                     order.order_number,
-                    status_result.error,
+                    confirm_result.error,
                 )
                 return Response(
                     {"success": False, "error": "Order cannot be confirmed in its current state"},
                     status=status.HTTP_409_CONFLICT,
                 )
-            order.refresh_from_db()
-            logger.info(f"✅ Order {order.order_number} confirmed after payment")
+            order = confirm_result.unwrap()
+            logger.info(
+                "✅ Order %s confirmed after Stripe payment (PI: %s, verified: %s)",
+                order.order_number,
+                pi_to_verify or "N/A",
+                verified_stripe_status,
+            )
 
             # Collect provisionable items inside the atomic block, but dispatch outside
             provisionable_items = [

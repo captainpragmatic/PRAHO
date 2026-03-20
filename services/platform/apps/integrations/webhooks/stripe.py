@@ -139,9 +139,9 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return handler
         return None
 
-    def handle_payment_intent_event(  # noqa: PLR0911  # Complexity: multi-step business logic
+    def handle_payment_intent_event(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: payment_intent.succeeded/failed paths share state, extraction would fragment the lock scope
         self, event_type: str, payload: dict[str, Any]
-    ) -> tuple[bool, str]:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
+    ) -> tuple[bool, str]:
         """💳 Handle PaymentIntent events with race condition protection.
 
         SECURITY FIX: Uses select_for_update() to prevent race conditions where
@@ -157,7 +157,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         with transaction.atomic():
             try:
                 # Lock the payment row to prevent concurrent updates
-                payment = Payment.objects.select_for_update().get(gateway_txn_id=stripe_payment_id)
+                payment = Payment.objects.select_for_update(of=("self",)).get(gateway_txn_id=stripe_payment_id)
             except Payment.DoesNotExist:
                 # Payment not found - might be created outside our system
                 logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {stripe_payment_id}")
@@ -175,8 +175,42 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     logger.info(f"⏭️ Payment {payment.id} already in terminal state, skipping duplicate webhook")
                     return True, f"Payment {payment.id} already processed (idempotent)"
 
-                # Update associated invoice if exists
-                if payment.invoice:
+                # B7: If payment has a proforma, auto-convert proforma→invoice
+                if payment.proforma:
+                    try:
+                        from apps.billing.proforma_service import (  # noqa: PLC0415
+                            ProformaPaymentService,
+                        )
+
+                        convert_result = ProformaPaymentService.record_payment_and_convert(
+                            proforma_id=str(payment.proforma.id),
+                            amount_cents=payment.amount_cents,
+                            payment_method="stripe",
+                            existing_payment=payment,
+                        )
+                        if convert_result.is_ok():
+                            logger.info(
+                                "✅ [Stripe] Auto-converted proforma %s after payment %s succeeded",
+                                payment.proforma.number,
+                                payment.id,
+                            )
+                        else:
+                            # C1: Return False so Stripe retries the webhook.
+                            # Payment is already marked succeeded but invoice was not
+                            # created — retry gives the conversion another chance.
+                            err_msg = convert_result.unwrap_err() if convert_result.is_err() else "unknown"
+                            logger.error(
+                                "🔥 [Stripe] Proforma conversion failed for payment %s: %s",
+                                payment.id,
+                                err_msg,
+                            )
+                            return False, f"conversion failed: {err_msg}"
+                    except Exception as e:
+                        logger.exception("🔥 [Stripe] Proforma auto-convert failed: %s", e)
+                        return False, f"conversion failed: {e}"
+
+                # Update associated invoice if exists (fallback for non-proforma payments)
+                elif payment.invoice:
                     payment.invoice.update_status_from_payments()
 
                 # 🔔 Notify Portal of payment success
@@ -209,6 +243,23 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                         logger.info(f"🔔 Triggered dunning process for invoice {payment.invoice.id}")
                     except Exception as dunning_error:
                         logger.warning(f"⚠️ Failed to trigger dunning: {dunning_error}")
+
+                # B7: On card failure, send proforma email as fallback so customer
+                # can pay via bank transfer instead
+                if payment.proforma and payment.proforma.status in ("draft", "sent"):
+                    try:
+                        from django.db import transaction as txn  # noqa: PLC0415
+
+                        from apps.billing.proforma_service import send_proforma_email  # noqa: PLC0415
+
+                        _proforma = payment.proforma
+                        txn.on_commit(lambda: send_proforma_email(_proforma))
+                        logger.info(
+                            "📧 [Stripe] Queued proforma email fallback for failed payment %s",
+                            payment.id,
+                        )
+                    except Exception as e:
+                        logger.warning("⚠️ [Stripe] Failed to queue proforma email fallback: %s", e)
 
                 logger.warning(f"❌ Payment {payment.id} marked as failed from Stripe")
                 return True, f"Payment {payment.id} failed"

@@ -362,7 +362,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
 
             # Create Stripe PaymentIntent only for card payment method
             payment_intent_result = None
-            if order_status == "pending" and ctx.payment_method == "card":
+            if order_status == "awaiting_payment" and ctx.payment_method == "card":
                 order_total = order_data.get("total", "0")
                 order_currency = order_data.get("currency_code", "RON")
                 total_cents = _parse_total_cents(str(order_total))
@@ -408,7 +408,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                         logger.error("🔥 Error creating payment intent for order %s: %s", order_id, e)
 
             # Set user-facing success/warning message
-            if order_status == "pending":
+            if order_status == "awaiting_payment":
                 if ctx.payment_method == "bank_transfer":
                     messages.success(
                         request,
@@ -1060,7 +1060,7 @@ def order_confirmation(request: HttpRequest, order_id: str) -> HttpResponse:
         # 💳 NEW: Get payment intent for pending orders
         payment_info = None
         stripe_config = None
-        if order_data.get("status") == "pending":
+        if order_data.get("status") == "awaiting_payment":
             # Get payment intent from session
             session_key = f"payment_intent_{order_id}"
             payment_info = request.session.get(session_key)
@@ -1348,7 +1348,7 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
                     return JsonResponse(
                         {
                             "success": True,
-                            "status": "confirmed",
+                            "status": "paid",
                             "message": "Payment confirmed and service is being provisioned",
                         }
                     )

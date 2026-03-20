@@ -8,7 +8,7 @@ import decimal
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +42,6 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django_fsm import TransitionNotAllowed
 
 from apps.api.secure_auth import get_authenticated_customer
-from apps.billing.config import get_invoice_payment_terms_days
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_rate_limit, staff_required
@@ -58,8 +57,6 @@ from apps.users.models import User
 from .models import (
     Currency,
     Invoice,
-    InvoiceLine,
-    InvoiceSequence,
     Payment,
     ProformaInvoice,
     ProformaLine,
@@ -780,89 +777,19 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @billing_staff_required
 def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
     """
-    🔄 Convert proforma to actual invoice (Romanian business practice)
+    🚫 Manual conversion removed — proforma→invoice is automatic after payment.
+
+    Phase B: Conversion only happens via ProformaPaymentService.record_payment_and_convert()
+    when a succeeded payment is recorded (bank transfer or Stripe webhook).
     """
-    proforma = get_object_or_404(ProformaInvoice, pk=pk)
-
-    # Security check - type guard for authenticated user
-    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
-        messages.error(request, _("❌ You do not have permission to convert this proforma."))
-        return redirect("billing:invoice_list")
-
-    # Business rules
-    if proforma.is_expired:
-        messages.error(request, _("❌ Cannot convert expired proforma to invoice."))
-        return redirect("billing:proforma_detail", pk=pk)
-
-    # Check if already converted
-    existing_invoice = Invoice.objects.filter(converted_from_proforma=proforma).first()
-    if existing_invoice:
-        messages.warning(
-            request,
-            _("⚠️ This proforma has already been converted to invoice #{number}").format(number=existing_invoice.number),
-        )
-        return redirect("billing:invoice_detail", pk=existing_invoice.pk)
-
-    if request.method == "POST":
-        with transaction.atomic():
-            # Get next invoice number
-            sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
-            invoice_number = sequence.get_next_number("INV")
-
-            # Create invoice from proforma (draft first, then issue via FSM)
-            invoice = Invoice.objects.create(
-                customer=proforma.customer,
-                number=invoice_number,
-                currency=proforma.currency,
-                subtotal_cents=proforma.subtotal_cents,
-                tax_cents=proforma.tax_cents,
-                total_cents=proforma.total_cents,
-                due_at=timezone.now() + timedelta(days=get_invoice_payment_terms_days()),
-                # Copy billing address from proforma
-                bill_to_name=proforma.bill_to_name,
-                bill_to_tax_id=proforma.bill_to_tax_id,
-                bill_to_email=proforma.bill_to_email,
-                bill_to_address1=proforma.bill_to_address1,
-                bill_to_address2=proforma.bill_to_address2,
-                bill_to_city=proforma.bill_to_city,
-                bill_to_region=proforma.bill_to_region,
-                bill_to_postal=proforma.bill_to_postal,
-                bill_to_country=proforma.bill_to_country,
-                # Link back to proforma
-                converted_from_proforma=proforma,
-            )
-
-            # Copy line items
-            for proforma_line in proforma.lines.all():
-                InvoiceLine.objects.create(
-                    invoice=invoice,
-                    kind=proforma_line.kind,
-                    service=proforma_line.service,
-                    description=proforma_line.description,
-                    quantity=proforma_line.quantity,
-                    unit_price_cents=proforma_line.unit_price_cents,
-                    tax_rate=proforma_line.tax_rate,
-                    line_total_cents=proforma_line.line_total_cents,
-                )
-
-            # Issue via FSM transition — sets issued_at and locked_at
-            invoice.issue()
-            invoice.save()
-
-        messages.success(
-            request,
-            _("✅ Proforma #{proforma_number} converted to Invoice #{invoice_number}!").format(
-                proforma_number=proforma.number, invoice_number=invoice.number
-            ),
-        )
-        return redirect("billing:invoice_detail", pk=invoice.pk)
-
-    context = {
-        "proforma": proforma,
-        "lines": proforma.lines.all(),
-    }
-
-    return render(request, "billing/proforma_convert.html", context)
+    messages.error(
+        request,
+        _(
+            "❌ Manual conversion is no longer available. "
+            "Proformas are automatically converted to invoices when payment is recorded."
+        ),
+    )
+    return redirect("billing:proforma_detail", pk=pk)
 
 
 @billing_staff_required
@@ -877,89 +804,35 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if request.method == "POST":
-        # Convert proforma to invoice first using the billing service
-        # Instead of calling the view directly (which causes messages issues),
-        # we'll duplicate the conversion logic here
+        # Phase B: Delegate entirely to ProformaPaymentService convergence point.
+        # This replaces the old inline conversion+payment logic that was a security bypass
+        # (created Payment(status=succeeded) directly, duplicated conversion, accepted arbitrary amounts).
+        from apps.billing.proforma_service import ProformaPaymentService, _normalize_payment_method  # noqa: PLC0415
 
-        # Check if already converted
-        existing_invoice = Invoice.objects.filter(converted_from_proforma=proforma).first()
-        if existing_invoice:
-            # Already converted, process payment on existing invoice
-            invoice = existing_invoice
-        else:
-            # Convert proforma to invoice
-            sequence, _created = InvoiceSequence.objects.get_or_create(scope="default")
-            invoice_number = sequence.get_next_number("INV")
+        raw_method = request.POST.get("payment_method", "bank")
+        reference = request.POST.get("reference", "")
 
-            # Create invoice from proforma
-            invoice = Invoice.objects.create(
-                customer=proforma.customer,
-                number=invoice_number,
-                status="draft",
-                currency=proforma.currency,
-                total_cents=proforma.total_cents,
-                tax_cents=proforma.tax_cents,
-                subtotal_cents=proforma.subtotal_cents,
-                due_at=proforma.valid_until
-                if proforma.valid_until
-                else timezone.now() + timezone.timedelta(days=get_invoice_payment_terms_days()),
-                issued_at=timezone.now(),
-                converted_from_proforma=proforma,
-            )
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,  # Full amount only, not from POST
+            payment_method=_normalize_payment_method(raw_method),
+            reference=reference,
+            created_by=request.user,
+        )
 
-            # Copy all line items
-            for proforma_line in proforma.lines.all():
-                InvoiceLine.objects.create(
-                    invoice=invoice,
-                    kind=proforma_line.kind,
-                    service=proforma_line.service,
-                    description=proforma_line.description,
-                    quantity=proforma_line.quantity,
-                    unit_price_cents=proforma_line.unit_price_cents,
-                    tax_rate=proforma_line.tax_rate,
-                    line_total_cents=proforma_line.line_total_cents,
-                )
-
-        # Process payment on the invoice
-        if invoice:
-            # Process payment on the invoice
-            amount = Decimal(request.POST.get("amount", str(invoice.total)))
-            payment_method = request.POST.get("payment_method", "bank_transfer")
-
-            Payment.objects.create(
-                customer=invoice.customer,
-                invoice=invoice,
-                amount_cents=int(amount * 100),
-                currency=invoice.currency,
-                payment_method=payment_method
-                if payment_method in ["stripe", "bank", "paypal", "cash", "other"]
-                else "other",
-                status="succeeded",
-                created_by=request.user,
-            )
-
-            # Mark invoice as paid via FSM transition
-            try:
-                invoice.mark_as_paid()
-            except TransitionNotAllowed:
-                logger.warning(
-                    f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
-                )
-                messages.warning(
-                    request,
-                    _(
-                        "⚠️ Payment recorded but invoice #{number} could not be marked as paid (status: {status})."
-                    ).format(number=invoice.number, status=invoice.status),
-                )
-            else:
-                invoice.save()
+        if result.is_ok():
+            invoice = result.unwrap()
+            if invoice:
                 messages.success(
                     request,
-                    _("✅ Payment processed and invoice #{number} marked as paid!").format(number=invoice.number),
+                    _("✅ Payment recorded and invoice #{number} issued!").format(number=invoice.number),
                 )
-            return json_success({"invoice_id": invoice.id}, "Payment processed successfully")
+                return redirect("billing:invoice_detail", pk=invoice.pk)
+            messages.success(request, _("✅ Payment recorded successfully."))
+            return redirect("billing:proforma_detail", pk=pk)
         else:
-            return json_error("Failed to convert proforma", status=400)
+            messages.error(request, f"❌ {result.unwrap_err()}")
+            return redirect("billing:proforma_detail", pk=pk)
 
     return json_error("Invalid method", status=405)
 

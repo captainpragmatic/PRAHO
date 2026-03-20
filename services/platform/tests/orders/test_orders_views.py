@@ -242,7 +242,7 @@ class OrderDetailViewTestCase(TestCase):
             customer=self.customer,
             order_number="ORD-2024-DETAIL-0001",
             currency=self.currency,
-            status="pending",
+            status="awaiting_payment",
             subtotal_cents=10000,
             tax_cents=2100,
             total_cents=12100,
@@ -265,7 +265,7 @@ class OrderDetailViewTestCase(TestCase):
             product_type="hosting",
             quantity=1,
             unit_price_cents=10000,
-            provisioning_status="pending"
+            provisioning_status="pending"  # OrderItem.provisioning_status "pending" is still valid
         )
 
         # Add status history
@@ -412,7 +412,7 @@ class OrderStatusChangeViewTestCase(TestCase):
 
         url = reverse('orders:order_change_status', args=[self.order.id])
         response = self.client.post(url, {
-            'status': 'pending',
+            'status': 'awaiting_payment',
             'notes': 'Order submitted for processing'
         }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
@@ -421,11 +421,11 @@ class OrderStatusChangeViewTestCase(TestCase):
         # Check JSON response
         data = response.json()
         self.assertTrue(data['success'])
-        self.assertEqual(data['new_status'], 'pending')
+        self.assertEqual(data['new_status'], 'awaiting_payment')
 
         # Verify order status changed
         self.order.refresh_from_db()
-        self.assertEqual(self.order.status, 'pending')
+        self.assertEqual(self.order.status, 'awaiting_payment')
 
         # Verify status history created
         self.assertEqual(self.order.status_history.count(), 1)
@@ -433,7 +433,7 @@ class OrderStatusChangeViewTestCase(TestCase):
         self.assertIsNotNone(history)
         assert history is not None  # Type narrowing
         self.assertEqual(history.old_status, 'draft')
-        self.assertEqual(history.new_status, 'pending')
+        self.assertEqual(history.new_status, 'awaiting_payment')
         self.assertEqual(history.notes, 'Order submitted for processing')
 
     def test_invalid_status_transition(self):
@@ -514,7 +514,7 @@ class OrderCancelViewTestCase(TestCase):
             customer=self.customer,
             order_number="ORD-2024-CANCEL-0001",
             currency=self.currency,
-            status="pending"
+            status="awaiting_payment"
         )
 
     def test_successful_order_cancellation(self):

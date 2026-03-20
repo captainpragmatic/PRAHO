@@ -280,7 +280,7 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
                         'invoice_id': self.invoice.id,
                         'refund_type': RefundType.FULL,
                         'amount_refunded_cents': 15000,
-                        'order_status_updated': True,
+                        'order_status_updated': False,  # Phase A: order status not changed on refund
                         'invoice_status_updated': True,
                         'payment_refund_processed': False,
                         'audit_entries_created': 2
@@ -314,7 +314,7 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
                         'invoice_id': None,
                         'refund_type': RefundType.PARTIAL,
                         'amount_refunded_cents': 5000,
-                        'order_status_updated': True,
+                        'order_status_updated': False,  # Phase A: order status not changed on refund
                         'invoice_status_updated': False,
                         'payment_refund_processed': False,
                         'audit_entries_created': 1
@@ -528,7 +528,8 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
         self.assertTrue(result.is_ok())
         result_data = result.unwrap()
         self.assertTrue(result_data["refund_record_created"])
-        self.assertTrue(result_data["order_status_updated"])
+        # Phase A: order status is never changed on refund (refunds at Invoice/Payment level)
+        self.assertFalse(result_data["order_status_updated"])
         self.assertEqual(result_data["order_id"], mock_order.id)
 
 

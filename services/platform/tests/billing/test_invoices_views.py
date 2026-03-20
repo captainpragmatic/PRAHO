@@ -193,27 +193,21 @@ class ProformaToInvoiceViewTestCase(TestCase):
         return request
 
     def test_proforma_to_invoice_conversion_success(self):
-        """Test successful proforma to invoice conversion"""
+        """Manual conversion is removed in Phase B — view always redirects with error message."""
         request = self.factory.post(f'/app/billing/proformas/{self.proforma.pk}/convert-to-invoice/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
 
         response = proforma_to_invoice(request, self.proforma.pk)
 
-
-        # Should redirect to the new invoice
+        # Always redirects to proforma_detail — no invoice is created
         self.assertEqual(response.status_code, 302)
 
-        # Check that invoice was created
-        invoices = Invoice.objects.filter(customer=self.customer)
-        self.assertEqual(invoices.count(), 1)
-
-        invoice = invoices.first()
-        self.assertEqual(invoice.total_cents, self.proforma.total_cents)
-        self.assertEqual(invoice.status, 'issued')
+        # No invoice should be created; conversion only happens via ProformaPaymentService
+        self.assertEqual(Invoice.objects.filter(customer=self.customer).count(), 0)
 
     def test_proforma_to_invoice_unauthorized_user(self):
-        """Test proforma to invoice conversion with unauthorized user"""
+        """Test proforma to invoice conversion with unauthorized user (no billing staff role)."""
         unauthorized_user = User.objects.create_user(
             email='unauth_convert@test.ro',
             password='testpass'
@@ -225,20 +219,21 @@ class ProformaToInvoiceViewTestCase(TestCase):
 
         response = proforma_to_invoice(request, self.proforma.pk)
 
-        # Should redirect (unauthorized)
+        # Should redirect (unauthorized — billing_staff_required redirects non-staff)
         self.assertEqual(response.status_code, 302)
 
         # Should not create invoice
         self.assertEqual(Invoice.objects.count(), 0)
 
     def test_proforma_to_invoice_not_found(self):
-        """Test proforma to invoice conversion with non-existent proforma"""
+        """Manual conversion is removed — view redirects even for non-existent pk (no get_object_or_404)."""
         request = self.factory.post('/app/billing/proformas/99999/convert-to-invoice/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
 
-        with self.assertRaises(Http404):
-            proforma_to_invoice(request, 99999)
+        # View no longer calls get_object_or_404; it redirects immediately with an error message
+        response = proforma_to_invoice(request, 99999)
+        self.assertEqual(response.status_code, 302)
 
 
 class InvoiceEditViewsTestCase(TestCase):
