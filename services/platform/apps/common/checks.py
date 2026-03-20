@@ -526,3 +526,35 @@ def check_session_security_configuration(app_configs: Any, **kwargs: Any) -> lis
             )
 
     return errors
+
+
+@register(Tags.security, deploy=True)
+def check_csp_nonce_middleware_order(**kwargs: Any) -> list[Error | DjangoWarning]:
+    """Verify CSPNonceMiddleware is active and ordered before SecurityHeadersMiddleware (#130/M4)."""
+    errors: list[Error | DjangoWarning] = []
+    middleware = list(getattr(settings, "MIDDLEWARE", []))
+
+    csp_path = "apps.common.middleware.CSPNonceMiddleware"
+    sec_path = "apps.common.middleware.SecurityHeadersMiddleware"
+
+    csp_idx = middleware.index(csp_path) if csp_path in middleware else -1
+    sec_idx = middleware.index(sec_path) if sec_path in middleware else -1
+
+    if csp_idx == -1:
+        errors.append(
+            DjangoWarning(
+                "CSPNonceMiddleware is not in MIDDLEWARE — CSP nonces will be empty strings",
+                hint=f"Add '{csp_path}' to MIDDLEWARE before SecurityHeadersMiddleware",
+                id="security.W060",
+            )
+        )
+    elif sec_idx != -1 and csp_idx > sec_idx:
+        errors.append(
+            Error(
+                "CSPNonceMiddleware must appear before SecurityHeadersMiddleware in MIDDLEWARE",
+                hint="Move CSPNonceMiddleware above SecurityHeadersMiddleware so the nonce is set before CSP headers are written",
+                id="security.E060",
+            )
+        )
+
+    return errors

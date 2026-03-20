@@ -1188,6 +1188,17 @@ class RefundService:
                         "refunded" if refund_type == "full" else "partially_refunded",
                         payment.status,
                     )
+                    log_security_event(
+                        event_type="refund_reconciliation_gap",
+                        details={
+                            "payment_id": str(payment.id),
+                            "gateway_status": "refunded",
+                            "local_status": payment.status,
+                            "refund_type": refund_type,
+                            "severity": "critical",
+                            "action_required": "manual_reconciliation",
+                        },
+                    )
 
             return gateway_result
 
