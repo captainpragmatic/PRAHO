@@ -3,6 +3,7 @@
 # ===============================================================================
 
 import contextlib
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -383,7 +384,6 @@ def validate_session_secure(request: HttpRequest) -> Response:
     Request Body:
     {
         "user_id": "2",
-        "state_version": 42,
         "timestamp": 1694022337
     }
 
@@ -393,7 +393,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
         X-Timestamp: <unix timestamp>
         X-Signature: <HMAC signature covering body + headers>
 
-    Response: {"active": true, "state_version": 43, "revoke_before": "..."}
+    Response: {"active": true, "membership_hash": "a1b2c3...", "revoke_before": "..."}
 
     Security Features:
     - No user IDs in URL (prevents enumeration)
@@ -421,7 +421,6 @@ def validate_session_secure(request: HttpRequest) -> Response:
         try:
             request_data = request.data if hasattr(request, "data") else json.loads(request.body)
             user_id = request_data.get("user_id")
-            state_version = request_data.get("state_version", 1)
             request_timestamp = request_data.get("timestamp")
 
             if not user_id:
@@ -441,7 +440,18 @@ def validate_session_secure(request: HttpRequest) -> Response:
 
         # Validate user exists and is active
         try:
-            User.objects.get(id=user_id, is_active=True)
+            user = User.objects.get(id=user_id, is_active=True)
+
+            # Compute a stable hash of the user's active memberships so Portal
+            # can detect changes (role grant/revoke) without polling.
+            # Truncated to 64 bits — sufficient for change detection (not a security boundary).
+            memberships = (
+                CustomerMembership.objects.filter(user=user, is_active=True)
+                .order_by("customer_id")
+                .values_list("customer_id", "role")
+            )
+            hash_input = ",".join(f"{cid}:{role}" for cid, role in memberships)
+            membership_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:16]
 
             # Success - calculate next validation time
             next_validation = datetime.now(UTC) + timedelta(minutes=10)
@@ -450,7 +460,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
 
             response_data = {
                 "active": True,
-                "state_version": state_version + 1,
+                "membership_hash": membership_hash,
                 "revoke_before": next_validation.isoformat(),
             }
 
