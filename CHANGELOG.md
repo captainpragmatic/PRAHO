@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.27.0] - 2026-03-20
+
 ### Added
 
 - **django-fsm-2 migration (ADR-0034)** — migrated 10 status-driven models to `FSMField(protected=True)` with `@transition` decorators: Order, OrderItem, Invoice, ProformaInvoice, Payment, Refund, Subscription, Service, Domain, Ticket; `ConcurrentTransitionMixin` on Order and Service for race-sensitive paths
@@ -17,9 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FSM transition smoke tests** — 106 tests across all 10 models verifying valid transitions, invalid transition rejection (`TransitionNotAllowed`), and protected field blocks (`AttributeError` on direct assignment)
 - **`force_status()` test helper** — `tests/helpers/fsm_helpers.py` bypasses FSM protection via `__dict__` for test setup; only allowed path for direct status manipulation in tests
 - **`_TICKET_VALID_TRANSITIONS` graph** — static FSM transition map derived from `@transition` decorators, used by `get_allowed_transitions()` to show only valid UI options per source status
+- **EU VIES VAT validation** — cross-border reverse-charge support with real-time VIES API validation for B2B EU transactions (#88)
 
 ### Fixed
 
+- **Ghost emails/provisioning on rollback (C1)** — billing payment signal side-effects (`_send_payment_success_email`, `_trigger_virtualmin_provisioning_on_payment`, etc.) now wrapped in `transaction.on_commit()` so they only fire after the DB transaction commits
+- **`confirm_payment` swallowed FSM conflicts (C2)** — `TransitionNotAllowed` in payment confirmation now returns `success=False, status="fsm_conflict"` instead of silently returning the gateway's `success=True`
+- **Refund entity updates were dead code (C3)** — `_process_entity_updates()` now actually calls `_update_order_refund_status()` and `_update_invoice_refund_status()` instead of setting `*_updated=True` without doing anything
+- **Order cancellation FSM bypass (C4)** — replaced `QuerySet.update(provisioning_status="cancelled")` with per-item FSM `cancel_provisioning()` transitions, now handling both `pending` and `in_progress` items
 - **TRANSITION_MAP dispatch by target only** — `_ORDER_TRANSITION_MAP` now keyed by `(source, target)` tuple; fixes ambiguous dispatch where `failed→pending` (retry) and `draft→pending` (submit) shared the same target key
 - **Silent `contextlib.suppress(TransitionNotAllowed)`** in `refund_service.py` — replaced with explicit try/except that logs warning and returns `Err()` instead of silently leaving invoice in wrong status
 - **Phantom audit logs** in `payment_service.py` — `log_security_event("payment_status_changed")` now only emits after successful FSM transition, not on failure or unmapped status
@@ -27,14 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`refresh_from_db` field loss** on all 10 FSM models — added `fields` parameter guard so FSM fields are only popped from `__dict__` when they'll actually be refreshed; prevents losing in-memory status when refreshing unrelated fields
 - **Provisioning webhook FSM bypass** — `provisioning/webhooks.py` changed from `service.status = "active"` to `service.complete_provisioning()` FSM transition method
 - **Ticket `get_allowed_transitions()`** — now returns only FSM-valid targets per source status instead of all map keys minus current (was showing invalid options like "in_progress" from "closed")
+- **Auth `state_version` → `membership_hash`** — replaced stale state versioning with HMAC-based membership hash for more reliable session invalidation (#84)
+- **Portal signed-cookie → DB sessions** — switched from signed-cookie sessions to database-backed sessions, restoring SecurityMiddleware compatibility (#118)
+- **Refund aggregation fail-hard** — refund service now raises typed DB exceptions on aggregation errors instead of silently returning zero (#119, #120)
+- **CORS config + refund error logging** — fixed CORS middleware ordering and added structured error logging in refund service (#67, #63)
+- **Billing audit trail completeness** — audit trail logging, aggregation safety, Sentry visibility with entity context in refund service
+- **CSP nonce deferral** — Content Security Policy nonces now correctly deferred for Stripe scripts; improved error handling in payment confirmation
 
 ### Changed
 
 - **`Result` class deduplication** — consolidated 3 identical `Result` implementations into `apps.common.types.Result` with `Ok`/`Err` constructors
+- **Unified design system (ADR-0035)** — extracted shared UI components into `shared/ui/`, migrated to `{% icon %}` tags, removed hardcoded SVGs and inline scripts across both services
+- **`db_table` standardization** — all Django models now use app-prefixed bare plural convention (`billing_invoices`, `orders_items`, etc.) for consistency
+- **psycopg v3 migration** — replaced `psycopg2-binary` with native `psycopg` (v3) for async support and better connection pooling
+- **Tiered CI testing (ADR-0036)** — SQLite for PR checks, PostgreSQL for master/nightly; affected-module detection for focused test runs
 - **Pre-commit pipeline** — added `fsm-guardrail-check` hook after `code-health-check`
 - **README test badge** — updated from 5,000+ to 7,000+
 
 ### Security
+
+- **Domain webhook HMAC-SHA256 verification** — implemented signature verification for domain registrar webhooks with timing-safe comparison
 
 - **Order idempotency hardening** — DB-backed unique constraint per customer with atomic `cache.add` and stuck-lock recovery; `IntegrityError` catch narrowed to only handle idempotency race conditions, not financial check constraints
 - **Payment intent validation** — regex validation (`pi_[a-zA-Z0-9]{10,64}`) at both platform and portal boundaries with `isinstance` guard against non-string input
