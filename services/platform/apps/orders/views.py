@@ -20,7 +20,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.forms import ModelForm, modelform_factory
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -189,36 +189,33 @@ def _validate_manual_price_override(
 
 
 def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
-    """
-    Calculate VAT rate for customer using centralized TaxService.
-    DEPRECATED: Use OrderVATCalculator.calculate_vat() instead for full compliance.
-    """
+    """Calculate VAT rate for customer using OrderVATCalculator (#130/L4)."""
+    from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
+
     try:
-        from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-            TaxService,  # Circular: cross-app  # Deferred: avoids circular import
-        )
+        country = getattr(customer, "country", "RO") or "RO"
+        vat_number = ""
+        is_business = bool(getattr(customer, "company_name", ""))
+        if hasattr(customer, "tax_profile"):
+            try:
+                tp = customer.tax_profile
+                vat_number = getattr(tp, "vat_number", "") or ""
+            except Exception:  # noqa: S110
+                pass  # No tax profile — use defaults
 
-        tax_profile = customer.get_tax_profile()
-
-        # Determine customer country
-        country_code = "RO"  # Default to Romania
-        if tax_profile and tax_profile.cui and tax_profile.cui.startswith("RO"):
-            country_code = "RO"
-
-        # Get VAT rate as decimal (0.21 for 21%)
-        vat_rate = TaxService.get_vat_rate(country_code, as_decimal=True)
-
-        logger.info(f"💰 [Orders] VAT rate for customer {customer.id}: {vat_rate} ({country_code})")
-        return vat_rate
-
+        info: CustomerVATInfo = {
+            "country": country,
+            "is_business": is_business,
+            "vat_number": vat_number,
+            "customer_id": str(customer.id),
+            "order_id": None,
+        }
+        # Use 10000 (100.00) as dummy subtotal — we only need the rate
+        result = OrderVATCalculator.calculate_vat(subtotal_cents=10000, customer_info=info)
+        return (result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
     except Exception as e:
-        logger.warning(f"⚠️ [Orders] Could not determine VAT rate for customer {customer.id}: {e}")
-        # Fall back to centralized Romanian VAT rate
-        from apps.common.tax_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-            TaxService,  # Circular: cross-app  # Deferred: avoids circular import
-        )
-
-        return TaxService.get_vat_rate("RO", as_decimal=True)
+        logger.warning("⚠️ [Orders] VAT rate lookup failed for customer %s: %s — using 21%%", customer.id, e)
+        return Decimal("0.2100")
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -286,15 +283,20 @@ def order_list(request: HttpRequest) -> HttpResponse:
     page_number = request.GET.get("page")
     orders = paginator.get_page(page_number)
 
-    # Get status counts for filter badges
-    status_counts = {
-        "total": Order.objects.filter(customer_id__in=customer_ids).count(),
-        "draft": Order.objects.filter(customer_id__in=customer_ids, status="draft").count(),
-        "pending": Order.objects.filter(customer_id__in=customer_ids, status="pending").count(),
-        "confirmed": Order.objects.filter(customer_id__in=customer_ids, status="confirmed").count(),
-        "processing": Order.objects.filter(customer_id__in=customer_ids, status="processing").count(),
-        "completed": Order.objects.filter(customer_id__in=customer_ids, status="completed").count(),
-    }
+    # Get status counts in a single query using conditional aggregation (#130/L1)
+    base_qs = Order.objects.filter(customer_id__in=customer_ids)
+    counts = base_qs.aggregate(
+        total=Count("id"),
+        draft=Count("id", filter=Q(status="draft")),
+        pending=Count("id", filter=Q(status="pending")),
+        confirmed=Count("id", filter=Q(status="confirmed")),
+        processing=Count("id", filter=Q(status="processing")),
+        completed=Count("id", filter=Q(status="completed")),
+        failed=Count("id", filter=Q(status="failed")),
+        cancelled=Count("id", filter=Q(status="cancelled")),
+        refunded=Count("id", filter=Q(status="refunded")),
+    )
+    status_counts = counts
 
     context = {
         "orders": orders,

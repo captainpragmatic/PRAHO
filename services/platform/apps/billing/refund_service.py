@@ -1188,14 +1188,25 @@ class RefundService:
                         payment.partially_refund()
                     payment.save()
                 except TransitionNotAllowed:
-                    # Payment may already be in refunded/partially_refunded state.
-                    # Log at ERROR: gateway refund succeeded but local status is now inconsistent.
+                    # CRITICAL: gateway refund succeeded but local state is inconsistent (#130/M9).
+                    # Log security event for monitoring/alerting — reconciliation required.
                     logger.error(
                         "🔥 [Refund] Gateway refund succeeded but Payment %s FSM transition "
                         "to '%s' failed (current status: %s) — reconciliation required",
                         payment.id,
                         "refunded" if refund_type == "full" else "partially_refunded",
                         payment.status,
+                    )
+                    log_security_event(
+                        event_type="refund_reconciliation_gap",
+                        details={
+                            "payment_id": str(payment.id),
+                            "gateway_status": "refunded",
+                            "local_status": payment.status,
+                            "refund_type": refund_type,
+                            "severity": "critical",
+                            "action_required": "manual_reconciliation",
+                        },
                     )
 
             return gateway_result

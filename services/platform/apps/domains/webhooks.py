@@ -5,6 +5,7 @@ Secure webhook processing for registrar integrations with signature verification
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -23,6 +24,13 @@ from apps.common.validators import log_security_event
 
 from .models import Domain, Registrar
 from .services import DomainRegistrarGateway
+
+# Webhook payload validation constants (#130/M8)
+_MAX_REGISTRAR_ID_LENGTH = 255
+_MAX_HOSTNAME_LENGTH = 253
+_HOSTNAME_RE = re.compile(
+    r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -164,12 +172,48 @@ class RegistrarWebhookView(View):
             return True, f"Event {event_type} acknowledged (no handler)"
         return handler(domain, webhook_data, client_ip)
 
+    def _apply_webhook_domain_fields(self, domain: Domain, webhook_data: dict[str, Any]) -> None:
+        """Apply validated webhook payload fields to domain (#130/M8)."""
+        registrar_id = webhook_data.get("registrar_domain_id")
+        if registrar_id and isinstance(registrar_id, str) and len(registrar_id) <= _MAX_REGISTRAR_ID_LENGTH:
+            domain.registrar_domain_id = registrar_id
+        elif registrar_id:
+            logger.warning(
+                "⚠️ [Webhook] Invalid registrar_domain_id (type=%s, len=%s)",
+                type(registrar_id).__name__,
+                len(str(registrar_id)) if registrar_id else 0,
+            )
+
+        raw_epp = webhook_data.get("epp_code")
+        if raw_epp:
+            domain.set_encrypted_epp_code(raw_epp)
+
+        expires_at = webhook_data.get("expires_at")
+        if expires_at:
+            try:
+                domain.expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            except ValueError:
+                logger.warning(f"⚠️ [Webhook] Invalid expires_at format: {expires_at}")
+
+        nameservers = webhook_data.get("nameservers")
+        if nameservers and isinstance(nameservers, list):
+            valid_ns = [
+                ns
+                for ns in nameservers
+                if isinstance(ns, str) and len(ns) <= _MAX_HOSTNAME_LENGTH and _HOSTNAME_RE.match(ns)
+            ]
+            if len(valid_ns) != len(nameservers):
+                logger.warning(
+                    "⚠️ [Webhook] Filtered %d invalid nameservers from payload", len(nameservers) - len(valid_ns)
+                )
+            if valid_ns:
+                domain.nameservers = valid_ns
+
     def _handle_domain_registered(
         self, domain: Domain, webhook_data: dict[str, Any], client_ip: str
     ) -> tuple[bool, str]:
         """✅ Handle domain registration completion"""
         try:
-            # Update domain status and details from registrar
             try:
                 domain.activate()
             except TransitionNotAllowed:
@@ -178,23 +222,8 @@ class RegistrarWebhookView(View):
                 else:
                     logger.warning(f"⚠️ [Webhook] Cannot activate domain {domain.name} from status '{domain.status}'")
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
-            domain.registrar_domain_id = webhook_data.get("registrar_domain_id", domain.registrar_domain_id)
-            raw_epp = webhook_data.get("epp_code")
-            if raw_epp:
-                domain.set_encrypted_epp_code(raw_epp)
 
-            # Update expiration date if provided
-            expires_at = webhook_data.get("expires_at")
-            if expires_at:
-                try:
-                    domain.expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                except ValueError:
-                    logger.warning(f"⚠️ [Webhook] Invalid expires_at format: {expires_at}")
-
-            # Update nameservers if provided
-            nameservers = webhook_data.get("nameservers")
-            if nameservers and isinstance(nameservers, list):
-                domain.nameservers = nameservers
+            self._apply_webhook_domain_fields(domain, webhook_data)
 
             try:
                 domain.save()

@@ -774,7 +774,7 @@ class OrderServiceCreationService:
         try:
             updated_services = []
 
-            for item in order.items.all():
+            for item in order.items.select_related("service").all():
                 if item.service and item.service.status == "pending":
                     item.service.start_provisioning()
                     item.service.save(update_fields=["status"])
