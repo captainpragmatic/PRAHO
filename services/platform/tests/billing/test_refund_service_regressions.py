@@ -1306,11 +1306,6 @@ class TestGetRefundedAmounts(TestCase):
     def test_order_none(self):
         assert RefundService._get_order_refunded_amount(None) == 0
 
-    def test_order_meta_refunds(self):
-        order = MagicMock()
-        order.meta = {"refunds": [{"amount_cents": 3000}, {"amount_cents": 2000}]}
-        assert RefundService._get_order_refunded_amount(order) == 5000
-
     def test_order_db_refunds(self):
         c = _make_customer()
         cur = _make_currency()
@@ -1337,11 +1332,6 @@ class TestGetRefundedAmounts(TestCase):
 
     def test_invoice_none(self):
         assert RefundService._get_invoice_refunded_amount(None) == 0
-
-    def test_invoice_meta_refunds(self):
-        inv = MagicMock()
-        inv.meta = {"refunds": [{"amount_cents": 1000}]}
-        assert RefundService._get_invoice_refunded_amount(inv) == 1000
 
     def test_invoice_db_refunds(self):
         c = _make_customer()

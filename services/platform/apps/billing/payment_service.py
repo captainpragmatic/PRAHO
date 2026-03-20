@@ -351,7 +351,7 @@ class PaymentService:
                 # Update payment record status
                 try:
                     with transaction.atomic():
-                        payment = Payment.objects.select_for_update().get(gateway_txn_id=payment_intent_id)
+                        payment = Payment.objects.select_for_update(of=("self",)).get(gateway_txn_id=payment_intent_id)
 
                         if customer_id is not None:
                             try:
