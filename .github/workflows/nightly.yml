@@ -135,6 +135,8 @@ jobs:
         "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under=80
 
     - name: Portal tests
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.dev
       run: |
         cd services/portal
         PYTHONPATH= PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
