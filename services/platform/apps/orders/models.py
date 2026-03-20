@@ -51,16 +51,17 @@ class Order(ConcurrentTransitionMixin, models.Model):
     customer = models.ForeignKey("customers.Customer", on_delete=models.PROTECT, related_name="orders")
 
     # Order status workflow
+    # Order status workflow — renamed in Phase A of Order-Proforma-Invoice lifecycle.
+    # Refunds are handled at Invoice/Payment level, not on Order FSM.
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("draft", _("Draft")),  # Cart/Quote stage - can be modified
-        ("pending", _("Pending")),  # Awaiting payment
-        ("confirmed", _("Confirmed")),  # Payment confirmed, ready for processing
-        ("processing", _("Processing")),  # Payment received, provisioning in progress
+        ("awaiting_payment", _("Awaiting Payment")),  # Submitted, waiting for payment
+        ("paid", _("Paid")),  # Payment received, audit checkpoint
+        ("in_review", _("In Review")),  # High-value order review gate
+        ("provisioning", _("Provisioning")),  # Services being provisioned
         ("completed", _("Completed")),  # Fully provisioned and delivered
         ("cancelled", _("Cancelled")),  # Cancelled by customer or admin
         ("failed", _("Failed")),  # Payment or provisioning failed
-        ("refunded", _("Refunded")),  # Order was refunded
-        ("partially_refunded", _("Partially Refunded")),  # Partial refund processed
     )
     status = FSMField(
         max_length=20,
@@ -73,8 +74,8 @@ class Order(ConcurrentTransitionMixin, models.Model):
     # Editable fields by status for hybrid editing approach
     EDITABLE_FIELDS_BY_STATUS: ClassVar[dict[str, list[str]]] = {
         "draft": ["*"],  # Everything editable
-        "pending": ["*"],  # Everything editable (payment not processed yet)
-        "confirmed": [
+        "awaiting_payment": ["*"],  # Everything editable (payment not processed yet)
+        "paid": [
             "notes",
             "delivery_date",
             "shipping_address_line1",
@@ -84,7 +85,8 @@ class Order(ConcurrentTransitionMixin, models.Model):
             "shipping_postal_code",
             "shipping_country",
         ],  # Limited to delivery and notes
-        "processing": [
+        "in_review": ["notes"],  # Only notes while under review
+        "provisioning": [
             "notes",
             "delivery_date",
             "shipping_address_line1",
@@ -97,8 +99,6 @@ class Order(ConcurrentTransitionMixin, models.Model):
         "completed": ["notes"],  # Only administrative notes
         "failed": ["*"],  # Full edit to retry/fix issues
         "cancelled": ["notes"],  # Only notes for record keeping
-        "refunded": ["notes"],  # Only notes
-        "partially_refunded": ["notes", "refund_reason"],  # Notes and refund details
     }
 
     # Financial information
@@ -152,7 +152,17 @@ class Order(ConcurrentTransitionMixin, models.Model):
     notes = models.TextField(blank=True, help_text=_("Internal order notes"))
     customer_notes = models.TextField(blank=True, help_text=_("Notes from customer"))
 
-    # Invoice relationship
+    # Proforma relationship — created at awaiting_payment, converted to invoice on payment
+    proforma = models.ForeignKey(
+        "billing.ProformaInvoice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="orders",
+        help_text=_("Proforma invoice for this order"),
+    )
+
+    # Invoice relationship — linked after proforma converts to invoice on payment
     invoice = models.ForeignKey(
         "billing.Invoice",
         on_delete=models.SET_NULL,
@@ -222,14 +232,13 @@ class Order(ConcurrentTransitionMixin, models.Model):
                 condition=models.Q(
                     status__in=[
                         "draft",
-                        "pending",
-                        "confirmed",
-                        "processing",
+                        "awaiting_payment",
+                        "paid",
+                        "in_review",
+                        "provisioning",
                         "completed",
                         "cancelled",
                         "failed",
-                        "refunded",
-                        "partially_refunded",
                     ]
                 ),
                 name="order_status_valid_values",
@@ -342,13 +351,17 @@ class Order(ConcurrentTransitionMixin, models.Model):
 
     @property
     def is_paid(self) -> bool:
-        """Check if order has been paid"""
-        return bool(self.status in ["confirmed", "processing", "completed"])
+        """Check if order has been paid (payment received at some point)."""
+        return bool(self.status in ["paid", "in_review", "provisioning", "completed"])
 
     @property
     def can_be_cancelled(self) -> bool:
-        """Check if order can be cancelled"""
-        return self.status in ["draft", "pending", "confirmed"]
+        """Check if order can be cancelled (before completion).
+
+        Must match the FSM cancel() transition sources:
+        draft, awaiting_payment, paid, in_review, provisioning, failed.
+        """
+        return self.status in ["draft", "awaiting_payment", "paid", "in_review", "provisioning"]
 
     def can_edit_field(self, field_name: str) -> bool:
         """Check if a specific field can be edited based on current status"""
@@ -452,49 +465,54 @@ class Order(ConcurrentTransitionMixin, models.Model):
         self.save(update_fields=["subtotal_cents", "tax_cents", "total_cents"])
 
     # =========================================================================
-    # FSM TRANSITIONS
+    # FSM TRANSITIONS — Phase A rename (Order-Proforma-Invoice lifecycle)
     # =========================================================================
 
-    @transition(field=status, source="draft", target="pending", conditions=[_order_has_items])
+    @transition(field=status, source="draft", target="awaiting_payment", conditions=[_order_has_items])
     def submit(self) -> None:
-        """Submit draft order for payment."""
+        """Submit draft order for payment. Creates proforma (Phase B)."""
 
-    @transition(field=status, source="pending", target="confirmed")
-    def confirm(self) -> None:
-        """Confirm order after payment verification."""
+    @transition(field=status, source="awaiting_payment", target="paid")
+    def mark_paid(self) -> None:
+        """Mark order as paid after payment confirmation.
+        Audit checkpoint: proves money received even if provisioning fails."""
 
-    @transition(field=status, source="confirmed", target="processing")
-    def start_processing(self) -> None:
-        """Start provisioning the order."""
+    @transition(field=status, source="paid", target="provisioning")
+    def start_provisioning(self) -> None:
+        """Start provisioning services (auto-advance for orders below review threshold)."""
 
-    @transition(field=status, source="processing", target="completed")
+    @transition(field=status, source="paid", target="in_review")
+    def flag_for_review(self) -> None:
+        """Flag high-value order for admin review before provisioning."""
+
+    @transition(field=status, source="in_review", target="provisioning")
+    def approve_review(self) -> None:
+        """Admin approves reviewed order, proceeding to provisioning."""
+
+    @transition(field=status, source="in_review", target="cancelled")
+    def reject_review(self) -> None:
+        """Admin rejects reviewed order."""
+
+    @transition(field=status, source="provisioning", target="completed")
     def complete(self) -> None:
-        """Mark order as completed."""
+        """Mark order as completed after all items provisioned."""
         self.completed_at = timezone.now()
 
-    @transition(field=status, source=["draft", "pending", "confirmed", "processing", "failed"], target="cancelled")
+    @transition(
+        field=status,
+        source=["draft", "awaiting_payment", "paid", "in_review", "provisioning", "failed"],
+        target="cancelled",
+    )
     def cancel(self) -> None:
         """Cancel the order."""
 
-    @transition(field=status, source=["pending", "processing"], target="failed")
+    @transition(field=status, source=["awaiting_payment", "provisioning"], target="failed")
     def fail(self) -> None:
         """Mark order as failed."""
 
-    @transition(field=status, source="failed", target="pending")
+    @transition(field=status, source="failed", target="awaiting_payment")
     def retry(self) -> None:
-        """Retry a failed order."""
-
-    @transition(field=status, source="completed", target="refunded")
-    def refund_order(self) -> None:
-        """Fully refund a completed order."""
-
-    @transition(field=status, source="completed", target="partially_refunded")
-    def partial_refund(self) -> None:
-        """Partially refund a completed order."""
-
-    @transition(field=status, source="partially_refunded", target="refunded")
-    def complete_refund(self) -> None:
-        """Complete remaining refund on partially refunded order."""
+        """Retry a failed order (returns to awaiting_payment)."""
 
 
 class OrderItem(models.Model):

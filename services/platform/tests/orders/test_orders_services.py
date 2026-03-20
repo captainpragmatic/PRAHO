@@ -291,7 +291,7 @@ class OrderServiceTestCase(TestCase):
                 'fiscal_code': 'RO12345678',
             }
         )
-        # FSM: submit() (draft→pending) requires at least one item on the order
+        # FSM: submit() (draft→awaiting_payment) requires at least one item on the order
         OrderItem.objects.create(
             order=order,
             product=self.product,
@@ -311,7 +311,7 @@ class OrderServiceTestCase(TestCase):
 
         # Update status
         status_data = StatusChangeData(
-            new_status="pending",
+            new_status="awaiting_payment",
             notes="Order submitted for processing",
             changed_by=self.user
         )
@@ -321,7 +321,7 @@ class OrderServiceTestCase(TestCase):
         # Verify success
         self.assertTrue(result.is_ok(), f"Expected success, got error: {result.unwrap_err() if result.is_err() else 'N/A'}")
         updated_order = result.unwrap()
-        self.assertEqual(updated_order.status, "pending")
+        self.assertEqual(updated_order.status, "awaiting_payment")
 
         # Verify status history
         self.assertEqual(order.status_history.count(), 1)
@@ -329,7 +329,7 @@ class OrderServiceTestCase(TestCase):
         self.assertIsNotNone(history)
         assert history is not None  # Type narrowing
         self.assertEqual(history.old_status, "draft")
-        self.assertEqual(history.new_status, "pending")
+        self.assertEqual(history.new_status, "awaiting_payment")
         self.assertEqual(history.notes, "Order submitted for processing")
         self.assertEqual(history.changed_by, self.user)
 
@@ -366,17 +366,20 @@ class OrderServiceTestCase(TestCase):
     def test_valid_status_transitions(self):
         """Test all valid status transitions"""
         valid_transitions = [
-            ("draft", "pending"),
+            ("draft", "awaiting_payment"),
             ("draft", "cancelled"),
-            ("pending", "confirmed"),
-            ("pending", "cancelled"),
-            ("pending", "failed"),
-            ("confirmed", "processing"),
-            ("confirmed", "cancelled"),
-            ("processing", "completed"),
-            ("processing", "failed"),
-            ("processing", "cancelled"),
-            # NOTE: ("failed", "pending") uses FSM retry() method which is not
+            ("awaiting_payment", "paid"),
+            ("awaiting_payment", "cancelled"),
+            ("awaiting_payment", "failed"),
+            ("paid", "provisioning"),
+            ("paid", "cancelled"),
+            ("paid", "in_review"),
+            ("in_review", "provisioning"),
+            ("in_review", "cancelled"),
+            ("provisioning", "completed"),
+            ("provisioning", "failed"),
+            ("provisioning", "cancelled"),
+            # NOTE: ("failed", "awaiting_payment") uses FSM retry() method which is not
             # exposed via update_order_status service — omitted here intentionally
             ("failed", "cancelled"),
         ]
@@ -385,7 +388,7 @@ class OrderServiceTestCase(TestCase):
             with self.subTest(transition=f"{old_status} → {new_status}"):
                 order = Order.objects.create(
                     customer=self.customer,
-                    order_number=f"ORD-2024-{old_status.upper()}-{new_status.upper()}",
+                    order_number=f"ORD-2024-{old_status[:4].upper()}-{new_status[:4].upper()}",
                     currency=self.currency,
                     status=old_status,
                     billing_address={
@@ -399,8 +402,8 @@ class OrderServiceTestCase(TestCase):
                     }
                 )
 
-                # FSM: draft → pending requires items + a current price (preflight validation)
-                if old_status == "draft" and new_status == "pending":
+                # FSM: draft → awaiting_payment requires items + a current price (preflight validation)
+                if old_status == "draft" and new_status == "awaiting_payment":
                     item_product = Product.objects.create(
                         slug=f"transition-product-{old_status}-{new_status}",
                         name="Transition Test Product",
@@ -665,14 +668,14 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(order.status, 'draft')
         self.assertEqual(Service.objects.count(), 0)
 
-        # Step 2: Move order to pending (should create services)
-        status_data = StatusChangeData(new_status='pending')
+        # Step 2: Move order to awaiting_payment (should create services)
+        status_data = StatusChangeData(new_status='awaiting_payment')
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
         # Verify order status changed
         order.refresh_from_db()
-        self.assertEqual(order.status, 'pending')
+        self.assertEqual(order.status, 'awaiting_payment')
 
         # Manually trigger service creation (signals may not work in test environment)
         creation_result = OrderServiceCreationService.create_pending_services(order)
@@ -690,13 +693,13 @@ class OrderServiceCreationTestCase(TestCase):
         order_item = order.items.first()
         self.assertEqual(order_item.service, service)
 
-        # Step 3a: Move order to confirmed first
-        status_data = StatusChangeData(new_status='confirmed')
+        # Step 3a: Move order to paid first
+        status_data = StatusChangeData(new_status='paid')
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
-        # Step 3b: Then move to processing (should update services to provisioning)
-        status_data = StatusChangeData(new_status='processing')
+        # Step 3b: Then move to provisioning (should update services to provisioning)
+        status_data = StatusChangeData(new_status='provisioning')
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 

@@ -209,7 +209,7 @@
       </div>
 
       {% comment %}Add Item Section for Edit Mode{% endcomment %}
-      {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,pending" %}
+      {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,awaiting_payment" %}
       <div class="px-6 py-4 bg-slate-900 border-t border-slate-700">
         <div class="flex items-center justify-between">
           <div>
@@ -258,7 +258,7 @@
         </div>
         <p class="text-lg font-medium mb-2">{% trans "No items in this order yet" %}</p>
         <p class="text-sm">{% trans "Order items will appear here once added" %}</p>
-        {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,pending" %}
+        {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,awaiting_payment" %}
           <div class="mt-4">
             <button type="button"
                     onclick="toggleAddItemForm()"
@@ -270,7 +270,7 @@
       </div>
 
       {% comment %}Add Item Form Section for Empty State{% endcomment %}
-      {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,pending" %}
+      {% if request.resolver_match.url_name == 'order_edit' and order.status in "draft,awaiting_payment" %}
       <div id="add-item-form-section-empty" class="hidden p-6 border-t border-slate-700">
         <div class="bg-slate-800 rounded-lg border border-slate-600 p-4">
           <div class="flex items-center justify-between mb-4">

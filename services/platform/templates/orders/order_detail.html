@@ -20,7 +20,7 @@
         {% if preflight_ok %}
           <div class="mt-2 text-green-400 text-sm">{% icon "check" %} {% trans "Validation passed" %}</div>
         {% else %}
-          <div class="mt-2 text-yellow-400 text-sm">{% icon "warning" %} {% trans "Validation required before promoting to Pending" %}</div>
+          <div class="mt-2 text-yellow-400 text-sm">{% icon "warning" %} {% trans "Validation required before submitting for payment" %}</div>
         {% endif %}
       {% endif %}
     </div>
@@ -36,22 +36,22 @@
           {% trans "Edit" as bt2 %}{% button bt2 variant="primary" href=order_edit_url %}
         {% endif %}
 
-        {% if order.status == "completed" or order.status == "partially_refunded" %}
+        {% if order.status == "completed" %}
           {% trans "Refund Order" as bt3 %}{% button bt3 onclick="showRefundModal()" variant="success" %}
         {% endif %}
 
-        {% if order.status not in "cancelled,refunded,completed" %}
+        {% if order.status not in "cancelled,completed" %}
           {% if order.status == "draft" %}
             {% url 'orders:order_validate' pk=order.id as validate_url %}
             {% trans "Run Validation" as validate_btn %}{% button validate_btn variant="success" icon="check" hx_get=validate_url hx_target="#preflight-container" hx_swap="innerHTML" %}
           {% endif %}
           {% trans "Change Status" as change_status_btn %}{% button change_status_btn variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
         {% endif %}
-      {% elif not is_staff and order.status in "completed,partially_refunded" %}
+      {% elif not is_staff and order.status in "completed" %}
         <!-- Refund Request Button for Customers -->
         {% trans "Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
 
-        {% if order.status not in "cancelled,refunded,completed" %}
+        {% if order.status not in "cancelled,completed" %}
           {% trans "Change Status" as change_status_btn2 %}{% button change_status_btn2 variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
         {% endif %}
       {% endif %}
@@ -80,22 +80,20 @@
               <dd class="mt-1">
                 {% if order.status == "draft" %}
                   {% trans "Draft" as bt5 %}{% badge bt5 icon="document" variant="secondary" %}
-                {% elif order.status == "pending" %}
-                  {% trans "Pending" as bt6 %}{% badge bt6 icon="clock" variant="warning" %}
-                {% elif order.status == "confirmed" %}
-                  {% trans "Confirmed" as bt6b %}{% badge bt6b icon="check" variant="success" %}
-                {% elif order.status == "processing" %}
-                  {% trans "Processing" as bt7 %}{% badge bt7 icon="settings" variant="primary" %}
+                {% elif order.status == "awaiting_payment" %}
+                  {% trans "Awaiting Payment" as bt6 %}{% badge bt6 icon="clock" variant="warning" %}
+                {% elif order.status == "paid" %}
+                  {% trans "Payment Received" as bt6b %}{% badge bt6b icon="check" variant="success" %}
+                {% elif order.status == "in_review" %}
+                  {% trans "Under Review" as bt6c %}{% badge bt6c icon="alert" variant="warning" %}
+                {% elif order.status == "provisioning" %}
+                  {% trans "Setting Up Services" as bt7 %}{% badge bt7 icon="settings" variant="primary" %}
                 {% elif order.status == "completed" %}
                   {% trans "Completed" as bt8 %}{% badge bt8 icon="check" variant="success" %}
                 {% elif order.status == "cancelled" %}
                   {% trans "Cancelled" as bt9 %}{% badge bt9 icon="x" variant="danger" %}
                 {% elif order.status == "failed" %}
                   {% trans "Failed" as bt10 %}{% badge bt10 variant="danger" %}
-                {% elif order.status == "refunded" %}
-                  {% trans "Refunded" as bt11 %}{% badge bt11 icon="currency" variant="info" %}
-                {% elif order.status == "partially_refunded" %}
-                  {% trans "Partially Refunded" as bt12 %}{% badge bt12 variant="warning" %}
                 {% endif %}
               </dd>
             </div>
@@ -233,13 +231,13 @@
                 <div class="flex items-start space-x-3">
                   <div class="flex-shrink-0">
                     {% if history.new_status == "draft" %}{% icon "document" %}
-                    {% elif history.new_status == "pending" %}{% icon "clock" %}
-                    {% elif history.new_status == "processing" %}{% icon "settings" %}
+                    {% elif history.new_status == "awaiting_payment" %}{% icon "clock" %}
+                    {% elif history.new_status == "paid" %}{% icon "check" %}
+                    {% elif history.new_status == "in_review" %}{% icon "alert" %}
+                    {% elif history.new_status == "provisioning" %}{% icon "settings" %}
                     {% elif history.new_status == "completed" %}{% icon "check" %}
                     {% elif history.new_status == "cancelled" %}{% icon "x" %}
                     {% elif history.new_status == "failed" %}{% icon "warning" %}
-                    {% elif history.new_status == "refunded" %}{% icon "currency" %}
-                    {% elif history.new_status == "partially_refunded" %}{% icon "currency" %}
                     {% endif %}
                   </div>
                   <div class="flex-1 min-w-0">
@@ -275,7 +273,7 @@
 </div>
 
 <!-- Status Change Modal (for staff) -->
-{% if is_staff and order.status not in "cancelled,refunded,completed" %}
+{% if is_staff and order.status not in "cancelled,completed" %}
 <div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <!-- Backdrop -->
   <div class="fixed inset-0 bg-slate-900 opacity-75 transition-opacity" aria-hidden="true" onclick="hideStatusModal()"></div>
@@ -331,26 +329,25 @@
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="">{% trans "Select new status..." %}</option>
               {% if order.status == "draft" %}
-                <option value="pending" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Pending" %}</option>
+                <option value="awaiting_payment" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Submit for Payment" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
-              {% elif order.status == "pending" %}
-                <option value="confirmed">✅ {% trans "Confirmed" %}</option>
+              {% elif order.status == "awaiting_payment" %}
+                <option value="paid">✅ {% trans "Mark as Paid" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
                 <option value="failed">🔥 {% trans "Failed" %}</option>
-              {% elif order.status == "confirmed" %}
-                <option value="processing">⚙️ {% trans "Processing" %}</option>
+              {% elif order.status == "paid" %}
+                <option value="provisioning">⚙️ {% trans "Start Provisioning" %}</option>
+                <option value="in_review">🔍 {% trans "Flag for Review" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
-              {% elif order.status == "processing" %}
+              {% elif order.status == "in_review" %}
+                <option value="provisioning">✅ {% trans "Approve & Provision" %}</option>
+                <option value="cancelled">❌ {% trans "Reject & Cancel" %}</option>
+              {% elif order.status == "provisioning" %}
                 <option value="completed">✅ {% trans "Completed" %}</option>
                 <option value="failed">🔥 {% trans "Failed" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
-              {% elif order.status == "completed" %}
-                <option value="refunded">💰 {% trans "Refunded" %}</option>
-                <option value="partially_refunded">💸 {% trans "Partially Refunded" %}</option>
-              {% elif order.status == "partially_refunded" %}
-                <option value="refunded">💰 {% trans "Refunded" %}</option>
               {% elif order.status == "failed" %}
-                <option value="pending">⏳ {% trans "Pending" %}</option>
+                <option value="awaiting_payment">⏳ {% trans "Retry" %}</option>
                 <option value="cancelled">❌ {% trans "Cancelled" %}</option>
               {% endif %}
             </select>
@@ -473,7 +470,7 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endif %}
 
 <!-- Refund Modal (for staff) -->
-{% if is_staff and order.status in "completed,partially_refunded" %}
+{% if is_staff and order.status in "completed" %}
 <div id="refundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
@@ -651,7 +648,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
 {% endif %}
 
 <!-- Order Refund Request Modal (for customers) -->
-{% if not is_staff and order.status in "completed,partially_refunded" %}
+{% if not is_staff and order.status in "completed" %}
 <div id="orderRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">

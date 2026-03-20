@@ -83,6 +83,14 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     invoice = models.ForeignKey(
         "billing.Invoice", on_delete=models.SET_NULL, null=True, blank=True, related_name="payments"
     )
+    # Proforma linked at payment creation, before conversion to invoice
+    proforma = models.ForeignKey(
+        "billing.ProformaInvoice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+    )
 
     # Payment details
     status = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)

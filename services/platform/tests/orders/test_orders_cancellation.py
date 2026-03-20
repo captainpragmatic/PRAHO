@@ -64,7 +64,7 @@ class OrderCancellationItemStatusTests(TestCase):
     def test_pending_item_cancelled_via_fsm(self) -> None:
         item = self._make_item("pending")
 
-        _handle_order_cancellation(self.order, old_status="confirmed")
+        _handle_order_cancellation(self.order, old_status="paid")
 
         item.refresh_from_db()
         self.assertEqual(item.provisioning_status, "cancelled")
@@ -73,7 +73,7 @@ class OrderCancellationItemStatusTests(TestCase):
         """C4 regression: in_progress items must also be cancelled."""
         item = self._make_item("in_progress")
 
-        _handle_order_cancellation(self.order, old_status="processing")
+        _handle_order_cancellation(self.order, old_status="provisioning")
 
         item.refresh_from_db()
         self.assertEqual(item.provisioning_status, "cancelled")
@@ -82,7 +82,7 @@ class OrderCancellationItemStatusTests(TestCase):
         """Completed items must NOT be cancelled."""
         item = self._make_item("completed")
 
-        _handle_order_cancellation(self.order, old_status="confirmed")
+        _handle_order_cancellation(self.order, old_status="paid")
 
         item.refresh_from_db()
         self.assertEqual(item.provisioning_status, "completed")
@@ -93,7 +93,7 @@ class OrderCancellationItemStatusTests(TestCase):
         in_progress = self._make_item("in_progress")
         completed = self._make_item("completed")
 
-        _handle_order_cancellation(self.order, old_status="processing")
+        _handle_order_cancellation(self.order, old_status="provisioning")
 
         pending.refresh_from_db()
         in_progress.refresh_from_db()

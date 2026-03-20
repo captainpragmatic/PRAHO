@@ -839,22 +839,27 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
         from apps.orders.services import OrderService, StatusChangeData
 
         if new_status == "paid" and old_status != "paid":
-            # Invoice paid - advance orders to processing
-            for order in invoice.orders.filter(status="pending"):
+            # Invoice paid — advance orders to paid.
+            # RC-3 fix: Skip proforma-linked orders — those are handled by
+            # proforma_payment_received signal which does the full double-transition
+            # (mark_paid + start_provisioning). If we advance them here to "paid"
+            # only, the on_commit signal handler sees them already paid and skips,
+            # leaving them stuck without provisioning.
+            for order in invoice.orders.filter(status="awaiting_payment", proforma__isnull=True):
                 status_change = StatusChangeData(
-                    new_status="processing",
+                    new_status="paid",
                     notes=f"Payment received for invoice {invoice.number}",
                     changed_by=None,  # System change
                 )
 
                 result = OrderService.update_order_status(order, status_change)
                 if result.is_ok():
-                    logger.info(f"📋 [Order] Advanced {order.order_number} to processing")
+                    logger.info(f"📋 [Order] Advanced {order.order_number} to paid")
 
         elif new_status == "void" and old_status != "void":
             # Invoice voided - cancel related orders
             for order in invoice.orders.all():
-                if order.status in ["pending", "processing"]:
+                if order.status in ["awaiting_payment", "paid", "in_review", "provisioning"]:
                     status_change = StatusChangeData(
                         new_status="cancelled", notes=f"Related invoice {invoice.number} was voided", changed_by=None
                     )
@@ -950,6 +955,19 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
                 "customer_id": str(invoice.customer.id),
                 "refund_amount_cents": invoice.total_cents,
             },
+        )
+
+        # D4: Emit invoice_refunded signal for cross-app handlers (Provisioning, Orders)
+        from apps.billing.custom_signals import (
+            invoice_refunded,  # Deferred: avoids circular import at module level (PLC0415 suppressed per-file in pyproject.toml)
+        )
+
+        transaction.on_commit(
+            lambda inv=invoice: invoice_refunded.send(
+                sender=Invoice,
+                invoice=inv,
+                refund_type="full",
+            )
         )
 
         logger.info(f"💰 [Refund] Completed invoice refund for {invoice.number}")

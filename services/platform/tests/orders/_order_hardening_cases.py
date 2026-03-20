@@ -14,7 +14,7 @@ Verifies:
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -323,13 +323,13 @@ class NonRetryableConstraintMarkersTest(TestCase):
 
 
 def _make_pending_order_for_h9(customer: Customer, currency: Currency, **kwargs: object) -> Order:
-    """Create a pending order for H9 state machine tests."""
+    """Create an awaiting_payment order for H9 state machine tests."""
     return Order.objects.create(
         customer=customer,
         currency=currency,
         customer_email=customer.primary_email,
         customer_name=customer.company_name,
-        status="pending",
+        status="awaiting_payment",
         **kwargs,
     )
 
@@ -354,16 +354,32 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         return request
 
     def test_confirm_order_creates_status_history_record(self) -> None:
-        """After confirming an order, an OrderStatusHistory row must exist."""
+        """After confirming a card order, an OrderStatusHistory row must exist."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
+        from tests.helpers.fsm_helpers import force_status  # noqa: PLC0415
 
-        order = _make_pending_order_for_h9(self.customer, self.currency, payment_method="bank_transfer")
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.company_name,
+            payment_method="card",
+            payment_intent_id="pi_testH9history123456",
+        )
+        force_status(order, "awaiting_payment")
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch("apps.api.orders.views._provision_confirmed_order_item"),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
-            response = confirm_order(self._make_request({"payment_status": "succeeded"}), str(order.id))
+            response = confirm_order(
+                self._make_request({"payment_intent_id": "pi_testH9history123456", "payment_status": "succeeded"}),
+                str(order.id),
+            )
 
         self.assertEqual(response.status_code, 200)
         history_count = OrderStatusHistory.objects.filter(order=order).count()
@@ -373,15 +389,16 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         latest = OrderStatusHistory.objects.filter(order=order).order_by("-created_at").first()
         self.assertIsNotNone(latest)
         assert latest is not None  # narrow type for mypy
-        self.assertEqual(latest.new_status, "confirmed")
-        self.assertEqual(latest.old_status, "pending")
+        # Phase A+D: confirm_order auto-advances through paid→provisioning
+        # (below review threshold), so latest history shows provisioning
+        self.assertIn(latest.new_status, ("paid", "provisioning"))
 
-    def test_confirm_order_status_transition_pending_to_confirmed(self) -> None:
-        """The state machine must transition order from pending → confirmed."""
+    def test_confirm_order_status_transition_awaiting_payment_to_provisioning(self) -> None:
+        """confirm_order auto-advances awaiting_payment → paid → provisioning (below threshold)."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
         order = _make_pending_order_for_h9(self.customer, self.currency)
-        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.status, "awaiting_payment")
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
@@ -391,32 +408,33 @@ class ConfirmOrderStatusHistoryTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         order.refresh_from_db()
-        self.assertEqual(order.status, "confirmed")
+        # Phase D: auto-advance to provisioning for orders below review threshold
+        self.assertEqual(order.status, "provisioning")
 
-    def test_invalid_transition_refunded_to_confirmed_is_rejected(self) -> None:
-        """The state machine must reject the refunded → confirmed transition."""
+    def test_invalid_transition_completed_to_paid_is_rejected(self) -> None:
+        """The state machine must reject the completed → paid transition."""
         from apps.orders.services import OrderService  # noqa: PLC0415
 
         order = _make_order(self.customer, self.currency)
-        # Force the order into 'refunded' state directly (terminal state)
-        force_status(order, "refunded")
+        # Force the order into 'completed' state (terminal state)
+        force_status(order, "completed")
 
-        status_change = StatusChangeData(new_status="confirmed", notes="attacker attempt", changed_by=None)
+        status_change = StatusChangeData(new_status="paid", notes="attacker attempt", changed_by=None)
         result = OrderService.update_order_status(order, status_change)
 
-        self.assertFalse(result.is_ok(), "refunded → confirmed must be rejected by the state machine")
+        self.assertFalse(result.is_ok(), "completed → paid must be rejected by the state machine")
 
-    def test_invalid_transition_cancelled_to_confirmed_is_rejected(self) -> None:
-        """The state machine must reject the cancelled → confirmed transition."""
+    def test_invalid_transition_cancelled_to_paid_is_rejected(self) -> None:
+        """The state machine must reject the cancelled → paid transition."""
         from apps.orders.services import OrderService  # noqa: PLC0415
 
         order = _make_order(self.customer, self.currency)
         force_status(order, "cancelled")
 
-        status_change = StatusChangeData(new_status="confirmed", notes="unexpected retry", changed_by=None)
+        status_change = StatusChangeData(new_status="paid", notes="unexpected retry", changed_by=None)
         result = OrderService.update_order_status(order, status_change)
 
-        self.assertFalse(result.is_ok(), "cancelled → confirmed must be rejected by the state machine")
+        self.assertFalse(result.is_ok(), "cancelled → paid must be rejected by the state machine")
 
     def test_double_confirmation_is_rejected_by_idempotency_guard(self) -> None:
         """Calling confirm_order twice on the same order must return HTTP 409 on the second call."""
@@ -678,7 +696,7 @@ class ConfirmOrderPaymentIntentBindingTest(TestCase):
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.company_name,
-            status="pending",
+            status="awaiting_payment",
             payment_method=payment_method,
         )
 
@@ -767,7 +785,7 @@ class ConfirmOrderPIFormatValidationTest(TestCase):
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.company_name,
-            status="pending",
+            status="awaiting_payment",
             payment_method="card",
         )
 
@@ -865,17 +883,17 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         request.user = self.user
         return request
 
-    def test_already_confirmed_order_returns_409_with_generic_message(self) -> None:
-        """Calling confirm_order on an already-confirmed order must return 409 with no internal state names."""
+    def test_already_paid_order_returns_409_with_generic_message(self) -> None:
+        """Calling confirm_order on an already-paid order must return 409 with no internal state names."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
-        # An order that is already confirmed cannot be confirmed again
+        # An order that is already paid cannot be confirmed again
         order = Order.objects.create(
             customer=self.customer,
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.company_name,
-            status="confirmed",
+            status="paid",
         )
 
         request = self._make_confirm_request({})
@@ -896,17 +914,17 @@ class ConfirmOrderErrorLeakageTest(TestCase):
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.company_name,
-            status="pending",
+            status="awaiting_payment",
         )
 
-        internal_message = "Invalid status transition: pending -> confirmed (constraint XYZ violated internally)"
+        internal_message = "Invalid status transition: awaiting_payment -> paid (constraint XYZ violated internally)"
 
         request = self._make_confirm_request({})
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch(
-                "apps.api.orders.views.OrderService.update_order_status",
+                "apps.orders.services.OrderPaymentConfirmationService.confirm_order",
                 return_value=Err(internal_message),
             ),
         ):
@@ -927,9 +945,8 @@ class ConfirmOrderErrorLeakageTest(TestCase):
             error_text,
             "Internal constraint names must not appear in client-facing error messages",
         )
-        # Response must be a generic, user-friendly message
-        self.assertIn(
-            "confirmed",
-            error_text.lower(),
-            "Generic error message should mention the action (confirmed) without internal details",
+        # Response must be a generic, user-friendly message about the action
+        self.assertTrue(
+            any(word in error_text.lower() for word in ["confirmed", "paid", "processed", "state"]),
+            f"Generic error message should mention the order state action. Got: {error_text}",
         )

@@ -86,15 +86,15 @@ def get_task_time_limit() -> int:
     return SettingsService.get_integer_setting("orders.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
 
-def process_pending_orders() -> dict[str, Any]:
+def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Complexity: dispatch + lock + per-order branching; helpers already extracted
     """
-    Process orders stuck in "pending" status.
+    Process orders stuck in "awaiting_payment" status.
 
     This task handles:
     - Trigger provisioning for paid orders
     - Handle order timeouts and cancellations
     - Update order status based on payment status
-    - Process orders that should move to confirmed/processing
+    - Process orders that should move to paid/provisioning
 
     Runs every 5 minutes to ensure timely order processing.
 
@@ -120,10 +120,10 @@ def process_pending_orders() -> dict[str, Any]:
             return {"success": True, "message": "Already running"}
 
         try:
-            # Get all pending orders
+            # Get all awaiting_payment orders (B12: include proforma for fallback)
             pending_orders = (
-                Order.objects.filter(status="pending")
-                .select_related("customer", "currency", "invoice")
+                Order.objects.filter(status="awaiting_payment")
+                .select_related("customer", "currency", "invoice", "proforma")
                 .prefetch_related("items")
             )
 
@@ -138,6 +138,21 @@ def process_pending_orders() -> dict[str, Any]:
                 }
 
                 try:
+                    # B12: Create proforma if missing (edge case — signal failed or race)
+                    if order.total_cents > 0 and not order.proforma:
+                        try:
+                            from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+                            proforma_result = ProformaService.create_from_order(order)
+                            if proforma_result.is_ok():
+                                logger.info(
+                                    "📄 [OrderProcessor] Created missing proforma for %s",
+                                    order.order_number,
+                                )
+                                order.refresh_from_db()
+                        except Exception as e:
+                            logger.error("🔥 [OrderProcessor] Failed to create proforma fallback: %s", e)
+
                     # Check if order has timed out
                     if _handle_order_timeout(order, now, order_result, results):
                         continue
@@ -187,13 +202,15 @@ def process_pending_orders() -> dict[str, Any]:
 
 def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: int, results: dict[str, Any]) -> bool:
     """Process payment confirmation for an order."""
-    if total_paid_cents >= invoice.total_cents and order.status == "pending":
+    if total_paid_cents >= invoice.total_cents and order.status == "awaiting_payment":
         old_status = order.status
         try:
-            order.confirm()
+            order.mark_paid()
             order.save(update_fields=["status", "updated_at"])
         except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning("⚠️ [PaymentSync] Cannot confirm order %s from status %s", order.order_number, old_status)
+            logger.warning(
+                "⚠️ [PaymentSync] Cannot mark order %s as paid from status %s", order.order_number, old_status
+            )
             return False
         results["payment_confirmations"] += 1
 
@@ -204,7 +221,7 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
             content_object=order,
             description=f"Order payment confirmed: {order.order_number}",
             old_values={"status": old_status},
-            new_values={"status": "confirmed"},
+            new_values={"status": "paid"},
             actor_type="system",
             metadata={
                 "order_id": str(order.id),
@@ -222,7 +239,7 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
 def _process_payment_failures(order: Order, payments: list[Any], results: dict[str, Any]) -> bool:
     """Process payment failures for an order."""
     failed_payments = [p for p in payments if p.status == "failed"]
-    if not failed_payments or order.status != "pending":
+    if not failed_payments or order.status != "awaiting_payment":
         return False
 
     # Check if all payment attempts have failed
@@ -262,36 +279,26 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
 
 
 def _process_refunds(order: Order, payments: list[Any], total_paid_cents: int, results: dict[str, Any]) -> bool:
-    """Process refunds for an order."""
+    """Process refunds for an order.
+
+    Phase A: Refunds are now handled at Invoice/Payment level, not Order FSM.
+    This function only logs refund activity for monitoring — no order state changes.
+    """
     total_refunded_cents = sum(p.amount_cents for p in payments if p.status in ["refunded", "partially_refunded"])
 
     if total_refunded_cents <= 0:
         return False
 
-    updated = False
-    try:
-        if total_refunded_cents >= total_paid_cents and order.status not in ["refunded", "cancelled"]:
-            # Full refund — only callable from completed or partially_refunded
-            if order.status == "completed":
-                order.refund_order()
-                updated = True
-            elif order.status == "partially_refunded":
-                order.complete_refund()
-                updated = True
-        elif total_refunded_cents < total_paid_cents and order.status != "partially_refunded":
-            # Partial refund
-            order.partial_refund()
-            updated = True
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning(
-            "⚠️ [PaymentSync] Cannot process refund on order %s from status %s", order.order_number, order.status
-        )
-        return False
-
-    if updated:
-        order.save(update_fields=["status", "updated_at"])
-        results["refunds_processed"] += 1
-    return updated
+    # Log for visibility but don't change order status — refunds are billing concern
+    logger.info(
+        "💰 [PaymentSync] Refund detected for order %s: %d/%d cents refunded (order stays %s)",
+        order.order_number,
+        total_refunded_cents,
+        total_paid_cents,
+        order.status,
+    )
+    results["refunds_processed"] += 1
+    return False
 
 
 def _add_updated_order_result(
@@ -366,17 +373,19 @@ def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
 
 
 def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process orders with paid invoices."""
-    # Move to confirmed status and trigger provisioning
+    """Process orders with paid invoices (fallback task)."""
+    # Move to paid status
     try:
-        order.confirm()
+        order.mark_paid()
         order.save(update_fields=["status", "updated_at"])
     except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s from status %s", order.order_number, order.status)
+        logger.warning(
+            "⚠️ [OrderProcessor] Cannot mark order %s as paid from status %s", order.order_number, order.status
+        )
         return
 
     order_result["action"] = "payment_confirmed"
-    order_result["status"] = "confirmed"
+    order_result["status"] = "paid"
     results["confirmed_orders"] += 1
 
     # Trigger provisioning for order items
@@ -385,14 +394,14 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
     if provisioned_items > 0:
         results["provisioning_triggered"] += provisioned_items
         try:
-            order.start_processing()
+            order.start_provisioning()
             order.save(update_fields=["status", "updated_at"])
         except (TransitionNotAllowed, ConcurrentTransition):
             logger.warning(
-                "⚠️ [OrderProcessor] Cannot start processing order %s from status %s", order.order_number, order.status
+                "⚠️ [OrderProcessor] Cannot start provisioning order %s from status %s", order.order_number, order.status
             )
             return
-        order_result["status"] = "processing"
+        order_result["status"] = "provisioning"
 
     # Log order confirmation
     AuditService.log_simple_event(
@@ -442,7 +451,7 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
             order.save(update_fields=["invoice", "updated_at"])
 
             order_result["action"] = "invoice_created"
-            order_result["status"] = "pending"
+            order_result["status"] = "awaiting_payment"
 
             logger.info(f"📄 [OrderProcessor] Created invoice {invoice.number} for order {order.order_number}")
         else:
@@ -455,18 +464,18 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
 
 
 def _process_free_order(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process free orders."""
+    """Process free orders (total=0 → skip proforma, go directly to paid → provisioning)."""
     try:
-        order.confirm()
+        order.mark_paid()
         order.save(update_fields=["status", "updated_at"])
     except (TransitionNotAllowed, ConcurrentTransition):
         logger.warning(
-            "⚠️ [OrderProcessor] Cannot confirm free order %s from status %s", order.order_number, order.status
+            "⚠️ [OrderProcessor] Cannot mark free order %s as paid from status %s", order.order_number, order.status
         )
         return
 
     order_result["action"] = "free_order_confirmed"
-    order_result["status"] = "confirmed"
+    order_result["status"] = "paid"
     results["confirmed_orders"] += 1
 
     # Trigger provisioning
@@ -609,7 +618,7 @@ def sync_order_payment_status() -> dict[str, Any]:
         cutoff_date = timezone.now() - timedelta(days=7)
 
         orders_to_check = Order.objects.filter(
-            Q(status__in=["pending", "confirmed", "processing"])
+            Q(status__in=["awaiting_payment", "paid", "provisioning"])
             & Q(invoice__isnull=False)
             & Q(created_at__gte=cutoff_date)
         ).select_related("invoice", "customer", "currency")
@@ -716,7 +725,7 @@ def process_recurring_orders() -> dict[str, Any]:
                     # Check if renewal order already exists
                     existing_renewal = Order.objects.filter(
                         customer=service.customer,
-                        status__in=["draft", "pending", "confirmed", "processing"],
+                        status__in=["draft", "awaiting_payment", "paid", "provisioning"],
                         items__meta__contains={"renewal_service_id": str(service.id)},
                     ).exists()
 

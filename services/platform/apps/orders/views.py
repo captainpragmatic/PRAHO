@@ -291,14 +291,13 @@ def order_list(request: HttpRequest) -> HttpResponse:
     status_counts = base_qs.aggregate(
         total=Count("id"),
         draft=Count("id", filter=Q(status="draft")),
-        pending=Count("id", filter=Q(status="pending")),
-        confirmed=Count("id", filter=Q(status="confirmed")),
-        processing=Count("id", filter=Q(status="processing")),
+        awaiting_payment=Count("id", filter=Q(status="awaiting_payment")),
+        paid=Count("id", filter=Q(status="paid")),
+        in_review=Count("id", filter=Q(status="in_review")),
+        provisioning=Count("id", filter=Q(status="provisioning")),
         completed=Count("id", filter=Q(status="completed")),
         failed=Count("id", filter=Q(status="failed")),
         cancelled=Count("id", filter=Q(status="cancelled")),
-        refunded=Count("id", filter=Q(status="refunded")),
-        partially_refunded=Count("id", filter=Q(status="partially_refunded")),
     )
 
     context = {
@@ -399,9 +398,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
     # Determine if order can be edited based on status and user permissions
     can_edit = (
-        is_staff
-        and len(editable_fields) > 0
-        and order.status not in ["completed", "cancelled", "refunded"]  # Terminal states
+        is_staff and len(editable_fields) > 0 and order.status not in ["completed", "cancelled"]  # Terminal states
     )
 
     # Preflight validation (only for draft orders)
@@ -963,7 +960,7 @@ def order_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         return json_error("You do not have permission to request refunds for this order")
 
     # Only allow refund requests for completed or partially refunded orders
-    if order.status not in ["completed", "partially_refunded"]:
+    if order.status != "completed":
         return json_error("Refund requests are only allowed for completed orders")
 
     try:
@@ -1109,9 +1106,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
     # Use consistent can_edit logic with order_detail view
     can_edit = (
-        is_staff
-        and len(editable_fields) > 0
-        and order.status not in ["completed", "cancelled", "refunded"]  # Terminal states
+        is_staff and len(editable_fields) > 0 and order.status not in ["completed", "cancelled"]  # Terminal states
     )
 
     context = {
@@ -1220,7 +1215,7 @@ def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         return access_denied
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "pending"):
+    if not (order.is_draft or order.status == "awaiting_payment"):
         return json_error("Order cannot be modified in current status")
 
     # Dynamic form creation for OrderItem
@@ -1438,7 +1433,7 @@ def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> 
         return access_denied
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "pending"):
+    if not (order.is_draft or order.status == "awaiting_payment"):
         return json_error("Order cannot be modified in current status")
 
     item = get_object_or_404(OrderItem, id=item_pk, order=order)
@@ -1483,7 +1478,7 @@ def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -
         return json_error("Access denied")
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "pending"):
+    if not (order.is_draft or order.status == "awaiting_payment"):
         return json_error("Order cannot be modified in current status")
 
     try:
