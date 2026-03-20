@@ -22,6 +22,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Sum
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -1204,7 +1205,9 @@ def _handle_payment_refund(payment: Payment) -> None:
     """Handle payment refund completion"""
     try:
         if payment.invoice:
-            refunded_amount = sum(p.amount_cents for p in payment.invoice.payments.filter(status="refunded"))
+            refunded_amount = payment.invoice.payments.filter(status="refunded").aggregate(
+                total=Sum("amount_cents", default=0)
+            )["total"]
             if refunded_amount >= payment.invoice.total_cents:
                 try:
                     payment.invoice.refund_invoice()

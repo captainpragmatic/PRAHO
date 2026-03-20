@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -683,8 +682,8 @@ class OrderServiceCreationService:
                 if billing_cycle not in ["monthly", "quarterly", "annual"]:
                     billing_cycle = "monthly"
 
-                # Generate unique username (will be updated during provisioning)
-                username = f"tmp_{int(time.time())}_{order.id.hex[:8]}"
+                # Generate unique username (will be updated during provisioning) (#130/M7)
+                username = f"tmp_{uuid.uuid4().hex[:12]}"
 
                 # Create service with pending status
                 service = Service.objects.create(
