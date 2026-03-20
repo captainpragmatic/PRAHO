@@ -265,8 +265,8 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:
             provisioning_status="pending",
         ).update(provisioning_status="cancelled")  # fsm-bypass: bulk cancel on order cancellation
 
-        # Send cancellation email
-        _send_order_cancelled_email(order)
+        # Send cancellation email after transaction commits to avoid ghost emails on rollback (#130/M6)
+        transaction.on_commit(lambda: _send_order_cancelled_email(order))
 
         # If order was processing, may need to handle refunds
         if old_status == "processing":

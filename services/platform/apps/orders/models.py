@@ -630,6 +630,13 @@ class OrderItem(models.Model):
             self.product_name = self.product.name
             self.product_type = self.product.product_type
 
+        # Skip VAT recalculation for non-financial field updates (#130/M5)
+        update_fields = kwargs.get("update_fields")
+        _financial_fields = {"unit_price_cents", "tax_rate", "tax_cents", "quantity", "setup_cents", "line_total_cents"}
+        if update_fields and not (set(update_fields) & _financial_fields):
+            super().save(*args, **kwargs)
+            return
+
         # Apply default VAT when tax_rate was not explicitly set.
         # This keeps direct model creation aligned with the authoritative VAT rules.
         if self.tax_rate == Decimal("0.0000") and self.order_id:
