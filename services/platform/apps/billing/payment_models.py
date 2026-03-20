@@ -30,6 +30,9 @@ TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
         "failed",
         "refunded",
         "partially_refunded",
+        "cancelled",
+        "canceled",
+        "disputed",
     }
 )
 
