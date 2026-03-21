@@ -2,6 +2,7 @@
 # CUSTOMER API VIEWS 🎯
 # ===============================================================================
 
+import json
 import logging
 from typing import Any, ClassVar, cast
 
@@ -18,6 +19,7 @@ from rest_framework.views import APIView
 from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.customers.contact_models import CustomerAddress
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
@@ -803,3 +805,429 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
             {"success": False, "error": "Failed to update billing address. Please try again."},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ===============================================================================
+# CUSTOMER USER MANAGEMENT API 👥 (Phase 7 — Portal Parity)
+# ===============================================================================
+
+MAX_ADDRESSES_PER_CUSTOMER = 10
+
+
+def _get_request_data(request: HttpRequest) -> dict[str, Any]:
+    """Extract parsed request body data."""
+    if hasattr(request, "data"):
+        return dict(request.data)
+    return json.loads(request.body)
+
+
+def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
+    """Return error response if user is not an owner of the customer."""
+    membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
+    if not membership or membership.role != "owner":
+        return Response(
+            {"success": False, "error": "Owner role required for this action."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+@require_customer_authentication
+def customer_users_list(request: HttpRequest, customer: Customer) -> Response:
+    """List users (memberships) for a customer."""
+    memberships = (
+        CustomerMembership.objects.filter(customer=customer, is_active=True)
+        .select_related("user")
+        .order_by("role", "user__email")
+    )
+    users_data = [
+        {
+            "user_id": m.user.id,
+            "email": m.user.email,
+            "first_name": m.user.first_name,
+            "last_name": m.user.last_name,
+            "role": m.role,
+            "is_active": m.user.is_active,
+            "is_primary": m.is_primary,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in memberships
+    ]
+    return Response({"success": True, "users": users_data})
+
+
+@require_customer_authentication
+def customer_users_add(request: HttpRequest, customer: Customer) -> Response:
+    """Add an existing user to a customer organization."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    # Require owner role
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    target_user_id = data.get("target_user_id")
+    role = data.get("role", "viewer")
+
+    if not target_user_id:
+        return Response({"success": False, "error": "target_user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate role
+    valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
+    if role not in valid_roles:
+        return Response(
+            {"success": False, "error": f"Invalid role. Must be one of: {', '.join(valid_roles)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        target_user = User.objects.get(id=target_user_id, is_active=True)
+    except User.DoesNotExist:
+        return Response({"success": False, "error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if CustomerMembership.objects.filter(customer=customer, user=target_user).exists():
+        return Response(
+            {"success": False, "error": "User is already a member of this customer."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    CustomerMembership.objects.create(customer=customer, user=target_user, role=role)
+    logger.info(f"✅ [User Management API] User {target_user.email} added to customer {customer.id} as {role}")
+    return Response({"success": True, "message": f"User added as {role}."})
+
+
+@require_customer_authentication
+def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
+    """Create a new user and add them to the customer organization."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    email = data.get("email", "").strip()
+    role = data.get("role", "viewer")
+    first_name = data.get("first_name", "").strip()
+    last_name = data.get("last_name", "").strip()
+
+    if not email:
+        return Response({"success": False, "error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(email=email).exists():
+        return Response(
+            {"success": False, "error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
+    if role not in valid_roles:
+        return Response(
+            {"success": False, "error": f"Invalid role. Must be one of: {', '.join(valid_roles)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
+        CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
+
+    logger.info(f"✅ [User Management API] New user {email} created and added to customer {customer.id}")
+    return Response(
+        {"success": True, "user_id": new_user.id, "message": f"User created and added as {role}."},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@require_customer_authentication
+def customer_users_role(request: HttpRequest, customer: Customer) -> Response:
+    """Change a user's role within the customer organization."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    target_user_id = data.get("target_user_id")
+    new_role = data.get("new_role")
+
+    if not target_user_id or not new_role:
+        return Response(
+            {"success": False, "error": "target_user_id and new_role are required."}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
+    if new_role not in valid_roles:
+        return Response(
+            {"success": False, "error": f"Invalid role. Must be one of: {', '.join(valid_roles)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        membership = CustomerMembership.objects.get(customer=customer, user_id=target_user_id, is_active=True)
+    except CustomerMembership.DoesNotExist:
+        return Response({"success": False, "error": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Prevent demoting the last owner
+    if membership.role == "owner" and new_role != "owner":
+        owner_count = CustomerMembership.objects.filter(customer=customer, role="owner", is_active=True).count()
+        if owner_count <= 1:
+            return Response(
+                {"success": False, "error": "Cannot remove the last owner. Assign another owner first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    old_role = membership.role
+    membership.role = new_role
+    membership.save(update_fields=["role", "updated_at"])
+    logger.info(
+        f"✅ [User Management API] Role changed for user {target_user_id} on customer {customer.id}: {old_role} → {new_role}"
+    )
+    return Response({"success": True, "message": f"Role changed from {old_role} to {new_role}."})
+
+
+@require_customer_authentication
+def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
+    """Remove a user from the customer organization."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    target_user_id = data.get("target_user_id")
+    if not target_user_id:
+        return Response({"success": False, "error": "target_user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        membership = CustomerMembership.objects.get(customer=customer, user_id=target_user_id, is_active=True)
+    except CustomerMembership.DoesNotExist:
+        return Response({"success": False, "error": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Prevent removing the last owner
+    if membership.role == "owner":
+        owner_count = CustomerMembership.objects.filter(customer=customer, role="owner", is_active=True).count()
+        if owner_count <= 1:
+            return Response(
+                {"success": False, "error": "Cannot remove the last owner."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+    # Prevent removing the last user
+    total_members = CustomerMembership.objects.filter(customer=customer, is_active=True).count()
+    if total_members <= 1:
+        return Response(
+            {"success": False, "error": "Cannot remove the last member of a customer."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    membership.is_active = False
+    membership.save(update_fields=["is_active", "updated_at"])
+    logger.info(f"✅ [User Management API] User {target_user_id} removed from customer {customer.id}")
+    return Response({"success": True, "message": "User removed from customer."})
+
+
+@require_customer_authentication
+def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Response:
+    """Suspend or activate a user's membership."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    target_user_id = data.get("target_user_id")
+    if not target_user_id:
+        return Response({"success": False, "error": "target_user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        target_user = User.objects.get(id=target_user_id)
+    except User.DoesNotExist:
+        return Response({"success": False, "error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verify membership exists
+    if not CustomerMembership.objects.filter(customer=customer, user=target_user).exists():
+        return Response(
+            {"success": False, "error": "User is not a member of this customer."}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Toggle active status
+    target_user.is_active = not target_user.is_active
+    target_user.save(update_fields=["is_active"])
+    new_status = "activated" if target_user.is_active else "suspended"
+    logger.info(f"✅ [User Management API] User {target_user.email} {new_status} for customer {customer.id}")
+    return Response({"success": True, "is_active": target_user.is_active, "message": f"User {new_status}."})
+
+
+# ===============================================================================
+# CUSTOMER PROFILE & ADDRESS API 📍 (Phase 7 — Portal Parity)
+# ===============================================================================
+
+
+@require_customer_authentication
+def customer_update(request: HttpRequest, customer: Customer) -> Response:
+    """Update customer details (name, email, phone, etc.)."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    # Owner or billing role required
+    membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
+    if not membership or membership.role not in ("owner", "billing"):
+        return Response(
+            {"success": False, "error": "Owner or billing role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    updatable_fields = {"name", "company_name", "primary_email", "primary_phone", "website", "industry"}
+    update_fields = []
+    for field in updatable_fields:
+        if field in data:
+            setattr(customer, field, data[field])
+            update_fields.append(field)
+
+    if update_fields:
+        customer.save(update_fields=[*update_fields, "updated_at"])
+        logger.info(f"✅ [Customer API] Updated fields {update_fields} for customer {customer.id}")
+
+    return Response({"success": True, "message": "Customer updated."})
+
+
+@require_customer_authentication
+def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Response:
+    """Update customer tax profile (CUI, VAT number, etc.)."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
+    if not membership or membership.role not in ("owner", "billing"):
+        return Response(
+            {"success": False, "error": "Owner or billing role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
+    updatable_fields = {"cui", "vat_number", "is_vat_payer", "reverse_charge_eligible"}
+    update_fields = []
+    for field in updatable_fields:
+        if field in data:
+            setattr(tax_profile, field, data[field])
+            update_fields.append(field)
+
+    if update_fields:
+        tax_profile.save(update_fields=[*update_fields, "updated_at"])
+        logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
+
+    return Response({"success": True, "message": "Tax profile updated."})
+
+
+@require_customer_authentication
+def customer_addresses_list(request: HttpRequest, customer: Customer) -> Response:
+    """List all addresses for a customer."""
+    addresses = CustomerAddress.objects.filter(customer=customer).order_by("-is_current", "address_type")
+    addresses_data = [
+        {
+            "id": addr.id,
+            "address_type": addr.address_type,
+            "is_current": addr.is_current,
+            "address_line1": addr.address_line1,
+            "address_line2": getattr(addr, "address_line2", ""),
+            "city": addr.city,
+            "county": addr.county,
+            "country": addr.country,
+            "postal_code": addr.postal_code,
+        }
+        for addr in addresses
+    ]
+    return Response({"success": True, "addresses": addresses_data})
+
+
+@require_customer_authentication
+def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:
+    """Add a new address to a customer."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    # Enforce max address limit
+    current_count = CustomerAddress.objects.filter(customer=customer).count()
+    if current_count >= MAX_ADDRESSES_PER_CUSTOMER:
+        return Response(
+            {"success": False, "error": f"Maximum of {MAX_ADDRESSES_PER_CUSTOMER} addresses per customer."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    address = CustomerAddress.objects.create(
+        customer=customer,
+        address_type=data.get("address_type", "other"),
+        is_current=data.get("is_current", True),
+        address_line1=data.get("address_line1", ""),
+        city=data.get("city", ""),
+        county=data.get("county", ""),
+        country=data.get("country", "Romania"),
+        postal_code=data.get("postal_code", ""),
+    )
+    logger.info(f"✅ [Customer API] Address {address.id} added to customer {customer.id}")
+    return Response(
+        {"success": True, "address_id": address.id, "message": "Address added."}, status=status.HTTP_201_CREATED
+    )
+
+
+@require_customer_authentication
+def customer_addresses_update(request: HttpRequest, customer: Customer) -> Response:
+    """Update an existing customer address."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    address_id = data.get("address_id")
+    if not address_id:
+        return Response({"success": False, "error": "address_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        address = CustomerAddress.objects.get(id=address_id, customer=customer)
+    except CustomerAddress.DoesNotExist:
+        return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    updatable = {"address_type", "is_current", "address_line1", "city", "county", "country", "postal_code"}
+    update_fields = []
+    for field in updatable:
+        if field in data:
+            setattr(address, field, data[field])
+            update_fields.append(field)
+
+    if update_fields:
+        address.save(update_fields=update_fields)
+        logger.info(f"✅ [Customer API] Address {address_id} updated for customer {customer.id}")
+
+    return Response({"success": True, "message": "Address updated."})
+
+
+@require_customer_authentication
+def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Response:
+    """Delete a customer address."""
+    data = _get_request_data(request)
+    user_id = data.get("user_id")
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    address_id = data.get("address_id")
+    if not address_id:
+        return Response({"success": False, "error": "address_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        address = CustomerAddress.objects.get(id=address_id, customer=customer)
+    except CustomerAddress.DoesNotExist:
+        return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    address.delete()
+    logger.info(f"✅ [Customer API] Address {address_id} deleted from customer {customer.id}")
+    return Response({"success": True, "message": "Address deleted."})
