@@ -991,10 +991,10 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             order_number_for_log = order.order_number
         # Phase 1 transaction ends here — DB lock released before any network call.
 
-        # CRITICAL GUARD: This endpoint is card-only. Non-card orders (bank_transfer, etc.)
-        # must be confirmed through the admin/billing staff path via ProformaPaymentService.
-        # Allowing non-card orders here would let a customer self-confirm an unpaid bank transfer.
-        if not pi_to_verify and order_payment_method and order_payment_method != "card":
+        # CRITICAL GUARD: This endpoint requires a Stripe PaymentIntent. Non-card orders
+        # (bank_transfer, etc.) and orders with blank/missing payment_method must be confirmed
+        # through the admin/billing staff path via ProformaPaymentService.
+        if not pi_to_verify and order_payment_method != "card":
             logger.warning(
                 "[API] Reject confirm attempt on non-card order %s (payment_method=%s, no PI)",
                 order_number_for_log,

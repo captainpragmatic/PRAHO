@@ -61,7 +61,22 @@ def reverse_order_statuses(apps, schema_editor):
     Order.objects.filter(status="awaiting_payment").update(status="pending")  # fsm-bypass: data migration
     Order.objects.filter(status="paid").update(status="confirmed")  # fsm-bypass: data migration
     Order.objects.filter(status="provisioning").update(status="processing")  # fsm-bypass: data migration
-    # Note: cannot distinguish formerly refunded from originally completed on rollback
+
+    # DI-1 rollback: Restore refunded/partially_refunded from meta["original_status"]
+    # where available. Orders that were originally completed have no stored original_status.
+    if schema_editor.connection.vendor == "postgresql":
+        Order.objects.filter(
+            status="completed",
+            meta__has_key="original_status",
+        ).update(  # fsm-bypass: data migration
+            status=RawSQL("meta->>'original_status'", []),
+        )
+    else:
+        for order in Order.objects.filter(status="completed"):  # fsm-bypass: data migration
+            meta = order.meta or {}
+            original_status = meta.get("original_status")
+            if original_status in ("refunded", "partially_refunded"):
+                Order.objects.filter(pk=order.pk).update(status=original_status)
 
 
 class Migration(migrations.Migration):
