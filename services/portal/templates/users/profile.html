@@ -172,10 +172,14 @@
       <div class="text-center py-6">
         {% icon "building" size="2xl" css_class="text-slate-500 mb-3" %}
         <p class="text-slate-400 text-sm mb-4">{% trans 'No company profile yet' %}</p>
-        {% trans "Create Company" as create_btn %}
-        {% button create_btn variant="primary" size="sm" href="/company/create/" icon="plus" %}
       </div>
       {% endif %}
+
+      <!-- Create Company — always available -->
+      <div class="mt-4 flex justify-end">
+        {% trans "Create Company" as create_btn %}
+        {% button create_btn variant="secondary" size="sm" href="/company/create/" icon="plus" %}
+      </div>
 
       <!-- Romanian Compliance Notice -->
       <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
