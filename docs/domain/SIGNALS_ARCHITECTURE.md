@@ -33,16 +33,17 @@ def handle_order_created_or_updated()
 
 # Order status transitions
 def _handle_order_status_change()
-    # awaiting_payment → Proforma creation
-    # paid            → OrderPaymentConfirmationService.confirm_order()
+    # awaiting_payment → Proforma creation + email (bank transfer)
     # provisioning    → Service provisioning queue
     # cancelled       → _handle_order_cancellation()
     # completed       → Completion logging
+    # Note: 'paid' is transient — confirm_order() performs awaiting_payment→paid→provisioning/in_review
+    #   atomically via proforma_payment_received signal, not via post_save status handler.
 
 # Order cancellation — differentiates by service state
 def _handle_order_cancellation()
     # pending services     → hard-delete (never provisioned)
-    # provisioning services → fail_provisioning() then delete
+    # provisioning services → fail_provisioning() (no delete — real infrastructure may exist)
     # active services      → suspend(reason=...) — do NOT delete real infrastructure
     # terminal states      → clear FK only
 

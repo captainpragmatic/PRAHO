@@ -254,7 +254,15 @@ class PaymentService:
             )
 
             if result.get("success", False):
-                # Create Payment record with pending status (without linking to invoice)
+                # Create Payment record with pending status (without linking to invoice).
+                # Design: Direct card payments (Portal → Stripe) intentionally bypass the
+                # proforma flow. Proforma documents are for bank transfer / manual payment
+                # workflows only. The card payment lifecycle is:
+                #   PaymentIntent (here) → Stripe webhook → payment confirmed →
+                #   OrderPaymentConfirmationService.confirm_order() creates the invoice.
+                # No proforma_id is stored in metadata because card orders never create
+                # proformas — update_order_status() only creates proformas when the order
+                # moves to awaiting_payment, which does not happen in the card flow.
                 with transaction.atomic():
                     # Get or create currency object
                     currency_obj = None
@@ -272,7 +280,7 @@ class PaymentService:
                     client_secret = result.get("client_secret", "")
 
                     payment = Payment.objects.create(  # type: ignore[misc]
-                        invoice=None,  # Will be linked when order is processed
+                        invoice=None,  # Will be linked when order is confirmed via Stripe webhook
                         customer=order.customer,
                         payment_method=gateway,
                         amount_cents=expected_amount_cents,

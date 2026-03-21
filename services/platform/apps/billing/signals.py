@@ -660,20 +660,38 @@ def handle_proforma_invoice_conversion(
                         ProformaConversionService,
                     )
 
-                    result = ProformaConversionService.convert_to_invoice(  # type: ignore[call-arg]
-                        proforma_id=str(instance.id), conversion_reason="payment_received"
-                    )
+                    # T4.7: Acquire select_for_update lock on the proforma before
+                    # conversion to prevent a race with ProformaPaymentService which
+                    # uses the same lock pattern (F4: consistent lock ordering).
+                    # transaction.atomic() creates a savepoint so we don't abort
+                    # the outer signal transaction on conversion failure.
+                    with transaction.atomic():
+                        locked_proforma = ProformaInvoice.objects.select_for_update(of=("self",)).get(pk=instance.pk)
+                        # Re-check status after acquiring the lock — another concurrent
+                        # path (e.g. ProformaPaymentService) may have converted first.
+                        if locked_proforma.status in ("paid", "converted"):
+                            result = ProformaConversionService.convert_to_invoice(
+                                proforma_id=str(instance.id),
+                            )
+                        else:
+                            logger.info(
+                                "📋 [Proforma] Skipping signal conversion for %s — status is now %s",
+                                instance.number,
+                                locked_proforma.status,
+                            )
+                            result = None
 
-                    if result.is_ok():
-                        invoice = result.unwrap()
-                        logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")
+                    if result is not None:
+                        if result.is_ok():
+                            invoice = result.unwrap()
+                            logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")
 
-                        # Link any related orders to the new invoice
-                        if hasattr(instance, "orders") and instance.orders.exists():
-                            invoice.orders.set(instance.orders.all())
+                            # Link any related orders to the new invoice
+                            if hasattr(instance, "orders") and instance.orders.exists():
+                                invoice.orders.set(instance.orders.all())
 
-                    else:
-                        logger.error(f"🔥 [Proforma] Conversion failed: {result.unwrap_err()}")
+                        else:
+                            logger.error(f"🔥 [Proforma] Conversion failed: {result.unwrap_err()}")
 
                 except Exception as e:
                     logger.exception(f"🔥 [Proforma] Auto-conversion failed: {e}")
@@ -861,6 +879,12 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                 if result.is_ok():
                     order.refresh_from_db()
                     logger.info(f"📋 [Order] Confirmed {order.order_number} → {order.status}")
+                else:
+                    logger.error(
+                        "🔥 [Order] Failed to confirm order %s on invoice paid: %s",
+                        order.order_number,
+                        result.unwrap_err() if result.is_err() else "unknown",
+                    )
 
         elif new_status == "void" and old_status != "void":
             # Invoice voided - cancel related orders
@@ -873,6 +897,12 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                     result = OrderService.update_order_status(order, status_change)
                     if result.is_ok():
                         logger.info(f"📋 [Order] Cancelled {order.order_number} due to voided invoice")
+                    else:
+                        logger.error(
+                            "🔥 [Order] Failed to cancel order %s on invoice void: %s",
+                            order.order_number,
+                            result.unwrap_err() if result.is_err() else "unknown",
+                        )
 
         elif new_status == "overdue" and old_status != "overdue":
             # Invoice overdue - may suspend related services
@@ -1736,8 +1766,12 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
                     AuditService.log_compliance_event(compliance_request)
 
             except EFacturaDocument.DoesNotExist:
-                # No e-Factura document for this invoice
-                pass
+                # Expected: not all Romanian invoices have an e-Factura document
+                # (only those submitted to ANAF). No credit note needed.
+                logger.info(
+                    "💡 [e-Factura] No e-Factura document found for refunded invoice %s — skipping credit note",
+                    invoice.number,
+                )
 
     except Exception as e:
         logger.exception(f"🔥 [e-Factura] Refund reporting failed: {e}")

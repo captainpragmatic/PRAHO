@@ -1721,3 +1721,73 @@ class GetMaxPaymentAmountCentsTest(TestCase):
         mock_settings_cls.get_integer_setting.return_value = 50_000_000
         result = _get_max_payment_amount_cents()
         self.assertEqual(result, 50_000_000)
+
+
+# ===============================================================================
+# S-1: payment_method allowlist on process_proforma_payment
+# An arbitrary payment_method value must be rejected with HTTP 400 BEFORE
+# calling the service, not silently normalised to "other" or forwarded as-is.
+# ===============================================================================
+
+
+class ProcessProformaPaymentAllowlistTest(BillingViewsTestBase):
+    """S-1: process_proforma_payment must reject unknown payment_method values."""
+
+    def test_unknown_payment_method_returns_400(self) -> None:
+        """POST with payment_method='evil_method' must return 400, not call service."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            f"/billing/proformas/{proforma.pk}/pay/",
+            {"payment_method": "evil_method"},
+        )
+        self.assertEqual(
+            response.status_code,
+            400,
+            "Expected 400 for unknown payment_method, got "
+            f"{response.status_code}. The view must validate payment_method "
+            "against an allowlist before delegating to the service.",
+        )
+
+    def test_unknown_payment_method_does_not_call_service(self) -> None:
+        """The service must NOT be called when payment_method is not allowed."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        with patch(
+            "apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert"
+        ) as mock_service:
+            response = self.client.post(
+                f"/billing/proformas/{proforma.pk}/pay/",
+                {"payment_method": "evil_method"},
+            )
+        self.assertEqual(response.status_code, 400)
+        mock_service.assert_not_called()
+
+    def test_known_payment_methods_are_accepted(self) -> None:
+        """All allowed payment methods must not be rejected at the allowlist gate."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        allowed = ["bank_transfer", "bank", "card", "stripe", "cash", "other"]
+        for method in allowed:
+            with self.subTest(method=method):
+                # View will call the service and redirect (302) — may succeed or fail
+                # depending on proforma state, but it must NOT return 400 at the gate.
+                response = self.client.post(
+                    f"/billing/proformas/{proforma.pk}/pay/",
+                    {"payment_method": method},
+                )
+                self.assertNotEqual(
+                    response.status_code,
+                    400,
+                    f"Allowed method '{method}' was rejected by the allowlist gate.",
+                )
+
+    def test_case_insensitive_rejection(self) -> None:
+        """Casing must not bypass the allowlist (e.g. 'Evil_Method' is still rejected)."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            f"/billing/proformas/{proforma.pk}/pay/",
+            {"payment_method": "Evil_Method"},
+        )
+        self.assertEqual(response.status_code, 400)

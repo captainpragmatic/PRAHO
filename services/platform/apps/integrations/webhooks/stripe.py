@@ -189,8 +189,41 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                         else:
                             return True, f"Payment {payment.id} already processed (idempotent)"
                     else:
-                        logger.info(f"⏭️ Payment {payment.id} already in terminal state, skipping duplicate webhook")
-                        return True, f"Payment {payment.id} already processed (idempotent)"
+                        # B-1 fix: Savepoint rollback can NULL out payment.proforma FK
+                        # even though meta["proforma_id"] was written before the savepoint.
+                        # Re-link the proforma from meta so conversion can be retried.
+                        proforma_id_from_meta = (payment.meta or {}).get("proforma_id")
+                        if proforma_id_from_meta:
+                            try:
+                                from apps.billing.proforma_models import (  # noqa: PLC0415
+                                    ProformaInvoice,
+                                )
+
+                                recovered_proforma = ProformaInvoice.objects.get(id=proforma_id_from_meta)
+                                if recovered_proforma.status == "converted":
+                                    return True, f"Payment {payment.id} already processed (idempotent)"
+                                # Re-link so the conversion block below uses payment.proforma
+                                payment.proforma = recovered_proforma
+                                payment.save(update_fields=["proforma", "updated_at"])
+                                logger.warning(
+                                    "⚠️ [Stripe] B-1 recovery: re-linked proforma %s to payment %s from meta — "
+                                    "proforma FK was NULL (savepoint rollback). Retrying conversion.",
+                                    recovered_proforma.number,
+                                    payment.id,
+                                )
+                                # Fall through to the proforma conversion block below
+                            except ProformaInvoice.DoesNotExist:
+                                logger.error(
+                                    "🔥 [Stripe] B-1 recovery failed: proforma %s in meta not found for payment %s",
+                                    proforma_id_from_meta,
+                                    payment.id,
+                                )
+                                return True, f"Payment {payment.id} already processed (idempotent)"
+                        else:
+                            logger.info(
+                                "⏭️ Payment %s already in terminal state, skipping duplicate webhook", payment.id
+                            )
+                            return True, f"Payment {payment.id} already processed (idempotent)"
 
                 # B7: If payment has a proforma, auto-convert proforma→invoice
                 if payment.proforma:
@@ -216,8 +249,8 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                             # Payment is already marked succeeded but invoice was not
                             # created — retry gives the conversion another chance.
                             err_msg = convert_result.unwrap_err() if convert_result.is_err() else "unknown"
-                            logger.error(
-                                "🔥 [Stripe] Proforma conversion failed for payment %s: %s",
+                            logger.critical(
+                                "🔥 [Stripe] Proforma conversion failed for payment %s: %s — customer charged but no invoice created",
                                 payment.id,
                                 err_msg,
                             )
@@ -275,7 +308,36 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                         from apps.billing.proforma_service import send_proforma_email  # noqa: PLC0415
 
                         _proforma = payment.proforma
-                        txn.on_commit(lambda: send_proforma_email(_proforma))
+                        _payment_id = payment.id
+
+                        # Task 4.5 fix: Re-fetch proforma status inside on_commit because
+                        # status may have changed between now and when the callback runs
+                        # (e.g., concurrent bank payment converted the proforma to "converted").
+                        # Task 4.4 fix: Catch exceptions so email failures don't silently
+                        # vanish — log at ERROR level so alerts surface the failure.
+                        def _send_proforma_email_on_commit(
+                            proforma: Any = _proforma, payment_id: Any = _payment_id
+                        ) -> None:
+                            try:
+                                proforma.refresh_from_db()
+                                if proforma.status in ("draft", "sent"):
+                                    send_proforma_email(proforma)
+                                else:
+                                    logger.info(
+                                        "⏭️ [Stripe] Skipped proforma email for payment %s — "
+                                        "proforma status changed to %s",
+                                        payment_id,
+                                        proforma.status,
+                                    )
+                            except Exception as email_exc:
+                                logger.error(
+                                    "🔥 [Stripe] Proforma email failed for payment %s: %s",
+                                    payment_id,
+                                    email_exc,
+                                    exc_info=True,
+                                )
+
+                        txn.on_commit(_send_proforma_email_on_commit)
                         logger.info(
                             "📧 [Stripe] Queued proforma email fallback for failed payment %s",
                             payment.id,

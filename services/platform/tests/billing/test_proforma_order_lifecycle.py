@@ -513,3 +513,122 @@ class TestProformaPaymentEdgeCases(ProformaLifecycleTestBase):
             payment_method="bank",
         )
         self.assertTrue(result2.is_ok())
+
+    def test_idempotent_converted_proforma_with_deleted_invoice_returns_ok(self):
+        """B-2 regression test (confidence 85): When proforma.status == "converted" but
+        the referenced invoice was hard-deleted, record_payment_and_convert must return
+        Ok(None) with a critical log — NOT Err(...).
+
+        Returning Err causes Stripe to retry indefinitely (retry storm).
+        The invoice is gone — there is nothing to fix. Ok(None) + critical log
+        is the correct response: data-loss must be surfaced via alerting, not retries.
+        """
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        # Simulate a converted proforma whose invoice was hard-deleted:
+        # set status to "converted" and put a nonexistent invoice_id in meta.
+        # Invoice uses integer PK, so use a large integer that cannot exist.
+        nonexistent_invoice_id = "999999999"
+        force_status(proforma, "converted")
+        proforma.meta = {"invoice_id": nonexistent_invoice_id}
+        proforma.save(update_fields=["meta"])
+
+        with self.assertLogs("apps.billing.proforma_service", level="CRITICAL") as log_ctx:
+            result = ProformaPaymentService.record_payment_and_convert(
+                proforma_id=str(proforma.id),
+                amount_cents=12100,
+                payment_method="bank",
+            )
+
+        # B-2 BUG: Without fix, returns Err(...) → causes Stripe retry storm.
+        # With fix: returns Ok(None) so Stripe acknowledges the event.
+        self.assertTrue(result.is_ok(), f"Expected Ok(None), got Err: {result}")
+        self.assertIsNone(result.unwrap())
+        # Must emit a CRITICAL log so PagerDuty / alerting can surface data-loss
+        critical_logs = [m for m in log_ctx.output if "CRITICAL" in m]
+        self.assertTrue(len(critical_logs) >= 1, "Expected at least one CRITICAL log")
+
+    def test_nonexistent_proforma_id_returns_err_not_found(self):
+        """Task 5.3: record_payment_and_convert with a nonexistent integer ID returns Err 'not found'.
+
+        ProformaInvoice uses an integer PK (auto-increment). Passing an ID that
+        does not exist causes DoesNotExist which the service maps to Err('not found').
+        Guard: must not raise — should return a structured Err.
+        """
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        # Use a very large integer that cannot exist in a test DB
+        nonexistent_id = "999999999"
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=nonexistent_id,
+            amount_cents=12100,
+            payment_method="bank",
+        )
+        self.assertTrue(result.is_err(), "Expected Err for nonexistent proforma_id")
+        self.assertIn("not found", result.unwrap_err().lower())
+
+    def test_expired_proforma_payment_rejected_with_cannot_accept_payment(self):
+        """Task 5.4: Proforma in a terminal status ('expired' or 'converted') rejects
+        payment with an error containing 'cannot accept payment'.
+
+        Valid ProformaInvoice statuses are: draft, sent, accepted, expired, converted.
+        Only draft/sent/accepted can accept payment. This test uses 'expired' (a real
+        terminal state reachable via force_status) to verify the guard.
+
+        After force_status(proforma, 'expired'), record_payment_and_convert must return
+        Err containing 'cannot accept payment' (not raise, not return Ok).
+        """
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"PRO-EXPD-{ProformaInvoice.objects.count() + 1:03d}",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            valid_until=timezone.now() + timedelta(days=7),
+        )
+        force_status(proforma, "expired")
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=12100,
+            payment_method="bank",
+        )
+        self.assertTrue(result.is_err(), "Expected Err for expired proforma payment")
+        self.assertIn(
+            "cannot accept payment",
+            result.unwrap_err().lower(),
+            f"Error message must contain 'cannot accept payment', got: {result.unwrap_err()!r}",
+        )
+
+
+class TestConfirmOrderGuards(ProformaLifecycleTestBase):
+    """Task 5.5: confirm_order rejects non-awaiting_payment orders with Err."""
+
+    def test_confirm_order_on_draft_order_returns_err(self):
+        """Task 5.5: confirm_order on a 'draft' order returns Err (not Ok, not exception).
+
+        Only 'awaiting_payment' orders can be confirmed. A draft order has not yet
+        submitted payment intent so confirmation is semantically invalid.
+        """
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        # order starts as 'draft' after creation
+        self.assertEqual(order.status, "draft")
+
+        result = OrderPaymentConfirmationService.confirm_order(order)
+        self.assertTrue(result.is_err(), f"Expected Err for draft order confirm, got Ok: {result}")
+
+    def test_confirm_order_on_cancelled_order_returns_err(self):
+        """Task 5.5 boundary: confirm_order on a 'cancelled' order also returns Err."""
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        force_status(order, "cancelled")
+
+        result = OrderPaymentConfirmationService.confirm_order(order)
+        self.assertTrue(result.is_err(), f"Expected Err for cancelled order confirm, got Ok: {result}")

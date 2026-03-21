@@ -263,8 +263,21 @@ class ProformaPaymentService:
                 try:
                     return Ok(Invoice.objects.get(id=invoice_id))
                 except Invoice.DoesNotExist:
-                    pass
-            return Ok(None)
+                    # B-2 fix: Invoice was hard-deleted after conversion. Returning Err would
+                    # cause Stripe retry storms — the proforma is converted, payment exists,
+                    # and no retry can recreate a hard-deleted invoice. Return Ok(None) so
+                    # Stripe acknowledges the webhook. Log at CRITICAL so alerting surfaces
+                    # this data-loss for manual investigation.
+                    logger.critical(
+                        "🔥 [ProformaPayment] DATA LOSS: Proforma %s (id=%s) is converted but "
+                        "invoice %s was hard-deleted. Payment accepted — returning Ok(None) to "
+                        "prevent Stripe retry storm. Manual investigation required.",
+                        proforma.number,
+                        proforma.id,
+                        invoice_id,
+                    )
+                    return Ok(None)
+            return Err(f"Proforma {proforma.number} already converted but no invoice_id in meta")
 
         # Validate proforma is in a convertible state
         if proforma.status not in ("draft", "sent", "accepted"):

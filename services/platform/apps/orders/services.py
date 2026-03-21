@@ -259,7 +259,7 @@ class OrderNumberingService:
 # Keyed by (source, target) because different source states may need different
 # methods to reach the same target (e.g., draft→pending via submit vs failed→pending via retry).
 _ORDER_TRANSITION_MAP: dict[tuple[str, str], str] = {
-    # Happy path — Phase A rename
+    # Happy path
     ("draft", "awaiting_payment"): "submit",
     ("awaiting_payment", "paid"): "mark_paid",
     ("paid", "provisioning"): "start_provisioning",
@@ -880,6 +880,12 @@ class OrderPaymentConfirmationService:
 
             # Transition: awaiting_payment → paid (audit checkpoint)
             order.mark_paid()
+            # B-3 fix: write the first history record immediately after mark_paid(),
+            # before the second FSM transition mutates the order status.
+            # If written after flag_for_review()/start_provisioning(), the record's
+            # position in the audit trail is misleading and latent bugs arise if
+            # the hardcoded strings are ever replaced with order.status reads.
+            OrderService._create_status_history(order, "awaiting_payment", "paid", "Payment confirmed", None)
 
             # Review gate: configurable threshold determines if admin review is needed.
             threshold = OrderPaymentConfirmationService._get_review_threshold()
@@ -887,7 +893,6 @@ class OrderPaymentConfirmationService:
                 # High-value order → flag for admin review
                 order.flag_for_review()
                 order.save()
-                OrderService._create_status_history(order, "awaiting_payment", "paid", "Payment confirmed", None)
                 OrderService._create_status_history(
                     order, "paid", "in_review", f"Flagged for review (total >= {threshold} cents)", None
                 )
@@ -904,7 +909,6 @@ class OrderPaymentConfirmationService:
                 # Below threshold → auto-advance to provisioning
                 order.start_provisioning()
                 order.save()
-                OrderService._create_status_history(order, "awaiting_payment", "paid", "Payment confirmed", None)
                 OrderService._create_status_history(
                     order, "paid", "provisioning", "Auto-provisioning (below review threshold)", None
                 )
@@ -964,7 +968,12 @@ class OrderPaymentConfirmationService:
             threshold = SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
             # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
             return max(0, min(threshold, _MAX_THRESHOLD))
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "⚠️ [OrderConfirm] Could not read review threshold, using default %d: %s",
+                _DEFAULT_REVIEW_THRESHOLD,
+                e,
+            )
             return _DEFAULT_REVIEW_THRESHOLD
 
 

@@ -352,3 +352,69 @@ class TestReviewGateConfigurable(ReviewGateTestBase):
         self.assertTrue(result.is_ok())
         order.refresh_from_db()
         self.assertEqual(order.status, "in_review")
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", side_effect=Exception("DB connection refused"))
+    def test_threshold_db_failure_falls_back_to_default_with_warning(self, mock_get_setting):
+        """H3 review fix: When SettingsService raises, use default threshold and log warning."""
+        threshold = OrderPaymentConfirmationService._get_review_threshold()
+
+        self.assertEqual(threshold, DEFAULT_THRESHOLD)
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", side_effect=RuntimeError("DB timeout"))
+    def test_threshold_db_failure_logs_warning(self, mock_get_setting):
+        """H3 review fix: DB failure during threshold read produces a warning log."""
+        with self.assertLogs("apps.orders.services", level="WARNING") as log_ctx:
+            threshold = OrderPaymentConfirmationService._get_review_threshold()
+
+        self.assertEqual(threshold, DEFAULT_THRESHOLD)
+        self.assertTrue(
+            any("Could not read review threshold" in msg for msg in log_ctx.output),
+            f"Expected warning about threshold fallback, got: {log_ctx.output}",
+        )
+
+
+class TestReviewThresholdClamping(ReviewGateTestBase):
+    """Task 5.6: _get_review_threshold clamps values to [0, 100_000_000].
+
+    H8 fix: Misconfigured or negative thresholds must be clamped so the review
+    gate behaves predictably. A negative threshold would make EVERY order bypass
+    review (max(0, -1) = 0 means threshold=0 → all orders are >= 0 → in_review).
+    A ludicrously large value disables the review gate effectively.
+    """
+
+    _MAX_THRESHOLD = 100_000_000  # must match the constant in services.py
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=-1)
+    def test_negative_threshold_is_clamped_to_zero(self, mock_setting):
+        """Task 5.6a: SettingsService returning -1 must clamp to 0.
+
+        max(0, min(-1, 100_000_000)) == 0
+        A threshold of 0 means ALL orders go to in_review (every total >= 0).
+        """
+        threshold = OrderPaymentConfirmationService._get_review_threshold()
+        self.assertEqual(
+            threshold,
+            0,
+            f"Expected clamped threshold=0 for configured value -1, got: {threshold}",
+        )
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=999_000_000)
+    def test_excessive_threshold_is_clamped_to_max(self, mock_setting):
+        """Task 5.6b: SettingsService returning 999_000_000 must clamp to 100_000_000.
+
+        max(0, min(999_000_000, 100_000_000)) == 100_000_000
+        An excessive threshold prevents any order from going to in_review
+        (only limited by the configured maximum).
+        """
+        threshold = OrderPaymentConfirmationService._get_review_threshold()
+        self.assertEqual(
+            threshold,
+            self._MAX_THRESHOLD,
+            f"Expected clamped threshold={self._MAX_THRESHOLD} for value 999_000_000, got: {threshold}",
+        )
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=500_000)
+    def test_valid_threshold_is_returned_unchanged(self, mock_setting):
+        """Task 5.6 boundary: A value within [0, 100_000_000] is returned as-is."""
+        threshold = OrderPaymentConfirmationService._get_review_threshold()
+        self.assertEqual(threshold, 500_000)

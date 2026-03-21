@@ -6,9 +6,13 @@
 # Adds: in_review (new state for review gate)
 #
 # OrderStatusHistory records are left with old values as historical record (M1).
+#
+# DI-1 fix: Before overwriting refunded/partially_refunded → completed, store the
+# original status in order.meta["original_status"] so rollback can distinguish them.
 
 import django_fsm
 from django.db import migrations, models
+from django.db.models.expressions import RawSQL
 
 
 def rename_order_statuses(apps, schema_editor):
@@ -23,6 +27,24 @@ def rename_order_statuses(apps, schema_editor):
     Order.objects.filter(status="pending").update(status="awaiting_payment")  # fsm-bypass: data migration
     Order.objects.filter(status="confirmed").update(status="paid")  # fsm-bypass: data migration
     Order.objects.filter(status="processing").update(status="provisioning")  # fsm-bypass: data migration
+
+    # DI-1 fix: Store original status in meta BEFORE overwriting to completed.
+    # This allows rollback to restore the correct status (refunded vs partially_refunded).
+    # Uses jsonb_set on PostgreSQL (preserves existing meta keys); falls back to ORM
+    # on SQLite (test environment) where jsonb_set is unavailable.
+    if schema_editor.connection.vendor == "postgresql":
+        Order.objects.filter(status__in=["refunded", "partially_refunded"]).update(  # fsm-bypass: data migration
+            meta=RawSQL(
+                "jsonb_set(COALESCE(meta, '{}'), '{original_status}', to_jsonb(status::text))",
+                [],
+            )
+        )
+    else:
+        # SQLite fallback: iterate and update individually (acceptable for test/dev env only)
+        for order in Order.objects.filter(status__in=["refunded", "partially_refunded"]):  # fsm-bypass: data migration
+            meta = order.meta or {}
+            meta["original_status"] = order.status
+            Order.objects.filter(pk=order.pk).update(meta=meta)
 
     # Refunded/partially_refunded orders → completed (they WERE completed, refund is on Invoice)
     Order.objects.filter(status="refunded").update(status="completed")  # fsm-bypass: data migration

@@ -226,14 +226,13 @@ class ProformaToInvoiceViewTestCase(TestCase):
         self.assertEqual(Invoice.objects.count(), 0)
 
     def test_proforma_to_invoice_not_found(self):
-        """Manual conversion is removed — view redirects even for non-existent pk (no get_object_or_404)."""
+        """Non-existent proforma returns 404 via get_object_or_404."""
         request = self.factory.post('/app/billing/proformas/99999/convert-to-invoice/')
         request.user = self.user
         request = self.add_middleware_to_request(request)
 
-        # View no longer calls get_object_or_404; it redirects immediately with an error message
-        response = proforma_to_invoice(request, 99999)
-        self.assertEqual(response.status_code, 302)
+        with self.assertRaises(Http404):
+            proforma_to_invoice(request, 99999)
 
 
 class InvoiceEditViewsTestCase(TestCase):
