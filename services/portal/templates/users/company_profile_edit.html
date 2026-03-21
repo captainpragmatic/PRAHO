@@ -67,44 +67,6 @@
                             {% endif %}
                         </div>
 
-                        <!-- VAT Number -->
-                        <div>
-                            <label for="{{ form.vat_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.vat_number.label }}
-                                {% if form.vat_number.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.vat_number }}
-                            {% if form.vat_number.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.vat_number.help_text }}</p>
-                            {% endif %}
-                            {% if form.vat_number.errors %}
-                                {% for error in form.vat_number.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- Trade Registry Number -->
-                        <div>
-                            <label for="{{ form.trade_registry_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.trade_registry_number.label }}
-                                {% if form.trade_registry_number.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.trade_registry_number }}
-                            {% if form.trade_registry_number.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.trade_registry_number.help_text }}</p>
-                            {% endif %}
-                            {% if form.trade_registry_number.errors %}
-                                {% for error in form.trade_registry_number.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
                         <!-- Industry -->
                         <div class="md:col-span-2">
                             <label for="{{ form.industry.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -127,108 +89,29 @@
                     </div>
             {% end_section_card %}
 
-            <!-- Billing Address Section -->
-            {% trans 'Billing Address' as sc2_title %}
-            {% section_card title=sc2_title icon="map-pin" %}
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-                        <!-- Street Address -->
-                        <div class="md:col-span-2">
-                            <label for="{{ form.billing_street.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.billing_street.label }}
-                                {% if form.billing_street.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.billing_street }}
-                            {% if form.billing_street.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_street.help_text }}</p>
-                            {% endif %}
-                            {% if form.billing_street.errors %}
-                                {% for error in form.billing_street.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- City -->
+            <!-- Tax & Addresses — managed via dedicated pages -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+                    <div class="flex items-center justify-between">
                         <div>
-                            <label for="{{ form.billing_city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.billing_city.label }}
-                                {% if form.billing_city.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.billing_city }}
-                            {% if form.billing_city.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_city.help_text }}</p>
-                            {% endif %}
-                            {% if form.billing_city.errors %}
-                                {% for error in form.billing_city.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
+                            <dt class="text-sm font-medium text-slate-300">{% trans "Tax & VAT" %}</dt>
+                            <dd class="text-xs text-slate-400 mt-1">{% trans "CUI, VAT number, reverse charge" %}</dd>
                         </div>
-
-                        <!-- State/County -->
-                        <div>
-                            <label for="{{ form.billing_state.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.billing_state.label }}
-                                {% if form.billing_state.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.billing_state }}
-                            {% if form.billing_state.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_state.help_text }}</p>
-                            {% endif %}
-                            {% if form.billing_state.errors %}
-                                {% for error in form.billing_state.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- Postal Code -->
-                        <div>
-                            <label for="{{ form.billing_postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.billing_postal_code.label }}
-                                {% if form.billing_postal_code.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.billing_postal_code }}
-                            {% if form.billing_postal_code.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_postal_code.help_text }}</p>
-                            {% endif %}
-                            {% if form.billing_postal_code.errors %}
-                                {% for error in form.billing_postal_code.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- Country -->
-                        <div>
-                            <label for="{{ form.billing_country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.billing_country.label }}
-                                {% if form.billing_country.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.billing_country }}
-                            {% if form.billing_country.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_country.help_text }}</p>
-                            {% endif %}
-                            {% if form.billing_country.errors %}
-                                {% for error in form.billing_country.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
+                        {% trans "Manage" as tax_btn %}
+                        {% button tax_btn variant="secondary" size="sm" href="/company/tax/" icon="edit" %}
                     </div>
-            {% end_section_card %}
+                </div>
+                <div class="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-300">{% trans "Addresses" %}</dt>
+                            <dd class="text-xs text-slate-400 mt-1">{% trans "Billing & primary addresses" %}</dd>
+                        </div>
+                        {% trans "Manage" as addr_btn %}
+                        {% button addr_btn variant="secondary" size="sm" href="/company/addresses/" icon="map-pin" %}
+                    </div>
+                </div>
+            </div>
 
             <!-- Business Contact Section -->
             {% trans 'Business Contact' as sc3_title %}

@@ -1115,25 +1115,17 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
 
         if form.is_valid():
             try:
-                # Update company profile via Platform API using existing billing-address endpoint
+                # Update company profile via Platform API
+                # VAT/billing address managed via dedicated pages (/company/tax/, /company/addresses/)
                 update_data = {
                     "customer_id": customer_id,
                     "user_id": user_id,
                     "timestamp": int(timezone.now().timestamp()),
                     "company_name": form.cleaned_data["company_name"],
-                    "vat_number": form.cleaned_data["vat_number"],
-                    "trade_registry_number": form.cleaned_data["trade_registry_number"],
                     "primary_email": form.cleaned_data["primary_email"],
                     "primary_phone": form.cleaned_data["primary_phone"],
                     "website": form.cleaned_data["website"],
                     "industry": form.cleaned_data["industry"],
-                    "billing_address": {
-                        "street": form.cleaned_data["billing_street"],
-                        "city": form.cleaned_data["billing_city"],
-                        "state": form.cleaned_data["billing_state"],
-                        "postal_code": form.cleaned_data["billing_postal_code"],
-                        "country": form.cleaned_data["billing_country"],
-                    },
                 }
 
                 response = api_client.post("customers/billing-address/", data=update_data, user_id=user_id)
