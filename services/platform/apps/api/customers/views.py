@@ -609,7 +609,7 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
                 meta["stats"] = {
                     "services": customer.services.filter(status="active").count(),
                     "open_tickets": customer.tickets.filter(status__in=["open", "in_progress"]).count(),
-                    "outstanding_invoices": customer.invoices.filter(status="pending").count(),
+                    "outstanding_invoices": customer.invoices.filter(status__in=["issued", "overdue"]).count(),
                 }
 
             # Add billing profile if requested (already included in serializer, but could be conditional)
@@ -818,7 +818,10 @@ def _get_request_data(request: HttpRequest) -> dict[str, Any]:
     """Extract parsed request body data."""
     if hasattr(request, "data"):
         return dict(request.data)
-    return json.loads(request.body)
+    try:
+        return json.loads(request.body)
+    except json.JSONDecodeError:
+        return {}
 
 
 def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
@@ -832,6 +835,9 @@ def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
     return None
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_users_list(request: HttpRequest, customer: Customer) -> Response:
     """List users (memberships) for a customer."""
@@ -856,6 +862,9 @@ def customer_users_list(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "users": users_data})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_users_add(request: HttpRequest, customer: Customer) -> Response:
     """Add an existing user to a customer organization."""
@@ -897,6 +906,9 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "message": f"User added as {role}."})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     """Create a new user and add them to the customer organization."""
@@ -928,6 +940,8 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
         )
 
     with transaction.atomic():
+        # Invite-only flow: user is created with an unusable password.
+        # They must complete account setup via the password-reset link sent separately.
         new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
         CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
 
@@ -938,6 +952,9 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     )
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_users_role(request: HttpRequest, customer: Customer) -> Response:
     """Change a user's role within the customer organization."""
@@ -986,6 +1003,9 @@ def customer_users_role(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "message": f"Role changed from {old_role} to {new_role}."})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
     """Remove a user from the customer organization."""
@@ -1027,6 +1047,9 @@ def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "message": "User removed from customer."})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Response:
     """Suspend or activate a user's membership."""
@@ -1046,18 +1069,19 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
     except User.DoesNotExist:
         return Response({"success": False, "error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Verify membership exists
-    if not CustomerMembership.objects.filter(customer=customer, user=target_user).exists():
+    # Toggle membership-scoped active status (does not affect global user account)
+    try:
+        membership = CustomerMembership.objects.get(customer=customer, user=target_user)
+    except CustomerMembership.DoesNotExist:
         return Response(
             {"success": False, "error": "User is not a member of this customer."}, status=status.HTTP_404_NOT_FOUND
         )
 
-    # Toggle active status
-    target_user.is_active = not target_user.is_active
-    target_user.save(update_fields=["is_active"])
-    new_status = "activated" if target_user.is_active else "suspended"
-    logger.info(f"✅ [User Management API] User {target_user.email} {new_status} for customer {customer.id}")
-    return Response({"success": True, "is_active": target_user.is_active, "message": f"User {new_status}."})
+    membership.is_active = not membership.is_active
+    membership.save(update_fields=["is_active", "updated_at"])
+    new_status = "activated" if membership.is_active else "suspended"
+    logger.info(f"✅ [User Management API] Membership for {target_user.email} {new_status} for customer {customer.id}")
+    return Response({"success": True, "is_active": membership.is_active, "message": f"User {new_status}."})
 
 
 # ===============================================================================
@@ -1065,6 +1089,9 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
 # ===============================================================================
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_update(request: HttpRequest, customer: Customer) -> Response:
     """Update customer details (name, email, phone, etc.)."""
@@ -1093,6 +1120,9 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "message": "Customer updated."})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
@@ -1107,7 +1137,7 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
         )
 
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
-    updatable_fields = {"cui", "vat_number", "is_vat_payer", "reverse_charge_eligible"}
+    updatable_fields = {"cui", "vat_number", "trade_registry_number", "is_vat_payer", "reverse_charge_eligible"}
     update_fields = []
     for field in updatable_fields:
         if field in data:
@@ -1121,6 +1151,9 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
     return Response({"success": True, "message": "Tax profile updated."})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_addresses_list(request: HttpRequest, customer: Customer) -> Response:
     """List all addresses for a customer."""
@@ -1142,6 +1175,9 @@ def customer_addresses_list(request: HttpRequest, customer: Customer) -> Respons
     return Response({"success": True, "addresses": addresses_data})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:
     """Add a new address to a customer."""
@@ -1160,9 +1196,17 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    address_type = data.get("address_type", "billing")
+    valid_address_types = [c[0] for c in CustomerAddress.ADDRESS_TYPE_CHOICES]
+    if address_type not in valid_address_types:
+        return Response(
+            {"success": False, "error": f"Invalid address_type. Must be one of: {', '.join(valid_address_types)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     address = CustomerAddress.objects.create(
         customer=customer,
-        address_type=data.get("address_type", "other"),
+        address_type=address_type,
         is_current=data.get("is_current", True),
         address_line1=data.get("address_line1", ""),
         city=data.get("city", ""),
@@ -1176,6 +1220,9 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
     )
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_addresses_update(request: HttpRequest, customer: Customer) -> Response:
     """Update an existing customer address."""
@@ -1203,12 +1250,15 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
             update_fields.append(field)
 
     if update_fields:
-        address.save(update_fields=update_fields)
+        address.save(update_fields=[*update_fields, "updated_at"])
         logger.info(f"✅ [Customer API] Address {address_id} updated for customer {customer.id}")
 
     return Response({"success": True, "message": "Address updated."})
 
 
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 @require_customer_authentication
 def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Response:
     """Delete a customer address."""

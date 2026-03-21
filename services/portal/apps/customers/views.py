@@ -8,6 +8,8 @@ addresses for a customer organisation via the Platform API.
 import logging
 
 from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.core.validators import EmailValidator
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
@@ -114,6 +116,13 @@ def company_team_invite_view(request: HttpRequest) -> HttpResponse:
 
         if not email:
             messages.error(request, _("Email address is required."))
+            return render(request, "customers/team_invite.html", {"page_title": _("Invite Team Member")})
+
+        _email_validator = EmailValidator()
+        try:
+            _email_validator(email)
+        except ValidationError:
+            messages.error(request, _("Enter a valid email address."))
             return render(request, "customers/team_invite.html", {"page_title": _("Invite Team Member")})
 
         try:
@@ -266,6 +275,7 @@ def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
             messages.warning(request, _("Too many requests. Please wait and try again."))
         else:
             logger.error("Failed to fetch tax profile: %s", exc)
+            messages.error(request, _("Could not load tax profile. Please try again."))
 
     context = {
         "tax_data": tax_data,

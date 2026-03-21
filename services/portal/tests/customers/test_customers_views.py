@@ -10,6 +10,8 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 
+from apps.api_client.services import PlatformAPIError
+
 SESSION_DEFAULTS = {
     "customer_id": "1",
     "user_id": 10,
@@ -163,6 +165,119 @@ class AddressViewTests(SimpleTestCase):
                 "country": "RO",
                 "postal_code": "400000",
             },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("addresses", response.url)
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class TeamRoleViewTests(SimpleTestCase):
+    """Test the team role-change endpoint (POST)."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_role_change_success_redirects(self, mock_api):
+        """Successful role change redirects to team page."""
+        mock_api.change_customer_user_role.return_value = {"success": True}
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:team_role", kwargs={"target_user_id": 20}),
+            data={"role": "billing"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("team", response.url)
+        mock_api.change_customer_user_role.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_role_change_api_error_redirects(self, mock_api):
+        """API error on role change still redirects to team page with error message."""
+        mock_api.change_customer_user_role.side_effect = PlatformAPIError("server error")
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:team_role", kwargs={"target_user_id": 20}),
+            data={"role": "billing"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("team", response.url)
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class TeamRemoveViewTests(SimpleTestCase):
+    """Test the team member removal endpoint (POST)."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_remove_member_success_redirects(self, mock_api):
+        """Successful removal redirects to team page."""
+        mock_api.remove_customer_user.return_value = {"success": True}
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:team_remove", kwargs={"target_user_id": 20}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("team", response.url)
+        mock_api.remove_customer_user.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_remove_member_api_error_redirects(self, mock_api):
+        """API error on removal still redirects to team page."""
+        mock_api.remove_customer_user.side_effect = PlatformAPIError("not found")
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:team_remove", kwargs={"target_user_id": 20}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("team", response.url)
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class AddressDeleteViewTests(SimpleTestCase):
+    """Test the address deletion endpoint (POST)."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_address_delete_success_redirects(self, mock_api):
+        """Successful address deletion redirects to addresses page."""
+        mock_api.delete_customer_address.return_value = {"success": True}
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:address_delete", kwargs={"address_id": 5}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("addresses", response.url)
+        mock_api.delete_customer_address.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_address_delete_api_error_redirects(self, mock_api):
+        """API error on deletion still redirects to addresses page."""
+        mock_api.delete_customer_address.side_effect = PlatformAPIError("not found")
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:address_delete", kwargs={"address_id": 5}),
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("addresses", response.url)
