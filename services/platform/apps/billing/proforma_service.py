@@ -175,9 +175,10 @@ class ProformaService:
                 line.calculate_totals()
                 line.save()
 
-            # Recalculate proforma totals from lines for consistency
-            proforma.recalculate_totals()
-            proforma.save(update_fields=["subtotal_cents", "tax_cents", "total_cents"])
+            # NOTE: Do NOT call proforma.recalculate_totals() here.
+            # The correct totals (including discount_cents) were already set at creation.
+            # recalculate_totals() recomputes from full-price lines and would overwrite
+            # the discount-aware amounts, producing a proforma that charges full price.
 
             # Link proforma to order (inside same transaction per F3)
             order.proforma = proforma
