@@ -65,7 +65,7 @@
                 {% if can_manage_team %}
                 <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                     <!-- Role Change Form -->
-                    <form method="post" action="{% url 'customers:team_role' member.id %}" class="flex items-center gap-2">
+                    <form method="post" action="{% url 'customers:team_role' member.user_id %}" class="flex items-center gap-2">
                         {% csrf_token %}
                         <select name="role"
                                 class="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -81,7 +81,7 @@
                     </form>
 
                     <!-- Remove Form -->
-                    <form method="post" action="{% url 'customers:team_remove' member.id %}">
+                    <form method="post" action="{% url 'customers:team_remove' member.user_id %}">
                         {% csrf_token %}
                         <button type="submit"
                                 class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50"
