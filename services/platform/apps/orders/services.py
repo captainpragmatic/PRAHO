@@ -20,6 +20,7 @@ from apps.products.models import Product
 from apps.provisioning.service_models import Service, ServicePlan
 
 if TYPE_CHECKING:
+    from apps.billing.models import Invoice
     from apps.customers.models import Customer
     from apps.users.models import User
 
@@ -853,7 +854,7 @@ class OrderPaymentConfirmationService:
 
     @staticmethod
     @transaction.atomic
-    def confirm_order(order: Order, invoice: Any = None) -> Result[Order, str]:
+    def confirm_order(order: Order, invoice: Invoice | None = None) -> Result[Order, str]:
         """Confirm an order after payment. Atomic double-transition (F5).
 
         Why atomic: mark_paid() + start_provisioning() must both succeed or both fail.
@@ -918,9 +919,32 @@ class OrderPaymentConfirmationService:
                 },
             )
 
+            # C6 fix: Log the canonical payment confirmation audit event linked to the Order.
+            # Must use AuditService.log_simple_event(content_object=order) directly —
+            # log_security_event() hardcodes content_object=None so the record is not
+            # linked to the Order instance (audit compliance gap).
+            from apps.audit.services import AuditService  # noqa: PLC0415
+
+            AuditService.log_simple_event(
+                "order_payment_confirmed",
+                content_object=order,
+                description=f"Payment confirmed for order {order.order_number}",
+                metadata={
+                    "order_id": str(order.id),
+                    "order_number": order.order_number,
+                    "invoice_id": str(invoice.id) if invoice else None,
+                    "total_cents": order.total_cents,
+                    "resulting_status": order.status,
+                },
+                actor_type="system",
+            )
+
             logger.info("✅ [OrderConfirm] Order %s confirmed → %s", order.order_number, order.status)
             return Ok(order)
 
+        except (TransitionNotAllowed, ConcurrentTransition) as e:
+            logger.warning("⚠️ [OrderConfirm] FSM transition denied for %s: %s", order.order_number, e)
+            return Err(f"Order transition denied: {e}")
         except Exception as e:
             logger.exception("🔥 [OrderConfirm] Failed to confirm order %s: %s", order.order_number, e)
             return Err(f"Failed to confirm order: {e}")
@@ -933,10 +957,13 @@ class OrderPaymentConfirmationService:
         Default 500000 (5000 RON) is a reasonable starting point for hosting.
         """
         _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 RON  # noqa: N806
+        _MAX_THRESHOLD = 100_000_000  # 1,000,000 RON — upper bound guard  # noqa: N806
         try:
             from apps.settings.services import SettingsService  # noqa: PLC0415
 
-            return SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
+            threshold = SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
+            # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
+            return max(0, min(threshold, _MAX_THRESHOLD))
         except Exception:
             return _DEFAULT_REVIEW_THRESHOLD
 

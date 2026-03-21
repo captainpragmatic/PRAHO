@@ -19,6 +19,7 @@ from apps.common.types import Err, Ok, Result
 from apps.common.validators import log_security_event
 
 if TYPE_CHECKING:
+    from apps.orders.models import Order
     from apps.users.models import User
 
     from .proforma_models import ProformaInvoice
@@ -97,7 +98,7 @@ class ProformaService:
 
     @staticmethod
     @transaction.atomic
-    def create_from_order(order: Any) -> Result[Any, str]:
+    def create_from_order(order: Order) -> Result[Any, str]:
         """Create a proforma invoice from an order, synchronously (DB only, ~20ms).
 
         Why synchronous: proforma creation is a DB-only operation (no PDF, no email).
@@ -115,8 +116,11 @@ class ProformaService:
         from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         try:
-            # Get proforma sequence with lock to prevent race conditions
+            # Get proforma sequence with lock to prevent race conditions.
+            # get_or_create is not atomic with respect to the row lock, so we
+            # re-fetch with select_for_update after creation to hold the lock.
             sequence, _ = ProformaSequence.objects.get_or_create(scope="default")
+            sequence = ProformaSequence.objects.select_for_update(of=("self",)).get(pk=sequence.pk)
             proforma_number = sequence.get_next_number("PRO")
 
             # Extract bill_to from order billing_address JSON
@@ -326,9 +330,17 @@ class ProformaPaymentService:
 
         # H2 fix: Now that conversion succeeded, mark bank/admin payment as succeeded.
         # For existing_payment (Stripe path) the payment was already succeeded by the gateway.
+        # H9 fix: Catch ConcurrentTransition — Payment uses ConcurrentTransitionMixin and a
+        # concurrent webhook could have already called succeed(). This is idempotent.
         if not existing_payment:
-            payment.succeed()
-            payment.save(update_fields=["status", "updated_at"])
+            from django_fsm import ConcurrentTransition as _ConcurrentTransition  # noqa: PLC0415
+            from django_fsm import TransitionNotAllowed as _TransitionNotAllowed2  # noqa: PLC0415
+
+            try:
+                payment.succeed()
+                payment.save(update_fields=["status", "updated_at"])
+            except (_TransitionNotAllowed2, _ConcurrentTransition):
+                logger.warning("⚠️ [Proforma] Payment %s already succeeded (concurrent race)", payment.id)
 
         # Re-link payment to the new invoice
         payment.invoice = invoice

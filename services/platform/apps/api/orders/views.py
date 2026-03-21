@@ -922,7 +922,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
-def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, C901
+def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """
     Confirm order after successful payment and trigger service provisioning.
     """
@@ -1099,12 +1099,17 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 verified_stripe_status,
             )
 
-            # Collect provisionable items inside the atomic block, but dispatch outside
-            provisionable_items = [
-                item
-                for item in order.items.all()
-                if item.product.product_type in {"shared_hosting", "vps", "dedicated_server"}
-            ]
+            # Collect provisionable items inside the atomic block, but dispatch outside.
+            # C1 fix: Only collect items when status is "provisioning". High-value orders
+            # that land in "in_review" must NOT be provisioned until admin approves.
+            if order.status == "provisioning":
+                provisionable_items = [
+                    item
+                    for item in order.items.all()
+                    if item.product.product_type in {"shared_hosting", "vps", "dedicated_server"}
+                ]
+            else:
+                provisionable_items = []
 
         # Trigger service provisioning AFTER the transaction commits
         # to avoid dispatching work that references uncommitted data.

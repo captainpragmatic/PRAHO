@@ -109,3 +109,100 @@ class ServiceDeletionOnCancelTest(TestCase):
         self.assertIsNone(item.service)
         # Product data preserved for audit
         self.assertEqual(item.product_name, self.product.name)
+
+
+class ProformaExpiryOnCancelTest(TestCase):
+    """C2: proforma.expire_proforma() → expire() rename + draft handling."""
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Proforma Expiry SRL", customer_type="company",
+            status="active", primary_email="proforma-expiry@test.ro",
+        )
+        self.product = Product.objects.create(
+            name="Expiry Plan", slug="expiry-plan",
+            product_type="shared_hosting", is_active=True,
+        )
+        from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+        ProformaSequence.objects.get_or_create(scope="default")
+
+    def _create_order_with_proforma(self, proforma_status: str) -> tuple:
+        """Create an order with a linked proforma in the given status."""
+        from datetime import timedelta  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
+
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            billing_address={},
+        )
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer, currency=self.currency,
+            number=f"PRO-C2-{proforma_status[:4].upper()}",
+            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            valid_until=timezone.now() + timedelta(days=7),
+        )
+        if proforma_status == "sent":
+            proforma.send_proforma()
+            proforma.save()
+
+        order.proforma = proforma
+        order.save(update_fields=["proforma"])
+        return order, proforma
+
+    def test_cancel_order_with_sent_proforma_expires_it(self):
+        """C2 RED: Cancelling an order with a sent proforma must expire the proforma.
+
+        Before fix: signals.py calls proforma.expire_proforma() which raises AttributeError.
+        After fix: signals.py calls proforma.expire() which works.
+        """
+        order, proforma = self._create_order_with_proforma("sent")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = OrderService.update_order_status(
+                order, StatusChangeData(new_status="cancelled", notes="C2 test cancel")
+            )
+
+        self.assertTrue(result.is_ok())
+        proforma.refresh_from_db()
+        self.assertEqual(
+            proforma.status, "expired",
+            f"Sent proforma should be expired on order cancel, got: {proforma.status}"
+        )
+
+    def test_cancel_order_with_draft_proforma_expires_or_deletes_it(self):
+        """C2 RED: Cancelling an order with a draft proforma must handle it gracefully.
+
+        Before fix: signals.py calls proforma.expire_proforma() on a 'draft' proforma.
+        expire() only allows source='sent', so this raises TransitionNotAllowed,
+        which is swallowed and the proforma stays in 'draft' (orphaned).
+        After fix: draft proformas are deleted (they were never sent to the customer).
+        """
+        order, proforma = self._create_order_with_proforma("draft")
+        proforma_id = proforma.id
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = OrderService.update_order_status(
+                order, StatusChangeData(new_status="cancelled", notes="C2 draft test cancel")
+            )
+
+        self.assertTrue(result.is_ok())
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
+        # F17 fix: Draft proformas must be hard-deleted on order cancellation
+        # (they were never sent to the customer so no customer-visible record exists).
+        # assertFalse(exists()) is a definitive check — the conditional version could
+        # pass vacuously if the draft is left in place.
+        self.assertFalse(
+            ProformaInvoice.objects.filter(id=proforma_id).exists(),
+            "Draft proforma must be deleted (not left in 'draft' state) after order cancellation"
+        )

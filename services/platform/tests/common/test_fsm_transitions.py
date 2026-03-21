@@ -990,6 +990,19 @@ class OrderFSMTests(FSMTestMixin, TestCase):
         order.save(update_fields=["status"])
         self.assertEqual(order.status, "failed")
 
+    def test_fail_from_paid(self) -> None:
+        """M1 fix: fail() must be reachable from 'paid'.
+
+        If confirm_order() crashes between mark_paid() and start_provisioning()
+        (despite @transaction.atomic, there are no guarantees on partial commits
+        in nested transactions), the FSM needs an escape path from 'paid'.
+        Without this transition, a paid order with no invoice would be stuck.
+        """
+        order = self._make_order("paid")
+        order.fail()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "failed")
+
     def test_retry_from_failed(self) -> None:
         order = self._make_order("failed")
         order.retry()

@@ -16,7 +16,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django_fsm import ConcurrentTransitionMixin, FSMField, TransitionNotAllowed, transition
+from django_fsm import ConcurrentTransition, ConcurrentTransitionMixin, FSMField, TransitionNotAllowed, transition
 
 from .currency_models import Currency
 
@@ -266,7 +266,7 @@ class Payment(ConcurrentTransitionMixin, models.Model):
             transition_fn = getattr(self, method_name)
             try:
                 transition_fn()
-            except TransitionNotAllowed:
+            except (TransitionNotAllowed, ConcurrentTransition):
                 logger.warning(
                     "⚠️ [Payment] Transition to '%s' not allowed from '%s' for payment %s",
                     new_status,

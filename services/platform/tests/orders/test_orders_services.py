@@ -4,6 +4,7 @@ Tests business logic, Romanian VAT compliance, and service layer functionality.
 """
 
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -11,7 +12,6 @@ from django.test import TestCase
 from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
-from apps.products.models import Product, ProductPrice
 from apps.orders.services import (
     OrderCalculationService,
     OrderCreateData,
@@ -20,6 +20,7 @@ from apps.orders.services import (
     OrderService,
     StatusChangeData,
 )
+from apps.products.models import Product, ProductPrice
 from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
@@ -628,8 +629,13 @@ class OrderServiceCreationTestCase(TestCase):
 
     def test_complete_service_creation_flow(self):
         """Test the complete service creation flow: draft → pending → processing → completed"""
-        from apps.orders.services import OrderServiceCreationService, OrderCreateData, OrderService, StatusChangeData
-        from apps.provisioning.models import Service
+        from apps.orders.services import (  # noqa: PLC0415
+            OrderCreateData,
+            OrderService,
+            OrderServiceCreationService,
+            StatusChangeData,
+        )
+        from apps.provisioning.models import Service  # noqa: PLC0415
 
         # Step 1: Create draft order
         order_data = OrderCreateData(
@@ -728,7 +734,6 @@ class OrderServiceCreationTestCase(TestCase):
     def test_service_creation_without_service_plan(self):
         """Test service creation when product has no default service plan"""
         from apps.orders.services import OrderServiceCreationService
-        from apps.provisioning.models import Service
 
         # Remove service plan from product
         self.product.default_service_plan = None
@@ -834,3 +839,72 @@ class OrderServiceCreationTestCase(TestCase):
         # Verify total service count is still 1
         total_services = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(total_services, 1)
+
+
+class AuditTrailOnConfirmOrderTestCase(TestCase):
+    """C6: confirm_order must call AuditService.log_simple_event('order_payment_confirmed')."""
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Audit Trail Test SRL", customer_type="company",
+            status="active", primary_email="audit-trail@test.ro",
+        )
+
+    def _create_order(self, total_cents: int = 12100) -> Order:
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=total_cents - 2100, tax_cents=2100, total_cents=total_cents,
+            billing_address={},
+        )
+        return order
+
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_confirm_order_logs_payment_confirmed_audit_event(self, mock_threshold):
+        """C6 GREEN: confirm_order must create an AuditEvent with content_object=order.
+
+        The audit record must be linked to the Order instance (not content_object=None
+        which log_security_event hardcodes). We assert against real AuditEvent records
+        so that if the implementation falls back to content_object=None, the test fails.
+        """
+        from django.contrib.contenttypes.models import ContentType  # noqa: PLC0415
+
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        mock_threshold.return_value = 1000000  # High threshold so order goes to provisioning
+
+        order = self._create_order(total_cents=12100)
+        force_status(order, "awaiting_payment")
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency,
+            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+        )
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        self.assertTrue(result.is_ok())
+
+        # Assert a real AuditEvent was created with:
+        # 1. The correct event_type
+        # 2. content_object pointing to the Order (not None / fallback User)
+        order_content_type = ContentType.objects.get_for_model(order)
+        audit_event = AuditEvent.objects.filter(
+            action="order_payment_confirmed",
+            content_type=order_content_type,
+            object_id=str(order.id),
+        ).first()
+        self.assertIsNotNone(
+            audit_event,
+            "AuditEvent with action='order_payment_confirmed' linked to Order was not created. "
+            "The audit record must use AuditService.log_simple_event(content_object=order) — "
+            "not log_security_event() which hardcodes content_object=None."
+        )
+        # Verify invoice_id is in the metadata
+        self.assertIn("invoice_id", audit_event.metadata,
+                      "order_payment_confirmed audit event must include invoice_id in metadata")
+        self.assertEqual(audit_event.metadata["invoice_id"], str(invoice.id))
