@@ -209,6 +209,32 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
         self.assertEqual(proforma.bill_to_name, "Acme SRL")
         self.assertEqual(proforma.bill_to_country, "RO")
 
+    def test_discount_preserved_in_proforma_totals(self):
+        """Proforma total_cents reflects discount — regression guard for recalculate_totals overwrite."""
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        # Create order with items first (triggers post_save recalculation),
+        # THEN apply discount (which changes totals but not line items).
+        order = self._create_order_with_items()
+        # Apply discount AFTER item creation to avoid post_save overwrite
+        order.discount_cents = 2000
+        # Recalculate: subtotal stays 10000, but total = 10000 - 2000 + VAT(8000)
+        order.total_cents = order.total_cents - 2000  # Subtract discount from total
+        order.save(update_fields=["discount_cents", "total_cents"])
+        force_status(order, "awaiting_payment")
+
+        result = ProformaService.create_from_order(order)
+        self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
+        proforma = result.unwrap()
+
+        # Proforma must reflect discounted totals, NOT full-price line totals
+        full_price_total = 10000 + 2100  # 12100 without discount
+        self.assertLess(
+            proforma.total_cents,
+            full_price_total,
+            "Proforma total should be less than full price — discount must be applied",
+        )
+
     def test_links_proforma_to_order(self):
         """create_from_order sets order.proforma FK."""
         from apps.billing.proforma_service import ProformaService  # noqa: PLC0415

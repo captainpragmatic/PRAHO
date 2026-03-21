@@ -246,7 +246,7 @@
                 {% url 'orders:order_detail' pk=order.id as order_detail_url %}
                 {% trans "View" as bt11 %}{% button bt11 variant="outline" size="sm" href=order_detail_url %}
 
-                {% if is_staff and order.status not in "cancelled" %}
+                {% if is_staff and order.status != "cancelled" %}
                   {% url 'orders:order_edit' pk=order.id as order_edit_url %}
                   {% trans "Edit" as bt12 %}{% button bt12 variant="outline" size="sm" href=order_edit_url %}
                 {% endif %}
@@ -365,7 +365,7 @@
               {% url 'orders:order_detail' pk=order.id as order_detail_url %}
               {% trans "View Details" as bt21 %}{% button bt21 variant="outline" size="sm" href=order_detail_url %}
 
-              {% if is_staff and order.status not in "cancelled" %}
+              {% if is_staff and order.status != "cancelled" %}
                 {% url 'orders:order_edit' pk=order.id as order_edit_url %}
                 {% trans "Edit Order" as bt22 %}{% button bt22 variant="outline" size="sm" href=order_edit_url %}
               {% endif %}
