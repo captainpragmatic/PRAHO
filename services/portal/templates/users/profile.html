@@ -118,16 +118,6 @@
             </dd>
           </div>
 
-          <div>
-            <dt class="text-sm font-medium text-slate-400">{% trans 'Email Notifications' %}</dt>
-            <dd class="mt-1 text-sm">
-              {% if profile.profile.email_notifications %}
-                {% trans "Enabled" as en_on %}{% badge en_on variant="success" icon="mail" %}
-              {% else %}
-                {% trans "Disabled" as en_off %}{% badge en_off variant="secondary" icon="mail" %}
-              {% endif %}
-            </dd>
-          </div>
         </div>
       </div>
   {% end_section_card %}

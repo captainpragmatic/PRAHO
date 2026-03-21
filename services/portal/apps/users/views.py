@@ -520,17 +520,17 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         memberships = _get_user_customer_memberships(request)
         if memberships:
             request.session["user_memberships"] = memberships
-            # Set default selected customer if not set
             if not request.session.get("selected_customer_id"):
                 request.session["selected_customer_id"] = customer_id
-                # Find the customer name and role for the default customer
-                for membership in memberships:
-                    if str(membership.get("customer_id")) == str(customer_id):
-                        request.session["selected_customer_name"] = membership.get(
-                            "customer_name", f"Customer {customer_id}"
-                        )
-                        request.session["selected_customer_role"] = membership.get("role", "viewer")
-                        break
+
+    # Ensure selected customer name/role are always populated from memberships
+    if request.session.get("user_memberships") and not request.session.get("selected_customer_name"):
+        sel_id = str(request.session.get("selected_customer_id", customer_id))
+        for membership in request.session["user_memberships"]:
+            if str(membership.get("customer_id")) == sel_id:
+                request.session["selected_customer_name"] = membership.get("customer_name", f"Customer {sel_id}")
+                request.session["selected_customer_role"] = membership.get("role", "viewer")
+                break
 
     context = {
         "form": form,
@@ -543,6 +543,9 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         "selected_customer_id": request.session.get("selected_customer_id", customer_id),
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
+        "can_edit_profile": _can_edit_company_profile(
+            request, str(request.session.get("selected_customer_id", customer_id))
+        ),
     }
 
     return render(request, "users/profile.html", context)
