@@ -209,3 +209,58 @@ class NavigationTests(SimpleTestCase):
         response = self.client.get(reverse("customers:team"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Back to Company")
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class CompanyProfileEditTests(SimpleTestCase):
+    """Test that the company profile edit page works correctly."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.users.views.api_client")
+    def test_edit_form_renders_billing_fields(self, mock_api):
+        """Edit form renders billing address fields with correct names."""
+        mock_api.post.return_value = {
+            "success": True,
+            "customer": {
+                "company_name": "Test Co",
+                "primary_email": "test@co.ro",
+                "billing_profile": {"address_street": "Str. Test 1", "address_city": "Cluj"},
+                "tax_profile": {"vat_number": "RO123"},
+            },
+        }
+        self._set_session()
+        response = self.client.get(reverse("users:company_profile_edit"))
+        self.assertEqual(response.status_code, 200)
+        # Verify correct field names are used (billing_street, not street_address)
+        self.assertContains(response, 'name="billing_street"')
+        self.assertContains(response, 'name="billing_city"')
+        self.assertContains(response, 'name="billing_state"')
+
+    @patch("apps.users.views.api_client")
+    def test_edit_form_no_admin_fields(self, mock_api):
+        """Edit form does not expose admin-only fields."""
+        mock_api.post.return_value = {
+            "success": True,
+            "customer": {
+                "company_name": "Test Co",
+                "primary_email": "test@co.ro",
+                "billing_profile": {},
+                "tax_profile": {},
+            },
+        }
+        self._set_session()
+        response = self.client.get(reverse("users:company_profile_edit"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Admin fields must NOT be present
+        self.assertNotIn("payment_terms", content)
+        self.assertNotIn("credit_limit", content)
+        self.assertNotIn("preferred_currency", content)

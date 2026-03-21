@@ -134,18 +134,18 @@
 
                         <!-- Street Address -->
                         <div class="md:col-span-2">
-                            <label for="{{ form.street_address.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.street_address.label }}
-                                {% if form.street_address.field.required %}
+                            <label for="{{ form.billing_street.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.billing_street.label }}
+                                {% if form.billing_street.field.required %}
                                     <span class="text-red-400">*</span>
                                 {% endif %}
                             </label>
-                            {{ form.street_address }}
-                            {% if form.street_address.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.street_address.help_text }}</p>
+                            {{ form.billing_street }}
+                            {% if form.billing_street.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_street.help_text }}</p>
                             {% endif %}
-                            {% if form.street_address.errors %}
-                                {% for error in form.street_address.errors %}
+                            {% if form.billing_street.errors %}
+                                {% for error in form.billing_street.errors %}
                                     <p class="mt-1 text-sm text-red-400">{{ error }}</p>
                                 {% endfor %}
                             {% endif %}
@@ -153,18 +153,18 @@
 
                         <!-- City -->
                         <div>
-                            <label for="{{ form.city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.city.label }}
-                                {% if form.city.field.required %}
+                            <label for="{{ form.billing_city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.billing_city.label }}
+                                {% if form.billing_city.field.required %}
                                     <span class="text-red-400">*</span>
                                 {% endif %}
                             </label>
-                            {{ form.city }}
-                            {% if form.city.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.city.help_text }}</p>
+                            {{ form.billing_city }}
+                            {% if form.billing_city.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_city.help_text }}</p>
                             {% endif %}
-                            {% if form.city.errors %}
-                                {% for error in form.city.errors %}
+                            {% if form.billing_city.errors %}
+                                {% for error in form.billing_city.errors %}
                                     <p class="mt-1 text-sm text-red-400">{{ error }}</p>
                                 {% endfor %}
                             {% endif %}
@@ -172,18 +172,18 @@
 
                         <!-- State/County -->
                         <div>
-                            <label for="{{ form.state.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.state.label }}
-                                {% if form.state.field.required %}
+                            <label for="{{ form.billing_state.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.billing_state.label }}
+                                {% if form.billing_state.field.required %}
                                     <span class="text-red-400">*</span>
                                 {% endif %}
                             </label>
-                            {{ form.state }}
-                            {% if form.state.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.state.help_text }}</p>
+                            {{ form.billing_state }}
+                            {% if form.billing_state.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_state.help_text }}</p>
                             {% endif %}
-                            {% if form.state.errors %}
-                                {% for error in form.state.errors %}
+                            {% if form.billing_state.errors %}
+                                {% for error in form.billing_state.errors %}
                                     <p class="mt-1 text-sm text-red-400">{{ error }}</p>
                                 {% endfor %}
                             {% endif %}
@@ -191,18 +191,18 @@
 
                         <!-- Postal Code -->
                         <div>
-                            <label for="{{ form.postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.postal_code.label }}
-                                {% if form.postal_code.field.required %}
+                            <label for="{{ form.billing_postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.billing_postal_code.label }}
+                                {% if form.billing_postal_code.field.required %}
                                     <span class="text-red-400">*</span>
                                 {% endif %}
                             </label>
-                            {{ form.postal_code }}
-                            {% if form.postal_code.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.postal_code.help_text }}</p>
+                            {{ form.billing_postal_code }}
+                            {% if form.billing_postal_code.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_postal_code.help_text }}</p>
                             {% endif %}
-                            {% if form.postal_code.errors %}
-                                {% for error in form.postal_code.errors %}
+                            {% if form.billing_postal_code.errors %}
+                                {% for error in form.billing_postal_code.errors %}
                                     <p class="mt-1 text-sm text-red-400">{{ error }}</p>
                                 {% endfor %}
                             {% endif %}
@@ -210,18 +210,18 @@
 
                         <!-- Country -->
                         <div>
-                            <label for="{{ form.country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.country.label }}
-                                {% if form.country.field.required %}
+                            <label for="{{ form.billing_country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                {{ form.billing_country.label }}
+                                {% if form.billing_country.field.required %}
                                     <span class="text-red-400">*</span>
                                 {% endif %}
                             </label>
-                            {{ form.country }}
-                            {% if form.country.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.country.help_text }}</p>
+                            {{ form.billing_country }}
+                            {% if form.billing_country.help_text %}
+                                <p class="mt-1 text-sm text-slate-400">{{ form.billing_country.help_text }}</p>
                             {% endif %}
-                            {% if form.country.errors %}
-                                {% for error in form.country.errors %}
+                            {% if form.billing_country.errors %}
+                                {% for error in form.billing_country.errors %}
                                     <p class="mt-1 text-sm text-red-400">{{ error }}</p>
                                 {% endfor %}
                             {% endif %}
