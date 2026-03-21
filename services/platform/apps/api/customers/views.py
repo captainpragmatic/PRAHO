@@ -1389,6 +1389,24 @@ def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Respo
     except CustomerAddress.DoesNotExist:
         return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
 
+    # Guard: cannot delete the last primary or billing address
+    if address.address_type in ("primary", "billing"):
+        remaining = (
+            CustomerAddress.objects.filter(
+                customer=customer, address_type=address.address_type, deleted_at__isnull=True
+            )
+            .exclude(pk=address.pk)
+            .count()
+        )
+        if remaining == 0:
+            return Response(
+                {
+                    "success": False,
+                    "error": f"Cannot delete the only {address.address_type} address. Add a replacement first.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
     acting_user = User.objects.filter(id=user_id).first()
     address.soft_delete(user=acting_user)
     logger.info(f"✅ [Customer API] Address {address_id} soft-deleted from customer {customer.id}")

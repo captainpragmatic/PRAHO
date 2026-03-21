@@ -361,8 +361,12 @@ def company_address_add_view(request: HttpRequest) -> HttpResponse:
         return redirect("users:company_profile")
 
     if request.method == "POST":
+        address_type = request.POST.get("address_type", "billing").strip()
+        if address_type not in ("primary", "billing"):
+            messages.error(request, _("Invalid address type."))
+            return render(request, "customers/address_form.html", {"page_title": _("Add Address")})
         payload: dict[str, object] = {
-            "address_type": request.POST.get("address_type", "billing").strip(),
+            "address_type": address_type,
             "address_line1": request.POST.get("address_line1", "").strip(),
             "address_line2": request.POST.get("address_line2", "").strip(),
             "city": request.POST.get("city", "").strip(),

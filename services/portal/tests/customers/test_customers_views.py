@@ -342,24 +342,27 @@ class CompanyProfileEditTests(SimpleTestCase):
         session.save()
 
     @patch("apps.users.views.api_client")
-    def test_edit_form_renders_billing_fields(self, mock_api):
-        """Edit form renders billing address fields with correct names."""
+    def test_edit_form_has_manage_links(self, mock_api):
+        """Edit form has links to Tax Profile and Addresses pages instead of inline fields."""
         mock_api.post.return_value = {
             "success": True,
             "customer": {
                 "company_name": "Test Co",
                 "primary_email": "test@co.ro",
-                "billing_profile": {"address_street": "Str. Test 1", "address_city": "Cluj"},
-                "tax_profile": {"vat_number": "RO123"},
+                "billing_profile": {},
+                "tax_profile": {},
             },
         }
         self._set_session()
         response = self.client.get(reverse("users:company_profile_edit"))
         self.assertEqual(response.status_code, 200)
-        # Verify correct field names are used (billing_street, not street_address)
-        self.assertContains(response, 'name="billing_street"')
-        self.assertContains(response, 'name="billing_city"')
-        self.assertContains(response, 'name="billing_state"')
+        content = response.content.decode()
+        # Billing fields removed — managed via /company/addresses/
+        self.assertNotIn('name="billing_street"', content)
+        self.assertNotIn('name="vat_number"', content)
+        # Manage links present
+        self.assertIn('/company/tax/', content)
+        self.assertIn('/company/addresses/', content)
 
     @patch("apps.users.views.api_client")
     def test_edit_form_no_admin_fields(self, mock_api):
@@ -634,12 +637,12 @@ class AddressFormTypesTests(SimpleTestCase):
         self._set_session()
         response = self.client.get(reverse("customers:address_add"))
         content = response.content.decode()
-        # Valid types present
+        # Valid types present (simplified to primary + billing only)
         self.assertIn('value="primary"', content)
         self.assertIn('value="billing"', content)
-        self.assertIn('value="delivery"', content)
-        self.assertIn('value="legal"', content)
-        # Invalid types absent
+        # Removed types absent
+        self.assertNotIn('value="delivery"', content)
+        self.assertNotIn('value="legal"', content)
         self.assertNotIn('value="shipping"', content)
         self.assertNotIn('value="other"', content)
 

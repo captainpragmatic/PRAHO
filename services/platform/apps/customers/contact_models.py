@@ -27,8 +27,6 @@ class CustomerAddress(SoftDeleteModel):
     ADDRESS_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("primary", _("Adresa principală")),
         ("billing", _("Adresa facturare")),
-        ("delivery", _("Adresa livrare")),
-        ("legal", _("Sediul social")),
     )
 
     customer = models.ForeignKey(
