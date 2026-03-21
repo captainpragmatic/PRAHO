@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any, ClassVar, cast
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
 from rest_framework import status
@@ -819,9 +819,29 @@ def _get_request_data(request: HttpRequest) -> dict[str, Any]:
     if hasattr(request, "data"):
         return dict(request.data)
     try:
-        return json.loads(request.body)
+        parsed: dict[str, Any] = json.loads(request.body)
+        return parsed
     except json.JSONDecodeError:
         return {}
+
+
+def _extract_user_id(data: dict[str, Any]) -> int:
+    """Extract and validate user_id from request data. Raises ValueError if missing."""
+    raw = data.get("user_id")
+    if raw is None:
+        msg = "user_id is required."
+        raise ValueError(msg)
+    return int(raw)
+
+
+def _check_self_action(user_id: int | str | None, target_user_id: int | str | None) -> Response | None:
+    """Return 400 if user_id and target_user_id refer to the same person."""
+    if user_id is not None and target_user_id is not None and str(user_id) == str(target_user_id):
+        return Response(
+            {"success": False, "error": "Cannot perform this action on yourself."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
 
 
 def _require_owner_role(user_id: int, customer: Customer) -> Response | None:
@@ -853,7 +873,7 @@ def customer_users_list(request: HttpRequest, customer: Customer) -> Response:
             "first_name": m.user.first_name,
             "last_name": m.user.last_name,
             "role": m.role,
-            "is_active": m.user.is_active,
+            "is_active": m.is_active,
             "is_primary": m.is_primary,
             "created_at": m.created_at.isoformat(),
         }
@@ -866,10 +886,13 @@ def customer_users_list(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_users_add(request: HttpRequest, customer: Customer) -> Response:
+def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Add an existing user to a customer organization."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     # Require owner role
     owner_error = _require_owner_role(user_id, customer)
@@ -895,13 +918,19 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:
     except User.DoesNotExist:
         return Response({"success": False, "error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    if CustomerMembership.objects.filter(customer=customer, user=target_user).exists():
+    try:
+        with transaction.atomic():
+            if CustomerMembership.objects.filter(customer=customer, user=target_user).exists():
+                return Response(
+                    {"success": False, "error": "User is already a member."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            CustomerMembership.objects.create(customer=customer, user=target_user, role=role)
+    except IntegrityError:
         return Response(
             {"success": False, "error": "User is already a member of this customer."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
-    CustomerMembership.objects.create(customer=customer, user=target_user, role=role)
     logger.info(f"✅ [User Management API] User {target_user.email} added to customer {customer.id} as {role}")
     return Response({"success": True, "message": f"User added as {role}."})
 
@@ -913,7 +942,10 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     """Create a new user and add them to the customer organization."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -956,10 +988,13 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_users_role(request: HttpRequest, customer: Customer) -> Response:
+def customer_users_role(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Change a user's role within the customer organization."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -972,6 +1007,10 @@ def customer_users_role(request: HttpRequest, customer: Customer) -> Response:
         return Response(
             {"success": False, "error": "target_user_id and new_role are required."}, status=status.HTTP_400_BAD_REQUEST
         )
+
+    self_error = _check_self_action(user_id, target_user_id)
+    if self_error:
+        return self_error
 
     valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
     if new_role not in valid_roles:
@@ -1007,10 +1046,13 @@ def customer_users_role(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
+def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Remove a user from the customer organization."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -1019,6 +1061,10 @@ def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
     target_user_id = data.get("target_user_id")
     if not target_user_id:
         return Response({"success": False, "error": "target_user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    self_error = _check_self_action(user_id, target_user_id)
+    if self_error:
+        return self_error
 
     try:
         membership = CustomerMembership.objects.get(customer=customer, user_id=target_user_id, is_active=True)
@@ -1051,10 +1097,13 @@ def customer_users_remove(request: HttpRequest, customer: Customer) -> Response:
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Response:
+def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Suspend or activate a user's membership."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -1063,6 +1112,10 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
     target_user_id = data.get("target_user_id")
     if not target_user_id:
         return Response({"success": False, "error": "target_user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    self_error = _check_self_action(user_id, target_user_id)
+    if self_error:
+        return self_error
 
     try:
         target_user = User.objects.get(id=target_user_id)
@@ -1096,7 +1149,10 @@ def customer_users_toggle_status(request: HttpRequest, customer: Customer) -> Re
 def customer_update(request: HttpRequest, customer: Customer) -> Response:
     """Update customer details (name, email, phone, etc.)."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     # Owner or billing role required
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
@@ -1110,11 +1166,18 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
     update_fields = []
     for field in updatable_fields:
         if field in data:
-            setattr(customer, field, data[field])
+            value = data[field]
+            if not isinstance(value, str):
+                return Response(
+                    {"success": False, "error": f"Field '{field}' must be a string."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            setattr(customer, field, value.strip())
             update_fields.append(field)
 
     if update_fields:
-        customer.save(update_fields=[*update_fields, "updated_at"])
+        with transaction.atomic():
+            customer.save(update_fields=[*update_fields, "updated_at"])
         logger.info(f"✅ [Customer API] Updated fields {update_fields} for customer {customer.id}")
 
     return Response({"success": True, "message": "Customer updated."})
@@ -1127,7 +1190,10 @@ def customer_update(request: HttpRequest, customer: Customer) -> Response:
 def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Response:
     """Update customer tax profile (CUI, VAT number, etc.)."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     membership = CustomerMembership.objects.filter(user_id=user_id, customer=customer, is_active=True).first()
     if not membership or membership.role not in ("owner", "billing"):
@@ -1136,16 +1202,29 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    tax_bool_fields = {"is_vat_payer", "reverse_charge_eligible"}
+    tax_string_fields = {"cui", "vat_number", "trade_registry_number"}
+
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
-    updatable_fields = {"cui", "vat_number", "trade_registry_number", "is_vat_payer", "reverse_charge_eligible"}
     update_fields = []
-    for field in updatable_fields:
+    for field in tax_bool_fields | tax_string_fields:
         if field in data:
-            setattr(tax_profile, field, data[field])
+            value = data[field]
+            if field in tax_bool_fields:
+                value = value.lower() in ("true", "1", "on", "yes") if isinstance(value, str) else bool(value)
+            else:
+                if not isinstance(value, str):
+                    return Response(
+                        {"success": False, "error": f"Field '{field}' must be a string."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                value = value.strip()
+            setattr(tax_profile, field, value)
             update_fields.append(field)
 
     if update_fields:
-        tax_profile.save(update_fields=[*update_fields, "updated_at"])
+        with transaction.atomic():
+            tax_profile.save(update_fields=[*update_fields, "updated_at"])
         logger.info(f"✅ [Customer API] Updated tax profile fields {update_fields} for customer {customer.id}")
 
     return Response({"success": True, "message": "Tax profile updated."})
@@ -1179,10 +1258,13 @@ def customer_addresses_list(request: HttpRequest, customer: Customer) -> Respons
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:
+def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Add a new address to a customer."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -1204,12 +1286,26 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    address_line1 = data.get("address_line1", "").strip() if isinstance(data.get("address_line1"), str) else ""
+    city = data.get("city", "").strip() if isinstance(data.get("city"), str) else ""
+    if not address_line1:
+        return Response(
+            {"success": False, "error": "address_line1 is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not city:
+        return Response(
+            {"success": False, "error": "city is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     address = CustomerAddress.objects.create(
         customer=customer,
         address_type=address_type,
         is_current=data.get("is_current", True),
-        address_line1=data.get("address_line1", ""),
-        city=data.get("city", ""),
+        address_line1=address_line1,
+        address_line2=data.get("address_line2", ""),
+        city=city,
         county=data.get("county", ""),
         country=data.get("country", "Romania"),
         postal_code=data.get("postal_code", ""),
@@ -1227,7 +1323,10 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
 def customer_addresses_update(request: HttpRequest, customer: Customer) -> Response:
     """Update an existing customer address."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -1242,7 +1341,16 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
     except CustomerAddress.DoesNotExist:
         return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    updatable = {"address_type", "is_current", "address_line1", "city", "county", "country", "postal_code"}
+    updatable = {
+        "address_type",
+        "is_current",
+        "address_line1",
+        "address_line2",
+        "city",
+        "county",
+        "country",
+        "postal_code",
+    }
     update_fields = []
     for field in updatable:
         if field in data:
@@ -1263,7 +1371,10 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
 def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Response:
     """Delete a customer address."""
     data = _get_request_data(request)
-    user_id = data.get("user_id")
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     owner_error = _require_owner_role(user_id, customer)
     if owner_error:
@@ -1278,6 +1389,7 @@ def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Respo
     except CustomerAddress.DoesNotExist:
         return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    address.delete()
-    logger.info(f"✅ [Customer API] Address {address_id} deleted from customer {customer.id}")
+    acting_user = User.objects.filter(id=user_id).first()
+    address.soft_delete(user=acting_user)
+    logger.info(f"✅ [Customer API] Address {address_id} soft-deleted from customer {customer.id}")
     return Response({"success": True, "message": "Address deleted."})

@@ -5,9 +5,11 @@ Uses SimpleTestCase (no business DB) and mocks the Platform API client,
 following the established Portal testing pattern.
 """
 
+import time
+from typing import Any
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings
+from django.test import Client, SimpleTestCase, override_settings
 from django.urls import reverse
 
 from apps.api_client.services import PlatformAPIError
@@ -44,7 +46,7 @@ class TeamViewTests(SimpleTestCase):
             "success": True,
             "users": [
                 {
-                    "id": 10,
+                    "user_id": 10,
                     "email": "owner@example.com",
                     "first_name": "O",
                     "last_name": "W",
@@ -52,7 +54,7 @@ class TeamViewTests(SimpleTestCase):
                     "is_active": True,
                 },
                 {
-                    "id": 20,
+                    "user_id": 20,
                     "email": "viewer@test.com",
                     "first_name": "V",
                     "last_name": "R",
@@ -379,3 +381,264 @@ class CompanyProfileEditTests(SimpleTestCase):
         self.assertNotIn("payment_terms", content)
         self.assertNotIn("credit_limit", content)
         self.assertNotIn("preferred_currency", content)
+
+
+# ---------------------------------------------------------------------------
+# F4: hx-confirm replaced with native onclick confirm
+# ---------------------------------------------------------------------------
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class TeamRemoveConfirmTests(SimpleTestCase):
+    """F4: Destructive remove button uses native JS confirm, not inert hx-confirm."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_remove_button_has_native_confirm(self, mock_api):
+        """Destructive action button uses native JS confirm, not inert hx-confirm."""
+        mock_api.get_customer_users.return_value = {
+            "success": True,
+            "users": [
+                {
+                    "user_id": 10,
+                    "email": "owner@test.com",
+                    "first_name": "O",
+                    "last_name": "W",
+                    "role": "owner",
+                    "is_active": True,
+                    "is_primary": True,
+                    "created_at": "2024-01-01T00:00:00",
+                },
+                {
+                    "user_id": 20,
+                    "email": "viewer@test.com",
+                    "first_name": "V",
+                    "last_name": "W",
+                    "role": "viewer",
+                    "is_active": True,
+                    "is_primary": False,
+                    "created_at": "2024-01-01T00:00:00",
+                },
+            ],
+        }
+        self._set_session()
+        response = self.client.get(reverse("customers:team"))
+        content = response.content.decode()
+        self.assertIn("return confirm(", content)
+        self.assertNotIn("hx-confirm", content)
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class AddressDeleteConfirmTests(SimpleTestCase):
+    """F4: Destructive delete button uses native JS confirm, not inert hx-confirm."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_delete_button_has_native_confirm(self, mock_api):
+        """Destructive action button uses native JS confirm, not inert hx-confirm."""
+        mock_api.get_customer_addresses.return_value = {
+            "success": True,
+            "addresses": [
+                {
+                    "id": 1,
+                    "address_type": "billing",
+                    "is_current": True,
+                    "address_line1": "St 1",
+                    "city": "Bucharest",
+                    "county": "B",
+                    "country": "Romania",
+                    "postal_code": "010101",
+                },
+            ],
+        }
+        self._set_session()
+        response = self.client.get(reverse("customers:addresses"))
+        content = response.content.decode()
+        self.assertIn("return confirm(", content)
+        self.assertNotIn("hx-confirm", content)
+
+
+# ---------------------------------------------------------------------------
+# F6: Admin role can edit tax profile
+# ---------------------------------------------------------------------------
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class TaxProfileViewTests(SimpleTestCase):
+    """F6: Admin role must be allowed to edit the tax profile."""
+
+    def setUp(self) -> None:
+        self.client = Client()
+
+    def _set_session(self, role: str = "admin") -> None:
+        session = self.client.session
+        session["user_id"] = 10
+        session["customer_id"] = "1"
+        session["selected_customer_id"] = 1
+        session["user_memberships"] = [{"customer_id": 1, "role": role}]
+        session["user_memberships_fetched_at"] = time.time()
+        session.save()
+
+    def _do_post_tax_profile(self, mock_api: Any, role: str) -> None:
+        """Helper: set session with role and POST to tax_profile."""
+        self._set_session(role=role)
+        mock_api.update_customer_tax_profile.return_value = {"success": True}
+        mock_api.post.return_value = {"success": True, "tax_profile": {}}
+        self.client.post(
+            reverse("customers:tax_profile"),
+            {"cui": "12345678", "is_vat_payer": "on"},
+        )
+
+    @patch("apps.customers.views.api_client")
+    def test_admin_role_can_edit_tax_profile(self, mock_api: Any) -> None:
+        """Admin role should be able to edit tax profile (POST)."""
+        self._do_post_tax_profile(mock_api, role="admin")
+        mock_api.update_customer_tax_profile.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_owner_role_can_edit_tax_profile(self, mock_api: Any) -> None:
+        """Owner role should still be able to edit tax profile."""
+        self._do_post_tax_profile(mock_api, role="owner")
+        mock_api.update_customer_tax_profile.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_billing_role_can_edit_tax_profile(self, mock_api: Any) -> None:
+        """Billing role should still be able to edit tax profile."""
+        self._do_post_tax_profile(mock_api, role="billing")
+        mock_api.update_customer_tax_profile.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_viewer_role_cannot_edit_tax_profile(self, mock_api: Any) -> None:
+        """Viewer role must NOT be allowed to edit tax profile (can_edit=False)."""
+        self._set_session(role="viewer")
+        mock_api.post.return_value = {"success": True, "tax_profile": {}}
+        self.client.post(
+            reverse("customers:tax_profile"),
+            {"cui": "12345678", "is_vat_payer": "on"},
+        )
+        mock_api.update_customer_tax_profile.assert_not_called()
+
+# ---------------------------------------------------------------------------
+# F7: Role allowlist on invite / role-change
+# ---------------------------------------------------------------------------
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class TeamRoleValidationTests(SimpleTestCase):
+    """F7: Invalid roles must be rejected on both invite and role-change endpoints."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_role_change_invalid_role_rejected(self, mock_api):
+        """Submitting an invalid role to team_role does not call the API."""
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:team_role", kwargs={"target_user_id": 20}),
+            {"role": "superadmin"},
+        )
+        self.assertEqual(response.status_code, 302)
+        mock_api.change_customer_user_role.assert_not_called()
+
+    @patch("apps.customers.views.api_client")
+    def test_role_change_valid_role_proceeds(self, mock_api):
+        """Submitting a valid role to team_role calls the API."""
+        mock_api.change_customer_user_role.return_value = {"success": True}
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:team_role", kwargs={"target_user_id": 20}),
+            {"role": "billing"},
+        )
+        self.assertEqual(response.status_code, 302)
+        mock_api.change_customer_user_role.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_invite_invalid_role_rejected(self, mock_api):
+        """Submitting an invalid role to team_invite does not call the API."""
+        self._set_session()
+        self.client.post(
+            reverse("customers:team_invite"),
+            {
+                "email": "new@example.com",
+                "first_name": "New",
+                "last_name": "User",
+                "role": "superadmin",
+            },
+        )
+        # Should re-render the form, not call create_customer_user
+        mock_api.create_customer_user.assert_not_called()
+
+    @patch("apps.customers.views.api_client")
+    def test_invite_valid_role_proceeds(self, mock_api):
+        """Submitting a valid role to team_invite calls the API."""
+        mock_api.create_customer_user.return_value = {"success": True}
+        self._set_session()
+        self.client.post(
+            reverse("customers:team_invite"),
+            {
+                "email": "new@example.com",
+                "first_name": "New",
+                "last_name": "User",
+                "role": "tech",
+            },
+        )
+        mock_api.create_customer_user.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# F14: Address form valid types
+# ---------------------------------------------------------------------------
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class AddressFormTypesTests(SimpleTestCase):
+    """F14: Address form must offer only valid address types matching the model."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    def test_address_form_has_valid_address_types(self):
+        """Address form offers only valid address types matching the model."""
+        self._set_session()
+        response = self.client.get(reverse("customers:address_add"))
+        content = response.content.decode()
+        # Valid types present
+        self.assertIn('value="primary"', content)
+        self.assertIn('value="billing"', content)
+        self.assertIn('value="delivery"', content)
+        self.assertIn('value="legal"', content)
+        # Invalid types absent
+        self.assertNotIn('value="shipping"', content)
+        self.assertNotIn('value="other"', content)
