@@ -260,7 +260,7 @@ def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
         payload: dict[str, object] = {
             "cui": request.POST.get("cui", "").strip(),
             "vat_number": request.POST.get("vat_number", "").strip(),
-            "trade_registry_number": request.POST.get("trade_registry_number", "").strip(),
+            "registration_number": request.POST.get("trade_registry_number", "").strip(),
             "is_vat_payer": request.POST.get("is_vat_payer") == "on",
             "reverse_charge_eligible": request.POST.get("reverse_charge_eligible") == "on",
         }

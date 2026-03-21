@@ -1203,7 +1203,7 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
         )
 
     tax_bool_fields = {"is_vat_payer", "reverse_charge_eligible"}
-    tax_string_fields = {"cui", "vat_number", "trade_registry_number"}
+    tax_string_fields = {"cui", "vat_number", "registration_number"}
 
     tax_profile, _created = CustomerTaxProfile.objects.get_or_create(customer=customer)
     update_fields = []
