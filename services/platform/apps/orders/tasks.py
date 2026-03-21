@@ -201,37 +201,20 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
 
 
 def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: int, results: dict[str, Any]) -> bool:
-    """Process payment confirmation for an order."""
+    """Process payment confirmation for an order.
+
+    Routes through OrderPaymentConfirmationService.confirm_order() to ensure the
+    review gate threshold check is applied consistently for all payment paths
+    (signal-based, task-based, and 7-day sync task).
+    """
     if total_paid_cents >= invoice.total_cents and order.status == "awaiting_payment":
-        old_status = order.status
-        try:
-            order.mark_paid()
-            order.save(update_fields=["status", "updated_at"])
-        except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning(
-                "⚠️ [PaymentSync] Cannot mark order %s as paid from status %s", order.order_number, old_status
-            )
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        if result.is_err():
+            logger.warning("⚠️ [PaymentSync] Cannot confirm order %s: %s", order.order_number, result.unwrap_err())
             return False
         results["payment_confirmations"] += 1
-
-        # Log payment confirmation
-        AuditService.log_simple_event(
-            event_type="order_payment_confirmed",
-            user=None,
-            content_object=order,
-            description=f"Order payment confirmed: {order.order_number}",
-            old_values={"status": old_status},
-            new_values={"status": "paid"},
-            actor_type="system",
-            metadata={
-                "order_id": str(order.id),
-                "order_number": order.order_number,
-                "invoice_id": str(invoice.id),
-                "amount_paid_cents": total_paid_cents,
-                "invoice_total_cents": invoice.total_cents,
-                "source_app": "orders",
-            },
-        )
         return True
     return False
 
@@ -297,7 +280,7 @@ def _process_refunds(order: Order, payments: list[Any], total_paid_cents: int, r
         total_paid_cents,
         order.status,
     )
-    results["refunds_processed"] += 1
+    results["refunds_detected"] += 1
     return False
 
 
@@ -607,7 +590,7 @@ def sync_order_payment_status() -> dict[str, Any]:
         "updated_orders": [],
         "payment_confirmations": 0,
         "payment_failures": 0,
-        "refunds_processed": 0,
+        "refunds_detected": 0,
         "errors": [],
     }
 
@@ -664,7 +647,7 @@ def sync_order_payment_status() -> dict[str, Any]:
             f"✅ [PaymentSync] Payment sync completed: "
             f"{results['checked_payments']} payments checked, "
             f"{results['payment_confirmations']} confirmations, "
-            f"{results['refunds_processed']} refunds processed"
+            f"{results['refunds_detected']} refunds detected"
         )
 
         return {"success": True, "results": results}

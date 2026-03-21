@@ -507,7 +507,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
     def cancel(self) -> None:
         """Cancel the order."""
 
-    @transition(field=status, source=["awaiting_payment", "provisioning"], target="failed")
+    @transition(field=status, source=["awaiting_payment", "paid", "provisioning"], target="failed")
     def fail(self) -> None:
         """Mark order as failed."""
 

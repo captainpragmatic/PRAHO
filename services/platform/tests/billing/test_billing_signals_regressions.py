@@ -1000,8 +1000,8 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         # Should return early without errors
         _sync_orders_on_invoice_status_change(invoice, "draft", "paid")
 
-    @patch("apps.billing.signals.OrderService" if False else "apps.orders.services.OrderService")
-    def test_paid_advances_awaiting_payment_orders(self, mock_os):
+    @patch("apps.orders.services.OrderPaymentConfirmationService")
+    def test_paid_advances_awaiting_payment_orders(self, mock_opcs):
         invoice = MagicMock()
         invoice.orders.exists.return_value = True
         order = MagicMock()
@@ -1010,10 +1010,10 @@ class TestSyncOrdersOnInvoiceStatusChange(TestCase):
         invoice.orders.filter.return_value = [order]
         mock_result = MagicMock()
         mock_result.is_ok.return_value = True
-        mock_os.update_order_status.return_value = mock_result
+        mock_opcs.confirm_order.return_value = mock_result
 
         _sync_orders_on_invoice_status_change(invoice, "issued", "paid")
-        mock_os.update_order_status.assert_called_once()
+        mock_opcs.confirm_order.assert_called_once_with(order, invoice=invoice)
 
     @patch("apps.orders.services.OrderService")
     def test_void_cancels_orders(self, mock_os):

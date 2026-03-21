@@ -808,6 +808,10 @@ _STATUS_LABEL_MAP: dict[str, str | _StrPromise] = {
     "in_progress": _("In Progress"),
     "not_consented": _("Not Consented"),
     "not consented": _("Not Consented"),
+    # Order lifecycle statuses (renamed in Phase A)
+    "awaiting_payment": _("Awaiting Payment"),
+    "in_review": _("Under Review"),
+    "provisioning": _("Provisioning"),
 }
 
 # ⚡ O(1) lookup — all known statuses across billing, services, orders, tickets

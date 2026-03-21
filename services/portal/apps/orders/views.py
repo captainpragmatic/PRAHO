@@ -1349,11 +1349,17 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
                     # instead of hardcoding "paid". With the review gate, high-value
                     # orders go to "in_review", not "paid".
                     actual_status = order_update_result.get("status", "paid")
+                    # H12 fix: Message must reflect actual order status.
+                    # in_review orders are NOT provisioning — they are awaiting admin approval.
+                    if actual_status == "in_review":
+                        message = "Payment confirmed. Your order is under review and will be processed shortly."
+                    else:
+                        message = "Payment confirmed and service is being provisioned"
                     return JsonResponse(
                         {
                             "success": True,
                             "status": actual_status,
-                            "message": "Payment confirmed and service is being provisioned",
+                            "message": message,
                         }
                     )
                 else:

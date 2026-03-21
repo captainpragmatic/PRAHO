@@ -66,6 +66,37 @@ class ReviewGateTestBase(TestCase):
         )
         return order
 
+    def _create_order_exact(self, total_cents: int):
+        """Create an order with exactly total_cents after item post_save recalculation.
+
+        Uses tax_rate=Decimal("0") so OrderItem.calculate_totals() sets tax_cents=0
+        and line_total_cents=total_cents. This ensures order.total_cents stays exactly
+        at total_cents after the post_save signal recalculates totals from items.
+        Required for boundary tests where off-by-one matters.
+        """
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=total_cents,
+            tax_cents=0,
+            total_cents=total_cents,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=total_cents,
+            tax_rate=Decimal("0"),
+            tax_cents=0,
+            line_total_cents=total_cents,
+        )
+        return order
+
 
 class TestReviewGateBelowThreshold(ReviewGateTestBase):
     """Orders below threshold auto-advance to provisioning."""
@@ -103,6 +134,36 @@ class TestReviewGateAboveThreshold(ReviewGateTestBase):
         self.assertTrue(result.is_ok())
         order.refresh_from_db()
         self.assertEqual(order.status, "in_review")
+
+    def test_one_above_threshold_goes_to_in_review(self):
+        """Order at threshold + 1 cent goes to in_review (boundary: above).
+
+        Uses tax_rate=0 so OrderItem.calculate_totals() preserves the exact total_cents.
+        With a non-zero tax_rate, VAT is recalculated from unit_price_cents and may differ
+        from the intended total_cents by rounding.
+        """
+        order = self._create_order_exact(total_cents=DEFAULT_THRESHOLD + 1)
+        force_status(order, "awaiting_payment")
+
+        result = OrderPaymentConfirmationService.confirm_order(order)
+        self.assertTrue(result.is_ok())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "in_review")
+
+    def test_one_below_threshold_goes_to_provisioning(self):
+        """Order at threshold - 1 cent goes to provisioning (boundary: below).
+
+        Uses tax_rate=0 so OrderItem.calculate_totals() preserves the exact total_cents.
+        With a non-zero tax_rate, VAT is recalculated from unit_price_cents and may differ
+        from the intended total_cents by rounding.
+        """
+        order = self._create_order_exact(total_cents=DEFAULT_THRESHOLD - 1)
+        force_status(order, "awaiting_payment")
+
+        result = OrderPaymentConfirmationService.confirm_order(order)
+        self.assertTrue(result.is_ok())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
 
 
 class TestReviewGateAdminActions(ReviewGateTestBase):
@@ -163,6 +224,118 @@ class TestReviewGateBackgroundTask(ReviewGateTestBase):
             f"High-value order should go to in_review, not {order.status}. "
             f"Background task must route through OrderPaymentConfirmationService.confirm_order().",
         )
+
+
+class TestSyncTaskRespectsReviewGate(ReviewGateTestBase):
+    """7-day payment sync task must route through confirm_order (review gate)."""
+
+    def test_sync_task_respects_review_gate(self):
+        """_process_payment_confirmation must route through confirm_order, not bypass it.
+
+        ROOT CAUSE: _process_payment_confirmation called mark_paid()+save() directly,
+        skipping OrderPaymentConfirmationService.confirm_order() which contains the
+        review gate threshold check. High-value orders would be stuck in 'paid'.
+        """
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.tasks import _process_payment_confirmation  # noqa: PLC0415
+
+        # M9-test fix: Use _create_order_exact so total_cents stays exactly at DEFAULT_THRESHOLD
+        # after the post_save signal recalculates item totals. _create_order adds tax that
+        # would push total_cents above DEFAULT_THRESHOLD, making this a threshold-boundary test
+        # that always routes to in_review regardless of the threshold value.
+        order = self._create_order_exact(total_cents=DEFAULT_THRESHOLD)  # At threshold → should go to in_review
+        force_status(order, "awaiting_payment")
+
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=DEFAULT_THRESHOLD - 2100,
+            tax_cents=2100,
+            total_cents=DEFAULT_THRESHOLD,
+        )
+        results: dict = {"payment_confirmations": 0, "errors": []}
+
+        confirmed = _process_payment_confirmation(order, invoice, DEFAULT_THRESHOLD, results)
+
+        self.assertTrue(confirmed)
+        order.refresh_from_db()
+        # Without fix: order ends up in "paid" (review gate bypassed, stuck)
+        # With fix: order ends up in "in_review" (review gate respected)
+        self.assertEqual(
+            order.status,
+            "in_review",
+            f"High-value order should go to in_review, not {order.status}. "
+            f"7-day sync task must route through OrderPaymentConfirmationService.confirm_order().",
+        )
+
+
+class TestC1ProvisioningGuard(ReviewGateTestBase):
+    """C1: confirm_order API must NOT provision in_review orders."""
+
+    @patch("apps.api.orders.views._provision_confirmed_order_item")
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    @patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway")
+    def test_high_value_order_does_not_provision_after_confirm(
+        self, mock_gateway_factory, mock_auth, mock_threshold, mock_provision
+    ):
+        """C1 RED: confirm_order API calls _provision_confirmed_order_item even for in_review orders.
+
+        HIGH-VALUE order → confirm_order() → status becomes in_review (review gate).
+        Bug: provisionable_items is collected and dispatched regardless of resulting status.
+        Fix: guard provisioning with `if order.status == "provisioning":`.
+        """
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        from rest_framework.test import APIRequestFactory  # noqa: PLC0415
+
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+        from apps.billing.gateways.base import PaymentConfirmResult  # noqa: PLC0415
+        from apps.users.models import User  # noqa: PLC0415
+
+        # Order at exactly the threshold → goes to in_review
+        mock_threshold.return_value = DEFAULT_THRESHOLD
+
+        # Bypass HMAC auth
+        mock_auth.return_value = (self.customer, None)
+
+        # Mock Stripe gateway to return success
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True, status="succeeded", error=None
+        )
+        mock_gateway_factory.return_value = mock_gateway
+
+        # Need a staff user for the request
+        user = User.objects.create_user(
+            email="c1-test@pragmatichost.com", password="test123", is_staff=True, staff_role="admin"
+        )
+
+        # Create high-value order with a VPS item (provisionable product type)
+        order = self._create_order(total_cents=DEFAULT_THRESHOLD)
+        # Set payment_method=card and payment_intent_id so the view proceeds
+        order.payment_method = "card"
+        order.payment_intent_id = "pi_c1test1234567890"
+        order.save(update_fields=["payment_method", "payment_intent_id"])
+        force_status(order, "awaiting_payment")
+
+        factory = APIRequestFactory()
+        request = factory.post(
+            "/api/orders/confirm/",
+            data={"payment_intent_id": "pi_c1test1234567890", "payment_status": "succeeded"},
+            content_type="application/json",
+        )
+        request.user = user
+
+        confirm_order(request, str(order.id))
+
+        order.refresh_from_db()
+        self.assertEqual(
+            order.status, "in_review",
+            f"High-value order should be in_review after confirm, got: {order.status}"
+        )
+        # C1 BUG: without fix, _provision_confirmed_order_item IS called for in_review orders
+        mock_provision.assert_not_called()
 
 
 class TestReviewGateConfigurable(ReviewGateTestBase):

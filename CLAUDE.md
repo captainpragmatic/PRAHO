@@ -109,6 +109,31 @@ Each Platform app follows the strategic seams pattern for future microservices e
 - Lint: `make lint-fsm` (also runs as Phase 6 of `make lint`)
 - Inline bypass: `# fsm-bypass: reason` comment on the line
 
+**FSM Change Protocol (Mandatory for any transition modification):**
+
+When modifying any FSM transition (adding gates, changing preconditions, adding side effects):
+
+1. **Parallel Paths Audit:** Before writing code, grep for ALL code paths that reach the target state:
+   ```bash
+   rg "\.target_method\b|\.target_state" --type py -l
+   ```
+   List every path in views, services, tasks, signals, webhooks, admin, and management commands.
+   Each path must be explicitly marked: MUST UPDATE / NO CHANGE (with reason).
+
+2. **Background Task Consistency:** Every background task (`tasks.py`) that calls FSM transitions must go through the same service method as the primary path. Direct `model.transition()` calls in tasks are prohibited — they bypass gates.
+
+3. **Exception Completeness:** Models with `ConcurrentTransitionMixin` (Order, Service) require catching BOTH `TransitionNotAllowed` AND `ConcurrentTransition` — they are separate exception hierarchies.
+
+**Test Quality Rules:**
+
+Tests must satisfy these checks (enforced during review):
+
+1. **No tautological assertions:** `force_status(x, "done"); assertEqual(x.status, "done")` always passes. Test real transitions.
+2. **No mock-the-unit-under-test:** Mock external dependencies (email, Stripe API), never the service being tested.
+3. **Boundary coverage:** Threshold tests must include: above, at boundary, and below.
+4. **Failure path coverage:** Every test file with happy-path tests must also test at least one failure/error path.
+5. **Signal/on_commit testing:** Use `self.captureOnCommitCallbacks(using="default")` for deferred side effects.
+
 ## Commands
 
 All commands run from project root via Makefile.
