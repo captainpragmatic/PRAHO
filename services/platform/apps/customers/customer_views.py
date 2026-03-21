@@ -210,6 +210,7 @@ def customer_list(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@rate_limit(key="user", rate="45/m", method="GET")
 def customer_search_htmx(request: HttpRequest) -> HttpResponse:
     """🔄 HTMX endpoint for live customer filtering."""
     user = cast(User, request.user)

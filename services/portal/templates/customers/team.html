@@ -85,7 +85,7 @@
                         {% csrf_token %}
                         <button type="submit"
                                 class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50"
-                                hx-confirm="{% trans 'Are you sure you want to remove this team member?' %}">
+                                onclick="return confirm('{% trans "Are you sure you want to remove this team member?" %}')">
                             {% icon "x" size="sm" css_class="mr-1" %}
                             {% trans "Remove" %}
                         </button>

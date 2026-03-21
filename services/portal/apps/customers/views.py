@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 # Roles that are allowed to manage team membership and addresses.
 _OWNER_ROLES = ["owner"]
 
+# Valid assignable role values — matches Platform CustomerMembership.ROLE_CHOICES.
+_VALID_ROLES: frozenset[str] = frozenset({"viewer", "tech", "billing", "owner"})
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -57,6 +60,27 @@ def _get_user_role(request: HttpRequest, customer_id: int | None) -> str | None:
     for m in memberships:
         if str(m.get("customer_id")) == str(customer_id):
             return str(m.get("role", ""))
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Internal validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_invite_input(role: str, email: str) -> str | None:
+    """Validate team-invite POST inputs.
+
+    Returns an error message string if validation fails, or None on success.
+    """
+    if role not in _VALID_ROLES:
+        return str(_("Invalid role selected."))
+    if not email:
+        return str(_("Email address is required."))
+    try:
+        EmailValidator()(email)
+    except ValidationError:
+        return str(_("Enter a valid email address."))
     return None
 
 
@@ -114,15 +138,9 @@ def company_team_invite_view(request: HttpRequest) -> HttpResponse:
         last_name = request.POST.get("last_name", "").strip()
         role = request.POST.get("role", "viewer").strip()
 
-        if not email:
-            messages.error(request, _("Email address is required."))
-            return render(request, "customers/team_invite.html", {"page_title": _("Invite Team Member")})
-
-        _email_validator = EmailValidator()
-        try:
-            _email_validator(email)
-        except ValidationError:
-            messages.error(request, _("Enter a valid email address."))
+        invite_error = _validate_invite_input(role, email)
+        if invite_error:
+            messages.error(request, invite_error)
             return render(request, "customers/team_invite.html", {"page_title": _("Invite Team Member")})
 
         try:
@@ -163,6 +181,10 @@ def company_team_role_view(request: HttpRequest, target_user_id: int) -> HttpRes
     new_role = request.POST.get("role", "").strip()
     if not new_role:
         messages.error(request, _("Role is required."))
+        return redirect("customers:team")
+
+    if new_role not in _VALID_ROLES:
+        messages.error(request, _("Invalid role selected."))
         return redirect("customers:team")
 
     try:
@@ -232,7 +254,7 @@ def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
         return redirect("users:company_profile")
 
     user_role = _get_user_role(request, customer_id)
-    can_edit = user_role in ["owner", "billing"]
+    can_edit = user_role in ["owner", "admin", "billing"]
 
     if request.method == "POST" and can_edit:
         payload: dict[str, object] = {

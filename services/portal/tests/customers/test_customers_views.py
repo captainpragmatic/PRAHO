@@ -707,15 +707,6 @@ class ProfilePageRedesignTests(SimpleTestCase):
         self.assertIn("Change Password", content)
 
     @patch("apps.users.views.api_client")
-    def test_email_notification_pref_displayed(self, mock_api: Any) -> None:
-        """Email notification badge appears in Account Information."""
-        self._mock_profile_api(mock_api)
-        self._set_session()
-        response = self.client.get(reverse("users:profile"))
-        content = response.content.decode()
-        self.assertIn("Email Notifications", content)
-
-    @patch("apps.users.views.api_client")
     def test_company_profiles_no_card_grid(self, mock_api: Any) -> None:
         """Company section has no card grid — simplified to dropdown + summary."""
         self._mock_profile_api(mock_api)

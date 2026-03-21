@@ -130,7 +130,7 @@ def _validate_user_membership(
         logger.warning(f"🚨 [API Security] User not found or inactive: {resolved_user_id}")
         return False, _uniform_error_response("Authentication required", 401)
 
-    membership = CustomerMembership.objects.filter(user=user, customer=customer).first()
+    membership = CustomerMembership.objects.filter(user=user, customer=customer, is_active=True).first()
 
     if not membership:
         logger.warning(
