@@ -642,3 +642,96 @@ class AddressFormTypesTests(SimpleTestCase):
         # Invalid types absent
         self.assertNotIn('value="shipping"', content)
         self.assertNotIn('value="other"', content)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10: Profile page UX redesign
+# ---------------------------------------------------------------------------
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class ProfilePageRedesignTests(SimpleTestCase):
+    """Phase 10: Profile page UX — nav dropdown, buttons, notifications, simplified company card."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    def _mock_profile_api(self, mock_api: Any) -> None:
+        """Set up standard mock returns for profile page API calls."""
+        mock_api.post.return_value = {"success": True, "profile": {}}
+        mock_api.get_customer_profile.return_value = {
+            "profile": {"email_notifications": True, "sms_notifications": False},
+        }
+
+    @patch("apps.users.views.api_client")
+    def test_nav_has_my_account_dropdown(self, mock_api: Any) -> None:
+        """Desktop nav shows 'My Account' dropdown instead of 'Profile' link."""
+        self._mock_profile_api(mock_api)
+        self._set_session()
+        response = self.client.get(reverse("users:profile"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "My Account")
+
+    @patch("apps.users.views.api_client")
+    def test_nav_dropdown_has_company_links(self, mock_api: Any) -> None:
+        """Dropdown items include Company Profile, Team, Addresses."""
+        self._mock_profile_api(mock_api)
+        self._set_session()
+        response = self.client.get(reverse("users:profile"))
+        content = response.content.decode()
+        self.assertIn("Company Profile", content)
+        self.assertIn("Team Members", content)
+        self.assertIn("Addresses", content)
+        self.assertIn("Security", content)
+        self.assertIn("Privacy", content)
+
+    @patch("apps.users.views.api_client")
+    def test_account_card_uses_button_component(self, mock_api: Any) -> None:
+        """MFA and Password links use button component markup."""
+        self._mock_profile_api(mock_api)
+        self._set_session()
+        response = self.client.get(reverse("users:profile"))
+        content = response.content.decode()
+        # Old raw link pattern replaced
+        self.assertNotIn('class="text-yellow-400 hover:text-yellow-300 text-xs"', content)
+        # Button-style links present
+        self.assertIn('href="/mfa/"', content)
+        self.assertIn('href="/change-password/"', content)
+        self.assertIn("Enable MFA", content)
+        self.assertIn("Change Password", content)
+
+    @patch("apps.users.views.api_client")
+    def test_email_notification_pref_displayed(self, mock_api: Any) -> None:
+        """Email notification badge appears in Account Information."""
+        self._mock_profile_api(mock_api)
+        self._set_session()
+        response = self.client.get(reverse("users:profile"))
+        content = response.content.decode()
+        self.assertIn("Email Notifications", content)
+
+    @patch("apps.users.views.api_client")
+    def test_company_profiles_no_card_grid(self, mock_api: Any) -> None:
+        """Company section has no card grid — simplified to dropdown + summary."""
+        self._mock_profile_api(mock_api)
+        self._set_session(
+            user_memberships=[
+                {"customer_id": 1, "customer_name": "Test Co", "role": "owner"},
+                {"customer_id": 2, "customer_name": "Other Co", "role": "viewer"},
+            ],
+            selected_customer_name="Test Co",
+            selected_customer_role="owner",
+        )
+        response = self.client.get(reverse("users:profile"))
+        content = response.content.decode()
+        # No card grid classes
+        self.assertNotIn("grid-cols-1 sm:grid-cols-2 xl:grid-cols-3", content)
+        # Dropdown is present
+        self.assertIn("switchCustomer", content)
+        # Summary row present
+        self.assertIn("Test Co", content)

@@ -84,10 +84,13 @@
 
               <!-- User Menu -->
               <div class="w-72 flex items-center justify-end space-x-2 flex-shrink-0">
-                <a href="/profile/"
-                  class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
-                  {% icon "settings" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Profile' %}
-                </a>
+                {% if account_menu_items %}
+                  {% include "components/nav_dropdown.html" with title="My Account" icon="user" items=account_menu_items %}
+                {% else %}
+                  <a href="/profile/" class="text-slate-300 hover:text-white flex items-center px-2 py-1 whitespace-nowrap">
+                    {% icon "settings" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Profile' %}
+                  </a>
+                {% endif %}
                 <form action="{% url 'users:logout' %}" method="post" class="inline">
                   {% csrf_token %}
                   <button type="submit"
