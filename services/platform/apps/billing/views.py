@@ -70,6 +70,11 @@ logger = logging.getLogger(__name__)
 # Customer access function removed - platform is staff-only
 _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
 
+# S-1: Allowlist for payment_method values accepted by process_proforma_payment.
+# Values are checked case-insensitively. Unknown methods return HTTP 400 immediately,
+# before any service call, to prevent injection of arbitrary method strings.
+ALLOWED_PAYMENT_METHODS: frozenset[str] = frozenset({"bank_transfer", "bank", "card", "stripe", "cash", "other"})
+
 
 def _get_max_payment_amount_cents() -> int:
     """Get max payment amount from SettingsService."""
@@ -789,6 +794,11 @@ def proforma_to_invoice(request: HttpRequest, pk: int) -> HttpResponse:
     Phase B: Conversion only happens via ProformaPaymentService.record_payment_and_convert()
     when a succeeded payment is recorded (bank transfer or Stripe webhook).
     """
+    proforma = get_object_or_404(ProformaInvoice, pk=pk)
+
+    if not isinstance(request.user, User) or not request.user.can_access_customer(proforma.customer):
+        return HttpResponseForbidden()
+
     messages.error(
         request,
         _(
@@ -818,6 +828,20 @@ def process_proforma_payment(request: HttpRequest, pk: int) -> HttpResponse:
 
         raw_method = request.POST.get("payment_method", "bank")
         reference = request.POST.get("reference", "")
+
+        # S-1: Validate payment_method against allowlist before calling the service.
+        # Reject unknown values immediately so that arbitrary strings cannot reach
+        # the payment processor or be stored in Payment.payment_method.
+        if raw_method.lower() not in ALLOWED_PAYMENT_METHODS:
+            logger.warning(
+                "⚠️ [ProformaPayment] Rejected unknown payment_method=%r for proforma %s",
+                raw_method,
+                proforma.pk,
+            )
+            return json_error(
+                f"Unknown payment method '{raw_method}'. Allowed values: " + ", ".join(sorted(ALLOWED_PAYMENT_METHODS)),
+                status=400,
+            )
 
         result = ProformaPaymentService.record_payment_and_convert(
             proforma_id=str(proforma.id),

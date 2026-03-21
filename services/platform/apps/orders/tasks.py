@@ -14,7 +14,6 @@ from typing import Any, TypedDict
 from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
-from django_fsm import ConcurrentTransition, TransitionNotAllowed
 from django_q.models import Schedule
 from django_q.tasks import async_task, schedule
 
@@ -22,7 +21,7 @@ from apps.audit.services import AuditService
 from apps.billing.models import Payment
 from apps.billing.services import InvoiceService
 from apps.orders.models import Order
-from apps.orders.services import OrderService
+from apps.orders.services import OrderService, StatusChangeData
 
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
@@ -150,6 +149,12 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                                     order.order_number,
                                 )
                                 order.refresh_from_db()
+                            else:
+                                logger.warning(
+                                    "⚠️ [OrderProcessor] Proforma fallback creation failed for %s: %s",
+                                    order.order_number,
+                                    proforma_result.unwrap_err(),
+                                )
                         except Exception as e:
                             logger.error("🔥 [OrderProcessor] Failed to create proforma fallback: %s", e)
 
@@ -214,6 +219,7 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
         if result.is_err():
             logger.warning("⚠️ [PaymentSync] Cannot confirm order %s: %s", order.order_number, result.unwrap_err())
             return False
+        order.refresh_from_db()
         results["payment_confirmations"] += 1
         return True
     return False
@@ -229,19 +235,25 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
     recent_failures = [p for p in failed_payments if p.created_at >= timezone.now() - timedelta(hours=24)]
 
     if len(recent_failures) >= MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL:
+        order.refresh_from_db()
         old_status = order.status
-        try:
-            order.fail()
-        except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning("⚠️ [PaymentSync] Cannot fail order %s from status %s", order.order_number, old_status)
-            return False
-        order.notes = (
-            f"{order.notes}\n[AUTO] Order marked as failed due to repeated payment failures at {timezone.now()}"
+        status_data = StatusChangeData(
+            new_status="failed",
+            notes=f"[AUTO] Order marked as failed due to repeated payment failures at {timezone.now()} ({len(recent_failures)} recent failures)",
         )
-        order.save(update_fields=["status", "notes", "updated_at"])
+        result = OrderService.update_order_status(order, status_data)
+        if result.is_err():
+            logger.warning(
+                "⚠️ [PaymentSync] Cannot fail order %s from status %s: %s",
+                order.order_number,
+                old_status,
+                result.unwrap_err(),
+            )
+            return False
+        order = result.unwrap()
         results["payment_failures"] += 1
 
-        # Log payment failure
+        # Log payment failure with detailed audit context (supplementary to service-layer history)
         AuditService.log_simple_event(
             event_type="order_payment_failed",
             user=None,
@@ -264,7 +276,7 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
 def _process_refunds(order: Order, payments: list[Any], total_paid_cents: int, results: dict[str, Any]) -> bool:
     """Process refunds for an order.
 
-    Phase A: Refunds are now handled at Invoice/Payment level, not Order FSM.
+    Refunds are handled at Invoice/Payment level, not Order FSM.
     This function only logs refund activity for monitoring — no order state changes.
     """
     total_refunded_cents = sum(p.amount_cents for p in payments if p.status in ["refunded", "partially_refunded"])
@@ -307,22 +319,27 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
     if now <= timeout_threshold:
         return False
 
-    # Cancel timed out orders
-    try:
-        order.cancel()
-    except (TransitionNotAllowed, ConcurrentTransition):
+    # Cancel timed out orders — route through service layer to create OrderStatusHistory
+    status_data = StatusChangeData(
+        new_status="cancelled",
+        notes=f"[AUTO] Order cancelled due to timeout at {now}",
+    )
+    result = OrderService.update_order_status(order, status_data)
+    if result.is_err():
         logger.warning(
-            "⚠️ [OrderProcessor] Cannot cancel timed-out order %s from status %s", order.order_number, order.status
+            "⚠️ [OrderProcessor] Cannot cancel timed-out order %s from status %s: %s",
+            order.order_number,
+            order.status,
+            result.unwrap_err(),
         )
         return False
-    order.notes = f"{order.notes}\n[AUTO] Order cancelled due to timeout at {now}"
-    order.save(update_fields=["status", "notes", "updated_at"])
+    order = result.unwrap()
 
     order_result["action"] = "timeout_cancelled"
     order_result["status"] = "cancelled"
     results["timed_out_orders"] += 1
 
-    # Log timeout cancellation
+    # Log timeout cancellation with detailed audit context (supplementary to service-layer history)
     AuditService.log_simple_event(
         event_type="order_timeout_cancelled",
         user=None,
@@ -358,9 +375,8 @@ def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
 def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
     """Process orders with paid invoices (fallback task).
 
-    C2 fix: Routes through OrderPaymentConfirmationService.confirm_order() instead of
-    calling mark_paid()+start_provisioning() directly. This ensures the review gate
-    threshold check is applied consistently for both signal-based and task-based paths.
+    Routes through OrderPaymentConfirmationService.confirm_order() to ensure the review
+    gate threshold check is applied consistently for both signal-based and task-based paths.
     """
     from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
@@ -398,17 +414,23 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
 
 
 def _process_cancelled_invoice(order: Order, now: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process orders with cancelled invoices."""
-    try:
-        order.cancel()
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning("⚠️ [OrderProcessor] Cannot cancel order %s from status %s", order.order_number, order.status)
+    """Process orders with cancelled invoices — route through service layer to create OrderStatusHistory."""
+    status_data = StatusChangeData(
+        new_status="cancelled",
+        notes=f"[AUTO] Order cancelled due to cancelled invoice at {now}",
+    )
+    result = OrderService.update_order_status(order, status_data)
+    if result.is_err():
+        logger.warning(
+            "⚠️ [OrderProcessor] Cannot cancel order %s from status %s: %s",
+            order.order_number,
+            order.status,
+            result.unwrap_err(),
+        )
         order_result["action"] = "invoice_cancelled_skip"
         order_result["status"] = order.status
         results["failed_orders"] += 1
         return
-    order.notes = f"{order.notes}\n[AUTO] Order cancelled due to cancelled invoice at {now}"
-    order.save(update_fields=["status", "notes", "updated_at"])
 
     order_result["action"] = "invoice_cancelled"
     order_result["status"] = "cancelled"
@@ -442,7 +464,7 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
 def _process_free_order(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
     """Process free orders (total=0 → skip proforma, go directly to paid → provisioning).
 
-    C4 fix: Routes through OrderPaymentConfirmationService.confirm_order() instead of
+    Routes through OrderPaymentConfirmationService.confirm_order() instead of
     calling mark_paid() alone. Without start_provisioning(), the order gets stuck in
     'paid' forever because the item completion check requires status=='provisioning'.
     """

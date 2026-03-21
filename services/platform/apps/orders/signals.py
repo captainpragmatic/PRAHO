@@ -12,7 +12,7 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService, BusinessEventData, OrdersAuditService
 from apps.common.validators import log_security_event
@@ -50,17 +50,21 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
             "customer_id": str(instance.customer.id),
         }
 
-        # Enhanced order audit logging using OrdersAuditService
-        event_data = BusinessEventData(
-            event_type=event_type,
-            business_object=instance,
-            user=None,  # System event
-            context=AuditContext(actor_type="system"),
-            old_values=old_values,
-            new_values=new_values,
-            description=f"Order {instance.order_number} {'created' if created else 'updated'}",
-        )
-        OrdersAuditService.log_order_event(event_data)
+        # M1 review fix: Audit logging in its own try/except so failure doesn't
+        # prevent on_commit callbacks from being registered (emails, status handling).
+        try:
+            event_data = BusinessEventData(
+                event_type=event_type,
+                business_object=instance,
+                user=None,  # System event
+                context=AuditContext(actor_type="system"),
+                old_values=old_values,
+                new_values=new_values,
+                description=f"Order {instance.order_number} {'created' if created else 'updated'}",
+            )
+            OrdersAuditService.log_order_event(event_data)
+        except Exception as e:
+            logger.warning("⚠️ [Order Signal] Audit logging failed for %s: %s", instance.order_number, e)
 
         if created:
             # Wrap in on_commit so email is not sent if the enclosing transaction
@@ -132,7 +136,7 @@ def _handle_order_status_change(order: Order, old_status: str, new_status: str) 
             },
         )
 
-        # Trigger different actions based on status transitions (Phase A renamed states)
+        # Trigger different actions based on status transitions
         if new_status == "awaiting_payment" and old_status == "draft":
             # Order becomes payable — create pending services (industry standard)
             _create_pending_services_for_order(order)
@@ -264,7 +268,11 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                         item.cancel_provisioning()
                         item.save(update_fields=["provisioning_status"])
                     except TransitionNotAllowed:
-                        pass  # Already in terminal state
+                        logger.debug(
+                            "⏭️ [Order] Item %s already in terminal state %s, skip cancel",
+                            item.id,
+                            item.provisioning_status,
+                        )
 
                 if service.status == "pending":
                     # Safe to hard-delete — never provisioned, no external resources allocated
@@ -290,7 +298,7 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                             service.status,
                             order.order_number,
                         )
-                    except TransitionNotAllowed:
+                    except (TransitionNotAllowed, ConcurrentTransition):
                         logger.warning(
                             "⚠️ [Order] Cannot suspend/fail service %s (status=%s) — manual review required",
                             service_id,
@@ -307,7 +315,11 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                     item.cancel_provisioning()
                     item.save(update_fields=["provisioning_status"])
                 except TransitionNotAllowed:
-                    pass
+                    logger.debug(
+                        "⏭️ [Order] Item %s already in terminal state %s, skip cancel",
+                        item.id,
+                        item.provisioning_status,
+                    )
 
             # Audit: services_deleted_on_cancellation  # noqa: ERA001  # Label comment, not commented-out code
             if service_details:
@@ -331,48 +343,61 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                     },
                 )
 
-        # M4 fix: Void proforma if it exists and is in a voidable state.
-        # Orders cancelled from awaiting_payment have a draft/sent proforma that should
-        # be voided. Orders cancelled after payment have invoices that need manual review.
-        if hasattr(order, "proforma") and order.proforma:
-            proforma = order.proforma
-            if proforma.status == "sent":
-                try:
-                    proforma.expire()
-                    proforma.save(update_fields=["status"])
+            # M4 fix: Void proforma if it exists and is in a voidable state.
+            # Orders cancelled from awaiting_payment have a draft/sent proforma that should
+            # be voided. Orders cancelled after payment have invoices that need manual review.
+            # C4 review fix: Moved inside atomic block so proforma cleanup is atomic with
+            # service cleanup — prevents inconsistent state if proforma voiding fails.
+            if order.proforma_id:
+                proforma = order.proforma
+                if proforma.status == "sent":
+                    try:
+                        proforma.expire()
+                        proforma.save(update_fields=["status"])
+                        logger.info(
+                            "📋 [Order] Expired proforma %s on cancellation of order %s",
+                            proforma.number,
+                            order.order_number,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "🔥 [Order] Could not expire proforma %s for order %s — manual review needed: %s",
+                            proforma.number,
+                            order.order_number,
+                            e,
+                            exc_info=True,
+                        )
+                elif proforma.status == "draft":
+                    # Draft proformas were never sent to the customer — delete them.
+                    # expire() only accepts source="sent", so deletion is the correct action.
+                    proforma_number = proforma.number
+                    order.proforma = None
+                    order.save(update_fields=["proforma"])
+                    proforma.delete()
                     logger.info(
-                        "📋 [Order] Expired proforma %s on cancellation of order %s",
-                        proforma.number,
+                        "🗑️ [Order] Deleted draft proforma %s on cancellation of order %s",
+                        proforma_number,
                         order.order_number,
                     )
-                except Exception:
+                elif proforma.status in ("accepted", "converted"):
                     logger.warning(
-                        "⚠️ [Order] Could not expire proforma %s (status: %s) — manual review needed",
+                        "⚠️ [Order] Order %s cancelled but proforma %s is %s — manual financial review needed",
+                        order.order_number,
                         proforma.number,
                         proforma.status,
                     )
-            elif proforma.status == "draft":
-                # Draft proformas were never sent to the customer — delete them.
-                # expire() only accepts source="sent", so deletion is the correct action.
-                proforma_number = proforma.number
-                order.proforma = None
-                order.save(update_fields=["proforma"])
-                proforma.delete()
-                logger.info(
-                    "🗑️ [Order] Deleted draft proforma %s on cancellation of order %s",
-                    proforma_number,
-                    order.order_number,
-                )
-            elif proforma.status in ("accepted", "converted"):
-                logger.warning(
-                    "⚠️ [Order] Order %s cancelled but proforma %s is %s — manual financial review needed",
-                    order.order_number,
-                    proforma.number,
-                    proforma.status,
-                )
 
-        # Send cancellation email (deliberately vague per plan)
-        _send_order_cancelled_email(order)
+        # Send cancellation email (deliberately vague per plan).
+        # Isolated try/except so a failed email never masks a succeeded cancellation.
+        try:
+            _send_order_cancelled_email(order)
+        except Exception as e:
+            logger.error(
+                "🔥 [Order] Cancellation succeeded but email failed for %s: %s",
+                order.order_number,
+                e,
+                exc_info=True,
+            )
 
         # If order was provisioning or paid, may need to handle refunds
         if old_status in ("provisioning", "paid", "in_review"):
@@ -382,8 +407,6 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Cancellation handling failed: {e}")
-
-    # _handle_order_refund removed — refunds handled at Invoice/Payment level (Phase A)
 
 
 # ===============================================================================
@@ -550,8 +573,15 @@ def _send_proforma_email_for_order(order: Order) -> None:
             # Transition proforma draft → sent (FSM) only on successful email delivery.
             proforma = order.proforma
             if proforma.status == "draft":
-                proforma.send_proforma()
-                proforma.save(update_fields=["status"])
+                try:
+                    proforma.send_proforma()
+                    proforma.save(update_fields=["status"])
+                except TransitionNotAllowed:
+                    logger.warning(
+                        "⚠️ [Order] Email sent for proforma %s but FSM transition to 'sent' failed (status: %s)",
+                        proforma.number,
+                        proforma.status,
+                    )
             logger.info("📧 [Order] Sent proforma email for order %s", order.order_number)
     except Exception as e:
         logger.exception("🔥 [Order] Failed to send proforma email for %s: %s", order.order_number, e)
@@ -605,8 +635,6 @@ def _send_order_cancelled_email(order: Order) -> None:
         )
     except Exception as e:
         logger.exception(f"🔥 [Order] Failed to send cancellation email: {e}")
-
-    # _send_order_refund_email removed — refund emails handled at Invoice/Payment level (Phase A)
 
 
 def _send_service_ready_email(item: OrderItem) -> None:
@@ -699,6 +727,8 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
 
     Handles file cleanup, cache invalidation, and audit compliance.
     """
+    # M5 review fix: Independent try/except for each cleanup step so one failure
+    # doesn't prevent the others (e.g., cache down shouldn't block audit logging).
     try:
         cache_keys = [
             f"order:{instance.id}",
@@ -706,13 +736,22 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
             f"order_items:{instance.id}",
             f"order_totals:{instance.id}",
         ]
-
         cache.delete_many(cache_keys)
         logger.info(f"🗑️ [Cache] Cleared order caches for {instance.order_number}")
+    except Exception as e:
+        logger.warning("⚠️ [Order Signal] Cache cleanup failed for %s: %s", instance.order_number, e)
 
+    try:
         _cleanup_order_files(instance)
-        _cancel_order_webhooks(instance)
+    except Exception as e:
+        logger.warning("⚠️ [Order Signal] File cleanup failed for %s: %s", instance.order_number, e)
 
+    try:
+        _cancel_order_webhooks(instance)
+    except Exception as e:
+        logger.warning("⚠️ [Order Signal] Webhook cleanup failed for %s: %s", instance.order_number, e)
+
+    try:
         log_security_event(
             "order_deleted",
             {
@@ -723,9 +762,8 @@ def handle_order_cleanup(sender: type[Order], instance: Order, **kwargs: Any) ->
                 "status": instance.status,
             },
         )
-
     except Exception as e:
-        logger.exception(f"🔥 [Order Signal] Order cleanup failed: {e}")
+        logger.warning("⚠️ [Order Signal] Audit logging failed for deleted order %s: %s", instance.order_number, e)
 
 
 @receiver(post_delete, sender=OrderItem)
@@ -805,8 +843,13 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                                     service.id,
                                     invoice.number,
                                 )
-                            except Exception:
-                                logger.exception("🔥 [Refund] Failed to suspend service %s", service.id)
+                            except Exception as e:
+                                action_taken = "suspension_failed"
+                                logger.exception(
+                                    "🔥 [Refund] Failed to suspend service %s: %s",
+                                    service.id,
+                                    e,
+                                )
                     else:
                         logger.info(
                             "📋 [Refund] Partial refund on invoice %s — service %s needs manual review",
@@ -825,7 +868,11 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                         },
                     )
     except Exception as e:
-        logger.exception("🔥 [Order Signal] invoice_refunded handler failed: %s", e)
+        logger.critical(
+            "🔥 [Order Signal] invoice_refunded handler failed — refund issued but services may still be active: %s",
+            e,
+            exc_info=True,
+        )
 
 
 # ===============================================================================

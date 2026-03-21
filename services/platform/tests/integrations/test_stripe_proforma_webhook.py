@@ -19,7 +19,7 @@ from apps.billing.models import Currency
 from apps.billing.payment_models import Payment
 from apps.billing.proforma_models import ProformaInvoice, ProformaSequence
 from apps.customers.models import Customer
-from tests.helpers.fsm_helpers import force_status  # noqa: F401
+from tests.helpers.fsm_helpers import force_status
 
 
 class StripeProformaWebhookTest(TestCase):
@@ -135,3 +135,52 @@ class StripeProformaWebhookTest(TestCase):
         # because apply_gateway_event returns False (already succeeded) → early return
         mock_convert.assert_called_once()
         self.assertTrue(success2, "Retry should succeed after conversion succeeds")
+
+    @patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert")
+    def test_retry_after_savepoint_rollback_uses_meta_proforma_id(self, mock_convert):
+        """B-1 regression test (confidence 93): When convert_to_invoice raises inside
+        record_payment_and_convert, the transaction savepoint rolls back
+        payment.proforma to NULL. On Stripe retry, payment.proforma is NULL but
+        payment.meta["proforma_id"] is preserved.
+
+        The C1 fallthrough MUST use meta["proforma_id"] to re-link the proforma and
+        attempt conversion. Without the fix, it hits the else-branch (payment.proforma
+        is NULL) and returns "already processed (idempotent)" — customer is permanently
+        charged with no invoice.
+        """
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        # Simulate the post-savepoint-rollback state:
+        # payment.proforma is NULL (FK rolled back by the savepoint) but
+        # meta["proforma_id"] is preserved (written before the savepoint).
+        _payment, proforma = self._create_payment_with_proforma("pi_savepoint_b1")
+
+        # Manually simulate savepoint rollback: clear payment.proforma FK but
+        # keep meta["proforma_id"] intact.
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+        Payment.objects.filter(gateway_txn_id="pi_savepoint_b1").update(proforma=None)
+        # Ensure meta contains proforma_id (as would be set by apply_gateway_event / record_payment)
+        Payment.objects.filter(gateway_txn_id="pi_savepoint_b1").update(
+            meta={"proforma_id": str(proforma.id)}
+        )
+        # Also simulate payment already being in succeeded state (first webhook committed this)
+        _payment.refresh_from_db()
+        force_status(_payment, "succeeded")
+
+        mock_convert.return_value = Ok(MagicMock())
+        processor = self._get_processor()
+        payload = self._build_succeeded_payload("pi_savepoint_b1")
+
+        success, _msg = processor.handle_payment_intent_event("payment_intent.succeeded", payload)
+
+        # B-1 BUG: Without fix, returns True/"already processed (idempotent)"
+        # because payment.proforma is NULL → else-branch → early return.
+        # With fix: meta["proforma_id"] is used to re-link proforma, then conversion is called.
+        mock_convert.assert_called_once_with(
+            proforma_id=str(proforma.id),
+            amount_cents=12100,
+            payment_method="stripe",
+            existing_payment=_payment,
+        )
+        self.assertTrue(success)

@@ -2069,7 +2069,261 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
         mock_email.assert_not_called()
 
 
+class TestInvoicePaidConfirmOrderFailureLogging(TestCase):
+    """H4 review fix: confirm_order() failure on invoice-paid path must log error."""
+
+    def test_confirm_order_failure_logs_error(self):
+        """H4 review fix: When confirm_order returns Err, billing signal logs the error."""
+        from apps.billing.signals import _sync_orders_on_invoice_status_change  # noqa: PLC0415
+        from apps.common.types import Err  # noqa: PLC0415
+
+        mock_invoice = MagicMock()
+        mock_invoice.number = "INV-001"
+        mock_invoice.orders.exists.return_value = True
+        mock_order = MagicMock()
+        mock_order.order_number = "ORD-001"
+        mock_order.status = "awaiting_payment"
+        mock_order.proforma = None
+        mock_invoice.orders.filter.return_value = [mock_order]
+
+        # _sync_orders_on_invoice_status_change does `from apps.orders.services import
+        # OrderPaymentConfirmationService` locally. Patch the class method at its home module.
+        mock_confirm = MagicMock(return_value=Err("FSM transition denied"))
+
+        with (
+            patch("apps.orders.services.OrderPaymentConfirmationService.confirm_order", mock_confirm),
+            patch("apps.orders.services.OrderService"),
+            patch("apps.orders.services.StatusChangeData"),
+            self.assertLogs("apps.billing.signals", level="ERROR") as log_ctx,
+        ):
+            _sync_orders_on_invoice_status_change(mock_invoice, "draft", "paid")
+
+        mock_confirm.assert_called_once()
+        self.assertTrue(
+            any("Failed to confirm order ORD-001" in msg for msg in log_ctx.output),
+            f"Expected error log about confirm failure, got: {log_ctx.output}",
+        )
+
+
 class TestConstants(TestCase):
     def test_constants_exist(self):
         assert LARGE_REFUND_THRESHOLD_CENTS == 50000
         assert E_FACTURA_MINIMUM_AMOUNT == 100
+
+
+# ===============================================================================
+# TASK 2.3: Silent void failure must log error when OrderService.update_order_status fails
+# ===============================================================================
+
+
+class VoidedInvoiceOrderCancellationFailureLoggingTest(TestCase):
+    """Task 2.3: Missing else-branch in void path of _sync_orders_on_invoice_status_change.
+
+    When OrderService.update_order_status returns Err(...) for a voided invoice,
+    the failure is currently silently dropped. The else-branch must log at ERROR level.
+    """
+
+    def test_void_order_cancellation_failure_is_logged(self):
+        """Task 2.3 RED: Err result from update_order_status on void path must be logged.
+
+        Currently no else-branch exists — the error is silently swallowed.
+        This test will FAIL until the else-branch with logger.error is added.
+        """
+        from apps.billing.signals import _sync_orders_on_invoice_status_change  # noqa: PLC0415
+        from apps.common.types import Err  # noqa: PLC0415
+
+        mock_invoice = MagicMock()
+        mock_invoice.orders.exists.return_value = True
+        mock_invoice.number = "INV-VOID-001"
+
+        mock_order = MagicMock()
+        mock_order.order_number = "ORD-VOID-001"
+        mock_order.status = "awaiting_payment"
+        mock_invoice.orders.all.return_value = [mock_order]
+
+        mock_result = Err("cancellation failed — FSM guard")
+
+        with (
+            patch("apps.orders.services.OrderService.update_order_status", return_value=mock_result),
+            self.assertLogs("apps.billing.signals", level="ERROR") as log_ctx,
+        ):
+            _sync_orders_on_invoice_status_change(mock_invoice, "issued", "void")
+
+        # Must log at ERROR level for the failure
+        error_records = [msg for msg in log_ctx.output if "ERROR" in msg]
+        self.assertTrue(
+            len(error_records) > 0,
+            f"Expected ERROR log for void cancellation failure, got: {log_ctx.output}",
+        )
+
+        # Must include the order number for traceability
+        self.assertTrue(
+            any(mock_order.order_number in msg for msg in error_records),
+            f"Expected order number {mock_order.order_number!r} in error log, got: {error_records}",
+        )
+
+
+# ===============================================================================
+# TASK 2.4: Inaccurate audit trail — suspension failure must record "suspension_failed"
+# ===============================================================================
+
+
+class RefundServiceSuspensionAuditTrailTest(TestCase):
+    """Task 2.4: When service.suspend() raises, action_taken must be "suspension_failed"
+    so the audit log accurately reflects the failure rather than "flagged_for_review".
+    """
+
+    def test_suspend_failure_records_suspension_failed_in_audit(self):
+        """Task 2.4 RED: service.suspend() raising must set action_taken="suspension_failed".
+
+        Currently the except block does NOT update action_taken, so log_security_event
+        records action="flagged_for_review" even when suspension was attempted and failed.
+        This test will FAIL until action_taken is updated in the except block.
+        """
+        from apps.orders.signals import _handle_invoice_refunded  # noqa: PLC0415
+
+        mock_invoice = MagicMock()
+        mock_invoice.id = uuid.uuid4()
+        mock_invoice.number = "INV-REFUND-AUDT"
+
+        mock_service = MagicMock()
+        mock_service.id = uuid.uuid4()
+        mock_service.status = "active"
+        mock_service.suspend.side_effect = Exception("Virtualmin down during suspend")
+
+        mock_item = MagicMock()
+        mock_item.service = mock_service
+
+        mock_order = MagicMock()
+
+        # select_for_update chain: returns queryset mock that iterates over [mock_item]
+        mock_items_qs = MagicMock()
+        mock_items_qs.__iter__ = MagicMock(return_value=iter([mock_item]))
+        mock_order.items.select_for_update.return_value.filter.return_value.select_related.return_value = mock_items_qs
+
+        captured_security_events: list[tuple] = []
+
+        def capture_security_event(event_type: str, data: dict) -> None:
+            captured_security_events.append((event_type, data))
+
+        with (
+            patch("apps.orders.signals.Order.objects") as mock_qs,
+            patch("apps.orders.signals.log_security_event", side_effect=capture_security_event),
+        ):
+            mock_qs.filter.return_value = [mock_order]
+            _handle_invoice_refunded(sender=None, invoice=mock_invoice, refund_type="full")
+
+        # Must have captured at least one security event
+        self.assertTrue(
+            len(captured_security_events) > 0,
+            "Expected log_security_event to be called but it was not",
+        )
+
+        # The action in the security event must be "suspension_failed", NOT "flagged_for_review"
+        refund_events = [
+            data for event_type, data in captured_security_events
+            if event_type == "invoice_refund_service_action"
+        ]
+        self.assertTrue(
+            len(refund_events) > 0,
+            f"Expected 'invoice_refund_service_action' security event, got: {captured_security_events}",
+        )
+
+        action = refund_events[0].get("action")
+        self.assertEqual(
+            action,
+            "suspension_failed",
+            f"Expected action='suspension_failed' when suspend() raises, got: {action!r}. "
+            "The audit trail currently records 'flagged_for_review' even on suspension failure.",
+        )
+
+
+# ===============================================================================
+# TASK 5.7: Proforma-linked orders must be skipped by billing sync on invoice paid
+# ===============================================================================
+
+
+class ProformaLinkedOrderSkippedBySyncTest(TestCase):
+    """Task 5.7: _sync_orders_on_invoice_status_change must NOT call confirm_order
+    for orders that already have a proforma FK set (status='awaiting_payment').
+
+    Those orders are handled by the proforma_payment_received signal. If the
+    billing sync also advances them, the order gets double-confirmed: first to
+    'paid' by the sync (bypassing the double-transition in confirm_order), then
+    the proforma signal sees it already paid and returns Ok idempotently — but
+    without the second transition to provisioning/in_review.
+    """
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = CustomerFactory()
+
+    def test_proforma_linked_order_is_skipped_by_invoice_paid_sync(self):
+        """Task 5.7: When invoice transitions to 'paid', orders with proforma FK
+        set must NOT be passed to OrderPaymentConfirmationService.confirm_order.
+
+        Strategy: create an order with status='awaiting_payment' and proforma set,
+        link it to an invoice, call _sync_orders_on_invoice_status_change,
+        and assert confirm_order was never called for this proforma-linked order.
+        """
+        from datetime import timedelta  # noqa: PLC0415
+
+        from django.utils import timezone  # noqa: PLC0415
+
+        from apps.billing.proforma_models import ProformaInvoice, ProformaSequence  # noqa: PLC0415
+        from apps.billing.signals import _sync_orders_on_invoice_status_change  # noqa: PLC0415
+        from apps.orders.models import Order  # noqa: PLC0415
+        from tests.helpers.fsm_helpers import force_status  # noqa: PLC0415
+
+        ProformaSequence.objects.get_or_create(scope="default")
+
+        invoice = InvoiceFactory(customer=self.customer, currency=self.currency)
+        force_status(invoice, "issued")
+
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="PRO-SKIP-001",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            valid_until=timezone.now() + timedelta(days=7),
+        )
+
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            billing_address={},
+            proforma=proforma,
+        )
+        force_status(order, "awaiting_payment")
+        order.invoice = invoice
+        order.save(update_fields=["invoice"])
+
+        with patch("apps.orders.services.OrderPaymentConfirmationService.confirm_order") as mock_confirm:
+            _sync_orders_on_invoice_status_change(invoice, "issued", "paid")
+
+        # confirm_order must NOT be called for proforma-linked orders —
+        # those are handled by the proforma_payment_received signal instead.
+        if mock_confirm.called:
+            called_orders = [
+                call.args[0] if call.args else call.kwargs.get("order")
+                for call in mock_confirm.call_args_list
+            ]
+            proforma_linked = [
+                o for o in called_orders
+                if o is not None and getattr(o, "proforma_id", None)
+            ]
+            self.assertEqual(
+                len(proforma_linked),
+                0,
+                f"confirm_order was called {mock_confirm.call_count} time(s) for proforma-linked "
+                f"order(s) — these must be skipped. Called with orders: {called_orders}",
+            )
