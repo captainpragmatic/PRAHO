@@ -621,21 +621,21 @@ REDIS_CACHE_CONFIG = {
 # Rate limiting rates for different scopes
 THROTTLE_RATES = {
     # Global DRF defaults (apps.common.performance.rate_limiting)
-    "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", "100/minute"),
-    "portal_hmac_burst": "50/10s",
-    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "100/minute"),
-    "burst": "30/10s",
+    "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", "200/minute"),
+    "portal_hmac_burst": "100/10s",
+    "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "200/minute"),
+    "burst": "60/10s",
     # Per-view API throttles (apps.api.core.throttling)
-    "auth": "5/minute",
-    "sustained": "1000/hour",
-    "api_burst": "60/min",
+    "auth": "10/minute",
+    "sustained": "2000/hour",
+    "api_burst": "120/min",
     # Built-in DRF classes used directly by decorators
-    "anon": "20/minute",
+    "anon": "40/minute",
     # Order API scoped throttles (apps.api.orders.views)
-    "order_create": "10/min",
-    "order_calculate": "30/min",
-    "order_list": "100/min",
-    "product_catalog": "200/min",
+    "order_create": "20/min",
+    "order_calculate": "60/min",
+    "order_list": "200/min",
+    "product_catalog": "400/min",
 }
 
 # Add throttling classes to REST_FRAMEWORK

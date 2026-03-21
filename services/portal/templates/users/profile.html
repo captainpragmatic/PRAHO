@@ -25,32 +25,13 @@
 
         <!-- Form Errors -->
         {% if form.non_field_errors %}
-        <div class="bg-red-900 border border-red-700 rounded-md p-3">
-          {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">{% icon "x" size="sm" css_class="text-red-100" %} {{ error }}</p>
-          {% endfor %}
-        </div>
+        {% form_error_summary form %}
         {% endif %}
 
         <!-- Basic Information -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label for="id_first_name" class="block text-sm font-medium text-slate-300 mb-1">
-              {% trans 'First Name' %}
-            </label>
-            <input type="text" name="first_name" id="id_first_name" value="{{ profile.first_name|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="{% trans 'Your first name' %}">
-          </div>
-
-          <div>
-            <label for="id_last_name" class="block text-sm font-medium text-slate-300 mb-1">
-              {% trans 'Last Name' %}
-            </label>
-            <input type="text" name="last_name" id="id_last_name" value="{{ profile.last_name|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="{% trans 'Your last name' %}">
-          </div>
+          {% form_field form.first_name icon_left="user" %}
+          {% form_field form.last_name icon_left="user" %}
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -58,21 +39,12 @@
             <label for="id_email" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'Email Address' %}
             </label>
-            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled
-                   class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
+            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
             <p class="mt-1 text-xs text-slate-400">
               {% trans 'Contact support to change your email address' %}
             </p>
           </div>
-
-          <div>
-            <label for="id_phone" class="block text-sm font-medium text-slate-300 mb-1">
-              {% trans 'Phone Number' %}
-            </label>
-            <input type="text" name="phone" id="id_phone" value="{{ profile.phone|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="+40 721 123 456">
-          </div>
+          {% form_field form.phone icon_left="phone" %}
         </div>
 
         <!-- Language & Preferences -->
@@ -82,29 +54,8 @@
           </h4>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label for="preferred_language" class="block text-sm font-medium text-slate-300 mb-1">
-                {% trans 'Language' %}
-              </label>
-              <select name="preferred_language" id="preferred_language"
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="ro" {% if profile.profile.preferred_language == 'ro' %}selected{% endif %}>Română (RO)</option>
-                <option value="en" {% if profile.profile.preferred_language == 'en' %}selected{% endif %}>English (EN)</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="timezone" class="block text-sm font-medium text-slate-300 mb-1">
-                {% trans 'Timezone' %}
-              </label>
-              <select name="timezone" id="timezone"
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="Europe/Bucharest" {% if profile.profile.timezone == 'Europe/Bucharest' or not profile.profile.timezone %}selected{% endif %}>Europe/Bucharest (RO)</option>
-                <option value="UTC" {% if profile.profile.timezone == 'UTC' %}selected{% endif %}>UTC</option>
-                <option value="Europe/London" {% if profile.profile.timezone == 'Europe/London' %}selected{% endif %}>Europe/London (UK)</option>
-                <option value="Europe/Paris" {% if profile.profile.timezone == 'Europe/Paris' %}selected{% endif %}>Europe/Paris (FR)</option>
-              </select>
-            </div>
+            {% form_field form.preferred_language %}
+            {% form_field form.timezone %}
           </div>
         </div>
 
