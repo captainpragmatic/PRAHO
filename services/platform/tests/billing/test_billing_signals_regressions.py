@@ -1130,7 +1130,9 @@ class TestHandleInvoiceRefundCompletion(TestCase):
         invoice.id = uuid.uuid4()
         invoice.customer.id = 1
 
-        _handle_invoice_refund_completion(invoice)
+        # H5 fix: email is now inside on_commit, so use captureOnCommitCallbacks
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_invoice_refund_completion(invoice)
         mock_email.assert_called_once()
         mock_history.assert_called_once()
         mock_efactura.assert_called_once()

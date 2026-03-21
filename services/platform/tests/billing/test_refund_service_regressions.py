@@ -613,8 +613,8 @@ class TestValidateOrderRefundEligibility(TestCase):
         # MagicMock with spec won't have status, triggering the no-status branch
         # But _get_order_refunded_amount may fail on mock, hitting exception
         r = RefundService._validate_order_refund_eligibility(order, {"refund_type": "full"})
-        # Either ok with not eligible or err from exception
-        assert r.is_ok() or r.is_err()
+        # M7 fix: Order without status attribute should return an error
+        assert r.is_err(), f"Expected Err for order without status, got Ok: {r}"
 
     def test_exception_in_eligibility(self):
         with patch.object(RefundService, "_get_order_refunded_amount", side_effect=Exception("boom")):
@@ -1458,8 +1458,9 @@ class TestValidateAndPrepareOrderRefund(TestCase):
         order.total_cents = 10000
         del order.status
         r = RefundService._validate_and_prepare_order_refund(order, {"refund_type": "full"})
-        # Without status, goes to get_order_refunded_amount path
-        assert r.is_ok() or r.is_err()
+        # M7 fix: Order without status should still return a result (Ok or Err)
+        # but we should assert the specific expected behavior
+        assert r.is_err(), f"Expected Err for order without status, got Ok: {r}"
 
 
 # ===========================================================================

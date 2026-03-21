@@ -415,7 +415,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (changeStatusBtn) {
         changeStatusBtn.addEventListener('click', function(e) {
             e.preventDefault();
-            console.log('Change Status button clicked'); // Debug log
             showStatusModal();
         });
     }
@@ -426,13 +425,7 @@ document.addEventListener('DOMContentLoaded', function() {
         statusForm.addEventListener('submit', function(e) {
             e.preventDefault();
 
-            console.log('Status form submitted'); // Debug log
             const formData = new FormData(this);
-
-            // Log form data for debugging
-            for (let [key, value] of formData.entries()) {
-                console.log(`${key}: ${value}`);
-            }
 
             fetch(this.action, {
                 method: 'POST',

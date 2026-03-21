@@ -778,8 +778,8 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                 {
                     "success": True,
                     "order": serializer.data,
-                    "auto_pending_attempted": auto_pending,
-                    "promoted_to_pending": promoted,
+                    "auto_submit_attempted": auto_pending,
+                    "promoted_to_awaiting_payment": promoted,
                     "preflight": preflight,
                 },
                 status=status.HTTP_201_CREATED,

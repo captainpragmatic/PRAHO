@@ -141,7 +141,7 @@ class TestOrderCreationDoSHardening(SimpleTestCase):
                 "order": {
                     "id": "550e8400-e29b-41d4-a716-446655440000",
                     "order_number": "ORD-2026-42-0001",
-                    "status": "pending",
+                    "status": "awaiting_payment",
                 },
             }
 

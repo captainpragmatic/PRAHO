@@ -127,6 +127,44 @@ class TestReviewGateAdminActions(ReviewGateTestBase):
         self.assertEqual(order.status, "cancelled")
 
 
+class TestReviewGateBackgroundTask(ReviewGateTestBase):
+    """C2 regression: Background task _process_paid_order must respect review gate."""
+
+    def test_background_task_respects_review_gate_for_high_value_orders(self):
+        """C2: _process_paid_order must route through confirm_order, not bypass it.
+
+        ROOT CAUSE: _process_paid_order called mark_paid()+start_provisioning() directly,
+        skipping OrderPaymentConfirmationService.confirm_order() which has the review threshold.
+        """
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.tasks import _process_paid_order  # noqa: PLC0415
+
+        order = self._create_order(total_cents=DEFAULT_THRESHOLD)  # At threshold → should go to in_review
+        force_status(order, "awaiting_payment")
+
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=DEFAULT_THRESHOLD - 2100,
+            tax_cents=2100,
+            total_cents=DEFAULT_THRESHOLD,
+        )
+        order_result: dict = {"action": None, "status": None}
+        results: dict = {"confirmed_orders": 0, "provisioning_triggered": 0, "errors": []}
+
+        _process_paid_order(order, invoice, order_result, results)
+
+        order.refresh_from_db()
+        # Without C2 fix: order ends up in "provisioning" (review gate bypassed)
+        # With C2 fix: order ends up in "in_review" (review gate respected)
+        self.assertEqual(
+            order.status,
+            "in_review",
+            f"High-value order should go to in_review, not {order.status}. "
+            f"Background task must route through OrderPaymentConfirmationService.confirm_order().",
+        )
+
+
 class TestReviewGateConfigurable(ReviewGateTestBase):
     """Review threshold is configurable via SettingsService."""
 

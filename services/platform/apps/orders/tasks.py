@@ -373,49 +373,42 @@ def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
 
 
 def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process orders with paid invoices (fallback task)."""
-    # Move to paid status
-    try:
-        order.mark_paid()
-        order.save(update_fields=["status", "updated_at"])
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning(
-            "⚠️ [OrderProcessor] Cannot mark order %s as paid from status %s", order.order_number, order.status
-        )
+    """Process orders with paid invoices (fallback task).
+
+    C2 fix: Routes through OrderPaymentConfirmationService.confirm_order() instead of
+    calling mark_paid()+start_provisioning() directly. This ensures the review gate
+    threshold check is applied consistently for both signal-based and task-based paths.
+    """
+    from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+    if result.is_err():
+        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s: %s", order.order_number, result.unwrap_err())
         return
 
+    order.refresh_from_db()
     order_result["action"] = "payment_confirmed"
-    order_result["status"] = "paid"
+    order_result["status"] = order.status
     results["confirmed_orders"] += 1
 
-    # Trigger provisioning for order items
-    provisioned_items = _trigger_item_provisioning(order, results)
-
-    if provisioned_items > 0:
-        results["provisioning_triggered"] += provisioned_items
-        try:
-            order.start_provisioning()
-            order.save(update_fields=["status", "updated_at"])
-        except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning(
-                "⚠️ [OrderProcessor] Cannot start provisioning order %s from status %s", order.order_number, order.status
-            )
-            return
-        order_result["status"] = "provisioning"
+    # If order went to provisioning (not in_review), trigger item provisioning
+    if order.status == "provisioning":
+        provisioned_items = _trigger_item_provisioning(order, results)
+        if provisioned_items > 0:
+            results["provisioning_triggered"] += provisioned_items
 
     # Log order confirmation
     AuditService.log_simple_event(
         event_type="order_confirmed_auto",
         user=None,
         content_object=order,
-        description=f"Order {order.order_number} automatically confirmed and processed",
+        description=f"Order {order.order_number} automatically confirmed (status: {order.status})",
         actor_type="system",
         metadata={
             "order_id": str(order.id),
             "order_number": order.order_number,
             "customer_id": str(order.customer.id),
             "invoice_id": str(invoice.id),
-            "items_provisioned": provisioned_items,
             "source_app": "orders",
         },
     )
@@ -464,28 +457,33 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
 
 
 def _process_free_order(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process free orders (total=0 → skip proforma, go directly to paid → provisioning)."""
-    try:
-        order.mark_paid()
-        order.save(update_fields=["status", "updated_at"])
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning(
-            "⚠️ [OrderProcessor] Cannot mark free order %s as paid from status %s", order.order_number, order.status
-        )
+    """Process free orders (total=0 → skip proforma, go directly to paid → provisioning).
+
+    C4 fix: Routes through OrderPaymentConfirmationService.confirm_order() instead of
+    calling mark_paid() alone. Without start_provisioning(), the order gets stuck in
+    'paid' forever because the item completion check requires status=='provisioning'.
+    """
+    from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+    result = OrderPaymentConfirmationService.confirm_order(order)
+    if result.is_err():
+        logger.warning("⚠️ [OrderProcessor] Cannot confirm free order %s: %s", order.order_number, result.unwrap_err())
         return
 
+    order.refresh_from_db()
     order_result["action"] = "free_order_confirmed"
-    order_result["status"] = "paid"
+    order_result["status"] = order.status
     results["confirmed_orders"] += 1
 
-    # Trigger provisioning
-    for item in order.items.filter(provisioning_status="pending"):
-        try:
-            async_task("apps.provisioning.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
-            results["provisioning_triggered"] += 1
-        except Exception as e:
-            logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
-            results["errors"].append(f"Free order provisioning trigger failed: {e}")
+    # If order went to provisioning, trigger item provisioning
+    if order.status == "provisioning":
+        for item in order.items.filter(provisioning_status="pending"):
+            try:
+                async_task("apps.provisioning.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
+                results["provisioning_triggered"] += 1
+            except Exception as e:
+                logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
+                results["errors"].append(f"Free order provisioning trigger failed: {e}")
 
 
 def _check_service_availability() -> bool:
@@ -527,7 +525,7 @@ def _create_renewal_order_data(service: Any) -> dict[str, Any]:
                 },
             }
         ],
-        "status": "pending",
+        "status": "awaiting_payment",
         "meta": {"auto_renewal": True, "original_service_id": str(service.id)},
     }
 

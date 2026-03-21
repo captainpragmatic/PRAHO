@@ -33,8 +33,9 @@ def reverse_order_statuses(apps, schema_editor):
     """Reverse the status renames for rollback."""
     Order = apps.get_model("orders", "Order")
 
-    # Map in_review back to pending (closest old equivalent) before the CHECK constraint is restored
-    Order.objects.filter(status="in_review").update(status="pending")  # fsm-bypass: data migration
+    # H4 fix: Map in_review to confirmed (old equivalent of "paid"), NOT pending.
+    # in_review orders have already been paid — mapping to pending (pre-payment) is wrong semantics.
+    Order.objects.filter(status="in_review").update(status="confirmed")  # fsm-bypass: data migration
     Order.objects.filter(status="awaiting_payment").update(status="pending")  # fsm-bypass: data migration
     Order.objects.filter(status="paid").update(status="confirmed")  # fsm-bypass: data migration
     Order.objects.filter(status="provisioning").update(status="processing")  # fsm-bypass: data migration

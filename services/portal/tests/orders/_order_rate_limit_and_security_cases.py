@@ -617,7 +617,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
         cache.clear()
         self.client = Client()
 
-    def _make_order_response(self, status: str = "pending", total: str = "0") -> dict:
+    def _make_order_response(self, status: str = "awaiting_payment", total: str = "0") -> dict:
         return {
             "order": {
                 "id": "550e8400-e29b-41d4-a716-446655440099",
@@ -640,7 +640,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
             patch("apps.orders.views.OrderCreationService.create_draft_order") as mock_create,
         ):
             mock_pre.return_value = {"valid": True, "errors": [], "warnings": []}
-            mock_create.return_value = self._make_order_response(status="pending", total="0")
+            mock_create.return_value = self._make_order_response(status="awaiting_payment", total="0")
 
             response = self.client.post(
                 "/order/create/",
@@ -667,7 +667,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
             patch("apps.orders.views.OrderCreationService.create_draft_order") as mock_create,
         ):
             mock_pre.return_value = {"valid": True, "errors": [], "warnings": []}
-            mock_create.return_value = self._make_order_response(status="pending", total="-5.00")
+            mock_create.return_value = self._make_order_response(status="awaiting_payment", total="-5.00")
 
             response = self.client.post(
                 "/order/create/",
@@ -695,7 +695,7 @@ class TestTotalCentsZeroRejection(SimpleTestCase):
             patch("apps.orders.views.PlatformAPIClient") as mock_api_cls,
         ):
             mock_pre.return_value = {"valid": True, "errors": [], "warnings": []}
-            mock_create.return_value = self._make_order_response(status="pending", total="99.00")
+            mock_create.return_value = self._make_order_response(status="awaiting_payment", total="99.00")
             mock_api = mock_api_cls.return_value
             mock_api.post_billing.return_value = {"success": True, "client_secret": "sk_test", "payment_intent_id": "pi_test0001234567890ab"}
 
@@ -778,7 +778,7 @@ class TestPaymentMethodValidation(SimpleTestCase):
                 "order": {
                     "id": "550e8400-e29b-41d4-a716-446655440010",
                     "order_number": "ORD-2026-42-0010",
-                    "status": "pending",
+                    "status": "awaiting_payment",
                     "total": "49.99",
                     "currency_code": "RON",
                 }
@@ -816,7 +816,7 @@ class TestPaymentMethodValidation(SimpleTestCase):
                 "order": {
                     "id": "550e8400-e29b-41d4-a716-446655440011",
                     "order_number": "ORD-2026-42-0011",
-                    "status": "pending",
+                    "status": "awaiting_payment",
                     "total": "49.99",
                     "currency_code": "RON",
                 }
@@ -1177,7 +1177,7 @@ class TestOrderCreationAtomicIdempotency(SimpleTestCase):
                 "order": {
                     "id": "550e8400-e29b-41d4-a716-446655440055",
                     "order_number": "ORD-2026-42-0055",
-                    "status": "pending",
+                    "status": "awaiting_payment",
                     "total": "49.99",
                     "currency_code": "RON",
                 }
