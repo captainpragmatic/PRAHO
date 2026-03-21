@@ -253,7 +253,7 @@
                             <!-- Action Buttons -->
                             <div class="flex gap-2">
                                 {% if membership.user.is_active %}
-                                    <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" style="display: inline;">
+                                    <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="false">
                                         {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
@@ -261,7 +261,7 @@
                                         {% trans "Suspend" as suspend_btn %}{% button suspend_btn variant="warning" type="submit" icon="clock" size="xs" attrs="onclick=\"return confirm('{{ confirm_suspend|escapejs }}')\"" %}
                                     </form>
                                 {% else %}
-                                    <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" style="display: inline;">
+                                    <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="true">
                                         {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
@@ -287,7 +287,7 @@
                                     </button>
                                 {% else %}
                                     <!-- Can remove -->
-                                    <form method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" style="display: inline;">
+                                    <form method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" class="inline">
                                         {% csrf_token %}
                                         {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                                         {% trans "Are you sure you want to remove this user from the customer? They will lose all access to this customer's data." as confirm_remove %}
@@ -357,7 +357,7 @@
                     {% trans "Add Existing User" as bt3 %}{% button bt3 variant="primary" href=add_user_url %}
 
                     {% url 'customers:create_user' customer.pk as create_user_url %}
-                    {% trans "Create New User" as bt4 %}{% button bt4 variant="outline" href=create_user_url %}
+                    {% trans "Create New User" as bt4 %}{% button bt4 variant="secondary" href=create_user_url %}
                 </div>
 
                 <p class="text-xs text-slate-500 mt-4">
@@ -498,7 +498,7 @@
                 {% endfor %}
                 {% if services_summary.total > 5 %}
                 <div class="text-center py-2">
-                    <a href="#" class="text-blue-400 hover:text-blue-300 text-sm">
+                    <a href="{% url 'provisioning:services' %}?customer={{ customer.pk }}" class="text-blue-400 hover:text-blue-300 text-sm">
                         {% trans 'View all' %} {{ services_summary.total }} {% trans 'services' %} →
                     </a>
                 </div>
@@ -544,7 +544,7 @@
                         <div>
                             <h3 class="font-medium text-white">
                                 {% if invoice.type == 'proforma' %}{% icon "clipboard" %} {% trans 'Proforma' %}{% else %}{% icon "document" %} {% trans 'Invoice' %}{% endif %}
-                                {{ invoice.invoice_number }}
+                                {{ invoice.number }}
                             </h3>
                             <p class="text-sm text-slate-400">
                                 {{ invoice.created_at|date:"d M Y" }} •
@@ -569,7 +569,7 @@
                 {% endfor %}
                 {% if invoices_summary.total > 5 %}
                 <div class="text-center py-2">
-                    <a href="#" class="text-blue-400 hover:text-blue-300 text-sm">
+                    <a href="{% url 'billing:invoice_list' %}?customer={{ customer.pk }}" class="text-blue-400 hover:text-blue-300 text-sm">
                         {% trans 'View all' %} {{ invoices_summary.total }} {% trans 'invoices' %} →
                     </a>
                 </div>
@@ -614,7 +614,7 @@
                     <div class="flex items-center justify-between">
                         <div>
                             <h3 class="font-medium text-white">
-                                #{{ ticket.id }} - {{ ticket.subject|truncatechars:50 }}
+                                #{{ ticket.id }} - {{ ticket.title|truncatechars:50 }}
                             </h3>
                             <p class="text-sm text-slate-400">
                                 {{ ticket.created_at|date:"d M Y H:i" }}
@@ -639,7 +639,7 @@
                 {% endfor %}
                 {% if tickets_summary.total > 5 %}
                 <div class="text-center py-2">
-                    <a href="#" class="text-blue-400 hover:text-blue-300 text-sm">
+                    <a href="{% url 'tickets:list' %}?customer={{ customer.pk }}" class="text-blue-400 hover:text-blue-300 text-sm">
                         {% trans 'View all' %} {{ tickets_summary.total }} {% trans 'tickets' %} →
                     </a>
                 </div>

@@ -18,6 +18,7 @@ from .customer_views import (
     customer_edit,
     customer_list,
     customer_search_api,
+    customer_search_htmx,
     customer_services_api,
     security_logger,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "customer_list",
     "customer_note_add",
     "customer_search_api",
+    "customer_search_htmx",
     "customer_services_api",
     "customer_tax_profile",
     "remove_user",

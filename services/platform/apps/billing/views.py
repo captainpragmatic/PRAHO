@@ -259,8 +259,15 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Staff can access all customers
-        customer_ids = list(Customer.objects.values_list("id", flat=True))
+        # Multi-tenant: scope to user's accessible customers
+        customer_ids = _get_accessible_customer_ids(request.user)
+
+        # Filter by specific customer (for "View all" links from customer detail)
+        customer_filter = request.GET.get("customer", "")
+        if customer_filter and customer_filter.isdigit():
+            filtered_id = int(customer_filter)
+            if filtered_id in customer_ids:
+                customer_ids = [filtered_id]
 
         # Filter by type
         doc_type = request.GET.get("type", "all")  # all, proforma, invoice

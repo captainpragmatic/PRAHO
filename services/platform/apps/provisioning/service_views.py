@@ -45,6 +45,13 @@ def service_list(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
     )
 
+    # Filter by specific customer (for "View all" links from customer detail)
+    customer_filter = request.GET.get("customer")
+    if customer_filter and customer_filter.isdigit():
+        customer_id = int(customer_filter)
+        if customer_id in customer_ids:
+            services = services.filter(customer_id=customer_id)
+
     # Filter by status
     status_filter = request.GET.get("status")
     filtered_services = services
