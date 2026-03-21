@@ -40,18 +40,18 @@
           {% trans "Refund Order" as bt3 %}{% button bt3 onclick="showRefundModal()" variant="success" %}
         {% endif %}
 
-        {% if order.status not in "cancelled,completed" %}
+        {% if order.status != "cancelled" and order.status != "completed" %}
           {% if order.status == "draft" %}
             {% url 'orders:order_validate' pk=order.id as validate_url %}
             {% trans "Run Validation" as validate_btn %}{% button validate_btn variant="success" icon="check" hx_get=validate_url hx_target="#preflight-container" hx_swap="innerHTML" %}
           {% endif %}
           {% trans "Change Status" as change_status_btn %}{% button change_status_btn variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
         {% endif %}
-      {% elif not is_staff and order.status in "completed" %}
+      {% elif not is_staff and order.status == "completed" %}
         <!-- Refund Request Button for Customers -->
         {% trans "Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
 
-        {% if order.status not in "cancelled,completed" %}
+        {% if order.status != "cancelled" and order.status != "completed" %}
           {% trans "Change Status" as change_status_btn2 %}{% button change_status_btn2 variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
         {% endif %}
       {% endif %}
@@ -273,7 +273,7 @@
 </div>
 
 <!-- Status Change Modal (for staff) -->
-{% if is_staff and order.status not in "cancelled,completed" %}
+{% if is_staff and order.status != "cancelled" and order.status != "completed" %}
 <div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <!-- Backdrop -->
   <div class="fixed inset-0 bg-slate-900 opacity-75 transition-opacity" aria-hidden="true" onclick="hideStatusModal()"></div>
@@ -463,7 +463,7 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endif %}
 
 <!-- Refund Modal (for staff) -->
-{% if is_staff and order.status in "completed" %}
+{% if is_staff and order.status == "completed" %}
 <div id="refundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
@@ -641,7 +641,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
 {% endif %}
 
 <!-- Order Refund Request Modal (for customers) -->
-{% if not is_staff and order.status in "completed" %}
+{% if not is_staff and order.status == "completed" %}
 <div id="orderRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
