@@ -1232,6 +1232,14 @@ class PlatformAPIClient:
         payload = {**data, "customer_id": customer_id}
         return self.post("customers/update/", data=payload, user_id=user_id)
 
+    def get_customer_tax_profile(self, customer_id: int, user_id: int) -> dict[str, Any]:
+        """🔒 Get customer tax profile via customer details endpoint — HMAC BODY"""
+        return self.post(
+            "customers/details/",
+            data={"customer_id": customer_id, "action": "get_customer_details", "include": ["tax_profile"]},
+            user_id=user_id,
+        )
+
     def update_customer_tax_profile(self, customer_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Update customer tax profile (CUI, VAT, reverse charge) — HMAC BODY"""
         payload = {**data, "customer_id": customer_id}

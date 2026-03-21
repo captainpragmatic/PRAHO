@@ -282,16 +282,22 @@ def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
                 logger.error("Failed to update tax profile: %s", exc)
                 messages.error(request, _("Could not update tax profile. Please try again."))
 
-    # Fetch current data via the company profile endpoint (reused from users app)
+    # Fetch current tax data via customer details endpoint (includes tax_profile)
     tax_data: dict = {}
     try:
         response = api_client.post(
-            "customers/profile/",
-            data={"customer_id": customer_id},
+            "customers/details/",
+            data={
+                "customer_id": customer_id,
+                "user_id": user_id,
+                "action": "get_customer_details",
+                "include": ["tax_profile"],
+            },
             user_id=user_id,
         )
         if isinstance(response, dict) and response.get("success"):
-            tax_data = response.get("tax_profile") or response.get("customer") or {}
+            customer = response.get("customer", {})
+            tax_data = customer.get("tax_profile", {})
     except PlatformAPIError as exc:
         if is_rate_limited_error(exc):
             messages.warning(request, _("Too many requests. Please wait and try again."))
