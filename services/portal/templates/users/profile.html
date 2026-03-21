@@ -135,7 +135,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Member Since' %}</dt>
-            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|date:"d.m.Y"|default:'N/A' }}</dd>
+            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|slice:":10"|default:'N/A' }}</dd>
           </div>
         </div>
 

@@ -909,6 +909,7 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
                 "last_name": user.last_name,
                 "phone": user.phone or "",
                 "mfa_enabled": user.mfa_enabled,
+                "date_joined": user.date_joined.isoformat() if user.date_joined else None,
             }
 
             # Add profile data (create default if doesn't exist)
