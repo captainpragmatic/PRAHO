@@ -6,11 +6,14 @@
 
 {% block content %}
 <div class="px-4 py-6 max-w-6xl mx-auto">
+    <!-- Breadcrumb -->
+    {% include "components/breadcrumb.html" with items=breadcrumb_items %}
+
     <!-- Header -->
     <div class="flex items-center justify-between mb-6">
         <div>
             <h1 class="text-2xl font-bold text-white romanian-flag">
-                {{ customer.name }}
+                {{ customer.get_display_name }}
             </h1>
             <p class="mt-1 text-sm text-slate-400">
                 {% if customer.customer_type == 'company' %}{% icon "building" %} {% trans 'Company Customer' %}
@@ -27,7 +30,7 @@
     </div>
 
     <!-- Customer Information Card -->
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <h2 class="text-lg font-medium text-white mb-6 border-b border-slate-600 pb-2">
                 {% icon "clipboard" %} {% trans 'Customer Information' %}
@@ -127,7 +130,7 @@
     </div>
 
     <!-- Customer Users -->
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
@@ -253,45 +256,48 @@
                             <!-- Action Buttons -->
                             <div class="flex gap-2">
                                 {% if membership.user.is_active %}
-                                    <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
+                                    <form id="suspend-form-{{ membership.user.pk }}" method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="false">
-                                        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-                                        {% trans "Are you sure you want to suspend this user?" as confirm_suspend %}
-                                        {% trans "Suspend" as suspend_btn %}{% button suspend_btn variant="warning" type="submit" icon="clock" size="xs" attrs="onclick=\"return confirm('{{ confirm_suspend|escapejs }}')\"" %}
+                                        {% trans "Suspend" as suspend_btn %}
+                                        <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-amber-900 text-amber-200 hover:bg-amber-800 transition-colors"
+                                          onclick="document.dispatchEvent(new CustomEvent('confirm-dangerous-action', {detail: {title: '{% trans "Suspend User" %}', message: '{% trans "Are you sure you want to suspend this user?" %}', confirmText: '{% trans "Suspend" %}', action: () => document.getElementById('suspend-form-{{ membership.user.pk }}').submit()}}))">
+                                          {% icon "clock" size="sm" %} {{ suspend_btn }}
+                                        </button>
                                     </form>
                                 {% else %}
-                                    <form method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
+                                    <form id="activate-form-{{ membership.user.pk }}" method="post" action="{% url 'customers:toggle_user_status' customer.pk membership.user.id %}" class="inline">
                                         {% csrf_token %}
                                         <input type="hidden" name="is_active" value="true">
-                                        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-                                        {% trans "Are you sure you want to activate this user?" as confirm_activate %}
-                                        {% trans "Activate" as activate_btn %}{% button activate_btn variant="success" type="submit" icon="services" size="xs" attrs="onclick=\"return confirm('{{ confirm_activate|escapejs }}')\"" %}
+                                        {% trans "Activate" as activate_btn %}
+                                        <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-green-900 text-green-200 hover:bg-green-800 transition-colors"
+                                          onclick="document.dispatchEvent(new CustomEvent('confirm-dangerous-action', {detail: {title: '{% trans "Activate User" %}', message: '{% trans "Are you sure you want to activate this user?" %}', confirmText: '{% trans "Activate" %}', action: () => document.getElementById('activate-form-{{ membership.user.pk }}').submit()}}))">
+                                          {% icon "check" size="sm" %} {{ activate_btn }}
+                                        </button>
                                     </form>
                                 {% endif %}
 
                                 <!-- Remove Button with Safeguards -->
                                 {% if is_last_user %}
-                                    <!-- Cannot remove - last user -->
                                     <button type="button" disabled
                                             class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
                                             title="{% trans 'Cannot remove the last user from customer' %}">
                                         {% icon "ban" %} {% trans "Cannot Remove" %}
                                     </button>
                                 {% elif membership.role == 'owner' and is_last_owner %}
-                                    <!-- Cannot remove - last owner -->
                                     <button type="button" disabled
                                             class="text-xs px-2 py-1 text-slate-500 border border-slate-600 rounded cursor-not-allowed"
                                             title="{% trans 'Cannot remove the only owner' %}">
                                         {% icon "ban" %} {% trans "Cannot Remove" %}
                                     </button>
                                 {% else %}
-                                    <!-- Can remove -->
-                                    <form method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" class="inline">
+                                    <form id="remove-form-{{ membership.pk }}" method="post" action="{% url 'customers:remove_user' customer.pk membership.id %}" class="inline">
                                         {% csrf_token %}
-                                        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-                                        {% trans "Are you sure you want to remove this user from the customer? They will lose all access to this customer's data." as confirm_remove %}
-                                        {% trans "Remove" as remove_btn %}{% button remove_btn variant="danger" type="submit" icon="x" size="xs" attrs="onclick=\"return confirm('{{ confirm_remove|escapejs }}')\"" %}
+                                        {% trans "Remove" as remove_btn %}
+                                        <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-red-900 text-red-200 hover:bg-red-800 transition-colors"
+                                          onclick="document.dispatchEvent(new CustomEvent('confirm-dangerous-action', {detail: {title: '{% trans "Remove User" %}', message: '{% trans "Are you sure you want to remove this user? They will lose all access to this customer." %}', confirmText: '{% trans "Remove" %}', action: () => document.getElementById('remove-form-{{ membership.pk }}').submit()}}))">
+                                          {% icon "x" size="sm" %} {{ remove_btn }}
+                                        </button>
                                     </form>
                                 {% endif %}
                             </div>
@@ -370,7 +376,7 @@
 
     <!-- Tax Information -->
     {% if tax_profile %}
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <h2 class="text-lg font-medium text-white mb-6 border-b border-slate-600 pb-2">
                 {% icon "building" %} {% trans 'Tax Information' %}
@@ -413,7 +419,7 @@
 
     <!-- Addresses -->
     {% if customer.addresses.exists %}
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <h2 class="text-lg font-medium text-white mb-6 border-b border-slate-600 pb-2">
                 {% icon "globe" %} {% trans 'Addresses' %}
@@ -447,23 +453,27 @@
     </div>
     {% endif %}
 
-    <!-- Hosting Services Card -->
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <!-- Services Card -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
-                    {% icon "settings" %} {% trans 'Hosting Services' %}
+                    {% icon "settings" %} {% trans 'Services' %}
                 </h2>
-                <div class="flex items-center space-x-2 text-sm text-slate-400">
-                    <span class="bg-slate-700 px-2 py-1 rounded">{{ services_summary.total }} {% trans 'Total' %}</span>
+                <div class="flex items-center space-x-2 text-sm">
+                    {% blocktrans count count=services_summary.total asvar svc_total %}{{ count }} Total{% plural %}{{ count }} Total{% endblocktrans %}
+                    {% badge svc_total variant="secondary" size="xs" %}
                     {% if services_summary.active > 0 %}
-                    <span class="bg-green-900 text-green-300 px-2 py-1 rounded">{{ services_summary.active }} {% trans 'Active' %}</span>
+                    {% blocktrans count count=services_summary.active asvar svc_active %}{{ count }} Active{% plural %}{{ count }} Active{% endblocktrans %}
+                    {% badge svc_active variant="success" size="xs" %}
                     {% endif %}
                     {% if services_summary.suspended > 0 %}
-                    <span class="bg-yellow-900 text-yellow-300 px-2 py-1 rounded">{{ services_summary.suspended }} {% trans 'Suspended' %}</span>
+                    {% blocktrans count count=services_summary.suspended asvar svc_susp %}{{ count }} Suspended{% plural %}{{ count }} Suspended{% endblocktrans %}
+                    {% badge svc_susp variant="warning" size="xs" %}
                     {% endif %}
                     {% if services_summary.pending > 0 %}
-                    <span class="bg-blue-900 text-blue-300 px-2 py-1 rounded">{{ services_summary.pending }} {% trans 'Pending' %}</span>
+                    {% blocktrans count count=services_summary.pending asvar svc_pend %}{{ count }} Pending{% plural %}{{ count }} Pending{% endblocktrans %}
+                    {% badge svc_pend variant="info" size="xs" %}
                     {% endif %}
                 </div>
             </div>
@@ -471,7 +481,7 @@
             {% if services %}
             <div class="space-y-3">
                 {% for service in services %}
-                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
+                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4 hover:bg-slate-600/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'provisioning:service_detail' service.pk %}';">
                     <div class="flex items-center justify-between">
                         <div>
                             <h3 class="font-medium text-white">
@@ -516,22 +526,26 @@
     </div>
 
     <!-- Orders & Invoices Card -->
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
                     {% icon "currency" %} {% trans 'Orders & Invoices' %}
                 </h2>
-                <div class="flex items-center space-x-2 text-sm text-slate-400">
-                    <span class="bg-slate-700 px-2 py-1 rounded">{{ invoices_summary.total }} {% trans 'Total' %}</span>
+                <div class="flex items-center space-x-2 text-sm">
+                    {% blocktrans count count=invoices_summary.total asvar inv_total %}{{ count }} Total{% plural %}{{ count }} Total{% endblocktrans %}
+                    {% badge inv_total variant="secondary" size="xs" %}
                     {% if invoices_summary.paid > 0 %}
-                    <span class="bg-green-900 text-green-300 px-2 py-1 rounded">{{ invoices_summary.paid }} {% trans 'Paid' %}</span>
+                    {% blocktrans count count=invoices_summary.paid asvar inv_paid %}{{ count }} Paid{% plural %}{{ count }} Paid{% endblocktrans %}
+                    {% badge inv_paid variant="success" size="xs" %}
                     {% endif %}
                     {% if invoices_summary.unpaid > 0 %}
-                    <span class="bg-red-900 text-red-300 px-2 py-1 rounded">{{ invoices_summary.unpaid }} {% trans 'Unpaid' %}</span>
+                    {% blocktrans count count=invoices_summary.unpaid asvar inv_unpaid %}{{ count }} Unpaid{% plural %}{{ count }} Unpaid{% endblocktrans %}
+                    {% badge inv_unpaid variant="danger" size="xs" %}
                     {% endif %}
                     {% if invoices_summary.draft > 0 %}
-                    <span class="bg-slate-600 text-slate-300 px-2 py-1 rounded">{{ invoices_summary.draft }} {% trans 'Draft' %}</span>
+                    {% blocktrans count count=invoices_summary.draft asvar inv_draft %}{{ count }} Draft{% plural %}{{ count }} Draft{% endblocktrans %}
+                    {% badge inv_draft variant="secondary" size="xs" %}
                     {% endif %}
                 </div>
             </div>
@@ -539,7 +553,7 @@
             {% if invoices %}
             <div class="space-y-3">
                 {% for invoice in invoices %}
-                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
+                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4 hover:bg-slate-600/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'billing:invoice_detail' invoice.pk %}';">
                     <div class="flex items-center justify-between">
                         <div>
                             <h3 class="font-medium text-white">
@@ -587,22 +601,26 @@
     </div>
 
     <!-- Support Tickets Card -->
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg mb-6">
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
         <div class="p-6">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
                     {% icon "tickets" %} {% trans 'Support Tickets' %}
                 </h2>
-                <div class="flex items-center space-x-2 text-sm text-slate-400">
-                    <span class="bg-slate-700 px-2 py-1 rounded">{{ tickets_summary.total }} {% trans 'Total' %}</span>
+                <div class="flex items-center space-x-2 text-sm">
+                    {% blocktrans count count=tickets_summary.total asvar tkt_total %}{{ count }} Total{% plural %}{{ count }} Total{% endblocktrans %}
+                    {% badge tkt_total variant="secondary" size="xs" %}
                     {% if tickets_summary.open > 0 %}
-                    <span class="bg-yellow-900 text-yellow-300 px-2 py-1 rounded">{{ tickets_summary.open }} {% trans 'Open' %}</span>
+                    {% blocktrans count count=tickets_summary.open asvar tkt_open %}{{ count }} Open{% plural %}{{ count }} Open{% endblocktrans %}
+                    {% badge tkt_open variant="warning" size="xs" %}
                     {% endif %}
                     {% if tickets_summary.closed > 0 %}
-                    <span class="bg-green-900 text-green-300 px-2 py-1 rounded">{{ tickets_summary.closed }} {% trans 'Closed' %}</span>
+                    {% blocktrans count count=tickets_summary.closed asvar tkt_closed %}{{ count }} Closed{% plural %}{{ count }} Closed{% endblocktrans %}
+                    {% badge tkt_closed variant="success" size="xs" %}
                     {% endif %}
                     {% if tickets_summary.pending > 0 %}
-                    <span class="bg-blue-900 text-blue-300 px-2 py-1 rounded">{{ tickets_summary.pending }} {% trans 'Pending' %}</span>
+                    {% blocktrans count count=tickets_summary.pending asvar tkt_pend %}{{ count }} Pending{% plural %}{{ count }} Pending{% endblocktrans %}
+                    {% badge tkt_pend variant="info" size="xs" %}
                     {% endif %}
                 </div>
             </div>
@@ -610,7 +628,7 @@
             {% if tickets %}
             <div class="space-y-3">
                 {% for ticket in tickets %}
-                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
+                <div class="bg-slate-700 border border-slate-600 rounded-lg p-4 hover:bg-slate-600/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'tickets:detail' ticket.pk %}';">
                     <div class="flex items-center justify-between">
                         <div>
                             <h3 class="font-medium text-white">
@@ -655,6 +673,46 @@
             {% endif %}
         </div>
     </div>
+
+    {% if is_staff_user and billing_profile %}
+    <!-- Staff-only billing config -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+        <div class="p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-lg font-medium text-white border-b border-slate-600 pb-2">
+                    {% icon "credit-card" %} {% trans 'Billing Configuration' %}
+                </h2>
+                {% trans "Staff Only" as staff_lbl %}{% badge staff_lbl variant="warning" size="xs" %}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-3">
+                    <div class="flex">
+                        <span class="text-sm font-medium text-slate-400 w-40">{% trans 'Payment Terms' %}:</span>
+                        <span class="text-sm text-white">{{ billing_profile.payment_terms_days|default:"—" }} {% trans 'days' %}</span>
+                    </div>
+                    <div class="flex">
+                        <span class="text-sm font-medium text-slate-400 w-40">{% trans 'Credit Limit' %}:</span>
+                        <span class="text-sm text-white">{{ billing_profile.credit_limit|default:"—" }}</span>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div class="flex">
+                        <span class="text-sm font-medium text-slate-400 w-40">{% trans 'Preferred Currency' %}:</span>
+                        <span class="text-sm text-white">{{ billing_profile.preferred_currency|default:"RON" }}</span>
+                    </div>
+                    <div class="flex">
+                        <span class="text-sm font-medium text-slate-400 w-40">{% trans 'Auto-payment' %}:</span>
+                        <span class="text-sm text-white">
+                            {% if billing_profile.auto_payment %}{% icon "check" %} {% trans 'Enabled' %}
+                            {% else %}{% icon "x" %} {% trans 'Disabled' %}{% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Navigation -->
     <div class="flex justify-between items-center">

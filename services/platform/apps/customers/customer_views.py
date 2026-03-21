@@ -296,6 +296,13 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     total_users = membership_stats["total"]
     owner_count = membership_stats["owners"]
 
+    # Breadcrumb navigation
+    breadcrumb_items = [
+        {"text": _("Dashboard"), "url": reverse("dashboard")},
+        {"text": _("Customers"), "url": reverse("customers:list")},
+        {"text": customer.get_display_name()},
+    ]
+
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
@@ -315,6 +322,9 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         "owner_count": owner_count,
         "is_last_user": total_users <= 1,
         "is_last_owner": owner_count <= 1,
+        # Navigation and access
+        "breadcrumb_items": breadcrumb_items,
+        "is_staff_user": user.is_staff or bool(user.staff_role),
     }
 
     return render(request, "customers/detail.html", context)
