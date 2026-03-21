@@ -7,12 +7,12 @@ from __future__ import annotations
 import uuid
 from unittest.mock import Mock, patch
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import (
     Currency,
+    Invoice,
     InvoiceSequence,
     ProformaSequence,
 )
@@ -26,6 +26,7 @@ from apps.billing.services import (
 )
 from apps.common.types import Err
 from apps.customers.models import Customer
+from apps.orders.models import Order
 from apps.users.models import User
 
 
@@ -88,10 +89,10 @@ class RefundServiceComprehensiveTestCase(TestCase):
         for status in expected_statuses:
             self.assertIn(status, actual_statuses)
 
-    @patch('apps.orders.models.Order.objects.select_related')
-    def test_refund_order_order_not_found(self, mock_select_related: Mock) -> None:
+    @patch('apps.billing.refund_service.Order.objects')
+    def test_refund_order_order_not_found(self, mock_qs: Mock) -> None:
         """Test refund_order when order doesn't exist"""
-        mock_select_related.return_value.get.side_effect = ObjectDoesNotExist("Order matching query does not exist")
+        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Order.DoesNotExist("Order matching query does not exist")
 
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,
@@ -135,11 +136,10 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertTrue(result.is_err())
         self.assertEqual(result.error, "Order not eligible")
 
-    @patch('apps.billing.services.RefundService._validate_invoice_refund_eligibility')
-    @patch('apps.billing.models.Invoice.objects.select_related')
-    def test_refund_invoice_invoice_not_found(self, mock_select_related: Mock, mock_validate: Mock) -> None:
+    @patch('apps.billing.refund_service.Invoice.objects')
+    def test_refund_invoice_invoice_not_found(self, mock_qs: Mock) -> None:
         """Test refund_invoice when invoice doesn't exist"""
-        mock_select_related.return_value.get.side_effect = ObjectDoesNotExist("Invoice matching query does not exist")
+        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Invoice.DoesNotExist("Invoice matching query does not exist")
 
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,

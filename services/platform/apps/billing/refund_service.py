@@ -11,7 +11,6 @@ import uuid
 from decimal import Decimal
 from typing import Any, TypedDict
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django_fsm import TransitionNotAllowed
@@ -128,7 +127,7 @@ class RefundService:
                 # Get order with row lock to prevent concurrent refund race
                 try:
                     order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
-                except ObjectDoesNotExist:
+                except Order.DoesNotExist:
                     return Err("Failed to process refund: Order not found")
 
                 # Validate eligibility INSIDE the atomic block with lock held
@@ -291,7 +290,7 @@ class RefundService:
                     invoice = (
                         Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
                     )
-                except ObjectDoesNotExist:
+                except Invoice.DoesNotExist:
                     return Err("Failed to process refund: Invoice not found")
 
                 # Validate eligibility INSIDE the atomic block with lock held

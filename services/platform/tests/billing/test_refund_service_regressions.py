@@ -9,7 +9,6 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase
 from django.utils import timezone
 
@@ -351,9 +350,9 @@ class TestRefundOrder(TestCase):
         assert r.is_err()
 
     def test_refund_order_object_does_not_exist(self):
-        """ObjectDoesNotExist caught by refund_order (#120)."""
+        """Order.DoesNotExist caught by refund_order (#120)."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = ObjectDoesNotExist("Order matching query does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Order.DoesNotExist("Order matching query does not exist")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Order not found" in r.unwrap_err()
@@ -403,9 +402,9 @@ class TestRefundInvoice(TestCase):
         assert "Invoice not found" in r.unwrap_err()
 
     def test_refund_invoice_object_does_not_exist(self):
-        """ObjectDoesNotExist caught by refund_invoice (#120)."""
+        """Invoice.DoesNotExist caught by refund_invoice (#120)."""
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = ObjectDoesNotExist("Invoice matching query does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Invoice.DoesNotExist("Invoice matching query does not exist")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Invoice not found" in r.unwrap_err()
