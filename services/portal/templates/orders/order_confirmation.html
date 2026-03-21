@@ -46,7 +46,7 @@
         </div>
 
         <div class="mt-3 sm:mt-0">
-          {% badge order.status|upper variant="warning" size="lg" icon="clock" %}
+          {% badge order.status|status_label variant=order.status|status_variant size="lg" icon=order.status|status_icon %}
         </div>
       </div>
     </div>

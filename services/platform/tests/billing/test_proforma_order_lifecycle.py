@@ -433,3 +433,83 @@ class TestProformaPaymentReceivedSignal(ProformaLifecycleTestBase):
             self.assertEqual(len(received), 1)
         finally:
             proforma_payment_received.disconnect(handler)
+
+
+class TestProformaPaymentEdgeCases(ProformaLifecycleTestBase):
+    """H8: Missing tests for edge cases in ProformaPaymentService."""
+
+    def _create_sent_proforma(self, customer=None, total_cents=12100):
+        """Create a sent proforma for testing."""
+        cust = customer or self.customer
+        proforma = ProformaInvoice.objects.create(
+            customer=cust, currency=self.currency,
+            number=f"PRO-EDGE-{ProformaInvoice.objects.count() + 1:03d}",
+            subtotal_cents=total_cents - 2100, tax_cents=2100, total_cents=total_cents,
+            valid_until=timezone.now() + timedelta(days=7),
+        )
+        proforma.send_proforma()
+        proforma.save()
+        return proforma
+
+    def test_cross_customer_payment_rejected(self):
+        """H8/IDOR: Payment from Customer A cannot be linked to Customer B's proforma."""
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        other_customer = Customer.objects.create(
+            name="Other SRL", customer_type="company",
+            status="active", primary_email="other@test.ro",
+        )
+        proforma = self._create_sent_proforma(customer=self.customer)
+
+        # Create payment belonging to a DIFFERENT customer
+        payment = Payment.objects.create(
+            customer=other_customer, currency=self.currency,
+            amount_cents=12100, payment_method="stripe",
+            gateway_txn_id="pi_idor_test",
+        )
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=12100,
+            payment_method="stripe",
+            existing_payment=payment,
+        )
+        self.assertTrue(result.is_err())
+        self.assertIn("customer", result.unwrap_err().lower())
+
+    def test_overpayment_rejected(self):
+        """H8: Payment amount exceeding proforma total is rejected."""
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma(total_cents=12100)
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=99999,  # Overpayment
+            payment_method="bank",
+        )
+        self.assertTrue(result.is_err())
+        self.assertIn("must equal", result.unwrap_err())
+
+    def test_idempotent_already_converted_returns_ok(self):
+        """H8: Sequential calls to record_payment_and_convert are idempotent."""
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+
+        # First call succeeds
+        result1 = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=12100,
+            payment_method="bank",
+        )
+        self.assertTrue(result1.is_ok())
+
+        # Second call — idempotent, returns Ok
+        result2 = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=12100,
+            payment_method="bank",
+        )
+        self.assertTrue(result2.is_ok())

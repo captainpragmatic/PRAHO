@@ -172,8 +172,25 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 changed = payment.apply_gateway_event("succeeded", meta_update)
 
                 if not changed:
-                    logger.info(f"⏭️ Payment {payment.id} already in terminal state, skipping duplicate webhook")
-                    return True, f"Payment {payment.id} already processed (idempotent)"
+                    # C1 fix: Even if payment is already succeeded, check if proforma
+                    # still needs conversion. This handles Stripe retries after a
+                    # conversion failure: payment committed as "succeeded" but proforma
+                    # not yet converted. Without this, the early-return would skip
+                    # conversion forever, leaving the customer with no invoice.
+                    if payment.proforma:
+                        payment.proforma.refresh_from_db()
+                        if payment.proforma.status not in ("converted",):
+                            logger.info(
+                                "🔄 [Stripe] Payment %s already succeeded but proforma %s not converted — retrying conversion",
+                                payment.id,
+                                payment.proforma.number,
+                            )
+                            # Fall through to the proforma conversion block below
+                        else:
+                            return True, f"Payment {payment.id} already processed (idempotent)"
+                    else:
+                        logger.info(f"⏭️ Payment {payment.id} already in terminal state, skipping duplicate webhook")
+                        return True, f"Payment {payment.id} already processed (idempotent)"
 
                 # B7: If payment has a proforma, auto-convert proforma→invoice
                 if payment.proforma:
@@ -213,8 +230,13 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 elif payment.invoice:
                     payment.invoice.update_status_from_payments()
 
-                # 🔔 Notify Portal of payment success
-                self._notify_portal_payment_success(payment, payment_intent)
+                # H6 fix: Move Portal notification to on_commit to release DB row lock
+                # before making outbound HTTP call. The select_for_update lock is held
+                # during the entire atomic block — network latency extends lock duration.
+                _payment = payment
+                _pi = payment_intent
+                _self = self
+                transaction.on_commit(lambda: _self._notify_portal_payment_success(_payment, _pi))
 
                 logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
                 return True, f"Payment {payment.id} succeeded"

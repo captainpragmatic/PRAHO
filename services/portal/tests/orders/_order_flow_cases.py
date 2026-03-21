@@ -794,7 +794,7 @@ class TestBankTransferSkipsStripeIntent(SimpleTestCase):
         order_data = {
             "id": "ord-001",
             "order_number": "ORD-001",
-            "status": "pending",
+            "status": "awaiting_payment",
             "payment_method": "bank_transfer",
             "total": "100.00",
             "currency_code": "RON",
@@ -840,7 +840,7 @@ class TestStripeFailureRedirectsToConfirmation(SimpleTestCase):
         order_data = {
             "id": "ord-stripe-001",
             "order_number": "ORD-STRIPE-001",
-            "status": "pending",
+            "status": "awaiting_payment",
             "payment_method": "card",
             "total": "100.00",
             "currency_code": "RON",

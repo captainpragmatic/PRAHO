@@ -1345,10 +1345,14 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
                     cart_service = GDPRCompliantCartSession(request.session)
                     cart_service.clear()
 
+                    # M9 fix: Read actual order status from Platform API response
+                    # instead of hardcoding "paid". With the review gate, high-value
+                    # orders go to "in_review", not "paid".
+                    actual_status = order_update_result.get("status", "paid")
                     return JsonResponse(
                         {
                             "success": True,
-                            "status": "paid",
+                            "status": actual_status,
                             "message": "Payment confirmed and service is being provisioned",
                         }
                     )

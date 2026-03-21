@@ -65,7 +65,8 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
         if created:
             # Wrap in on_commit so email is not sent if the enclosing transaction
             # rolls back (e.g. atomic block that saves the Order then fails later).
-            transaction.on_commit(lambda: _send_order_confirmation_email(instance))
+            # L4 fix: Use default arg capture for consistency with billing signals pattern
+            transaction.on_commit(lambda order=instance: _send_order_confirmation_email(order))
             logger.info(f"✅ [Order] Created {instance.order_number} for {instance.customer}")
 
         else:
@@ -262,7 +263,7 @@ def _trigger_service_provisioning(order: Order) -> None:
         logger.exception(f"🔥 [Order Signal] Provisioning trigger failed: {e}")
 
 
-def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: PLR0912, C901
+def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: PLR0912, PLR0915, C901
     """Handle order cancellation cleanup.
 
     D3: Hard-delete services on cancellation to free unique resources (domains, usernames).
@@ -357,12 +358,42 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                     },
                 )
 
+        # M4 fix: Void proforma if it exists and is in a voidable state.
+        # Orders cancelled from awaiting_payment have a draft/sent proforma that should
+        # be voided. Orders cancelled after payment have invoices that need manual review.
+        if hasattr(order, "proforma") and order.proforma:
+            proforma = order.proforma
+            if proforma.status in ("draft", "sent"):
+                try:
+                    proforma.expire_proforma()
+                    proforma.save(update_fields=["status", "updated_at"])
+                    logger.info(
+                        "📋 [Order] Expired proforma %s on cancellation of order %s",
+                        proforma.number,
+                        order.order_number,
+                    )
+                except Exception:
+                    logger.warning(
+                        "⚠️ [Order] Could not expire proforma %s (status: %s) — manual review needed",
+                        proforma.number,
+                        proforma.status,
+                    )
+            elif proforma.status in ("accepted", "converted"):
+                logger.warning(
+                    "⚠️ [Order] Order %s cancelled but proforma %s is %s — manual financial review needed",
+                    order.order_number,
+                    proforma.number,
+                    proforma.status,
+                )
+
         # Send cancellation email (deliberately vague per plan)
         _send_order_cancelled_email(order)
 
-        # If order was provisioning, may need to handle refunds
-        if old_status == "provisioning":
-            logger.warning(f"⚠️ [Order] Provisioning order {order.order_number} cancelled - manual refund review needed")
+        # If order was provisioning or paid, may need to handle refunds
+        if old_status in ("provisioning", "paid", "in_review"):
+            logger.warning(
+                f"⚠️ [Order] Order {order.order_number} cancelled from {old_status} — manual refund review needed"
+            )
 
     except Exception as e:
         logger.exception(f"🔥 [Order Signal] Cancellation handling failed: {e}")
@@ -651,7 +682,10 @@ def _handle_proforma_payment_received(sender: Any, proforma: Any, invoice: Any, 
                     result.unwrap_err() if result.is_err() else "unknown",
                 )
     except Exception as e:
-        logger.exception("🔥 [Order Signal] proforma_payment_received handler failed: %s", e)
+        # M10 fix: Use logger.critical for Sentry-level alerting on payment signal failure.
+        # If this handler fails, the customer paid but the order is not confirmed — requires
+        # immediate intervention. The background task provides a safety net but may take 5 min.
+        logger.critical("🔥 [Order Signal] proforma_payment_received handler failed: %s", e, exc_info=True)
 
 
 def _connect_billing_signals() -> None:
@@ -757,11 +791,17 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                 if service is None:
                     continue
 
+                # C3 fix: Capture the action taken BEFORE mutation so the audit log
+                # reflects reality. Previously, service.status was checked AFTER
+                # suspend() mutated it, so "suspended" was never logged.
+                action_taken = "flagged_for_review"
+
                 if refund_type == "full":
                     if service.status == "active":
                         try:
                             service.suspend(reason=f"Full refund on invoice {invoice.number}")
                             service.save(update_fields=["status", "updated_at"])
+                            action_taken = "suspended"
                             logger.info(
                                 "⚠️ [Refund] Suspended service %s for refunded invoice %s",
                                 service.id,
@@ -783,9 +823,7 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                         "invoice_number": invoice.number,
                         "service_id": str(service.id),
                         "refund_type": refund_type,
-                        "action": "suspended"
-                        if refund_type == "full" and service.status == "active"
-                        else "flagged_for_review",
+                        "action": action_taken,
                     },
                 )
     except Exception as e:

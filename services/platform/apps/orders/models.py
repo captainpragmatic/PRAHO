@@ -361,7 +361,8 @@ class Order(ConcurrentTransitionMixin, models.Model):
         Must match the FSM cancel() transition sources:
         draft, awaiting_payment, paid, in_review, provisioning, failed.
         """
-        return self.status in ["draft", "awaiting_payment", "paid", "in_review", "provisioning"]
+        # M3 fix: Include "failed" to match FSM cancel() transition sources
+        return self.status in ["draft", "awaiting_payment", "paid", "in_review", "provisioning", "failed"]
 
     def can_edit_field(self, field_name: str) -> bool:
         """Check if a specific field can be edited based on current status"""

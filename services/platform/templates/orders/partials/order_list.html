@@ -8,6 +8,7 @@ This template is dynamically loaded and contains only the results section.
 {% endcomment %}
 
 {% load i18n %}
+{% load formatting %}
 {% load ui_components %}
 
 <!-- Orders Results Container -->
@@ -67,7 +68,7 @@ This template is dynamically loaded and contains only the results section.
 
                 <!-- Order Total -->
                 <div class="text-xl font-bold text-white">
-                  {{ order.total_amount|floatformat:2 }} {{ order.currency }}
+                  {{ order.total_cents|cents_to_currency|romanian_currency:order.currency }}
                 </div>
               </div>
 

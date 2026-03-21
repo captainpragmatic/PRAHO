@@ -646,7 +646,15 @@ def handle_proforma_invoice_conversion(
             old_status = old_values.get("status")
 
             # Auto-convert proforma to invoice when paid
-            if instance.status == "paid" and old_status != "paid" and not hasattr(instance, "converted_invoice"):
+            # C6 fix: Also guard against "converted" status to prevent double conversion.
+            # ProformaPaymentService.record_payment_and_convert() handles its own conversion
+            # and sets status to "converted". If this post_save fires during that flow,
+            # the proforma may briefly be "paid" before reaching "converted".
+            if (
+                instance.status == "paid"
+                and old_status not in ("paid", "converted")
+                and not hasattr(instance, "converted_invoice")
+            ):
                 try:
                     from apps.billing.services import (
                         ProformaConversionService,
@@ -930,8 +938,10 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
 def _handle_invoice_refund_completion(invoice: Invoice) -> None:
     """Handle side effects when invoice refund is completed"""
     try:
-        # 1. Send invoice refund confirmation
-        _send_invoice_refund_confirmation(invoice)
+        # H5 fix: Send email via on_commit to prevent ghost emails on rollback.
+        # If an outer transaction rolls back, the email would have already been sent.
+        _inv = invoice
+        transaction.on_commit(lambda: _send_invoice_refund_confirmation(_inv))
 
         # 2. Update customer invoice payment patterns
         _update_customer_invoice_history(invoice, "refunded")

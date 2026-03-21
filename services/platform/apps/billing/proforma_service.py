@@ -223,7 +223,7 @@ class ProformaPaymentService:
 
     @staticmethod
     @transaction.atomic
-    def record_payment_and_convert(  # noqa: PLR0913, PLR0911, PLR0912, C901  # Convergence point: all payment paths share 6 params; guards are intentional
+    def record_payment_and_convert(  # noqa: PLR0913, PLR0911, PLR0912, PLR0915, C901  # Convergence point: all payment paths share 6 params; guards are intentional
         proforma_id: str,
         amount_cents: int,
         payment_method: str,
@@ -241,6 +241,10 @@ class ProformaPaymentService:
         from apps.billing.payment_models import Payment  # noqa: PLC0415
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
         from apps.billing.services import ProformaConversionService  # noqa: PLC0415
+
+        # H9 fix: Normalize payment method at the convergence point so all callers
+        # get canonical values (e.g., "bank_transfer" → "bank", "card" → "stripe").
+        payment_method = _normalize_payment_method(payment_method)
 
         try:
             # Lock proforma first (F4: consistent lock ordering prevents deadlock)
@@ -333,11 +337,16 @@ class ProformaPaymentService:
         # H7 fix: Mark the invoice as paid now that payment is confirmed.
         # ProformaConversionService creates the invoice in "issued" state.
         # We must transition it to "paid" so the order confirmation path sees a paid invoice.
+        # C5 fix: Catch only TransitionNotAllowed (idempotent retry), not all exceptions.
+        # A bare except Exception would swallow DatabaseError/OperationalError, leaving
+        # the invoice stuck in "issued" state after a successful payment.
+        from django_fsm import TransitionNotAllowed as _TransitionNotAllowed  # noqa: PLC0415
+
         try:
             invoice.mark_as_paid()
             invoice.save(update_fields=["status", "paid_at"])
-        except Exception:
-            # If already paid (idempotent retry), log and continue
+        except _TransitionNotAllowed:
+            # Already paid (idempotent retry) — safe to continue
             logger.warning(
                 "⚠️ [ProformaPayment] Could not mark invoice %s as paid (status: %s)",
                 invoice.number,
