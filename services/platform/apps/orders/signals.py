@@ -350,6 +350,7 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
             # service cleanup — prevents inconsistent state if proforma voiding fails.
             if order.proforma_id:
                 proforma = order.proforma
+                assert proforma is not None  # narrowing: proforma_id check guarantees non-None
                 if proforma.status == "sent":
                     try:
                         proforma.expire()
