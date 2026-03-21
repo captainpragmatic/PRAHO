@@ -756,7 +756,8 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 city = address_fields.get("city", "")
                 if address_line1 and city:
                     address_data = AddressData(
-                        address_type="primary",
+                        is_primary=True,
+                        is_billing=True,
                         address_line1=address_line1,
                         city=city,
                         county=address_fields.get("county", ""),
@@ -1236,11 +1237,13 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
 @require_customer_authentication
 def customer_addresses_list(request: HttpRequest, customer: Customer) -> Response:
     """List all addresses for a customer."""
-    addresses = CustomerAddress.objects.filter(customer=customer).order_by("-is_current", "address_type")
+    addresses = CustomerAddress.objects.filter(customer=customer).order_by("-is_current", "-is_primary", "-is_billing")
     addresses_data = [
         {
             "id": addr.id,
-            "address_type": addr.address_type,
+            "is_primary": addr.is_primary,
+            "is_billing": addr.is_billing,
+            "label": addr.label,
             "is_current": addr.is_current,
             "address_line1": addr.address_line1,
             "address_line2": getattr(addr, "address_line2", ""),
@@ -1258,7 +1261,7 @@ def customer_addresses_list(request: HttpRequest, customer: Customer) -> Respons
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
+def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response:
     """Add a new address to a customer."""
     data = _get_request_data(request)
     try:
@@ -1278,14 +1281,6 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    address_type = data.get("address_type", "billing")
-    valid_address_types = [c[0] for c in CustomerAddress.ADDRESS_TYPE_CHOICES]
-    if address_type not in valid_address_types:
-        return Response(
-            {"success": False, "error": f"Invalid address_type. Must be one of: {', '.join(valid_address_types)}"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
     address_line1 = data.get("address_line1", "").strip() if isinstance(data.get("address_line1"), str) else ""
     city = data.get("city", "").strip() if isinstance(data.get("city"), str) else ""
     if not address_line1:
@@ -1299,9 +1294,18 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    is_primary_raw = data.get("is_primary", False)
+    is_billing_raw = data.get("is_billing", False)
+    is_primary = bool(is_primary_raw)
+    is_billing = bool(is_billing_raw)
+    label_raw = data.get("label", "")
+    label = str(label_raw).strip() if label_raw else ""
+
     address = CustomerAddress.objects.create(
         customer=customer,
-        address_type=address_type,
+        is_primary=is_primary,
+        is_billing=is_billing,
+        label=label,
         is_current=data.get("is_current", True),
         address_line1=address_line1,
         address_line2=data.get("address_line2", ""),
@@ -1342,7 +1346,9 @@ def customer_addresses_update(request: HttpRequest, customer: Customer) -> Respo
         return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
 
     updatable = {
-        "address_type",
+        "is_primary",
+        "is_billing",
+        "label",
         "is_current",
         "address_line1",
         "address_line2",
@@ -1390,11 +1396,11 @@ def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Respo
         return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
 
     # Guard: cannot delete the last primary or billing address
-    if address.address_type in ("primary", "billing"):
+    if address.is_primary or address.is_billing:
+        role_label = "primary" if address.is_primary else "billing"
+        flag_filter = {"is_primary": True} if address.is_primary else {"is_billing": True}
         remaining = (
-            CustomerAddress.objects.filter(
-                customer=customer, address_type=address.address_type, deleted_at__isnull=True
-            )
+            CustomerAddress.objects.filter(customer=customer, deleted_at__isnull=True, **flag_filter)
             .exclude(pk=address.pk)
             .count()
         )
@@ -1402,7 +1408,7 @@ def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Respo
             return Response(
                 {
                     "success": False,
-                    "error": f"Cannot delete the only {address.address_type} address. Add a replacement first.",
+                    "error": f"Cannot delete the only {role_label} address. Add a replacement first.",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

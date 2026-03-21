@@ -120,7 +120,9 @@ class AddressViewTests(SimpleTestCase):
             "addresses": [
                 {
                     "id": 1,
-                    "address_type": "billing",
+                    "is_primary": False,
+                    "is_billing": True,
+                    "label": "",
                     "address_line1": "Str. Test 1",
                     "city": "București",
                     "country": "Romania",
@@ -150,7 +152,7 @@ class AddressViewTests(SimpleTestCase):
         response = self.client.get(reverse("customers:address_add"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Street Address")
-        self.assertContains(response, "Address Type")
+        self.assertContains(response, "Address Role")
 
     @patch("apps.customers.views.api_client")
     def test_address_add_post_success(self, mock_api):
@@ -160,7 +162,7 @@ class AddressViewTests(SimpleTestCase):
         response = self.client.post(
             reverse("customers:address_add"),
             data={
-                "address_type": "billing",
+                "is_billing": "on",
                 "address_line1": "Str. Nouă 5",
                 "city": "Cluj",
                 "county": "Cluj",
@@ -460,7 +462,9 @@ class AddressDeleteConfirmTests(SimpleTestCase):
             "addresses": [
                 {
                     "id": 1,
-                    "address_type": "billing",
+                    "is_primary": False,
+                    "is_billing": True,
+                    "label": "",
                     "is_current": True,
                     "address_line1": "St 1",
                     "city": "Bucharest",
@@ -512,10 +516,10 @@ class TaxProfileViewTests(SimpleTestCase):
         )
 
     @patch("apps.customers.views.api_client")
-    def test_admin_role_can_edit_tax_profile(self, mock_api: Any) -> None:
-        """Admin role should be able to edit tax profile (POST)."""
+    def test_admin_role_cannot_edit_tax_profile(self, mock_api: Any) -> None:
+        """Admin is not a valid Platform role — POST should not call API."""
         self._do_post_tax_profile(mock_api, role="admin")
-        mock_api.update_customer_tax_profile.assert_called_once()
+        mock_api.update_customer_tax_profile.assert_not_called()
 
     @patch("apps.customers.views.api_client")
     def test_owner_role_can_edit_tax_profile(self, mock_api: Any) -> None:
@@ -632,15 +636,17 @@ class AddressFormTypesTests(SimpleTestCase):
             session[k] = v
         session.save()
 
-    def test_address_form_has_valid_address_types(self):
-        """Address form offers only valid address types matching the model."""
+    def test_address_form_has_boolean_flag_inputs(self):
+        """Address form offers is_primary and is_billing checkboxes instead of address_type select."""
         self._set_session()
         response = self.client.get(reverse("customers:address_add"))
         content = response.content.decode()
-        # Valid types present (simplified to primary + billing only)
-        self.assertIn('value="primary"', content)
-        self.assertIn('value="billing"', content)
-        # Removed types absent
+        # Boolean flags present as checkboxes
+        self.assertIn('name="is_primary"', content)
+        self.assertIn('name="is_billing"', content)
+        # Old address_type select must not be present
+        self.assertNotIn('name="address_type"', content)
+        # Legacy types absent
         self.assertNotIn('value="delivery"', content)
         self.assertNotIn('value="legal"', content)
         self.assertNotIn('value="shipping"', content)

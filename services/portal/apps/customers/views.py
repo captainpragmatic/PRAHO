@@ -254,7 +254,7 @@ def company_tax_profile_view(request: HttpRequest) -> HttpResponse:
         return redirect("users:company_profile")
 
     user_role = _get_user_role(request, customer_id)
-    can_edit = user_role in ["owner", "admin", "billing"]
+    can_edit = user_role in ["owner", "billing"]
 
     if request.method == "POST" and can_edit:
         payload: dict[str, object] = {
@@ -361,12 +361,13 @@ def company_address_add_view(request: HttpRequest) -> HttpResponse:
         return redirect("users:company_profile")
 
     if request.method == "POST":
-        address_type = request.POST.get("address_type", "billing").strip()
-        if address_type not in ("primary", "billing"):
-            messages.error(request, _("Invalid address type."))
-            return render(request, "customers/address_form.html", {"page_title": _("Add Address")})
+        is_primary = request.POST.get("is_primary") in ("on", "true", "1", "yes")
+        is_billing = request.POST.get("is_billing") in ("on", "true", "1", "yes")
+        label = request.POST.get("label", "").strip()
         payload: dict[str, object] = {
-            "address_type": address_type,
+            "is_primary": is_primary,
+            "is_billing": is_billing,
+            "label": label,
             "address_line1": request.POST.get("address_line1", "").strip(),
             "address_line2": request.POST.get("address_line2", "").strip(),
             "city": request.POST.get("city", "").strip(),

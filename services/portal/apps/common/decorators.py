@@ -230,24 +230,19 @@ def require_customer_role(  # noqa: C901
     return decorator
 
 
-def require_admin_role(realtime_verification: bool = False) -> Callable[..., Any]:
-    """🔒 Require admin role - shortcut for admin-only views"""
-    return require_customer_role(["admin"], realtime_verification)
-
-
 def require_billing_access(realtime_verification: bool = False) -> Callable[..., Any]:
-    """🔒 Require billing access - owner, admin or billing role"""
-    return require_customer_role(["owner", "admin", "billing"], realtime_verification)
+    """🔒 Require billing access - owner or billing role"""
+    return require_customer_role(["owner", "billing"], realtime_verification)
 
 
 def require_technical_access(realtime_verification: bool = False) -> Callable[..., Any]:
-    """🔒 Require technical access - owner, admin or technical role"""
-    return require_customer_role(["owner", "admin", "technical"], realtime_verification)
+    """🔒 Require technical access - owner or tech role"""
+    return require_customer_role(["owner", "tech"], realtime_verification)
 
 
 def require_any_role(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require any valid role - equivalent to authenticated user with customer access"""
-    return require_customer_role(["owner", "admin", "billing", "technical", "viewer"], realtime_verification)
+    return require_customer_role(["owner", "billing", "tech", "viewer"], realtime_verification)
 
 
 def api_key_required(view_func: Callable[..., Any]) -> Callable[..., Any]:
