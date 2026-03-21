@@ -236,7 +236,6 @@ class SecureUserRegistrationService:
                 defaults={
                     "payment_terms": 30,  # Default 30 days
                     "preferred_currency": "RON",  # Romanian Lei
-                    "invoice_delivery_method": "email",
                 },
             )
 

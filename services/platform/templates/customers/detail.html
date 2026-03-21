@@ -388,6 +388,7 @@
                     <div class="flex">
                         <span class="text-sm font-medium text-slate-400 w-32">{% trans 'CUI/CIF' %}:</span>
                         <span class="text-sm text-white font-mono">{{ tax_profile.cui }}</span>
+                        <button type="button" onclick="navigator.clipboard.writeText('{{ tax_profile.cui }}')" class="ml-2 text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button>
                     </div>
                     {% endif %}
                     {% if tax_profile.vat_number %}

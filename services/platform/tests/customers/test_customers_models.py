@@ -201,7 +201,6 @@ class CustomerBillingProfileTestCase(TestCase):
             payment_terms=30,
             credit_limit=Decimal('10000.00'),
             preferred_currency='RON',
-            invoice_delivery_method='email'
         )
 
         self.assertEqual(billing_profile.payment_terms, 30)

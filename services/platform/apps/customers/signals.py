@@ -314,7 +314,6 @@ def handle_billing_profile_changes(
             "payment_terms": instance.payment_terms,
             "credit_limit": float(instance.credit_limit),
             "preferred_currency": instance.preferred_currency,
-            "invoice_delivery_method": instance.invoice_delivery_method,
             "auto_payment_enabled": instance.auto_payment_enabled,
         }
 
@@ -368,7 +367,6 @@ def store_original_billing_values(
                     "payment_terms": getattr(original, "payment_terms", None),
                     "credit_limit": float(getattr(original, "credit_limit", 0)),
                     "preferred_currency": getattr(original, "preferred_currency", None),
-                    "invoice_delivery_method": getattr(original, "invoice_delivery_method", None),
                     "auto_payment_enabled": getattr(original, "auto_payment_enabled", None),
                 }
             except CustomerBillingProfile.DoesNotExist:

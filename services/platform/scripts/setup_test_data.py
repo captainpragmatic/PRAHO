@@ -124,7 +124,6 @@ def create_test_data() -> (  # Complexity: multi-step business logic
                 "credit_limit": Decimal("1000.00"),
                 "auto_payment_enabled": False,
                 "preferred_currency": "RON",
-                "invoice_delivery_method": "email",
             },
         )
         if created:

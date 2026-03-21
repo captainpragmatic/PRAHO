@@ -1582,7 +1582,6 @@ class TestCustomersAuditService(TestCase):
         billing_profile.payment_terms = "net30"
         billing_profile.credit_limit = Decimal("1000.00")
         billing_profile.preferred_currency = "RON"
-        billing_profile.invoice_delivery_method = "email"
         billing_profile.auto_payment_enabled = True
         billing_profile.get_account_balance.return_value = Decimal("500.00")
         billing_profile.created_at = timezone.now()

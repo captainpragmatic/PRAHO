@@ -6,21 +6,17 @@
 
 {% block content %}
 <div class="px-4 py-6 max-w-4xl mx-auto">
+    <!-- Breadcrumb -->
+    {% include "components/breadcrumb.html" with items=breadcrumb_items %}
+
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
-        <div>
-            <h1 class="text-2xl font-bold text-white">
-                {% trans 'Add User to Customer' %}
-            </h1>
-            <p class="mt-1 text-sm text-slate-400">
-                {% icon "building" %} {{ customer.name }}
-            </p>
-        </div>
-        <div>
-            <a href="{% url 'customers:detail' customer.id %}" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md font-medium transition-colors">
-                ← {% trans 'Back to Customer' %}
-            </a>
-        </div>
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-white mt-4">
+            {% trans 'Add User to Customer' %}
+        </h1>
+        <p class="mt-1 text-sm text-slate-400">
+            {% icon "building" %} {{ customer.name }}
+        </p>
     </div>
 
     <!-- Add User Form -->
@@ -95,15 +91,13 @@
                         {% trans "Add User to Customer" as bt1 %}{% button bt1 type="submit" variant="primary" %}
                     {% endif %}
 
-                    <a href="{% url 'customers:create_user' customer.id %}"
-                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
-                        {% icon "plus" %} {% trans 'Create New User Instead' %}
-                    </a>
+                    {% url 'customers:create_user' customer.id as create_url %}
+                    {% trans "Create New User Instead" as create_text %}
+                    {% button create_text href=create_url variant="secondary" icon="plus" %}
 
-                    <a href="{% url 'customers:detail' customer.id %}"
-                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-                        {% icon "x" %} {% trans 'Cancel' %}
-                    </a>
+                    {% url 'customers:detail' customer.id as cancel_url %}
+                    {% trans "Cancel" as cancel_text %}
+                    {% button cancel_text href=cancel_url variant="secondary" icon="x" %}
                 </div>
             </form>
         </div>

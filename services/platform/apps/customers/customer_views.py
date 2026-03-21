@@ -496,6 +496,15 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
         "customer": customer,
         "title": _("Edit Customer"),
         "submit_text": _("Update Customer"),
+        "breadcrumb_items": [
+            {"text": _("Dashboard"), "url": reverse("dashboard")},
+            {"text": _("Customers"), "url": reverse("customers:list")},
+            {
+                "text": customer.get_display_name(),
+                "url": reverse("customers:detail", kwargs={"customer_id": customer.pk}),
+            },
+            {"text": _("Edit")},
+        ],
     }
 
     return render(request, "customers/edit.html", context)
@@ -698,6 +707,15 @@ def _render_assignment_form(
         "form": form,
         "customer": customer,
         "action": _("Assign User"),
+        "breadcrumb_items": [
+            {"text": _("Dashboard"), "url": reverse("dashboard")},
+            {"text": _("Customers"), "url": reverse("customers:list")},
+            {
+                "text": customer.get_display_name(),
+                "url": reverse("customers:detail", kwargs={"customer_id": customer.pk}),
+            },
+            {"text": _("Assign User")},
+        ],
     }
     return render(request, "customers/assign_user.html", context)
 

@@ -249,7 +249,6 @@ class CustomerBillingProfileForm(forms.ModelForm):
             "payment_terms",
             "credit_limit",
             "preferred_currency",
-            "invoice_delivery_method",
             "auto_payment_enabled",
         )
 
@@ -957,16 +956,6 @@ class CustomerEditForm(forms.Form):
             }
         ),
     )
-    invoice_delivery_method = forms.ChoiceField(
-        choices=[("email", _("Email")), ("postal", _("Postal Mail")), ("both", _("Email + Postal"))],
-        initial="email",
-        label=_("Invoice Delivery Method"),
-        widget=forms.Select(
-            attrs={
-                "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500"
-            }
-        ),
-    )
     auto_payment_enabled = forms.BooleanField(
         required=False,
         label=_("Auto-payment Enabled"),
@@ -1187,7 +1176,6 @@ class CustomerEditForm(forms.Form):
                         "payment_terms": billing_profile.payment_terms,
                         "credit_limit": billing_profile.credit_limit,
                         "preferred_currency": billing_profile.preferred_currency,
-                        "invoice_delivery_method": billing_profile.invoice_delivery_method,
                         "auto_payment_enabled": billing_profile.auto_payment_enabled,
                     }
                 )
@@ -1399,7 +1387,6 @@ class CustomerEditForm(forms.Form):
             billing_profile.payment_terms = data["payment_terms"]
             billing_profile.credit_limit = data["credit_limit"]
             billing_profile.preferred_currency = data["preferred_currency"]
-            billing_profile.invoice_delivery_method = data["invoice_delivery_method"]
             billing_profile.auto_payment_enabled = data["auto_payment_enabled"]
             billing_profile.save()
 

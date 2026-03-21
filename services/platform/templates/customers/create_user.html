@@ -6,21 +6,17 @@
 
 {% block content %}
 <div class="px-4 py-6 max-w-4xl mx-auto">
+    <!-- Breadcrumb -->
+    {% include "components/breadcrumb.html" with items=breadcrumb_items %}
+
     <!-- Header -->
-    <div class="flex items-center justify-between mb-6">
-        <div>
-            <h1 class="text-2xl font-bold text-white">
-                {% trans 'Create New User' %}
-            </h1>
-            <p class="mt-1 text-sm text-slate-400">
-                {% icon "building" %} {% trans 'For customer:' %} {{ customer.name }}
-            </p>
-        </div>
-        <div>
-            <a href="{% url 'customers:detail' customer.id %}" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md font-medium transition-colors">
-                ← {% trans 'Back to Customer' %}
-            </a>
-        </div>
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-white mt-4">
+            {% trans 'Create New User' %}
+        </h1>
+        <p class="mt-1 text-sm text-slate-400">
+            {% icon "building" %} {% trans 'For customer:' %} {{ customer.name }}
+        </p>
     </div>
 
     <!-- Create User Form -->
@@ -129,15 +125,13 @@
                 <div class="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-700">
                     {% trans "Create User Account" as bt1 %}{% button bt1 type="submit" variant="primary" %}
 
-                    <a href="{% url 'customers:add_user' customer.id %}"
-                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-blue-400 hover:text-blue-300 border border-blue-600 rounded-lg hover:border-blue-500 transition-colors">
-                        {% icon "users" %} {% trans 'Add Existing User Instead' %}
-                    </a>
+                    {% url 'customers:add_user' customer.id as add_url %}
+                    {% trans "Add Existing User Instead" as add_text %}
+                    {% button add_text href=add_url variant="secondary" icon="users" %}
 
-                    <a href="{% url 'customers:detail' customer.id %}"
-                       class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-                        {% icon "x" %} {% trans 'Cancel' %}
-                    </a>
+                    {% url 'customers:detail' customer.id as cancel_url %}
+                    {% trans "Cancel" as cancel_text %}
+                    {% button cancel_text href=cancel_url variant="secondary" icon="x" %}
                 </div>
             </form>
         </div>

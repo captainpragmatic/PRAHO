@@ -875,7 +875,6 @@ class Command(BaseCommand):
             customer=customer,
             payment_terms=30,
             preferred_currency="RON",
-            invoice_delivery_method="email",
             auto_payment_enabled=True,
             credit_limit=Decimal("25000.00"),
         )
@@ -1031,13 +1030,11 @@ class Command(BaseCommand):
 
         # --- Billing profile with variety ---
         currencies = ["RON", "EUR"]
-        delivery_methods = ["email", "postal", "both"]
         payment_terms_options = [15, 30, 45, 60]
         CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=payment_terms_options[index % len(payment_terms_options)],
             preferred_currency=currencies[index % len(currencies)],
-            invoice_delivery_method=delivery_methods[index % len(delivery_methods)],
             auto_payment_enabled=index % 4 == 0,
             credit_limit=Decimal("5000.00") if customer_type == "company" else Decimal("0.00"),
         )
@@ -1301,7 +1298,6 @@ class Command(BaseCommand):
         note_types = ["general", "call", "email", "meeting", "complaint", "compliment"]
         membership_roles = ["owner", "billing", "tech", "viewer"]
         currencies = ["RON", "EUR"]
-        delivery_methods = ["email", "postal", "both"]
         contact_methods = ["email", "phone", "both"]
 
         for idx, cust_data in enumerate(permutations):
@@ -1316,7 +1312,7 @@ class Command(BaseCommand):
 
             self._perm_addresses(customer, idx, city, county)
             self._perm_tax_profile(customer, idx)
-            self._perm_billing_profile(customer, idx, currencies, delivery_methods)
+            self._perm_billing_profile(customer, idx, currencies)
             self._perm_payment_methods(customer, idx, payment_method_types)
             self._perm_notes(fake, customer, idx, admin_user, note_types)
             self._perm_memberships(
@@ -1460,15 +1456,12 @@ class Command(BaseCommand):
                 is_vat_payer=False,
             )
 
-    def _perm_billing_profile(
-        self, customer: Customer, idx: int, currencies: list[str], delivery_methods: list[str]
-    ) -> None:
+    def _perm_billing_profile(self, customer: Customer, idx: int, currencies: list[str]) -> None:
         """Create deterministic billing profile for a permutation customer."""
         CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=[15, 30, 45, 60][idx % 4],
             preferred_currency=currencies[idx % len(currencies)],
-            invoice_delivery_method=delivery_methods[idx % len(delivery_methods)],
             auto_payment_enabled=idx in (5, 6),
             credit_limit=Decimal("10000.00") if customer.customer_type == "company" else Decimal("0.00"),
         )

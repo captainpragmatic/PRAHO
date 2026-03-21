@@ -547,7 +547,6 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
             "billing_profile": {
                 "payment_terms": "net_30",
                 "preferred_currency": "RON",
-                "invoice_delivery_method": "email",
                 "auto_payment_enabled": false
             }
         },

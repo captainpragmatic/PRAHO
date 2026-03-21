@@ -343,7 +343,6 @@ class CustomerBillingProfileSerializer(serializers.Serializer):
 
     payment_terms = serializers.CharField(max_length=50, allow_blank=True)
     preferred_currency = serializers.CharField(max_length=3, default="RON")
-    invoice_delivery_method = serializers.CharField(max_length=20, default="email")
     auto_payment_enabled = serializers.BooleanField(default=False)
 
 
