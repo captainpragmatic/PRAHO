@@ -42,6 +42,8 @@ urlpatterns = [
     path("tickets/", include("apps.tickets.urls")),
     # Hosting services - customer service management
     path("services/", include("apps.services.urls")),
+    # Customer management - team, tax profile, addresses
+    path("company/", include("apps.customers.urls")),
     # Order flow - product catalog and cart management
     path("order/", include("apps.orders.urls")),
     # GDPR / Legal pages (public, no auth required)

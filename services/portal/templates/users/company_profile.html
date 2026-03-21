@@ -210,8 +210,44 @@
                 </div>
         {% end_section_card %}
 
+        <!-- Quick Links to Related Sections -->
+        <div class="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <a href="{% url 'customers:team' %}"
+               class="flex items-center p-4 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700/70 transition-colors group">
+                <div class="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center mr-4 group-hover:bg-slate-600 transition-colors">
+                    {% icon "users" size="md" css_class="text-blue-400" %}
+                </div>
+                <div>
+                    <div class="text-white font-medium text-sm">{% trans "Team Members" %}</div>
+                    <div class="text-slate-400 text-xs">{% trans "Manage access & roles" %}</div>
+                </div>
+            </a>
+
+            <a href="{% url 'customers:tax_profile' %}"
+               class="flex items-center p-4 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700/70 transition-colors group">
+                <div class="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center mr-4 group-hover:bg-slate-600 transition-colors">
+                    {% icon "receipt" size="md" css_class="text-green-400" %}
+                </div>
+                <div>
+                    <div class="text-white font-medium text-sm">{% trans "Tax Profile" %}</div>
+                    <div class="text-slate-400 text-xs">{% trans "CUI, VAT & compliance" %}</div>
+                </div>
+            </a>
+
+            <a href="{% url 'customers:addresses' %}"
+               class="flex items-center p-4 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700/70 transition-colors group">
+                <div class="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center mr-4 group-hover:bg-slate-600 transition-colors">
+                    {% icon "map-pin" size="md" css_class="text-amber-400" %}
+                </div>
+                <div>
+                    <div class="text-white font-medium text-sm">{% trans "Addresses" %}</div>
+                    <div class="text-slate-400 text-xs">{% trans "Billing & shipping" %}</div>
+                </div>
+            </a>
+        </div>
+
         <!-- Help Text -->
-        <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+        <div class="mt-6 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="flex items-start">
                 {% icon "info" size="md" css_class="text-blue-400 mr-3 mt-0.5 flex-shrink-0" %}
                 <div class="text-sm text-slate-400">

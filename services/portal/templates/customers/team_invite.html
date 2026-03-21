@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Invite Team Member" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 py-8">
+    <div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        {% trans 'Invite Team Member' as ph_title %}{% trans 'Add a new member to your team' as ph_sub %}
+        {% page_header title=ph_title subtitle=ph_sub icon="user-plus" %}
+        {% end_page_header %}
+
+        <!-- Back link -->
+        <div class="mb-6">
+            <a href="{% url 'customers:team' %}"
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                {% icon "chevron-left" size="sm" css_class="mr-2" %}
+                {% trans "Back to Team" %}
+            </a>
+        </div>
+
+        {% trans 'New Team Member Details' as form_title %}
+        {% section_card title=form_title icon="user" %}
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            <!-- Email -->
+            <div class="mb-5">
+                <label for="email" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Email Address" %} <span class="text-red-400">*</span>
+                </label>
+                <input type="email" id="email" name="email" required
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'colleague@company.com' %}">
+            </div>
+
+            <!-- First Name -->
+            <div class="mb-5">
+                <label for="first_name" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "First Name" %}
+                </label>
+                <input type="text" id="first_name" name="first_name"
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'First name' %}">
+            </div>
+
+            <!-- Last Name -->
+            <div class="mb-5">
+                <label for="last_name" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Last Name" %}
+                </label>
+                <input type="text" id="last_name" name="last_name"
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'Last name' %}">
+            </div>
+
+            <!-- Role -->
+            <div class="mb-6">
+                <label for="role" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Role" %} <span class="text-red-400">*</span>
+                </label>
+                <select id="role" name="role" required
+                        class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    <option value="viewer">{% trans "Viewer" %} — {% trans "Read-only access" %}</option>
+                    <option value="tech">{% trans "Technical" %} — {% trans "Service management" %}</option>
+                    <option value="billing">{% trans "Billing" %} — {% trans "Billing and invoices" %}</option>
+                    <option value="owner">{% trans "Owner" %} — {% trans "Full access" %}</option>
+                </select>
+            </div>
+
+            <!-- Submit -->
+            <div class="flex items-center justify-end gap-4">
+                <a href="{% url 'customers:team' %}"
+                   class="px-6 py-3 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                <button type="submit"
+                        class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
+                    {% icon "user-plus" size="sm" css_class="mr-2" %}
+                    {% trans "Send Invitation" %}
+                </button>
+            </div>
+        </form>
+        {% end_section_card %}
+
+    </div>
+</div>
+{% endblock %}

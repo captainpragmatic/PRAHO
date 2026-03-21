@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Addresses" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 py-8">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        {% trans 'Addresses' as ph_title %}{% trans 'Manage your company billing and shipping addresses' as ph_sub %}
+        {% page_header title=ph_title subtitle=ph_sub icon="map-pin" %}
+        {% end_page_header %}
+
+        <!-- Action Bar -->
+        <div class="mb-6 flex justify-between items-center">
+            <a href="{% url 'users:company_profile' %}"
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                {% icon "chevron-left" size="sm" css_class="mr-2" %}
+                {% trans "Back to Company" %}
+            </a>
+
+            {% if can_manage %}
+            <a href="{% url 'customers:address_add' %}"
+               class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
+                {% icon "plus" size="sm" css_class="mr-2" %}
+                {% trans "Add Address" %}
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Address List -->
+        {% if addresses %}
+        <div class="space-y-4">
+            {% for addr in addresses %}
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                    <!-- Address Info -->
+                    <div class="flex items-start space-x-4">
+                        <div class="w-12 h-12 bg-slate-700 rounded-full flex items-center justify-center flex-shrink-0">
+                            {% icon "map-pin" size="md" css_class="text-slate-300" %}
+                        </div>
+                        <div>
+                            <div class="flex items-center space-x-2 mb-1">
+                                {% badge addr.address_type|title variant="info" %}
+                                {% if addr.is_current %}
+                                    {% trans 'Current' as current_label %}
+                                    {% badge current_label variant="success" %}
+                                {% endif %}
+                            </div>
+                            <div class="text-white font-medium">
+                                {{ addr.address_line1 }}
+                            </div>
+                            {% if addr.address_line2 %}
+                            <div class="text-slate-400 text-sm">{{ addr.address_line2 }}</div>
+                            {% endif %}
+                            <div class="text-slate-400 text-sm mt-1">
+                                {{ addr.city }}{% if addr.county %}, {{ addr.county }}{% endif %}
+                                {% if addr.postal_code %} {{ addr.postal_code }}{% endif %}
+                            </div>
+                            <div class="text-slate-500 text-sm">{{ addr.country }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Delete Action -->
+                    {% if can_manage %}
+                    <form method="post" action="{% url 'customers:address_delete' addr.id %}">
+                        {% csrf_token %}
+                        <button type="submit"
+                                class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50"
+                                hx-confirm="{% trans 'Are you sure you want to delete this address?' %}">
+                            {% icon "trash" size="sm" css_class="mr-1" %}
+                            {% trans "Delete" %}
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% else %}
+        <!-- Empty State -->
+        <div class="text-center py-16 bg-slate-800/50 rounded-xl border border-slate-700">
+            {% icon "map-pin" size="xl" css_class="mx-auto text-slate-600 mb-4" %}
+            <h3 class="text-lg font-medium text-slate-300 mb-2">{% trans "No addresses yet" %}</h3>
+            <p class="text-slate-500 mb-6">{% trans "Add billing or shipping addresses for your company." %}</p>
+            {% if can_manage %}
+            <a href="{% url 'customers:address_add' %}"
+               class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                {% icon "plus" size="sm" css_class="mr-2" %}
+                {% trans "Add Address" %}
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}
