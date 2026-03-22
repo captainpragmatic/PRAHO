@@ -124,14 +124,16 @@ result = RefundService.get_refund_eligibility('order', order.id, 5000)
 ### Refund Eligibility
 
 **Orders can be refunded if:**
-- Status is `completed`, `processing`, or `partially_refunded`
+- Status is `completed` or `provisioning`
 - Not already fully refunded
 - Order total > 0
 
 **Orders CANNOT be refunded if:**
-- Status is `draft`, `cancelled`, or `failed`
+- Status is `draft`, `awaiting_payment`, `cancelled`, or `failed`
 - Already fully refunded
 - Invalid or missing order
+
+> **Note:** Refund status (`refunded`, `partially_refunded`) is tracked on **Invoice** and **Payment** models, not on the Order FSM. An order's financial reversal is reflected via its linked invoice.
 
 **Invoices can be refunded if:**
 - Status is `issued`, `paid`, or `overdue`
@@ -145,10 +147,12 @@ result = RefundService.get_refund_eligibility('order', order.id, 5000)
 
 ### Status Updates
 
-| Original Status | Refund Type | New Status |
-|----------------|-------------|------------|
-| `completed` | Full | `refunded` |
-| `completed` | Partial | `partially_refunded` |
+Refund status is tracked on Invoice (not Order). The table below reflects Invoice FSM transitions:
+
+| Original Invoice Status | Refund Type | New Invoice Status |
+|------------------------|-------------|-------------------|
+| `paid` | Full | `refunded` |
+| `paid` | Partial | `partially_refunded` |
 | `partially_refunded` | Full | `refunded` |
 | `partially_refunded` | Partial | `partially_refunded` |
 
@@ -392,8 +396,8 @@ Generate refund statistics and reports.
 ### Common Issues
 
 1. **"Order not eligible for refund"**
-   - Check order status (must be completed/processing)
-   - Verify order hasn't been fully refunded already
+   - Check order status (must be `completed` or `provisioning`)
+   - Verify order hasn't been fully refunded already (check linked invoice status)
 
 2. **"Refund amount exceeds maximum"**
    - Check available refund amount with `get_refund_eligibility()`
