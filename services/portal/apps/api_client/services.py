@@ -1269,6 +1269,22 @@ class PlatformAPIClient:
             user_id=user_id,
         )
 
+    def set_address_primary(self, customer_id: int, user_id: int, address_id: int) -> dict[str, Any]:
+        """🔒 Set an address as the primary address — HMAC BODY"""
+        return self.post(
+            "customers/addresses/set-primary/",
+            data={"customer_id": customer_id, "address_id": address_id},
+            user_id=user_id,
+        )
+
+    def set_address_billing(self, customer_id: int, user_id: int, address_id: int) -> dict[str, Any]:
+        """🔒 Set an address as the billing address — HMAC BODY"""
+        return self.post(
+            "customers/addresses/set-billing/",
+            data={"customer_id": customer_id, "address_id": address_id},
+            user_id=user_id,
+        )
+
 
 # Singleton instance
 api_client = PlatformAPIClient()

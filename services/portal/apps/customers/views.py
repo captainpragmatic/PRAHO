@@ -426,3 +426,61 @@ def company_address_delete_view(request: HttpRequest, address_id: int) -> HttpRe
             messages.error(request, _("Could not delete address. Please try again."))
 
     return redirect("customers:addresses")
+
+
+@require_customer_role(required_roles=_OWNER_ROLES)
+@require_http_methods(["POST"])
+def company_address_set_primary_view(request: HttpRequest, address_id: int) -> HttpResponse:
+    """Set an address as the primary address."""
+    customer_id, user_id = _get_customer_context(request)
+    if customer_id is None or user_id is None:
+        return redirect("users:company_profile")
+
+    try:
+        response = api_client.set_address_primary(
+            customer_id=customer_id,
+            user_id=user_id,
+            address_id=address_id,
+        )
+        if isinstance(response, dict) and response.get("success"):
+            messages.success(request, _("Address set as primary."))
+        else:
+            error_detail = response.get("error", "") if isinstance(response, dict) else ""
+            messages.error(request, error_detail or _("Could not update address."))
+    except PlatformAPIError as exc:
+        if is_rate_limited_error(exc):
+            messages.warning(request, _("Too many requests. Please wait and try again."))
+        else:
+            logger.error("Failed to set primary address: %s", exc)
+            messages.error(request, _("Could not update address."))
+
+    return redirect("customers:addresses")
+
+
+@require_customer_role(required_roles=_OWNER_ROLES)
+@require_http_methods(["POST"])
+def company_address_set_billing_view(request: HttpRequest, address_id: int) -> HttpResponse:
+    """Set an address as the billing address."""
+    customer_id, user_id = _get_customer_context(request)
+    if customer_id is None or user_id is None:
+        return redirect("users:company_profile")
+
+    try:
+        response = api_client.set_address_billing(
+            customer_id=customer_id,
+            user_id=user_id,
+            address_id=address_id,
+        )
+        if isinstance(response, dict) and response.get("success"):
+            messages.success(request, _("Address set as billing."))
+        else:
+            error_detail = response.get("error", "") if isinstance(response, dict) else ""
+            messages.error(request, error_detail or _("Could not update address."))
+    except PlatformAPIError as exc:
+        if is_rate_limited_error(exc):
+            messages.warning(request, _("Too many requests. Please wait and try again."))
+        else:
+            logger.error("Failed to set billing address: %s", exc)
+            messages.error(request, _("Could not update address."))
+
+    return redirect("customers:addresses")

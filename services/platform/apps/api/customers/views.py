@@ -1417,3 +1417,65 @@ def customer_addresses_delete(request: HttpRequest, customer: Customer) -> Respo
     address.soft_delete(user=acting_user)
     logger.info(f"✅ [Customer API] Address {address_id} soft-deleted from customer {customer.id}")
     return Response({"success": True, "message": "Address deleted."})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def customer_addresses_set_primary(request: HttpRequest, customer: Customer) -> Response:
+    """Set an address as the primary address for a customer."""
+    data = _get_request_data(request)
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    address_id = data.get("address_id")
+    if not address_id:
+        return Response({"success": False, "error": "address_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        address = CustomerAddress.objects.get(id=address_id, customer=customer)
+    except CustomerAddress.DoesNotExist:
+        return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    address.is_primary = True
+    address.save(update_fields=["is_primary", "updated_at"])
+    logger.info(f"✅ [Customer API] Address {address_id} set as primary for customer {customer.id}")
+    return Response({"success": True, "message": "Address set as primary."})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def customer_addresses_set_billing(request: HttpRequest, customer: Customer) -> Response:
+    """Set an address as the billing address for a customer."""
+    data = _get_request_data(request)
+    try:
+        user_id = _extract_user_id(data)
+    except ValueError:
+        return Response({"success": False, "error": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    owner_error = _require_owner_role(user_id, customer)
+    if owner_error:
+        return owner_error
+
+    address_id = data.get("address_id")
+    if not address_id:
+        return Response({"success": False, "error": "address_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        address = CustomerAddress.objects.get(id=address_id, customer=customer)
+    except CustomerAddress.DoesNotExist:
+        return Response({"success": False, "error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    address.is_billing = True
+    address.save(update_fields=["is_billing", "updated_at"])
+    logger.info(f"✅ [Customer API] Address {address_id} set as billing for customer {customer.id}")
+    return Response({"success": True, "message": "Address set as billing."})

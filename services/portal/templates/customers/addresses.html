@@ -67,17 +67,32 @@
                         </div>
                     </div>
 
-                    <!-- Delete Action -->
+                    <!-- Address Actions -->
                     {% if can_manage %}
-                    <form method="post" action="{% url 'customers:address_delete' addr.id %}">
-                        {% csrf_token %}
-                        <button type="submit"
-                                class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50"
-                                onclick="return confirm('{% trans "Are you sure you want to delete this address?" %}')">
-                            {% icon "trash" size="sm" css_class="mr-1" %}
-                            {% trans "Delete" %}
-                        </button>
-                    </form>
+                    <div class="flex flex-col gap-2">
+                        {% if not addr.is_primary %}
+                        <form method="post" action="{% url 'customers:address_set_primary' addr.id %}">
+                            {% csrf_token %}
+                            {% trans "Make Primary" as primary_btn %}
+                            {% button primary_btn variant="secondary" size="sm" type="submit" icon="check" %}
+                        </form>
+                        {% endif %}
+                        {% if not addr.is_billing %}
+                        <form method="post" action="{% url 'customers:address_set_billing' addr.id %}">
+                            {% csrf_token %}
+                            {% trans "Make Billing" as billing_btn %}
+                            {% button billing_btn variant="secondary" size="sm" type="submit" icon="check" %}
+                        </form>
+                        {% endif %}
+                        {% if not addr.is_primary and not addr.is_billing %}
+                        <form method="post" action="{% url 'customers:address_delete' addr.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50" onclick="return confirm('{% trans "Are you sure you want to delete this address?" %}')">
+                                {% icon "trash" size="sm" css_class="mr-1" %} {% trans "Delete" %}
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
                     {% endif %}
                 </div>
             </div>

@@ -463,8 +463,8 @@ class AddressDeleteConfirmTests(SimpleTestCase):
                 {
                     "id": 1,
                     "is_primary": False,
-                    "is_billing": True,
-                    "label": "",
+                    "is_billing": False,
+                    "label": "Office",
                     "is_current": True,
                     "address_line1": "St 1",
                     "city": "Bucharest",

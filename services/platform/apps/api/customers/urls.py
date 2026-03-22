@@ -12,6 +12,8 @@ from .views import (
     customer_addresses_add,
     customer_addresses_delete,
     customer_addresses_list,
+    customer_addresses_set_billing,
+    customer_addresses_set_primary,
     customer_addresses_update,
     customer_create_api,
     customer_detail_api,
@@ -60,6 +62,8 @@ urlpatterns = [
     path("addresses/add/", customer_addresses_add, name="customer-addresses-add"),
     path("addresses/update/", customer_addresses_update, name="customer-addresses-update"),
     path("addresses/delete/", customer_addresses_delete, name="customer-addresses-delete"),
+    path("addresses/set-primary/", customer_addresses_set_primary, name="customer-addresses-set-primary"),
+    path("addresses/set-billing/", customer_addresses_set_billing, name="customer-addresses-set-billing"),
     # Router-based endpoints
     path("", include(router.urls)),
 ]

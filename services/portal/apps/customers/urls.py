@@ -18,4 +18,6 @@ urlpatterns = [
     path("addresses/", views.company_addresses_view, name="addresses"),
     path("addresses/add/", views.company_address_add_view, name="address_add"),
     path("addresses/<int:address_id>/delete/", views.company_address_delete_view, name="address_delete"),
+    path("addresses/<int:address_id>/set-primary/", views.company_address_set_primary_view, name="address_set_primary"),
+    path("addresses/<int:address_id>/set-billing/", views.company_address_set_billing_view, name="address_set_billing"),
 ]
