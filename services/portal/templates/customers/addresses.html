@@ -48,10 +48,7 @@
                 {% elif addr.label %}{{ addr.label }}
                 {% else %}{% trans "Other" as addr_type_label %}{% endif %}
                 {% if addr_type_label %}{% badge addr_type_label variant="info" %}{% endif %}
-                                {% if addr.is_current %}
-                                    {% trans 'Current' as current_label %}
-                                    {% badge current_label variant="success" %}
-                                {% endif %}
+                                {% if addr.label %}<span class="text-xs text-slate-400">{{ addr.label }}</span>{% endif %}
                             </div>
                             <div class="text-white font-medium">
                                 {{ addr.address_line1 }}
@@ -85,11 +82,10 @@
                         </form>
                         {% endif %}
                         {% if not addr.is_primary and not addr.is_billing %}
-                        <form method="post" action="{% url 'customers:address_delete' addr.id %}">
+                        <form method="post" action="{% url 'customers:address_delete' addr.id %}" onsubmit="return confirm('{% trans "Are you sure you want to delete this address?" %}')">
                             {% csrf_token %}
-                            <button type="submit" class="px-3 py-2 bg-red-900/50 text-red-400 text-sm font-medium rounded-lg hover:bg-red-900/70 transition-colors border border-red-800/50" onclick="return confirm('{% trans "Are you sure you want to delete this address?" %}')">
-                                {% icon "trash" size="sm" css_class="mr-1" %} {% trans "Delete" %}
-                            </button>
+                            {% trans "Delete" as delete_btn %}
+                            {% button delete_btn variant="danger" size="sm" type="submit" icon="trash" %}
                         </form>
                         {% endif %}
                     </div>
