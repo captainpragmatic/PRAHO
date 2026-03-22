@@ -402,7 +402,9 @@ def handle_address_changes(
 
             old_values = getattr(instance, "_original_address_values", {}) if not created else {}
             new_values = {
-                "address_type": instance.address_type,
+                "is_primary": instance.is_primary,
+                "is_billing": instance.is_billing,
+                "label": instance.label,
                 "address_line1": instance.address_line1,
                 "city": instance.city,
                 "county": instance.county,
@@ -412,6 +414,7 @@ def handle_address_changes(
                 "is_validated": instance.is_validated,
             }
 
+            address_role = "primary" if instance.is_primary else ("billing" if instance.is_billing else "other")
             CustomersAuditService.log_address_event(
                 event_type=event_type,
                 address=instance,
@@ -419,23 +422,21 @@ def handle_address_changes(
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
-                description=f"Address {instance.address_type} {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
+                description=f"Address ({address_role}) {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
             )
 
         # Address validation for Romanian addresses
         if instance.country == "România" and not instance.is_validated:
             _trigger_romanian_address_validation(instance)
 
-        # Version management - ensure only one current address per type
-        if instance.is_current:
-            _ensure_single_current_address(instance)
-
-        # Legal address compliance for Romanian companies
-        if instance.address_type == "legal" and instance.customer.customer_type == Customer.CustomerType.COMPANY:
-            _verify_legal_address_compliance(instance)
+        # NOTE: _ensure_single_current_address was removed in 0017 migration.
+        # With boolean role flags (is_primary / is_billing), a customer legitimately
+        # has multiple active (is_current=True) addresses simultaneously — one per role.
+        # The model's save() enforces flag exclusivity; is_current tracks versioning
+        # per address record, not per customer.
 
         logger.info(
-            f"🏠 [Customer] Address {instance.address_type} {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
+            f"🏠 [Customer] Address {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
         )
 
     except Exception as e:
@@ -454,7 +455,9 @@ def store_original_address_values(sender: type[CustomerAddress], instance: Custo
             try:
                 original = CustomerAddress.objects.get(pk=instance.pk)
                 instance._original_address_values = {
-                    "address_type": getattr(original, "address_type", None),
+                    "is_primary": getattr(original, "is_primary", None),
+                    "is_billing": getattr(original, "is_billing", None),
+                    "label": getattr(original, "label", None),
                     "address_line1": getattr(original, "address_line1", None),
                     "city": getattr(original, "city", None),
                     "county": getattr(original, "county", None),
@@ -881,29 +884,15 @@ def _trigger_romanian_address_validation(address: CustomerAddress) -> None:
         logger.exception(f"🔥 [Customer Signal] Romanian address validation failed: {e}")
 
 
-def _ensure_single_current_address(address: CustomerAddress) -> None:
-    """Ensure only one current address per type per customer."""
+def _verify_primary_address_compliance(address: CustomerAddress) -> None:
+    """Verify primary address compliance for Romanian companies"""
     try:
-        # Django signals have no guaranteed transaction context. A single .update() is atomic SQL — no row lock needed.
-        CustomerAddress.objects.filter(
-            customer=address.customer,
-            address_type=address.address_type,
-            is_current=True,
-        ).exclude(pk=address.pk).update(is_current=False)
-
-    except Exception:
-        logger.exception("🔥 [Customer Signal] Address versioning failed")
-
-
-def _verify_legal_address_compliance(address: CustomerAddress) -> None:
-    """Verify legal address compliance for Romanian companies"""
-    try:
-        if address.address_type == "legal" and address.country == "România":
-            # Romanian companies must have legal address in Romania
+        if address.is_primary and address.country == "România":
+            # Romanian companies must have primary address in Romania
             compliance_request = ComplianceEventRequest(
-                compliance_type="legal_address_compliance",
+                compliance_type="primary_address_compliance",
                 reference_id=f"customer_{address.customer.id}",
-                description=f"Legal address registered: {address.city}, {address.county}",
+                description=f"Primary address registered: {address.city}, {address.county}",
                 status="success",
                 evidence={
                     "address_id": str(address.id),
@@ -915,7 +904,7 @@ def _verify_legal_address_compliance(address: CustomerAddress) -> None:
             AuditService.log_compliance_event(compliance_request)
 
     except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Legal address compliance verification failed: {e}")
+        logger.exception(f"🔥 [Customer Signal] Primary address compliance verification failed: {e}")
 
 
 def _validate_stripe_payment_method(payment_method: CustomerPaymentMethod) -> None:

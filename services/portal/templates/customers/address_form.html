@@ -26,16 +26,31 @@
         <form method="post" novalidate>
             {% csrf_token %}
 
-            <!-- Address Type -->
+            <!-- Address Role Flags -->
             <div class="mb-5">
-                <label for="address_type" class="block text-sm font-medium text-slate-300 mb-2">
-                    {% trans "Address Type" %} <span class="text-red-400">*</span>
+                <p class="block text-sm font-medium text-slate-300 mb-2">{% trans "Address Role" %}</p>
+                <div class="flex flex-col gap-2">
+                    <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="checkbox" name="is_primary" id="is_primary" value="on"
+                               class="h-4 w-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-700">
+                        {% trans "Primary address" %}
+                    </label>
+                    <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="checkbox" name="is_billing" id="is_billing" value="on"
+                               class="h-4 w-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-700">
+                        {% trans "Billing address" %}
+                    </label>
+                </div>
+            </div>
+
+            <!-- Optional Label -->
+            <div class="mb-5">
+                <label for="label" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Label (optional)" %}
                 </label>
-                <select id="address_type" name="address_type" required
-                        class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                    <option value="primary">{% trans "Primary" %}</option>
-                    <option value="billing">{% trans "Billing" %}</option>
-                </select>
+                <input type="text" id="label" name="label" maxlength="50"
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'e.g. Home, Office, Warehouse' %}">
             </div>
 
             <!-- Address Line 1 -->

@@ -21,13 +21,13 @@ class CustomerAddress(SoftDeleteModel):
     """
     Customer addresses with versioning support.
 
+    Each address can independently be flagged as the primary address and/or
+    the billing address. The save() method enforces uniqueness automatically:
+    setting is_primary=True clears the flag on all other active addresses,
+    and likewise for is_billing=True.
+
     🚨 CASCADE: ON DELETE CASCADE from Customer
     """
-
-    ADDRESS_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
-        ("primary", _("Adresa principală")),
-        ("billing", _("Adresa facturare")),
-    )
 
     customer = models.ForeignKey(
         "customers.Customer",
@@ -35,7 +35,12 @@ class CustomerAddress(SoftDeleteModel):
         related_name="addresses",
     )
 
-    address_type = models.CharField(max_length=20, choices=ADDRESS_TYPE_CHOICES, verbose_name=_("Tip adresă"))
+    # Role flags — replaces the old address_type CharField
+    is_primary = models.BooleanField(default=False, verbose_name=_("Adresa principală"))
+    is_billing = models.BooleanField(default=False, verbose_name=_("Adresa facturare"))
+
+    # Optional free-text label chosen by the customer
+    label = models.CharField(max_length=50, blank=True, verbose_name=_("Etichetă"))
 
     # Address Fields
     address_line1 = models.CharField(max_length=200, verbose_name=_("Adresa 1"))
@@ -61,28 +66,49 @@ class CustomerAddress(SoftDeleteModel):
         db_table = "customer_addresses"
         verbose_name = _("Customer Address")
         verbose_name_plural = _("Customer Addresses")
-        constraints: ClassVar[list[UniqueConstraint]] = [
-            UniqueConstraint(
-                fields=["customer", "address_type"],
-                condition=Q(is_current=True, deleted_at__isnull=True),
-                name="unique_current_address_per_type",
-                violation_error_message=_("A current address of this type already exists for this customer."),
-            ),
-        ]
         indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=["customer", "address_type"]),
+            models.Index(fields=["customer", "is_primary"], name="addr_cust_is_primary_idx"),
+            models.Index(fields=["customer", "is_billing"], name="addr_cust_is_billing_idx"),
             models.Index(fields=["customer", "is_current"]),
             models.Index(fields=["postal_code"]),
-            # Partial index: SoftDeleteManager always filters deleted_at__isnull=True
+            # Partial indexes: SoftDeleteManager always filters deleted_at__isnull=True
             models.Index(
-                fields=["customer", "address_type"],
+                fields=["customer", "is_primary"],
                 condition=Q(deleted_at__isnull=True),
-                name="addr_cust_type_active_idx",
+                name="addr_cust_primary_active_idx",
+            ),
+            models.Index(
+                fields=["customer", "is_billing"],
+                condition=Q(deleted_at__isnull=True),
+                name="addr_cust_billing_active_idx",
             ),
         )
 
     def __str__(self) -> str:
-        return f"{self.customer.get_display_name()} - {dict(self.ADDRESS_TYPE_CHOICES)[self.address_type]}"
+        roles = []
+        if self.is_primary:
+            roles.append(str(_("Adresa principală")))
+        if self.is_billing:
+            roles.append(str(_("Adresa facturare")))
+        role_label = ", ".join(roles) if roles else str(_("Adresă"))
+        return f"{self.customer.get_display_name()} - {role_label}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save with exclusive primary/billing flag enforcement (atomic)."""
+        with db_transaction.atomic():
+            if self.is_primary:
+                CustomerAddress.objects.filter(
+                    customer=self.customer,
+                    is_primary=True,
+                    deleted_at__isnull=True,
+                ).exclude(pk=self.pk).update(is_primary=False)
+            if self.is_billing:
+                CustomerAddress.objects.filter(
+                    customer=self.customer,
+                    is_billing=True,
+                    deleted_at__isnull=True,
+                ).exclude(pk=self.pk).update(is_billing=False)
+            super().save(*args, **kwargs)
 
     def get_full_address(self) -> str:
         """Get formatted address"""

@@ -241,7 +241,7 @@ class CustomerAddressAPITests(TestCase):
 
         request = _make_request(self.factory, "/api/customers/addresses/add/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "address_type": "billing", "address_line1": "Str. Test 1",
+            "is_billing": True, "address_line1": "Str. Test 1",
             "city": "București", "county": "București", "country": "Romania",
             "postal_code": "010101", "timestamp": int(time.time()),
         })
@@ -256,14 +256,14 @@ class CustomerAddressAPITests(TestCase):
 
         for i in range(10):
             CustomerAddress.objects.create(
-                customer=self.customer, address_type="other", is_current=False,
+                customer=self.customer, is_current=False,
                 address_line1=f"Addr {i}", city="Cluj", county="Cluj",
                 country="Romania", postal_code="400000",
             )
 
         request = _make_request(self.factory, "/api/customers/addresses/add/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "address_type": "billing", "address_line1": "Str. 11th",
+            "is_billing": True, "address_line1": "Str. 11th",
             "city": "Iași", "timestamp": int(time.time()),
         })
         response = customer_addresses_add(request)
@@ -276,7 +276,7 @@ class CustomerAddressAPITests(TestCase):
         mock_auth.return_value = (self.customer, None)
 
         addr = CustomerAddress.objects.create(
-            customer=self.customer, address_type="billing", address_line1="To Delete",
+            customer=self.customer, is_billing=False, address_line1="To Delete",
             city="Brașov", county="Brașov", country="Romania", postal_code="500000",
         )
 
@@ -294,7 +294,7 @@ class CustomerAddressAPITests(TestCase):
         mock_auth.return_value = (self.customer, None)
 
         CustomerAddress.objects.create(
-            customer=self.customer, address_type="primary", address_line1="Str. 1",
+            customer=self.customer, is_primary=True, address_line1="Str. 1",
             city="București", county="București", country="Romania", postal_code="010101",
         )
 
@@ -355,7 +355,7 @@ class AddressSoftDeleteTests(TestCase):
         mock_auth.return_value = (self.customer, None)
 
         addr = CustomerAddress.objects.create(
-            customer=self.customer, address_type="billing", address_line1="Soft Del Street",
+            customer=self.customer, is_billing=False, address_line1="Soft Del Street",
             city="Cluj", county="Cluj", country="Romania", postal_code="400000",
         )
         addr_pk = addr.pk
@@ -568,7 +568,7 @@ class AddressLine2Tests(TestCase):
 
         request = _make_request(self.factory, "/api/customers/addresses/add/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "address_type": "billing", "address_line1": "Str. Test 1",
+            "is_billing": True, "address_line1": "Str. Test 1",
             "address_line2": "Ap. 5, Sc. A", "city": "Cluj",
             "county": "Cluj", "country": "Romania", "postal_code": "400000",
             "timestamp": int(time.time()),
@@ -584,7 +584,7 @@ class AddressLine2Tests(TestCase):
         mock_auth.return_value = (self.customer, None)
 
         addr = CustomerAddress.objects.create(
-            customer=self.customer, address_type="billing", address_line1="Str. 1",
+            customer=self.customer, is_billing=True, address_line1="Str. 1",
             city="Cluj", county="Cluj", country="Romania", postal_code="400000",
         )
 
@@ -620,7 +620,7 @@ class AddressRequiredFieldTests(TestCase):
 
         request = _make_request(self.factory, "/api/customers/addresses/add/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "address_type": "billing", "address_line1": "   ",
+            "is_billing": True, "address_line1": "   ",
             "city": "Cluj", "county": "Cluj", "country": "Romania",
             "timestamp": int(time.time()),
         })
@@ -635,7 +635,7 @@ class AddressRequiredFieldTests(TestCase):
 
         request = _make_request(self.factory, "/api/customers/addresses/add/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "address_type": "billing", "address_line1": "Str. Valid 1",
+            "is_billing": True, "address_line1": "Str. Valid 1",
             "city": "", "county": "Cluj", "country": "Romania",
             "timestamp": int(time.time()),
         })

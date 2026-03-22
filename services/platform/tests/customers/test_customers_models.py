@@ -14,7 +14,6 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.customers.models import (
@@ -253,7 +252,7 @@ class CustomerAddressTestCase(TestCase):
         """Test creating Romanian address"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='Strada Exemplu 123',
             city='București',
             county='Sector 1',
@@ -265,12 +264,13 @@ class CustomerAddressTestCase(TestCase):
         self.assertEqual(address.city, 'București')
         self.assertEqual(address.county, 'Sector 1')
         self.assertTrue(address.is_current)
+        self.assertTrue(address.is_primary)
 
     def test_address_string_representation(self):
         """Test CustomerAddress __str__ method"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Test Street 1',
             city='Cluj-Napoca',
             county='Cluj',
@@ -285,7 +285,7 @@ class CustomerAddressTestCase(TestCase):
         """Test get_full_address() method"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='Strada Principală 100',
             address_line2='Bloc A, Ap. 15',
             city='Timișoara',
@@ -307,7 +307,7 @@ class CustomerAddressTestCase(TestCase):
         # Create primary address
         primary_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='Primary Street 1',
             city='Iași',
             county='Iași',
@@ -321,10 +321,11 @@ class CustomerAddressTestCase(TestCase):
 
     def test_customer_get_billing_address(self):
         """Test customer.get_billing_address() method"""
-        # Create primary address
+        # Create primary address (no is_billing flag)
         primary_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
+            is_billing=False,
             address_line1='Primary Street 1',
             city='Brașov',
             county='Brașov',
@@ -336,10 +337,11 @@ class CustomerAddressTestCase(TestCase):
         billing_address = self.customer.get_billing_address()
         self.assertEqual(billing_address, primary_address)
 
-        # Create billing address
+        # Create separate billing address
         specific_billing = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_primary=False,
+            is_billing=True,
             address_line1='Billing Street 1',
             city='Constanța',
             county='Constanța',
@@ -351,33 +353,36 @@ class CustomerAddressTestCase(TestCase):
         billing_address = self.customer.get_billing_address()
         self.assertEqual(billing_address, specific_billing)
 
-    def test_duplicate_current_address_same_type_rejected(self):
-        """Partial unique constraint rejects two current addresses of same type."""
-        CustomerAddress.objects.create(
+    def test_save_clears_other_primary_flags(self):
+        """Setting is_primary=True on one address clears the flag on others."""
+        addr1 = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='First Primary St',
             city='București',
             county='Sector 1',
             postal_code='010101',
             is_current=True,
         )
-        with transaction.atomic(), self.assertRaises(IntegrityError):
-            CustomerAddress.objects.create(
-                customer=self.customer,
-                address_type='primary',
-                address_line1='Second Primary St',
-                city='Cluj-Napoca',
-                county='Cluj',
-                postal_code='400000',
-                is_current=True,
-            )
+        addr2 = CustomerAddress.objects.create(
+            customer=self.customer,
+            is_primary=True,
+            address_line1='Second Primary St',
+            city='Cluj-Napoca',
+            county='Cluj',
+            postal_code='400000',
+            is_current=True,
+        )
 
-    def test_soft_deleted_address_does_not_block_new_current(self):
-        """Soft-deleted address excluded from partial unique constraint."""
+        addr1.refresh_from_db()
+        self.assertFalse(addr1.is_primary)
+        self.assertTrue(addr2.is_primary)
+
+    def test_soft_deleted_address_does_not_block_new_primary(self):
+        """Soft-deleted address is excluded from is_primary uniqueness enforcement."""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='Old Primary St',
             city='București',
             county='Sector 1',
@@ -386,17 +391,17 @@ class CustomerAddressTestCase(TestCase):
         )
         address.soft_delete(user=self.admin_user)
 
-        # Creating a new current primary address should succeed
+        # Creating a new primary address should succeed
         new_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='New Primary St',
             city='Timișoara',
             county='Timiș',
             postal_code='300001',
             is_current=True,
         )
-        self.assertTrue(new_address.is_current)
+        self.assertTrue(new_address.is_primary)
         self.assertIsNone(new_address.deleted_at)
 
 

@@ -290,7 +290,9 @@ class CustomerAddressForm(forms.ModelForm):
     class Meta:
         model = CustomerAddress
         fields: ClassVar[tuple[str, ...]] = (
-            "address_type",
+            "is_primary",
+            "is_billing",
+            "label",
             "address_line1",
             "address_line2",
             "city",
@@ -757,7 +759,8 @@ class CustomerCreationForm(forms.Form):
             # Create primary address
             CustomerAddress.objects.create(
                 customer=customer,
-                address_type="primary",
+                is_primary=True,
+                is_billing=True,
                 address_line1=data["address_line1"],
                 address_line2=data.get("address_line2", ""),
                 city=data["city"],
@@ -1198,7 +1201,7 @@ class CustomerEditForm(forms.Form):
             from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
             separate_billing_address = CustomerAddress.objects.filter(
-                customer=customer, address_type="billing", is_current=True
+                customer=customer, is_billing=True, is_primary=False, is_current=True
             ).first()
 
             if separate_billing_address:
@@ -1396,7 +1399,7 @@ class CustomerEditForm(forms.Form):
                 from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
                 primary_address = CustomerAddress.objects.create(
-                    customer=self.customer, address_type="primary", is_current=True
+                    customer=self.customer, is_primary=True, is_billing=True, is_current=True
                 )
 
             assert primary_address is not None
@@ -1413,7 +1416,7 @@ class CustomerEditForm(forms.Form):
 
             billing_same_as_primary = data.get("billing_same_as_primary", True)
             existing_billing_address = CustomerAddress.objects.filter(
-                customer=self.customer, address_type="billing", is_current=True
+                customer=self.customer, is_billing=True, is_primary=False, is_current=True
             ).first()
 
             if billing_same_as_primary:
@@ -1424,7 +1427,7 @@ class CustomerEditForm(forms.Form):
                 # Create or update separate billing address
                 if not existing_billing_address:
                     existing_billing_address = CustomerAddress.objects.create(
-                        customer=self.customer, address_type="billing", is_current=True
+                        customer=self.customer, is_billing=True, is_current=True
                     )
 
                 existing_billing_address.address_line1 = data["billing_address_line1"]

@@ -42,10 +42,12 @@
                         </div>
                         <div>
                             <div class="flex items-center space-x-2 mb-1">
-                                {% if addr.address_type == "primary" %}{% trans "Primary" as addr_type_label %}
-                {% elif addr.address_type == "billing" %}{% trans "Billing" as addr_type_label %}
+                                {% if addr.is_primary and addr.is_billing %}{% trans "Primary / Billing" as addr_type_label %}
+                {% elif addr.is_primary %}{% trans "Primary" as addr_type_label %}
+                {% elif addr.is_billing %}{% trans "Billing" as addr_type_label %}
+                {% elif addr.label %}{{ addr.label }}
                 {% else %}{% trans "Other" as addr_type_label %}{% endif %}
-                {% badge addr_type_label variant="info" %}
+                {% if addr_type_label %}{% badge addr_type_label variant="info" %}{% endif %}
                                 {% if addr.is_current %}
                                     {% trans 'Current' as current_label %}
                                     {% badge current_label variant="success" %}

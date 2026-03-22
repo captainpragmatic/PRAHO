@@ -41,7 +41,7 @@ class CustomerListAttributeTests(TestCase):
         )
         CustomerAddress.objects.create(
             customer=self.customer,
-            address_type="primary",
+            is_primary=True,
             is_current=True,
             city="București",
             county="București",
@@ -82,7 +82,8 @@ class CustomerListAttributeTests(TestCase):
         # Add a second non-primary address
         CustomerAddress.objects.create(
             customer=self.customer,
-            address_type="billing",
+            is_billing=True,
+            is_primary=False,
             is_current=True,
             city="Cluj-Napoca",
             county="Cluj",

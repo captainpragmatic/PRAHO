@@ -288,7 +288,8 @@ class CustomerCreationSerializer(serializers.Serializer):
                 if billing_address_data:
                     CustomerAddress.objects.create(
                         customer=customer,
-                        address_type="primary",
+                        is_primary=True,
+                        is_billing=True,
                         is_current=True,
                         address_line1=billing_address_data.get("street_address", ""),
                         city=billing_address_data.get("city", ""),

@@ -113,7 +113,7 @@ def _build_customer_queryset(
         .prefetch_related(
             Prefetch(
                 "addresses",
-                queryset=CustomerAddress.objects.filter(address_type="primary", is_current=True),
+                queryset=CustomerAddress.objects.filter(is_primary=True, is_current=True),
                 to_attr="primary_addresses",
             )
         )

@@ -178,7 +178,8 @@ def create_full_customer(request: CustomerCreationRequest | None = None) -> Cust
     if request.with_address:
         CustomerAddress.objects.create(
             customer=customer,
-            address_type='legal',
+            is_primary=True,
+            is_billing=True,
             address_line1='Str. Test Nr. 1',
             city='București',
             county='Sector 1',
@@ -217,7 +218,8 @@ def create_individual_customer(
 
     CustomerAddress.objects.create(
         customer=customer,
-        address_type='billing',
+        is_primary=True,
+        is_billing=True,
         address_line1='Bd. Unirii Nr. 10, Ap. 5',
         city='București',
         county='Sector 3',

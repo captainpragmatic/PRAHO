@@ -13,6 +13,7 @@ from django.db import migrations
 def simplify_address_types(apps, schema_editor):
     """Convert delivery→billing and legal→primary, soft-deleting duplicates."""
     # Raw SQL because SoftDeleteManager lacks use_in_migrations=True
+    # Use CURRENT_TIMESTAMP instead of NOW() for SQLite/PostgreSQL compatibility.
     # delivery → billing (if no current billing exists for that customer)
     with schema_editor.connection.cursor() as cursor:
         # Update delivery addresses to billing where no current billing exists
@@ -29,7 +30,7 @@ def simplify_address_types(apps, schema_editor):
         # Soft-delete remaining delivery addresses (customer already has billing)
         cursor.execute("""
             UPDATE customer_addresses
-            SET deleted_at = NOW()
+            SET deleted_at = CURRENT_TIMESTAMP
             WHERE address_type = 'delivery' AND deleted_at IS NULL
         """)
 
@@ -47,7 +48,7 @@ def simplify_address_types(apps, schema_editor):
         # Soft-delete remaining legal addresses
         cursor.execute("""
             UPDATE customer_addresses
-            SET deleted_at = NOW()
+            SET deleted_at = CURRENT_TIMESTAMP
             WHERE address_type = 'legal' AND deleted_at IS NULL
         """)
 

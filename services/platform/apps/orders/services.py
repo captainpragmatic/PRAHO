@@ -297,11 +297,11 @@ class OrderService:
         address = None
 
         # First, try to get billing address marked as current
-        address = CustomerAddress.objects.filter(customer=customer, address_type="billing", is_current=True).first()
+        address = CustomerAddress.objects.filter(customer=customer, is_billing=True, is_current=True).first()
 
         # If no billing address, try primary address marked as current
         if not address:
-            address = CustomerAddress.objects.filter(customer=customer, address_type="primary", is_current=True).first()
+            address = CustomerAddress.objects.filter(customer=customer, is_primary=True, is_current=True).first()
 
         # If still no address, get any current address
         if not address:

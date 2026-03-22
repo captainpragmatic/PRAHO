@@ -2501,7 +2501,9 @@ class CustomersAuditService:
         address_metadata = {
             "customer_id": str(address.customer.id),
             "customer_name": address.customer.get_display_name(),
-            "address_type": address.address_type,
+            "is_primary": address.is_primary,
+            "is_billing": address.is_billing,
+            "label": address.label,
             "address_line1": address.address_line1,
             "address_line2": address.address_line2,
             "city": address.city,
@@ -2514,7 +2516,6 @@ class CustomersAuditService:
             "validated_at": address.validated_at.isoformat() if address.validated_at else None,
             "full_address": address.get_full_address(),
             "is_romanian_address": address.country == "România",
-            "is_legal_address": address.address_type == "legal",
             "created_at": address.created_at.isoformat(),
             "updated_at": address.updated_at.isoformat(),
             **context.metadata,

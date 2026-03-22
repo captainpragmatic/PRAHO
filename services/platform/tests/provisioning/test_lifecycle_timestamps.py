@@ -46,7 +46,7 @@ def _setup_service_fixtures(test_case: TestCase) -> None:
         credit_limit=Decimal("5000.00"), preferred_currency="RON",
     )
     CustomerAddress.objects.create(
-        customer=test_case.customer, address_type="legal", address_line1="Str. Lifecycle 1",
+        customer=test_case.customer, is_primary=True, is_billing=True, address_line1="Str. Lifecycle 1",
         city="București", county="Sector 1", postal_code="010101", country="România", is_current=True,
     )
     CustomerMembership.objects.create(user=test_case.admin, customer=test_case.customer, role="admin")

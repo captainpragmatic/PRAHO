@@ -430,7 +430,9 @@
                 {% for address in customer.addresses.all %}
                 <div class="bg-slate-700 border border-slate-600 rounded-lg p-4">
                     <div class="flex items-start justify-between mb-2">
-                        <h3 class="font-medium text-white">{{ address.get_address_type_display }}</h3>
+                        <h3 class="font-medium text-white">
+                            {% if address.label %}{{ address.label }}{% elif address.is_primary and address.is_billing %}{% trans "Adresa principală / facturare" %}{% elif address.is_primary %}{% trans "Adresa principală" %}{% elif address.is_billing %}{% trans "Adresa facturare" %}{% else %}{% trans "Adresă" %}{% endif %}
+                        </h3>
                         <div class="flex space-x-1">
                             {% if address.is_current %}
                             {% trans "Current" as bt5 %}{% badge bt5 variant="success" icon="globe" %}
