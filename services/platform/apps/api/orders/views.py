@@ -1065,6 +1065,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
         with transaction.atomic():
             order = (
                 Order.objects.select_for_update(of=("self",))
+                .select_related("proforma", "invoice")
                 .prefetch_related("items")
                 .get(id=order_id, customer_id=customer.id)
             )
@@ -1080,7 +1081,51 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             # Using update_order_status(new_status="paid") directly would skip the review gate.
             from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
 
-            confirm_result = OrderPaymentConfirmationService.confirm_order(order, invoice=order.invoice)
+            if order.invoice:
+                # Webhook already converted proforma → invoice. Just confirm.
+                confirm_result = OrderPaymentConfirmationService.confirm_order(order, invoice=order.invoice)
+            elif order.proforma:
+                # Webhook hasn't arrived yet — convert proforma ourselves (idempotent).
+                from apps.billing.payment_models import Payment  # noqa: PLC0415
+                from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+                existing_payment = Payment.objects.filter(gateway_txn_id=pi_to_verify, customer=customer).first()
+                convert_result = ProformaPaymentService.record_payment_and_convert(
+                    proforma_id=str(order.proforma.id),
+                    amount_cents=order.total_cents,
+                    payment_method="stripe",
+                    existing_payment=existing_payment,
+                )
+                if convert_result.is_ok():
+                    invoice = convert_result.unwrap()
+                    order.refresh_from_db()
+                    if order.status == "awaiting_payment":
+                        confirm_result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+                    else:
+                        confirm_result = Ok(order)  # Signal already advanced the order
+                else:
+                    logger.error(
+                        "🔥 [API] Proforma conversion failed for order %s: %s",
+                        order.order_number,
+                        convert_result.unwrap_err(),
+                    )
+                    return Response(
+                        {"success": False, "error": "Payment processing failed"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+            elif order.total_cents == 0:
+                # Free order — no proforma needed
+                confirm_result = OrderPaymentConfirmationService.confirm_order(order)
+            else:
+                logger.error(
+                    "🔥 [API] Order %s has no proforma and no invoice — broken state",
+                    order.order_number,
+                )
+                return Response(
+                    {"success": False, "error": "Order is in an invalid state"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
             if isinstance(confirm_result, Err):
                 logger.warning(
                     "⚠️ [API] Payment confirmation failed for order %s: %s",

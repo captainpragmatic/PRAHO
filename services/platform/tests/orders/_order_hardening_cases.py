@@ -323,15 +323,26 @@ class NonRetryableConstraintMarkersTest(TestCase):
 
 
 def _make_pending_order_for_h9(customer: Customer, currency: Currency, **kwargs: object) -> Order:
-    """Create an awaiting_payment order for H9 state machine tests."""
-    return Order.objects.create(
+    """Create an awaiting_payment order with proforma for H9 state machine tests."""
+    from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+
+    ProformaSequence.objects.get_or_create(scope="default")
+    order = Order.objects.create(
         customer=customer,
         currency=currency,
         customer_email=customer.primary_email,
         customer_name=customer.company_name,
         status="awaiting_payment",
+        payment_method="card",
+        billing_address={"company_name": customer.company_name or "Test", "country": "RO"},
         **kwargs,
     )
+    # Create proforma so confirm_order can convert it
+    from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+    ProformaService.create_from_order(order)
+    order.refresh_from_db()
+    return order
 
 
 class ConfirmOrderStatusHistoryTest(TestCase):
@@ -909,20 +920,24 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
         from apps.common.types import Err  # noqa: PLC0415
 
-        order = Order.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.company_name,
-            status="awaiting_payment",
-        )
+        order = _make_pending_order_for_h9(self.customer, self.currency)
 
         internal_message = "Invalid status transition: awaiting_payment -> paid (constraint XYZ violated internally)"
 
         request = self._make_confirm_request({})
 
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        mock_invoice = MagicMock()
+
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch(
+                "apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert",
+                return_value=Ok(mock_invoice),
+            ),
             patch(
                 "apps.orders.services.OrderPaymentConfirmationService.confirm_order",
                 return_value=Err(internal_message),

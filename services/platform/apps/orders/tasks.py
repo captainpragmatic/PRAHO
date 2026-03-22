@@ -171,9 +171,9 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                         elif invoice.status == "void":
                             _process_cancelled_invoice(order, now, order_result, results)
 
-                    # Order without invoice - check if it needs one
+                    # Order without invoice — route through the proforma path
                     elif order.total_cents > 0:
-                        _create_order_invoice(order, order_result, results)
+                        _convert_proforma_or_create_invoice(order, order_result, results)
 
                     else:
                         # Free order - move directly to confirmed
@@ -435,6 +435,69 @@ def _process_cancelled_invoice(order: Order, now: Any, order_result: dict[str, A
     order_result["action"] = "invoice_cancelled"
     order_result["status"] = "cancelled"
     results["failed_orders"] += 1
+
+
+def _convert_proforma_or_create_invoice(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
+    """Route order invoice creation through the proforma path (ADR-0038).
+
+    If the order has a proforma and a succeeded Payment linked to it, convert
+    the proforma to an invoice via ProformaPaymentService.record_payment_and_convert().
+    If the proforma exists but no succeeded payment has arrived yet, skip — the
+    webhook or confirm_order endpoint will convert it when payment succeeds.
+    If no proforma exists, fall through to legacy _create_order_invoice() (edge-case
+    recovery — the proforma-creation fallback above should have already created one).
+    """
+    if order.proforma is not None:
+        # Check for a succeeded payment linked to this proforma
+        succeeded_payment = Payment.objects.filter(
+            proforma=order.proforma,
+            status="succeeded",
+        ).first()
+
+        if succeeded_payment is None:
+            # Payment not yet succeeded — do not create an invoice yet
+            logger.info(
+                "⏳ [OrderProcessor] Proforma %s for order %s has no succeeded payment — skipping",
+                order.proforma.id,
+                order.order_number,
+            )
+            order_result["action"] = "proforma_awaiting_payment"
+            order_result["status"] = order.status
+            return
+
+        try:
+            from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+            convert_result = ProformaPaymentService.record_payment_and_convert(
+                proforma_id=str(order.proforma.id),
+                amount_cents=order.total_cents,
+                payment_method=succeeded_payment.payment_method or "stripe",
+                existing_payment=succeeded_payment,
+            )
+            if convert_result.is_ok():
+                invoice = convert_result.unwrap()
+                logger.info(
+                    "📄 [OrderProcessor] Converted proforma %s → invoice %s for order %s",
+                    order.proforma.id,
+                    invoice.number,
+                    order.order_number,
+                )
+                order_result["action"] = "proforma_converted"
+                order_result["status"] = order.status
+            else:
+                error = convert_result.unwrap_err()
+                logger.warning(
+                    "⚠️ [OrderProcessor] Proforma conversion failed for order %s: %s",
+                    order.order_number,
+                    error,
+                )
+                results["errors"].append(f"Proforma conversion failed for order {order.order_number}: {error}")
+        except Exception as e:
+            logger.error("🔥 [OrderProcessor] Failed to convert proforma for order %s: %s", order.order_number, e)
+            results["errors"].append(f"Proforma conversion error for {order.order_number}: {e}")
+    else:
+        # No proforma — fall back to legacy direct invoice creation (edge-case recovery)
+        _create_order_invoice(order, order_result, results)
 
 
 def _create_order_invoice(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:

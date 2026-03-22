@@ -311,12 +311,25 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
             email="c1-test@pragmatichost.com", password="test123", is_staff=True, staff_role="admin"
         )
 
-        # Create high-value order with a VPS item (provisionable product type)
+        # Create high-value order — give it an invoice directly so confirm_order
+        # uses the order.invoice branch (bypasses proforma conversion in the view).
+        # The review gate is tested inside confirm_order service, not the view conversion.
+        from apps.billing.models import Invoice  # noqa: PLC0415
+
         order = self._create_order(total_cents=DEFAULT_THRESHOLD)
-        # Set payment_method=card and payment_intent_id so the view proceeds
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=order.currency,
+            subtotal_cents=order.subtotal_cents,
+            tax_cents=order.tax_cents,
+            total_cents=order.total_cents,
+            number="INV-C1TEST",
+            status="paid",
+        )
         order.payment_method = "card"
         order.payment_intent_id = "pi_c1test1234567890"
-        order.save(update_fields=["payment_method", "payment_intent_id"])
+        order.invoice = invoice
+        order.save(update_fields=["payment_method", "payment_intent_id", "invoice"])
         force_status(order, "awaiting_payment")
 
         factory = APIRequestFactory()

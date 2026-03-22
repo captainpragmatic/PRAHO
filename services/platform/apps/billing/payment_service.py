@@ -204,7 +204,9 @@ class PaymentService:
 
             # Security-critical: derive authoritative payment amount from the order.
             try:
-                order = Order.objects.select_related("customer").get(id=order_id, customer_id=customer_id_int)
+                order = Order.objects.select_related("customer", "proforma").get(
+                    id=order_id, customer_id=customer_id_int
+                )
             except Order.DoesNotExist:
                 return PaymentIntentResult(
                     success=False,
@@ -253,16 +255,20 @@ class PaymentService:
                 metadata=payment_metadata,
             )
 
+            if order.proforma is None and expected_amount_cents > 0:
+                logger.warning(
+                    "⚠️ [PaymentService] Order %s has no proforma but total is %d cents — "
+                    "order may not be in awaiting_payment yet",
+                    order.order_number,
+                    expected_amount_cents,
+                )
+
             if result.get("success", False):
-                # Create Payment record with pending status (without linking to invoice).
-                # Design: Direct card payments (Portal → Stripe) intentionally bypass the
-                # proforma flow. Proforma documents are for bank transfer / manual payment
-                # workflows only. The card payment lifecycle is:
-                #   PaymentIntent (here) → Stripe webhook → payment confirmed →
-                #   OrderPaymentConfirmationService.confirm_order() creates the invoice.
-                # No proforma_id is stored in metadata because card orders never create
-                # proformas — update_order_status() only creates proformas when the order
-                # moves to awaiting_payment, which does not happen in the card flow.
+                # Create Payment record linked to the order's proforma (if present).
+                # All paid orders follow: draft → awaiting_payment (proforma created) →
+                # payment (Payment linked to proforma) → proforma converts to invoice →
+                # order advances. The proforma link enables the Stripe webhook to convert
+                # the proforma to an invoice automatically via record_payment_and_convert().
                 with transaction.atomic():
                     # Get or create currency object
                     currency_obj = None
@@ -279,20 +285,25 @@ class PaymentService:
                     payment_intent_id = result.get("payment_intent_id", "")
                     client_secret = result.get("client_secret", "")
 
+                    payment_meta: dict[str, Any] = {
+                        "client_secret": client_secret,
+                        "order_id": str(order_id),
+                        "gateway": gateway,
+                        **payment_metadata,
+                    }
+                    if order.proforma is not None:
+                        payment_meta["proforma_id"] = str(order.proforma.id)
+
                     payment = Payment.objects.create(  # type: ignore[misc]
-                        invoice=None,  # Will be linked when order is confirmed via Stripe webhook
+                        invoice=None,  # Will be linked when proforma converts to invoice
+                        proforma=order.proforma,
                         customer=order.customer,
                         payment_method=gateway,
                         amount_cents=expected_amount_cents,
                         currency=currency_obj,
                         status="pending",
                         gateway_txn_id=payment_intent_id,
-                        meta={
-                            "client_secret": client_secret,
-                            "order_id": str(order_id),
-                            "gateway": gateway,
-                            **payment_metadata,
-                        },
+                        meta=payment_meta,
                     )
 
                 logger.info(f"✅ Created payment {payment.id} for Portal order {order_id}")
