@@ -641,60 +641,10 @@ def handle_proforma_invoice_conversion(
                 description=f"Proforma {instance.number} {'created' if created else 'updated'}",
             )
             BillingAuditService.log_proforma_event(event_data)
-        if not created:
-            old_values = _serialize_values_for_audit(getattr(instance, "_original_proforma_values", {}))
-            old_status = old_values.get("status")
-
-            # Auto-convert proforma to invoice when paid
-            # C6 fix: Also guard against "converted" status to prevent double conversion.
-            # ProformaPaymentService.record_payment_and_convert() handles its own conversion
-            # and sets status to "converted". If this post_save fires during that flow,
-            # the proforma may briefly be "paid" before reaching "converted".
-            if (
-                instance.status == "paid"
-                and old_status not in ("paid", "converted")
-                and not hasattr(instance, "converted_invoice")
-            ):
-                try:
-                    from apps.billing.services import (
-                        ProformaConversionService,
-                    )
-
-                    # T4.7: Acquire select_for_update lock on the proforma before
-                    # conversion to prevent a race with ProformaPaymentService which
-                    # uses the same lock pattern (F4: consistent lock ordering).
-                    # transaction.atomic() creates a savepoint so we don't abort
-                    # the outer signal transaction on conversion failure.
-                    with transaction.atomic():
-                        locked_proforma = ProformaInvoice.objects.select_for_update(of=("self",)).get(pk=instance.pk)
-                        # Re-check status after acquiring the lock — another concurrent
-                        # path (e.g. ProformaPaymentService) may have converted first.
-                        if locked_proforma.status in ("paid", "converted"):
-                            result = ProformaConversionService.convert_to_invoice(
-                                proforma_id=str(instance.id),
-                            )
-                        else:
-                            logger.info(
-                                "📋 [Proforma] Skipping signal conversion for %s — status is now %s",
-                                instance.number,
-                                locked_proforma.status,
-                            )
-                            result = None
-
-                    if result is not None:
-                        if result.is_ok():
-                            invoice = result.unwrap()
-                            logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")
-
-                            # Link any related orders to the new invoice
-                            if hasattr(instance, "orders") and instance.orders.exists():
-                                invoice.orders.set(instance.orders.all())
-
-                        else:
-                            logger.error(f"🔥 [Proforma] Conversion failed: {result.unwrap_err()}")
-
-                except Exception as e:
-                    logger.exception(f"🔥 [Proforma] Auto-conversion failed: {e}")
+        # NOTE: Proforma-to-invoice conversion is handled exclusively by
+        # ProformaPaymentService.record_payment_and_convert() (ADR-0038).
+        # This signal handler does NOT convert proformas — the convergence
+        # point handles locking, idempotency, and signal emission.
 
     except Exception as e:
         logger.exception(f"🔥 [Proforma Signal] Conversion handling failed: {e}")

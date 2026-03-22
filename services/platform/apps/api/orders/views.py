@@ -991,21 +991,24 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             order_number_for_log = order.order_number
         # Phase 1 transaction ends here — DB lock released before any network call.
 
-        # CRITICAL GUARD: This endpoint requires a Stripe PaymentIntent. Non-card orders
-        # (bank_transfer, etc.) and orders with blank/missing payment_method must be confirmed
-        # through the admin/billing staff path via ProformaPaymentService.
-        if not pi_to_verify and order_payment_method != "card":
+        # CRITICAL GUARD: This endpoint requires a valid Stripe PaymentIntent.
+        # Without a PI, there is no payment to verify — reject ALL orders without one.
+        # Non-card orders (bank_transfer, etc.) go through admin/billing staff path.
+        # Card orders without a PI are invalid (payment was never initiated).
+        if not pi_to_verify:
             logger.warning(
-                "[API] Reject confirm attempt on non-card order %s (payment_method=%s, no PI)",
+                "[API] Reject confirm attempt without PaymentIntent on order %s (payment_method=%s)",
                 order_number_for_log,
                 order_payment_method,
             )
+            error_msg = (
+                "Card payment requires a PaymentIntent"
+                if order_payment_method == "card"
+                else "This order cannot be confirmed via this endpoint. "
+                "Bank transfer and other non-card orders are confirmed by billing staff."
+            )
             return Response(
-                {
-                    "success": False,
-                    "error": "This order cannot be confirmed via this endpoint. "
-                    "Bank transfer and other non-card orders are confirmed by billing staff.",
-                },
+                {"success": False, "error": error_msg},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
