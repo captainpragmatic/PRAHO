@@ -100,7 +100,7 @@ class OrderModelTestCase(TestCase):
         self.assertEqual(order.status, "draft")
 
         # Test valid status values survive DB roundtrip (verifies CHECK constraint compatibility)
-        valid_statuses = ["draft", "pending", "confirmed", "processing", "completed", "cancelled", "failed"]
+        valid_statuses = ["draft", "awaiting_payment", "paid", "in_review", "provisioning", "completed", "cancelled", "failed"]
         for status in valid_statuses:
             force_status(order, status)
             order.refresh_from_db()
@@ -396,14 +396,14 @@ class OrderStatusHistoryModelTestCase(TestCase):
         transition_history = OrderStatusHistory.objects.create(
             order=self.order,
             old_status="draft",
-            new_status="pending",
+            new_status="awaiting_payment",
             notes="Order submitted for processing",
             changed_by=self.user
         )
 
         # Verify transition tracking
         self.assertEqual(transition_history.old_status, "draft")
-        self.assertEqual(transition_history.new_status, "pending")
+        self.assertEqual(transition_history.new_status, "awaiting_payment")
         self.assertIsNotNone(transition_history.changed_by)
 
     def test_status_history_ordering(self):
@@ -419,32 +419,32 @@ class OrderStatusHistoryModelTestCase(TestCase):
         history2 = OrderStatusHistory.objects.create(
             order=self.order,
             old_status="draft",
-            new_status="pending",
+            new_status="awaiting_payment",
             notes="Submitted"
         )
 
         history3 = OrderStatusHistory.objects.create(
             order=self.order,
-            old_status="pending",
-            new_status="confirmed",
-            notes="Confirmed"
+            old_status="awaiting_payment",
+            new_status="paid",
+            notes="Paid"
         )
 
         # Get history in default order (most recent first)
         history_list = list(self.order.status_history.all())
 
-        self.assertEqual(history_list[0], history3)  # Most recent
-        self.assertEqual(history_list[1], history2)
-        self.assertEqual(history_list[2], history1)  # Oldest
+        self.assertEqual(history_list[0], history3)  # Most recent (awaiting_payment → paid)
+        self.assertEqual(history_list[1], history2)  # draft → awaiting_payment
+        self.assertEqual(history_list[2], history1)  # Oldest (initial)
 
     def test_audit_trail_completeness(self):
         """Test complete audit trail for order lifecycle"""
         statuses = [
             ("", "draft", "Order created"),  # Empty string for initial creation
-            ("draft", "pending", "Submitted for approval"),
-            ("pending", "confirmed", "Payment confirmed"),
-            ("confirmed", "processing", "Processing started"),
-            ("processing", "completed", "Order fulfilled")
+            ("draft", "awaiting_payment", "Submitted for approval"),
+            ("awaiting_payment", "paid", "Payment confirmed"),
+            ("paid", "provisioning", "Provisioning started"),
+            ("provisioning", "completed", "Order fulfilled")
         ]
 
         for old_status, new_status, notes in statuses:
@@ -469,12 +469,12 @@ class OrderStatusHistoryModelTestCase(TestCase):
         history = OrderStatusHistory.objects.create(
             order=self.order,
             old_status="draft",
-            new_status="pending",
+            new_status="awaiting_payment",
             notes="Status changed",
             changed_by=self.user
         )
 
-        expected_str = "ORD-2024-HISTORY-0001: draft → pending"
+        expected_str = "ORD-2024-HISTORY-0001: draft → awaiting_payment"
         self.assertEqual(str(history), expected_str)
 
 
@@ -513,7 +513,7 @@ class OrderSaveTransactionTestCase(TestCase):
             customer_name=self.customer.name,
         )
         # At this point order._state.adding is False (already persisted)
-        force_status(order, "pending", save=False)
+        force_status(order, "awaiting_payment", save=False)
 
         with patch("apps.orders.models.transaction.atomic") as mock_atomic:
             order.save(update_fields=["status"])
@@ -553,11 +553,11 @@ class OrderSaveTransactionTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
-        force_status(order, "pending", save=False)
+        force_status(order, "awaiting_payment", save=False)
         # Should not raise; no collision retry loop involved
         order.save(update_fields=["status"])
         order.refresh_from_db()
-        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.status, "awaiting_payment")
 
 
 # ---------------------------------------------------------------------------
@@ -677,7 +677,7 @@ class OrderSaveRetryOnCreationOnlyTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
-        force_status(order, "pending", save=False)
+        force_status(order, "awaiting_payment", save=False)
 
         # Patch Model.save (the super()) to raise IntegrityError
         with patch("django.db.models.Model.save", side_effect=IntegrityError("simulated")), self.assertRaises(IntegrityError):
@@ -773,7 +773,7 @@ class OrderFSMTransitionTests(TestCase):
             order.submit()
 
     def test_submit_from_draft_succeeds_with_items(self) -> None:
-        """draft → pending via submit() succeeds when the order has at least one item."""
+        """draft → awaiting_payment via submit() succeeds when the order has at least one item."""
         order = self._make_draft_order()
         OrderItem.objects.create(
             order=order,
@@ -785,16 +785,16 @@ class OrderFSMTransitionTests(TestCase):
         )
         order.submit()
         order.save(update_fields=["status"])
-        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.status, "awaiting_payment")
 
     def test_invalid_transition_raises(self) -> None:
-        """Verify TransitionNotAllowed for an illegal transition (draft → confirmed)."""
+        """Verify TransitionNotAllowed for an illegal transition (draft → paid)."""
         from django_fsm import TransitionNotAllowed  # noqa: PLC0415
 
         order = self._make_draft_order()
-        # confirm() requires source="pending"; calling it from "draft" must raise
+        # mark_paid() requires source="awaiting_payment"; calling it from "draft" must raise
         with self.assertRaises(TransitionNotAllowed):
-            order.confirm()
+            order.mark_paid()
 
     def test_completed_order_cannot_be_cancelled(self) -> None:
         """Terminal state: completed orders cannot be cancelled."""
@@ -805,19 +805,11 @@ class OrderFSMTransitionTests(TestCase):
         with self.assertRaises(TransitionNotAllowed):
             order.cancel()
 
-    def test_refund_only_from_completed(self) -> None:
-        """refund_order() must be accepted from 'completed' and rejected from 'pending'."""
+    def test_completed_order_cannot_transition_to_cancelled(self) -> None:
+        """Terminal state: completed orders cannot be cancelled (regression test for removed refund transitions)."""
         from django_fsm import TransitionNotAllowed  # noqa: PLC0415
 
-        # Accepted from completed
         order = self._make_draft_order()
         force_status(order, "completed")
-        order.refund_order()
-        order.save(update_fields=["status"])
-        self.assertEqual(order.status, "refunded")
-
-        # Rejected from pending
-        order2 = self._make_draft_order()
-        force_status(order2, "pending")
         with self.assertRaises(TransitionNotAllowed):
-            order2.refund_order()
+            order.cancel()

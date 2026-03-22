@@ -929,26 +929,45 @@ class OrderFSMTests(FSMTestMixin, TestCase):
             force_status(order, status)
         return order
 
+    # Phase A: Order states renamed (awaiting_payment, paid, in_review, provisioning)
     def test_submit_from_draft_with_items(self) -> None:
         order = self._make_order("draft", with_items=True)
         order.submit()
         order.save(update_fields=["status"])
-        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.status, "awaiting_payment")
 
-    def test_confirm_from_pending(self) -> None:
-        order = self._make_order("pending")
-        order.confirm()
+    def test_mark_paid_from_awaiting_payment(self) -> None:
+        order = self._make_order("awaiting_payment")
+        order.mark_paid()
         order.save(update_fields=["status"])
-        self.assertEqual(order.status, "confirmed")
+        self.assertEqual(order.status, "paid")
 
-    def test_start_processing_from_confirmed(self) -> None:
-        order = self._make_order("confirmed")
-        order.start_processing()
+    def test_start_provisioning_from_paid(self) -> None:
+        order = self._make_order("paid")
+        order.start_provisioning()
         order.save(update_fields=["status"])
-        self.assertEqual(order.status, "processing")
+        self.assertEqual(order.status, "provisioning")
 
-    def test_complete_from_processing(self) -> None:
-        order = self._make_order("processing")
+    def test_flag_for_review_from_paid(self) -> None:
+        order = self._make_order("paid")
+        order.flag_for_review()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "in_review")
+
+    def test_approve_review_from_in_review(self) -> None:
+        order = self._make_order("in_review")
+        order.approve_review()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "provisioning")
+
+    def test_reject_review_from_in_review(self) -> None:
+        order = self._make_order("in_review")
+        order.reject_review()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "cancelled")
+
+    def test_complete_from_provisioning(self) -> None:
+        order = self._make_order("provisioning")
         order.complete()
         order.save(update_fields=["status"])
         self.assertEqual(order.status, "completed")
@@ -959,14 +978,27 @@ class OrderFSMTests(FSMTestMixin, TestCase):
         order.save(update_fields=["status"])
         self.assertEqual(order.status, "cancelled")
 
-    def test_cancel_from_pending(self) -> None:
-        order = self._make_order("pending")
+    def test_cancel_from_awaiting_payment(self) -> None:
+        order = self._make_order("awaiting_payment")
         order.cancel()
         order.save(update_fields=["status"])
         self.assertEqual(order.status, "cancelled")
 
-    def test_fail_from_processing(self) -> None:
-        order = self._make_order("processing")
+    def test_fail_from_provisioning(self) -> None:
+        order = self._make_order("provisioning")
+        order.fail()
+        order.save(update_fields=["status"])
+        self.assertEqual(order.status, "failed")
+
+    def test_fail_from_paid(self) -> None:
+        """M1 fix: fail() must be reachable from 'paid'.
+
+        If confirm_order() crashes between mark_paid() and start_provisioning()
+        (despite @transaction.atomic, there are no guarantees on partial commits
+        in nested transactions), the FSM needs an escape path from 'paid'.
+        Without this transition, a paid order with no invoice would be stuck.
+        """
+        order = self._make_order("paid")
         order.fail()
         order.save(update_fields=["status"])
         self.assertEqual(order.status, "failed")
@@ -975,34 +1007,16 @@ class OrderFSMTests(FSMTestMixin, TestCase):
         order = self._make_order("failed")
         order.retry()
         order.save(update_fields=["status"])
-        self.assertEqual(order.status, "pending")
-
-    def test_refund_from_completed(self) -> None:
-        order = self._make_order("completed")
-        order.refund_order()
-        order.save(update_fields=["status"])
-        self.assertEqual(order.status, "refunded")
-
-    def test_partial_refund_from_completed(self) -> None:
-        order = self._make_order("completed")
-        order.partial_refund()
-        order.save(update_fields=["status"])
-        self.assertEqual(order.status, "partially_refunded")
-
-    def test_complete_refund_from_partially_refunded(self) -> None:
-        order = self._make_order("partially_refunded")
-        order.complete_refund()
-        order.save(update_fields=["status"])
-        self.assertEqual(order.status, "refunded")
+        self.assertEqual(order.status, "awaiting_payment")
 
     # Invalid transitions
-    def test_cannot_confirm_from_draft(self) -> None:
+    def test_cannot_mark_paid_from_draft(self) -> None:
         order = self._make_order("draft")
         with self.assertRaises(TransitionNotAllowed):
-            order.confirm()
+            order.mark_paid()
 
-    def test_cannot_complete_from_pending(self) -> None:
-        order = self._make_order("pending")
+    def test_cannot_complete_from_awaiting_payment(self) -> None:
+        order = self._make_order("awaiting_payment")
         with self.assertRaises(TransitionNotAllowed):
             order.complete()
 
@@ -1010,11 +1024,6 @@ class OrderFSMTests(FSMTestMixin, TestCase):
         order = self._make_order("completed")
         with self.assertRaises(TransitionNotAllowed):
             order.cancel()
-
-    def test_cannot_refund_from_pending(self) -> None:
-        order = self._make_order("pending")
-        with self.assertRaises(TransitionNotAllowed):
-            order.refund_order()
 
     def test_protected_field_blocks_direct_assignment(self) -> None:
         order = self._make_order("draft")
@@ -1672,7 +1681,7 @@ class ConcurrentTransitionTests(FSMTestMixin, TestCase):
         # First instance transitions successfully
         order.submit()
         order.save()
-        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.status, "awaiting_payment")
 
         # Stale instance should fail — it still thinks status is "draft"
         stale_order.submit()
@@ -1762,36 +1771,34 @@ class TestC1OrderStatusNotEnum(FSMTestMixin, TestCase):
 class TestC2SignalProcessingTrigger(FSMTestMixin, TestCase):
     """C2: Order signal must check old_status=='confirmed' for processing trigger."""
 
-    def test_signal_checks_confirmed_not_pending(self) -> None:
-        """The signal handler must check old_status=='confirmed' for the processing transition."""
+    def test_signal_triggers_provisioning_update_on_provisioning(self) -> None:
+        """Phase A: provisioning transition triggers service update regardless of source state."""
         customer = self._create_customer()
         currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         order = Order.objects.create(
             customer=customer, currency=currency,
             customer_email=customer.primary_email, customer_name=customer.name,
         )
-        force_status(order, "processing")
+        force_status(order, "provisioning")
 
-        # Simulate the signal handler being called with confirmed→processing
-        with patch("apps.orders.signals._trigger_invoice_generation") as mock_invoice, \
-             patch("apps.orders.signals._update_services_to_provisioning"):
-            _handle_order_status_change(order, "confirmed", "processing")
-            mock_invoice.assert_called_once_with(order)
+        # Per F12: new_status=="provisioning" triggers update regardless of old_status
+        with patch("apps.orders.signals._update_services_to_provisioning") as mock_update:
+            _handle_order_status_change(order, "paid", "provisioning")
+            mock_update.assert_called_once_with(order)
 
-    def test_signal_does_not_trigger_from_pending(self) -> None:
-        """pending→processing should NOT trigger invoice generation (FSM requires confirmed first)."""
+    def test_signal_triggers_provisioning_from_in_review(self) -> None:
+        """Phase A: in_review→provisioning also triggers service update (admin approved)."""
         customer = self._create_customer()
         currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
         order = Order.objects.create(
             customer=customer, currency=currency,
             customer_email=customer.primary_email, customer_name=customer.name,
         )
-        force_status(order, "processing")
+        force_status(order, "provisioning")
 
-        with patch("apps.orders.signals._trigger_invoice_generation") as mock_invoice, \
-             patch("apps.orders.signals._update_services_to_provisioning"):
-            _handle_order_status_change(order, "pending", "processing")
-            mock_invoice.assert_not_called()
+        with patch("apps.orders.signals._update_services_to_provisioning") as mock_update:
+            _handle_order_status_change(order, "in_review", "provisioning")
+            mock_update.assert_called_once_with(order)
 
 
 class TestC3TypedDictGetattr(TestCase):

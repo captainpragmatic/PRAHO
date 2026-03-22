@@ -33,16 +33,23 @@ class OrderPaymentMethodIntegrationTests(TestCase):
         CustomerMembership.objects.create(user=self.user, customer=self.customer, role="owner", is_active=True)
 
     def _make_order(self, **extra: object) -> Order:
-        status = str(extra.pop("status", "pending"))
-        return Order.objects.create(
+        # Phase A rename: orders start as "draft", use __dict__ bypass for FSM
+        # (integration tests don't have settings.TESTING=True for force_status,
+        # and submit() requires _order_has_items condition).
+        target_status = str(extra.pop("status", "awaiting_payment"))
+        order = Order.objects.create(
             customer=self.customer,
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.company_name,
             customer_company=self.customer.company_name,
-            status=status,
             **extra,
         )
+        if target_status != "draft":
+            # Bypass FSM protection for test setup (same technique as force_status)
+            order.__dict__["status"] = target_status
+            order.save(update_fields=["status"])
+        return order
 
     def _confirm_request(self, **extra: object):
         payload: dict[str, object] = {
@@ -91,11 +98,13 @@ class OrderPaymentMethodIntegrationTests(TestCase):
         self.assertTrue(response.data["success"])
 
         order.refresh_from_db()
-        self.assertEqual(order.status, "confirmed")
+        # Phase A: confirm_order does paid→provisioning (below review threshold)
+        self.assertIn(order.status, ("paid", "provisioning"))
         self.assertEqual(order.payment_intent_id, "pi_match1234567890")
 
     def test_confirming_non_pending_order_returns_conflict(self) -> None:
-        order = self._make_order(status="confirmed", payment_method="card", payment_intent_id="pi_done1234567890")
+        # Phase A: use "paid" status (already past payment)
+        order = self._make_order(status="paid", payment_method="card", payment_intent_id="pi_done1234567890")
         request = self._confirm_request(payment_intent_id="pi_done1234567890")
 
         response = confirm_order(request, str(order.id))

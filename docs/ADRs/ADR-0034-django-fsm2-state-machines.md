@@ -84,7 +84,7 @@ High. `FSMField` is a `CharField` subclass — removing django-fsm-2 requires ch
 class Order(ConcurrentTransitionMixin, models.Model):
     status = FSMField(protected=True, ...)
 
-    @transition(field=status, source="draft", target="pending",
+    @transition(field=status, source="draft", target="awaiting_payment",
                 conditions=[lambda self: self.items.exists()])
     def submit(self) -> None:
         pass  # Side effects go in post_transition signal
@@ -119,11 +119,11 @@ except (TransitionNotAllowed, ConcurrentTransition):
 from tests.helpers.fsm_helpers import force_status
 
 # Set up test state (bypasses FSM protection)
-force_status(order, "confirmed")
+force_status(order, "paid")
 
 # Test the actual transition
-order.start_processing()
-self.assertEqual(order.status, "processing")
+order.start_provisioning()
+self.assertEqual(order.status, "provisioning")
 ```
 
 ## Related

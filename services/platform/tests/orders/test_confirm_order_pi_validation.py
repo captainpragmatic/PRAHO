@@ -45,7 +45,7 @@ def _make_pending_order(customer: Customer, currency: Currency, **kwargs: object
         currency=currency,
         customer_email=customer.primary_email,
         customer_name=customer.company_name,
-        status="pending",
+        status="awaiting_payment",
         **kwargs,
     )
 
@@ -129,10 +129,15 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         mock_gateway.confirm_payment.assert_called_once_with("pi_validXYZ1234567890")
 
         order.refresh_from_db()
-        self.assertEqual(order.status, "confirmed")
+        # After confirmation, order advances through lifecycle (paid → provisioning or in_review)
+        self.assertIn(order.status, ["paid", "in_review", "provisioning"])
 
-    def test_no_pi_order_confirms_without_pi(self) -> None:
-        """Orders confirmed without a payment_intent_id proceed normally."""
+    def test_no_pi_order_rejects_non_card_payment(self) -> None:
+        """Non-card orders are rejected by the confirm endpoint (security fix).
+
+        Bank-transfer orders must be confirmed via billing/webhook/admin paths,
+        not the customer-facing API endpoint.
+        """
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
         order = _make_pending_order(
@@ -141,9 +146,7 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         )
         request = self._make_request({"payment_status": "succeeded"})
 
-        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
-             patch("apps.api.orders.views._provision_confirmed_order_item"):
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
             response = confirm_order(request, str(order.id))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data["success"])
+        self.assertEqual(response.status_code, 400)

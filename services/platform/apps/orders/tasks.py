@@ -14,7 +14,6 @@ from typing import Any, TypedDict
 from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
-from django_fsm import ConcurrentTransition, TransitionNotAllowed
 from django_q.models import Schedule
 from django_q.tasks import async_task, schedule
 
@@ -22,7 +21,7 @@ from apps.audit.services import AuditService
 from apps.billing.models import Payment
 from apps.billing.services import InvoiceService
 from apps.orders.models import Order
-from apps.orders.services import OrderService
+from apps.orders.services import OrderService, StatusChangeData
 
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
@@ -86,15 +85,15 @@ def get_task_time_limit() -> int:
     return SettingsService.get_integer_setting("orders.task_time_limit", _DEFAULT_TASK_TIME_LIMIT)
 
 
-def process_pending_orders() -> dict[str, Any]:
+def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Complexity: dispatch + lock + per-order branching; helpers already extracted
     """
-    Process orders stuck in "pending" status.
+    Process orders stuck in "awaiting_payment" status.
 
     This task handles:
     - Trigger provisioning for paid orders
     - Handle order timeouts and cancellations
     - Update order status based on payment status
-    - Process orders that should move to confirmed/processing
+    - Process orders that should move to paid/provisioning
 
     Runs every 5 minutes to ensure timely order processing.
 
@@ -120,10 +119,10 @@ def process_pending_orders() -> dict[str, Any]:
             return {"success": True, "message": "Already running"}
 
         try:
-            # Get all pending orders
+            # Get all awaiting_payment orders (B12: include proforma for fallback)
             pending_orders = (
-                Order.objects.filter(status="pending")
-                .select_related("customer", "currency", "invoice")
+                Order.objects.filter(status="awaiting_payment")
+                .select_related("customer", "currency", "invoice", "proforma")
                 .prefetch_related("items")
             )
 
@@ -138,6 +137,27 @@ def process_pending_orders() -> dict[str, Any]:
                 }
 
                 try:
+                    # B12: Create proforma if missing (edge case — signal failed or race)
+                    if order.total_cents > 0 and not order.proforma:
+                        try:
+                            from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+                            proforma_result = ProformaService.create_from_order(order)
+                            if proforma_result.is_ok():
+                                logger.info(
+                                    "📄 [OrderProcessor] Created missing proforma for %s",
+                                    order.order_number,
+                                )
+                                order.refresh_from_db()
+                            else:
+                                logger.warning(
+                                    "⚠️ [OrderProcessor] Proforma fallback creation failed for %s: %s",
+                                    order.order_number,
+                                    proforma_result.unwrap_err(),
+                                )
+                        except Exception as e:
+                            logger.error("🔥 [OrderProcessor] Failed to create proforma fallback: %s", e)
+
                     # Check if order has timed out
                     if _handle_order_timeout(order, now, order_result, results):
                         continue
@@ -151,9 +171,9 @@ def process_pending_orders() -> dict[str, Any]:
                         elif invoice.status == "void":
                             _process_cancelled_invoice(order, now, order_result, results)
 
-                    # Order without invoice - check if it needs one
+                    # Order without invoice — route through the proforma path
                     elif order.total_cents > 0:
-                        _create_order_invoice(order, order_result, results)
+                        _convert_proforma_or_create_invoice(order, order_result, results)
 
                     else:
                         # Free order - move directly to confirmed
@@ -186,35 +206,21 @@ def process_pending_orders() -> dict[str, Any]:
 
 
 def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: int, results: dict[str, Any]) -> bool:
-    """Process payment confirmation for an order."""
-    if total_paid_cents >= invoice.total_cents and order.status == "pending":
-        old_status = order.status
-        try:
-            order.confirm()
-            order.save(update_fields=["status", "updated_at"])
-        except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning("⚠️ [PaymentSync] Cannot confirm order %s from status %s", order.order_number, old_status)
-            return False
-        results["payment_confirmations"] += 1
+    """Process payment confirmation for an order.
 
-        # Log payment confirmation
-        AuditService.log_simple_event(
-            event_type="order_payment_confirmed",
-            user=None,
-            content_object=order,
-            description=f"Order payment confirmed: {order.order_number}",
-            old_values={"status": old_status},
-            new_values={"status": "confirmed"},
-            actor_type="system",
-            metadata={
-                "order_id": str(order.id),
-                "order_number": order.order_number,
-                "invoice_id": str(invoice.id),
-                "amount_paid_cents": total_paid_cents,
-                "invoice_total_cents": invoice.total_cents,
-                "source_app": "orders",
-            },
-        )
+    Routes through OrderPaymentConfirmationService.confirm_order() to ensure the
+    review gate threshold check is applied consistently for all payment paths
+    (signal-based, task-based, and 7-day sync task).
+    """
+    if total_paid_cents >= invoice.total_cents and order.status == "awaiting_payment":
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        if result.is_err():
+            logger.warning("⚠️ [PaymentSync] Cannot confirm order %s: %s", order.order_number, result.unwrap_err())
+            return False
+        order.refresh_from_db()
+        results["payment_confirmations"] += 1
         return True
     return False
 
@@ -222,26 +228,32 @@ def _process_payment_confirmation(order: Order, invoice: Any, total_paid_cents: 
 def _process_payment_failures(order: Order, payments: list[Any], results: dict[str, Any]) -> bool:
     """Process payment failures for an order."""
     failed_payments = [p for p in payments if p.status == "failed"]
-    if not failed_payments or order.status != "pending":
+    if not failed_payments or order.status != "awaiting_payment":
         return False
 
     # Check if all payment attempts have failed
     recent_failures = [p for p in failed_payments if p.created_at >= timezone.now() - timedelta(hours=24)]
 
     if len(recent_failures) >= MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL:
+        order.refresh_from_db()
         old_status = order.status
-        try:
-            order.fail()
-        except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning("⚠️ [PaymentSync] Cannot fail order %s from status %s", order.order_number, old_status)
-            return False
-        order.notes = (
-            f"{order.notes}\n[AUTO] Order marked as failed due to repeated payment failures at {timezone.now()}"
+        status_data = StatusChangeData(
+            new_status="failed",
+            notes=f"[AUTO] Order marked as failed due to repeated payment failures at {timezone.now()} ({len(recent_failures)} recent failures)",
         )
-        order.save(update_fields=["status", "notes", "updated_at"])
+        result = OrderService.update_order_status(order, status_data)
+        if result.is_err():
+            logger.warning(
+                "⚠️ [PaymentSync] Cannot fail order %s from status %s: %s",
+                order.order_number,
+                old_status,
+                result.unwrap_err(),
+            )
+            return False
+        order = result.unwrap()
         results["payment_failures"] += 1
 
-        # Log payment failure
+        # Log payment failure with detailed audit context (supplementary to service-layer history)
         AuditService.log_simple_event(
             event_type="order_payment_failed",
             user=None,
@@ -262,36 +274,26 @@ def _process_payment_failures(order: Order, payments: list[Any], results: dict[s
 
 
 def _process_refunds(order: Order, payments: list[Any], total_paid_cents: int, results: dict[str, Any]) -> bool:
-    """Process refunds for an order."""
+    """Process refunds for an order.
+
+    Refunds are handled at Invoice/Payment level, not Order FSM.
+    This function only logs refund activity for monitoring — no order state changes.
+    """
     total_refunded_cents = sum(p.amount_cents for p in payments if p.status in ["refunded", "partially_refunded"])
 
     if total_refunded_cents <= 0:
         return False
 
-    updated = False
-    try:
-        if total_refunded_cents >= total_paid_cents and order.status not in ["refunded", "cancelled"]:
-            # Full refund — only callable from completed or partially_refunded
-            if order.status == "completed":
-                order.refund_order()
-                updated = True
-            elif order.status == "partially_refunded":
-                order.complete_refund()
-                updated = True
-        elif total_refunded_cents < total_paid_cents and order.status != "partially_refunded":
-            # Partial refund
-            order.partial_refund()
-            updated = True
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning(
-            "⚠️ [PaymentSync] Cannot process refund on order %s from status %s", order.order_number, order.status
-        )
-        return False
-
-    if updated:
-        order.save(update_fields=["status", "updated_at"])
-        results["refunds_processed"] += 1
-    return updated
+    # Log for visibility but don't change order status — refunds are billing concern
+    logger.info(
+        "💰 [PaymentSync] Refund detected for order %s: %d/%d cents refunded (order stays %s)",
+        order.order_number,
+        total_refunded_cents,
+        total_paid_cents,
+        order.status,
+    )
+    results["refunds_detected"] += 1
+    return False
 
 
 def _add_updated_order_result(
@@ -317,22 +319,27 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
     if now <= timeout_threshold:
         return False
 
-    # Cancel timed out orders
-    try:
-        order.cancel()
-    except (TransitionNotAllowed, ConcurrentTransition):
+    # Cancel timed out orders — route through service layer to create OrderStatusHistory
+    status_data = StatusChangeData(
+        new_status="cancelled",
+        notes=f"[AUTO] Order cancelled due to timeout at {now}",
+    )
+    result = OrderService.update_order_status(order, status_data)
+    if result.is_err():
         logger.warning(
-            "⚠️ [OrderProcessor] Cannot cancel timed-out order %s from status %s", order.order_number, order.status
+            "⚠️ [OrderProcessor] Cannot cancel timed-out order %s from status %s: %s",
+            order.order_number,
+            order.status,
+            result.unwrap_err(),
         )
         return False
-    order.notes = f"{order.notes}\n[AUTO] Order cancelled due to timeout at {now}"
-    order.save(update_fields=["status", "notes", "updated_at"])
+    order = result.unwrap()
 
     order_result["action"] = "timeout_cancelled"
     order_result["status"] = "cancelled"
     results["timed_out_orders"] += 1
 
-    # Log timeout cancellation
+    # Log timeout cancellation with detailed audit context (supplementary to service-layer history)
     AuditService.log_simple_event(
         event_type="order_timeout_cancelled",
         user=None,
@@ -366,68 +373,131 @@ def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
 
 
 def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process orders with paid invoices."""
-    # Move to confirmed status and trigger provisioning
-    try:
-        order.confirm()
-        order.save(update_fields=["status", "updated_at"])
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s from status %s", order.order_number, order.status)
+    """Process orders with paid invoices (fallback task).
+
+    Routes through OrderPaymentConfirmationService.confirm_order() to ensure the review
+    gate threshold check is applied consistently for both signal-based and task-based paths.
+    """
+    from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+    result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+    if result.is_err():
+        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s: %s", order.order_number, result.unwrap_err())
         return
 
+    order.refresh_from_db()
     order_result["action"] = "payment_confirmed"
-    order_result["status"] = "confirmed"
+    order_result["status"] = order.status
     results["confirmed_orders"] += 1
 
-    # Trigger provisioning for order items
-    provisioned_items = _trigger_item_provisioning(order, results)
-
-    if provisioned_items > 0:
-        results["provisioning_triggered"] += provisioned_items
-        try:
-            order.start_processing()
-            order.save(update_fields=["status", "updated_at"])
-        except (TransitionNotAllowed, ConcurrentTransition):
-            logger.warning(
-                "⚠️ [OrderProcessor] Cannot start processing order %s from status %s", order.order_number, order.status
-            )
-            return
-        order_result["status"] = "processing"
+    # If order went to provisioning (not in_review), trigger item provisioning
+    if order.status == "provisioning":
+        provisioned_items = _trigger_item_provisioning(order, results)
+        if provisioned_items > 0:
+            results["provisioning_triggered"] += provisioned_items
 
     # Log order confirmation
     AuditService.log_simple_event(
         event_type="order_confirmed_auto",
         user=None,
         content_object=order,
-        description=f"Order {order.order_number} automatically confirmed and processed",
+        description=f"Order {order.order_number} automatically confirmed (status: {order.status})",
         actor_type="system",
         metadata={
             "order_id": str(order.id),
             "order_number": order.order_number,
             "customer_id": str(order.customer.id),
             "invoice_id": str(invoice.id),
-            "items_provisioned": provisioned_items,
             "source_app": "orders",
         },
     )
 
 
 def _process_cancelled_invoice(order: Order, now: Any, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process orders with cancelled invoices."""
-    try:
-        order.cancel()
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning("⚠️ [OrderProcessor] Cannot cancel order %s from status %s", order.order_number, order.status)
+    """Process orders with cancelled invoices — route through service layer to create OrderStatusHistory."""
+    status_data = StatusChangeData(
+        new_status="cancelled",
+        notes=f"[AUTO] Order cancelled due to cancelled invoice at {now}",
+    )
+    result = OrderService.update_order_status(order, status_data)
+    if result.is_err():
+        logger.warning(
+            "⚠️ [OrderProcessor] Cannot cancel order %s from status %s: %s",
+            order.order_number,
+            order.status,
+            result.unwrap_err(),
+        )
         order_result["action"] = "invoice_cancelled_skip"
         order_result["status"] = order.status
         results["failed_orders"] += 1
         return
-    order.notes = f"{order.notes}\n[AUTO] Order cancelled due to cancelled invoice at {now}"
-    order.save(update_fields=["status", "notes", "updated_at"])
 
     order_result["action"] = "invoice_cancelled"
     order_result["status"] = "cancelled"
     results["failed_orders"] += 1
+
+
+def _convert_proforma_or_create_invoice(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
+    """Route order invoice creation through the proforma path (ADR-0038).
+
+    If the order has a proforma and a succeeded Payment linked to it, convert
+    the proforma to an invoice via ProformaPaymentService.record_payment_and_convert().
+    If the proforma exists but no succeeded payment has arrived yet, skip — the
+    webhook or confirm_order endpoint will convert it when payment succeeds.
+    If no proforma exists, fall through to legacy _create_order_invoice() (edge-case
+    recovery — the proforma-creation fallback above should have already created one).
+    """
+    if order.proforma is not None:
+        # Check for a succeeded payment linked to this proforma
+        succeeded_payment = Payment.objects.filter(
+            proforma=order.proforma,
+            status="succeeded",
+        ).first()
+
+        if succeeded_payment is None:
+            # Payment not yet succeeded — do not create an invoice yet
+            logger.info(
+                "⏳ [OrderProcessor] Proforma %s for order %s has no succeeded payment — skipping",
+                order.proforma.id,
+                order.order_number,
+            )
+            order_result["action"] = "proforma_awaiting_payment"
+            order_result["status"] = order.status
+            return
+
+        try:
+            from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+            convert_result = ProformaPaymentService.record_payment_and_convert(
+                proforma_id=str(order.proforma.id),
+                amount_cents=order.total_cents,
+                payment_method=succeeded_payment.payment_method or "stripe",
+                existing_payment=succeeded_payment,
+            )
+            if convert_result.is_ok():
+                invoice = convert_result.unwrap()
+                logger.info(
+                    "📄 [OrderProcessor] Converted proforma %s → invoice %s for order %s",
+                    order.proforma.id,
+                    invoice.number,
+                    order.order_number,
+                )
+                order_result["action"] = "proforma_converted"
+                order_result["status"] = order.status
+            else:
+                error = convert_result.unwrap_err()
+                logger.warning(
+                    "⚠️ [OrderProcessor] Proforma conversion failed for order %s: %s",
+                    order.order_number,
+                    error,
+                )
+                results["errors"].append(f"Proforma conversion failed for order {order.order_number}: {error}")
+        except Exception as e:
+            logger.error("🔥 [OrderProcessor] Failed to convert proforma for order %s: %s", order.order_number, e)
+            results["errors"].append(f"Proforma conversion error for {order.order_number}: {e}")
+    else:
+        # No proforma — fall back to legacy direct invoice creation (edge-case recovery)
+        _create_order_invoice(order, order_result, results)
 
 
 def _create_order_invoice(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
@@ -442,7 +512,7 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
             order.save(update_fields=["invoice", "updated_at"])
 
             order_result["action"] = "invoice_created"
-            order_result["status"] = "pending"
+            order_result["status"] = "awaiting_payment"
 
             logger.info(f"📄 [OrderProcessor] Created invoice {invoice.number} for order {order.order_number}")
         else:
@@ -455,28 +525,33 @@ def _create_order_invoice(order: Order, order_result: dict[str, Any], results: d
 
 
 def _process_free_order(order: Order, order_result: dict[str, Any], results: dict[str, Any]) -> None:
-    """Process free orders."""
-    try:
-        order.confirm()
-        order.save(update_fields=["status", "updated_at"])
-    except (TransitionNotAllowed, ConcurrentTransition):
-        logger.warning(
-            "⚠️ [OrderProcessor] Cannot confirm free order %s from status %s", order.order_number, order.status
-        )
+    """Process free orders (total=0 → skip proforma, go directly to paid → provisioning).
+
+    Routes through OrderPaymentConfirmationService.confirm_order() instead of
+    calling mark_paid() alone. Without start_provisioning(), the order gets stuck in
+    'paid' forever because the item completion check requires status=='provisioning'.
+    """
+    from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+    result = OrderPaymentConfirmationService.confirm_order(order)
+    if result.is_err():
+        logger.warning("⚠️ [OrderProcessor] Cannot confirm free order %s: %s", order.order_number, result.unwrap_err())
         return
 
+    order.refresh_from_db()
     order_result["action"] = "free_order_confirmed"
-    order_result["status"] = "confirmed"
+    order_result["status"] = order.status
     results["confirmed_orders"] += 1
 
-    # Trigger provisioning
-    for item in order.items.filter(provisioning_status="pending"):
-        try:
-            async_task("apps.provisioning.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
-            results["provisioning_triggered"] += 1
-        except Exception as e:
-            logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
-            results["errors"].append(f"Free order provisioning trigger failed: {e}")
+    # If order went to provisioning, trigger item provisioning
+    if order.status == "provisioning":
+        for item in order.items.filter(provisioning_status="pending"):
+            try:
+                async_task("apps.provisioning.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
+                results["provisioning_triggered"] += 1
+            except Exception as e:
+                logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
+                results["errors"].append(f"Free order provisioning trigger failed: {e}")
 
 
 def _check_service_availability() -> bool:
@@ -518,7 +593,7 @@ def _create_renewal_order_data(service: Any) -> dict[str, Any]:
                 },
             }
         ],
-        "status": "pending",
+        "status": "awaiting_payment",
         "meta": {"auto_renewal": True, "original_service_id": str(service.id)},
     }
 
@@ -600,7 +675,7 @@ def sync_order_payment_status() -> dict[str, Any]:
         "updated_orders": [],
         "payment_confirmations": 0,
         "payment_failures": 0,
-        "refunds_processed": 0,
+        "refunds_detected": 0,
         "errors": [],
     }
 
@@ -609,7 +684,7 @@ def sync_order_payment_status() -> dict[str, Any]:
         cutoff_date = timezone.now() - timedelta(days=7)
 
         orders_to_check = Order.objects.filter(
-            Q(status__in=["pending", "confirmed", "processing"])
+            Q(status__in=["awaiting_payment", "paid", "provisioning"])
             & Q(invoice__isnull=False)
             & Q(created_at__gte=cutoff_date)
         ).select_related("invoice", "customer", "currency")
@@ -657,7 +732,7 @@ def sync_order_payment_status() -> dict[str, Any]:
             f"✅ [PaymentSync] Payment sync completed: "
             f"{results['checked_payments']} payments checked, "
             f"{results['payment_confirmations']} confirmations, "
-            f"{results['refunds_processed']} refunds processed"
+            f"{results['refunds_detected']} refunds detected"
         )
 
         return {"success": True, "results": results}
@@ -716,7 +791,7 @@ def process_recurring_orders() -> dict[str, Any]:
                     # Check if renewal order already exists
                     existing_renewal = Order.objects.filter(
                         customer=service.customer,
-                        status__in=["draft", "pending", "confirmed", "processing"],
+                        status__in=["draft", "awaiting_payment", "paid", "provisioning"],
                         items__meta__contains={"renewal_service_id": str(service.id)},
                     ).exists()
 

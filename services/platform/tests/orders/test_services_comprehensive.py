@@ -298,10 +298,10 @@ class TestOrderFilters:
     def test_order_filters_structure(self):
         """OrderFilters should accept expected keys"""
         filters: OrderFilters = {
-            'status': 'pending',
+            'status': 'awaiting_payment',
             'search': 'test',
         }
-        assert filters['status'] == 'pending'
+        assert filters['status'] == 'awaiting_payment'
         assert filters['search'] == 'test'
 
 
@@ -311,18 +311,18 @@ class TestStatusChangeData:
     def test_status_change_data_creation(self):
         """StatusChangeData should be creatable with required fields"""
         data = StatusChangeData(
-            new_status='confirmed',
-            notes='Order confirmed by admin',
+            new_status='paid',
+            notes='Order paid by customer',
         )
-        assert data.new_status == 'confirmed'
-        assert data.notes == 'Order confirmed by admin'
+        assert data.new_status == 'paid'
+        assert data.notes == 'Order paid by customer'
         assert data.changed_by is None
 
     def test_status_change_data_with_user(self):
         """StatusChangeData should accept user reference"""
         mock_user = MagicMock()
         data = StatusChangeData(
-            new_status='processing',
+            new_status='provisioning',
             changed_by=mock_user,
         )
         assert data.changed_by == mock_user

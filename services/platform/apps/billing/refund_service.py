@@ -853,15 +853,14 @@ class RefundService:
         # Process order updates
         if order:
             order_result = RefundService._update_order_refund_status(order, refund_data=refund_data)
-            if order_result.is_ok():
-                result["order_status_updated"] = True
-            else:
+            if order_result.is_err():
                 logger.warning(
-                    "⚠️ [Refund] Order status update failed for order %s: %s",
+                    "⚠️ [Refund] Order refund recording failed for order %s: %s",
                     order.id,
-                    order_result.unwrap_err() if order_result.is_err() else "unknown",
+                    order_result.unwrap_err(),
                 )
-                result["order_status_updated"] = False
+            # Phase A: order status is never changed on refund — always False
+            result["order_status_updated"] = False
             result["order_id"] = order.id
 
         # Process invoice updates
@@ -897,41 +896,28 @@ class RefundService:
     def _update_order_refund_status(
         order: Any, refund_amount_cents: int | None = None, refund_data: RefundData | None = None
     ) -> Result[None, str]:
-        """Update order refund status"""
+        """Update order refund status.
+
+        Phase A: Refunds are now handled at Invoice/Payment level, not Order FSM.
+        Order status is NOT changed — the order stays in its current state (typically
+        'completed'). The refund is tracked on the Invoice and Payment models.
+        This method now only logs the refund event for audit purposes.
+        """
         try:
-            total_amount_cents = getattr(order, "total_cents", _FALLBACK_ORDER_TOTAL_CENTS)
-
-            # Update order status to indicate it has been refunded
-            if hasattr(order, "status"):
-                refund_type = refund_data.get("refund_type", "full") if refund_data else "full"
-                # Use provided refund_amount_cents or get from refund_data
-                current_amount = (
-                    refund_amount_cents
-                    if refund_amount_cents is not None
-                    else (refund_data.get("amount_cents", 0) if refund_data else 0)
-                )
-
-                # Query existing non-failed refunds for this order (safe inside
-                # select_for_update atomic block — the row lock prevents races)
-                from apps.billing.models import Refund  # noqa: PLC0415  # Deferred: avoids circular import
-
-                already_refunded = Refund.objects.filter(
-                    order=order,
-                    status__in=["completed", "approved", "processing", "pending"],
-                ).aggregate(total=Sum("amount_cents", default=0))["total"]
-
-                # Check if this refund makes it fully refunded
-                try:
-                    if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
-                        order.refund_order()
-                    else:
-                        order.partial_refund()
-                    order.save()
-                except TransitionNotAllowed:
-                    return Err("Order status transition not allowed for refund")
-                return Ok(None)
-
-            return Err("Order update failed")
+            # Log the refund event but don't change order status
+            refund_type = refund_data.get("refund_type", "full") if refund_data else "full"
+            current_amount = (
+                refund_amount_cents
+                if refund_amount_cents is not None
+                else (refund_data.get("amount_cents", 0) if refund_data else 0)
+            )
+            logger.info(
+                "💰 [Refund] Order %s refund recorded (%s, %d cents) — order status unchanged per Phase A",
+                getattr(order, "order_number", getattr(order, "pk", "?")),
+                refund_type,
+                current_amount,
+            )
+            return Ok(None)
         except Exception:
             logger.exception("Order refund status update failed for order_id=%s", getattr(order, "pk", "unknown"))
             return Err("Failed to update order status")

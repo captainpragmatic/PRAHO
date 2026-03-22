@@ -392,8 +392,7 @@ class ProformaCreateViewTest(BillingViewsTestBase):
         response = self.client.get("/billing/proformas/create/")
         self.assertEqual(response.status_code, 200)
 
-    @patch("apps.billing.views.get_invoice_payment_terms_days", return_value=30)
-    def test_proforma_create_post_success(self, _mock):
+    def test_proforma_create_post_success(self):
         self.client.force_login(self.admin_user)
         response = self.client.post(
             "/billing/proformas/create/",
@@ -574,15 +573,23 @@ class ProformaSendViewTest(BillingViewsTestBase):
 
 
 class ProformaToInvoiceViewTest(BillingViewsTestBase):
-    """Tests for proforma_to_invoice view."""
+    """Tests for proforma_to_invoice view.
+
+    Manual conversion was removed in Phase B. The view now always redirects to
+    proforma_detail with an error message regardless of HTTP method.
+    """
 
     def test_convert_get(self):
+        # Manual conversion is removed — GET now redirects with error message
         proforma = self._create_proforma()
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/proformas/{proforma.pk}/convert/")
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, f"/billing/proformas/{proforma.pk}/", fetch_redirect_response=False)
 
     def test_convert_post_success(self):
+        # Manual conversion is removed — POST also redirects with error message
+        # No invoice is created; conversion only happens via ProformaPaymentService
         proforma = self._create_proforma()
         ProformaLine.objects.create(
             proforma=proforma,
@@ -596,7 +603,9 @@ class ProformaToInvoiceViewTest(BillingViewsTestBase):
         self.client.force_login(self.staff_user)
         response = self.client.post(f"/billing/proformas/{proforma.pk}/convert/")
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Invoice.objects.filter(converted_from_proforma=proforma).exists())
+        self.assertRedirects(response, f"/billing/proformas/{proforma.pk}/", fetch_redirect_response=False)
+        # No invoice should be created — conversion is automatic, not manual
+        self.assertFalse(Invoice.objects.filter(converted_from_proforma=proforma).exists())
 
     def test_convert_expired_proforma(self):
         proforma = self._create_proforma(valid_until=timezone.now() - timedelta(days=1))
@@ -704,30 +713,33 @@ class ProcessPaymentViewTest(BillingViewsTestBase):
 
 
 class ProcessProformaPaymentViewTest(BillingViewsTestBase):
-    """Tests for process_proforma_payment view."""
+    """Tests for process_proforma_payment view.
+
+    Phase B: The view now delegates to ProformaPaymentService.record_payment_and_convert()
+    and returns redirects (not JSON) on both success and failure.
+    """
 
     def test_proforma_payment_post_new_conversion(self):
+        # View delegates to ProformaPaymentService; on success or error it redirects
         proforma = self._create_proforma()
         self.client.force_login(self.staff_user)
         response = self.client.post(
             f"/billing/proformas/{proforma.pk}/pay/",
             {"amount": "100.00", "payment_method": "bank"},
         )
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
+        # Service is called and returns a redirect (302) regardless of outcome
+        self.assertEqual(response.status_code, 302)
 
     def test_proforma_payment_already_converted(self):
-        proforma = self._create_proforma()
+        # Idempotent: already-converted proforma returns Ok(existing_invoice); view redirects
+        proforma = self._create_proforma(status="converted")
         self._create_invoice(converted_from_proforma=proforma)
         self.client.force_login(self.staff_user)
         response = self.client.post(
             f"/billing/proformas/{proforma.pk}/pay/",
             {"amount": "100.00", "payment_method": "stripe"},
         )
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
+        self.assertEqual(response.status_code, 302)
 
     def test_proforma_payment_get_method(self):
         proforma = self._create_proforma()
@@ -1709,3 +1721,73 @@ class GetMaxPaymentAmountCentsTest(TestCase):
         mock_settings_cls.get_integer_setting.return_value = 50_000_000
         result = _get_max_payment_amount_cents()
         self.assertEqual(result, 50_000_000)
+
+
+# ===============================================================================
+# S-1: payment_method allowlist on process_proforma_payment
+# An arbitrary payment_method value must be rejected with HTTP 400 BEFORE
+# calling the service, not silently normalised to "other" or forwarded as-is.
+# ===============================================================================
+
+
+class ProcessProformaPaymentAllowlistTest(BillingViewsTestBase):
+    """S-1: process_proforma_payment must reject unknown payment_method values."""
+
+    def test_unknown_payment_method_returns_400(self) -> None:
+        """POST with payment_method='evil_method' must return 400, not call service."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            f"/billing/proformas/{proforma.pk}/pay/",
+            {"payment_method": "evil_method"},
+        )
+        self.assertEqual(
+            response.status_code,
+            400,
+            "Expected 400 for unknown payment_method, got "
+            f"{response.status_code}. The view must validate payment_method "
+            "against an allowlist before delegating to the service.",
+        )
+
+    def test_unknown_payment_method_does_not_call_service(self) -> None:
+        """The service must NOT be called when payment_method is not allowed."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        with patch(
+            "apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert"
+        ) as mock_service:
+            response = self.client.post(
+                f"/billing/proformas/{proforma.pk}/pay/",
+                {"payment_method": "evil_method"},
+            )
+        self.assertEqual(response.status_code, 400)
+        mock_service.assert_not_called()
+
+    def test_known_payment_methods_are_accepted(self) -> None:
+        """All allowed payment methods must not be rejected at the allowlist gate."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        allowed = ["bank_transfer", "bank", "card", "stripe", "cash", "other"]
+        for method in allowed:
+            with self.subTest(method=method):
+                # View will call the service and redirect (302) — may succeed or fail
+                # depending on proforma state, but it must NOT return 400 at the gate.
+                response = self.client.post(
+                    f"/billing/proformas/{proforma.pk}/pay/",
+                    {"payment_method": method},
+                )
+                self.assertNotEqual(
+                    response.status_code,
+                    400,
+                    f"Allowed method '{method}' was rejected by the allowlist gate.",
+                )
+
+    def test_case_insensitive_rejection(self) -> None:
+        """Casing must not bypass the allowlist (e.g. 'Evil_Method' is still rejected)."""
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            f"/billing/proformas/{proforma.pk}/pay/",
+            {"payment_method": "Evil_Method"},
+        )
+        self.assertEqual(response.status_code, 400)

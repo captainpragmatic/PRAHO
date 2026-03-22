@@ -61,20 +61,22 @@
         <span class="text-white">
           {% if order.status == "draft" %}
             {% icon "document" %} {% trans "Draft" %}
-          {% elif order.status == "pending" %}
-            {% icon "clock" %} {% trans "Pending" %}
-          {% elif order.status == "processing" %}
-            {% icon "settings" %} {% trans "Processing" %}
+          {% elif order.status == "awaiting_payment" %}
+            {% icon "clock" %} {% trans "Awaiting Payment" %}
+          {% elif order.status == "paid" %}
+            {% icon "check" %} {% trans "Paid" %}
+          {% elif order.status == "in_review" %}
+            {% icon "alert" %} {% trans "In Review" %}
+          {% elif order.status == "provisioning" %}
+            {% icon "settings" %} {% trans "Provisioning" %}
           {% elif order.status == "completed" %}
             {% icon "check" %} {% trans "Completed" %}
           {% elif order.status == "cancelled" %}
             {% icon "x" %} {% trans "Cancelled" %}
           {% elif order.status == "failed" %}
             {% icon "warning" %} {% trans "Failed" %}
-          {% elif order.status == "refunded" %}
-            {% icon "currency" %} {% trans "Refunded" %}
-          {% elif order.status == "partially_refunded" %}
-            {% icon "currency" %} {% trans "Partially Refunded" %}
+          {% else %}
+            {{ order.status|title }}
           {% endif %}
         </span>
       </div>

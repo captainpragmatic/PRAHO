@@ -313,7 +313,12 @@ class ProformaConversionService:
         from apps.billing.models import ProformaInvoice  # noqa: PLC0415  # Deferred: test mockability
 
         try:
-            proforma = ProformaInvoice.objects.select_related("customer", "currency").get(id=proforma_id)
+            # RC-1: Lock proforma to prevent concurrent conversion creating duplicate invoices
+            proforma = (
+                ProformaInvoice.objects.select_for_update(of=("self",))
+                .select_related("customer", "currency")
+                .get(id=proforma_id)
+            )
         except ProformaInvoice.DoesNotExist:
             return Err(f"Proforma not found: {proforma_id}")
 

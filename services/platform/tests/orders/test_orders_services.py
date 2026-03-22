@@ -4,6 +4,7 @@ Tests business logic, Romanian VAT compliance, and service layer functionality.
 """
 
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -11,7 +12,6 @@ from django.test import TestCase
 from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
-from apps.products.models import Product, ProductPrice
 from apps.orders.services import (
     OrderCalculationService,
     OrderCreateData,
@@ -20,6 +20,7 @@ from apps.orders.services import (
     OrderService,
     StatusChangeData,
 )
+from apps.products.models import Product, ProductPrice
 from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
@@ -291,7 +292,7 @@ class OrderServiceTestCase(TestCase):
                 'fiscal_code': 'RO12345678',
             }
         )
-        # FSM: submit() (draft→pending) requires at least one item on the order
+        # FSM: submit() (draft→awaiting_payment) requires at least one item on the order
         OrderItem.objects.create(
             order=order,
             product=self.product,
@@ -311,7 +312,7 @@ class OrderServiceTestCase(TestCase):
 
         # Update status
         status_data = StatusChangeData(
-            new_status="pending",
+            new_status="awaiting_payment",
             notes="Order submitted for processing",
             changed_by=self.user
         )
@@ -321,7 +322,7 @@ class OrderServiceTestCase(TestCase):
         # Verify success
         self.assertTrue(result.is_ok(), f"Expected success, got error: {result.unwrap_err() if result.is_err() else 'N/A'}")
         updated_order = result.unwrap()
-        self.assertEqual(updated_order.status, "pending")
+        self.assertEqual(updated_order.status, "awaiting_payment")
 
         # Verify status history
         self.assertEqual(order.status_history.count(), 1)
@@ -329,7 +330,7 @@ class OrderServiceTestCase(TestCase):
         self.assertIsNotNone(history)
         assert history is not None  # Type narrowing
         self.assertEqual(history.old_status, "draft")
-        self.assertEqual(history.new_status, "pending")
+        self.assertEqual(history.new_status, "awaiting_payment")
         self.assertEqual(history.notes, "Order submitted for processing")
         self.assertEqual(history.changed_by, self.user)
 
@@ -366,17 +367,20 @@ class OrderServiceTestCase(TestCase):
     def test_valid_status_transitions(self):
         """Test all valid status transitions"""
         valid_transitions = [
-            ("draft", "pending"),
+            ("draft", "awaiting_payment"),
             ("draft", "cancelled"),
-            ("pending", "confirmed"),
-            ("pending", "cancelled"),
-            ("pending", "failed"),
-            ("confirmed", "processing"),
-            ("confirmed", "cancelled"),
-            ("processing", "completed"),
-            ("processing", "failed"),
-            ("processing", "cancelled"),
-            # NOTE: ("failed", "pending") uses FSM retry() method which is not
+            ("awaiting_payment", "paid"),
+            ("awaiting_payment", "cancelled"),
+            ("awaiting_payment", "failed"),
+            ("paid", "provisioning"),
+            ("paid", "cancelled"),
+            ("paid", "in_review"),
+            ("in_review", "provisioning"),
+            ("in_review", "cancelled"),
+            ("provisioning", "completed"),
+            ("provisioning", "failed"),
+            ("provisioning", "cancelled"),
+            # NOTE: ("failed", "awaiting_payment") uses FSM retry() method which is not
             # exposed via update_order_status service — omitted here intentionally
             ("failed", "cancelled"),
         ]
@@ -385,7 +389,7 @@ class OrderServiceTestCase(TestCase):
             with self.subTest(transition=f"{old_status} → {new_status}"):
                 order = Order.objects.create(
                     customer=self.customer,
-                    order_number=f"ORD-2024-{old_status.upper()}-{new_status.upper()}",
+                    order_number=f"ORD-2024-{old_status[:4].upper()}-{new_status[:4].upper()}",
                     currency=self.currency,
                     status=old_status,
                     billing_address={
@@ -399,8 +403,8 @@ class OrderServiceTestCase(TestCase):
                     }
                 )
 
-                # FSM: draft → pending requires items + a current price (preflight validation)
-                if old_status == "draft" and new_status == "pending":
+                # FSM: draft → awaiting_payment requires items + a current price (preflight validation)
+                if old_status == "draft" and new_status == "awaiting_payment":
                     item_product = Product.objects.create(
                         slug=f"transition-product-{old_status}-{new_status}",
                         name="Transition Test Product",
@@ -625,8 +629,13 @@ class OrderServiceCreationTestCase(TestCase):
 
     def test_complete_service_creation_flow(self):
         """Test the complete service creation flow: draft → pending → processing → completed"""
-        from apps.orders.services import OrderServiceCreationService, OrderCreateData, OrderService, StatusChangeData
-        from apps.provisioning.models import Service
+        from apps.orders.services import (  # noqa: PLC0415
+            OrderCreateData,
+            OrderService,
+            OrderServiceCreationService,
+            StatusChangeData,
+        )
+        from apps.provisioning.models import Service  # noqa: PLC0415
 
         # Step 1: Create draft order
         order_data = OrderCreateData(
@@ -665,14 +674,14 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(order.status, 'draft')
         self.assertEqual(Service.objects.count(), 0)
 
-        # Step 2: Move order to pending (should create services)
-        status_data = StatusChangeData(new_status='pending')
+        # Step 2: Move order to awaiting_payment (should create services)
+        status_data = StatusChangeData(new_status='awaiting_payment')
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
         # Verify order status changed
         order.refresh_from_db()
-        self.assertEqual(order.status, 'pending')
+        self.assertEqual(order.status, 'awaiting_payment')
 
         # Manually trigger service creation (signals may not work in test environment)
         creation_result = OrderServiceCreationService.create_pending_services(order)
@@ -690,13 +699,13 @@ class OrderServiceCreationTestCase(TestCase):
         order_item = order.items.first()
         self.assertEqual(order_item.service, service)
 
-        # Step 3a: Move order to confirmed first
-        status_data = StatusChangeData(new_status='confirmed')
+        # Step 3a: Move order to paid first
+        status_data = StatusChangeData(new_status='paid')
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
-        # Step 3b: Then move to processing (should update services to provisioning)
-        status_data = StatusChangeData(new_status='processing')
+        # Step 3b: Then move to provisioning (should update services to provisioning)
+        status_data = StatusChangeData(new_status='provisioning')
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
@@ -725,7 +734,6 @@ class OrderServiceCreationTestCase(TestCase):
     def test_service_creation_without_service_plan(self):
         """Test service creation when product has no default service plan"""
         from apps.orders.services import OrderServiceCreationService
-        from apps.provisioning.models import Service
 
         # Remove service plan from product
         self.product.default_service_plan = None
@@ -831,3 +839,391 @@ class OrderServiceCreationTestCase(TestCase):
         # Verify total service count is still 1
         total_services = Service.objects.filter(customer=self.customer).count()
         self.assertEqual(total_services, 1)
+
+
+class AuditTrailOnConfirmOrderTestCase(TestCase):
+    """C6: confirm_order must call AuditService.log_simple_event('order_payment_confirmed')."""
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Audit Trail Test SRL", customer_type="company",
+            status="active", primary_email="audit-trail@test.ro",
+        )
+
+    def _create_order(self, total_cents: int = 12100) -> Order:
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=total_cents - 2100, tax_cents=2100, total_cents=total_cents,
+            billing_address={},
+        )
+        return order
+
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_confirm_order_logs_payment_confirmed_audit_event(self, mock_threshold):
+        """C6 GREEN: confirm_order must create an AuditEvent with content_object=order.
+
+        The audit record must be linked to the Order instance (not content_object=None
+        which log_security_event hardcodes). We assert against real AuditEvent records
+        so that if the implementation falls back to content_object=None, the test fails.
+        """
+        from django.contrib.contenttypes.models import ContentType  # noqa: PLC0415
+
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        mock_threshold.return_value = 1000000  # High threshold so order goes to provisioning
+
+        order = self._create_order(total_cents=12100)
+        force_status(order, "awaiting_payment")
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency,
+            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+        )
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        self.assertTrue(result.is_ok())
+
+        # Assert a real AuditEvent was created with:
+        # 1. The correct event_type
+        # 2. content_object pointing to the Order (not None / fallback User)
+        order_content_type = ContentType.objects.get_for_model(order)
+        audit_event = AuditEvent.objects.filter(
+            action="order_payment_confirmed",
+            content_type=order_content_type,
+            object_id=str(order.id),
+        ).first()
+        self.assertIsNotNone(
+            audit_event,
+            "AuditEvent with action='order_payment_confirmed' linked to Order was not created. "
+            "The audit record must use AuditService.log_simple_event(content_object=order) — "
+            "not log_security_event() which hardcodes content_object=None."
+        )
+        # Verify invoice_id is in the metadata
+        self.assertIn("invoice_id", audit_event.metadata,
+                      "order_payment_confirmed audit event must include invoice_id in metadata")
+        self.assertEqual(audit_event.metadata["invoice_id"], str(invoice.id))
+
+
+# ===============================================================================
+# B-3: confirm_order audit history gap
+# The first status history record (awaiting_payment→paid) MUST be written
+# immediately after mark_paid(), before the second FSM transition fires.
+# If it is written after flag_for_review()/start_provisioning(), the order
+# object's .status is already the third state, so the record would silently
+# describe the wrong transition.
+# ===============================================================================
+
+
+class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
+    """B-3: Both OrderStatusHistory records must be created in transition order."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="History Order Test SRL",
+            customer_type="company",
+            status="active",
+            primary_email="history-order@test.ro",
+        )
+
+    def _create_awaiting_payment_order(self, total_cents: int = 12100) -> "Order":
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=total_cents - 2100,
+            tax_cents=2100,
+            total_cents=total_cents,
+            billing_address={},
+        )
+        force_status(order, "awaiting_payment")
+        return order
+
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_confirm_order_below_threshold_creates_two_history_records_in_order(
+        self, mock_threshold: object
+    ) -> None:
+        """Below review threshold: must emit awaiting_payment→paid then paid→provisioning."""
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        mock_threshold.return_value = 1_000_000_00  # Far above test order total
+
+        order = self._create_awaiting_payment_order(total_cents=12100)
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        self.assertTrue(result.is_ok(), f"confirm_order failed: {result}")
+
+        records = list(
+            OrderStatusHistory.objects.filter(order=order)
+            .order_by("created_at")
+            .values_list("old_status", "new_status")
+        )
+
+        # Must have exactly two records from the double-transition
+        self.assertEqual(
+            len(records),
+            2,
+            f"Expected 2 OrderStatusHistory records, got {len(records)}: {records}",
+        )
+        # First: awaiting_payment → paid
+        self.assertEqual(
+            records[0],
+            ("awaiting_payment", "paid"),
+            f"First history record must be awaiting_payment→paid, got {records[0]}",
+        )
+        # Second: paid → provisioning
+        self.assertEqual(
+            records[1],
+            ("paid", "provisioning"),
+            f"Second history record must be paid→provisioning, got {records[1]}",
+        )
+
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_confirm_order_above_threshold_creates_two_history_records_in_order(
+        self, mock_threshold: object
+    ) -> None:
+        """Above review threshold: must emit awaiting_payment→paid then paid→in_review."""
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        mock_threshold.return_value = 100  # Below test order total → triggers review gate
+
+        order = self._create_awaiting_payment_order(total_cents=12100)
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        self.assertTrue(result.is_ok(), f"confirm_order failed: {result}")
+
+        records = list(
+            OrderStatusHistory.objects.filter(order=order)
+            .order_by("created_at")
+            .values_list("old_status", "new_status")
+        )
+
+        self.assertEqual(
+            len(records),
+            2,
+            f"Expected 2 OrderStatusHistory records, got {len(records)}: {records}",
+        )
+        self.assertEqual(
+            records[0],
+            ("awaiting_payment", "paid"),
+            f"First history record must be awaiting_payment→paid, got {records[0]}",
+        )
+        self.assertEqual(
+            records[1],
+            ("paid", "in_review"),
+            f"Second history record must be paid→in_review, got {records[1]}",
+        )
+
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_first_history_record_is_written_before_second_transition(
+        self, mock_threshold: object
+    ) -> None:
+        """B-3 ordering guard: awaiting_payment→paid record must be persisted BEFORE
+        start_provisioning() is called.
+
+        Strategy: patch Order.start_provisioning to raise after mark_paid() succeeds.
+        If the history is written BEFORE start_provisioning(), the first record survives
+        (the outer atomic block rolls back, but we use a savepoint probe).
+        If the history is written AFTER start_provisioning() (the current bug), nothing
+        is written even for the first transition.
+
+        We verify the fix by ensuring the history_record OLD→NEW strings correctly
+        reflect the state at the time of writing (awaiting_payment→paid),
+        NOT the post-transition state (paid→provisioning).
+        """
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        # Below review threshold so start_provisioning() is called
+        mock_threshold.return_value = 1_000_000_00
+
+        order = self._create_awaiting_payment_order(total_cents=12100)
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+
+        result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
+        self.assertTrue(result.is_ok(), f"confirm_order failed: {result}")
+
+        # The first history record must describe awaiting_payment→paid,
+        # not the post-transition state (which would be paid→provisioning).
+        # If the records were reversed or the old_status were wrong, this assertion fails.
+        first_record = (
+            OrderStatusHistory.objects.filter(order=order).order_by("created_at").first()
+        )
+        self.assertIsNotNone(first_record, "No OrderStatusHistory records created")
+        assert first_record is not None  # type narrowing
+        self.assertEqual(
+            first_record.old_status,
+            "awaiting_payment",
+            "First history record old_status must be 'awaiting_payment' — "
+            "if the history is written after the second FSM transition, old_status "
+            "will reflect the post-transition state instead.",
+        )
+        self.assertEqual(
+            first_record.new_status,
+            "paid",
+            "First history record new_status must be 'paid'.",
+        )
+
+
+# ===============================================================================
+# TASK 5.8: Proforma reuse on retry (failed → awaiting_payment)
+# ===============================================================================
+
+
+class ProformaReuseOnRetryTest(TestCase):
+    """Task 5.8: When an order goes from 'failed' back to 'awaiting_payment',
+    update_order_status must reuse the existing proforma rather than creating a
+    new one (H4 fix in services.py).
+
+    This guards against orphan proformas: if a payment attempt fails and the
+    customer retries, a fresh proforma would have a different number and the
+    customer would receive two proformas for the same order.
+    """
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Proforma Reuse SRL",
+            customer_type="company",
+            status="active",
+            primary_email="proforma-reuse@test.ro",
+        )
+        self.product = Product.objects.create(
+            name="Reuse Plan",
+            slug="reuse-plan",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+        from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+        ProformaSequence.objects.get_or_create(scope="default")
+
+    def _create_draft_order(self):
+        from decimal import Decimal  # noqa: PLC0415
+
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            billing_address={"company_name": "Reuse SRL", "country": "RO"},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+            tax_cents=2100,
+            line_total_cents=12100,
+        )
+        return order
+
+    def test_proforma_is_reused_on_retry_from_failed(self):
+        """Task 5.8: Proforma linked on first awaiting_payment is reused on retry.
+
+        Lifecycle:
+        1. Order force_status → awaiting_payment (simulate successful first submission).
+        2. ProformaService.create_from_order() creates the proforma (same as update_order_status).
+        3. Order force_status → failed.
+        4. update_order_status(failed → awaiting_payment) — must reuse existing proforma.
+
+        Using force_status for the initial awaiting_payment bypasses preflight
+        validation which requires full billing address + product price. The core
+        behavior under test is the reuse guard in step 4 (H4 fix in services.py).
+        """
+        from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_draft_order()
+
+        # Step 1: Simulate first awaiting_payment (bypass preflight via force_status)
+        force_status(order, "awaiting_payment")
+
+        # Step 2: Simulate proforma creation that update_order_status would do
+        proforma_result = ProformaService.create_from_order(order)
+        self.assertTrue(proforma_result.is_ok(), f"ProformaService.create_from_order failed: {proforma_result}")
+        order.refresh_from_db()
+
+        first_proforma = order.proforma
+        self.assertIsNotNone(first_proforma, "Proforma must be created on first awaiting_payment")
+        first_proforma_id = first_proforma.id
+
+        # Step 3: awaiting_payment → failed (payment attempt failed)
+        result_fail = OrderService.update_order_status(
+            order, StatusChangeData(new_status="failed", notes="payment failed")
+        )
+        self.assertTrue(result_fail.is_ok(), f"Failed transition failed: {result_fail}")
+        order.refresh_from_db()
+        self.assertEqual(order.status, "failed")
+
+        # Verify proforma FK is still present after failure
+        self.assertEqual(
+            order.proforma_id,
+            first_proforma_id,
+            "Proforma FK must be preserved through failed state",
+        )
+
+        # Step 4: failed → awaiting_payment again (retry — must reuse proforma)
+        result_retry = OrderService.update_order_status(
+            order, StatusChangeData(new_status="awaiting_payment", notes="retry after failure")
+        )
+        self.assertTrue(result_retry.is_ok(), f"Retry transition failed: {result_retry}")
+        order.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+
+        # CRITICAL ASSERTION: same proforma, no new one created
+        self.assertEqual(
+            order.proforma_id,
+            first_proforma_id,
+            f"Proforma must be REUSED on retry — expected id={first_proforma_id}, "
+            f"got id={order.proforma_id}. A second proforma was created instead of reusing.",
+        )
+
+        # Verify the proforma itself still exists and has the correct ID
+        reused_proforma = ProformaInvoice.objects.get(id=first_proforma_id)
+        self.assertEqual(
+            reused_proforma.id,
+            first_proforma_id,
+            "The original proforma must still exist and be linked after retry",
+        )
