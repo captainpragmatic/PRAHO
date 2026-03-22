@@ -1348,7 +1348,10 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
         except (ValueError, TypeError, decimal.InvalidOperation):
             return JsonResponse({"error": "Invalid amount provided"}, status=400)
 
-        payment_method = request.POST.get("payment_method", "bank_transfer")
+        raw_method = request.POST.get("payment_method", "bank_transfer")
+        payment_method = raw_method.lower() if raw_method else "bank_transfer"
+        if payment_method not in ALLOWED_PAYMENT_METHODS:
+            return JsonResponse({"error": f"Invalid payment method: {raw_method}"}, status=400)
 
         # Create payment record
         Payment.objects.create(
@@ -1356,9 +1359,7 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
             invoice=invoice,
             amount_cents=int(amount * 100),
             currency=invoice.currency,
-            payment_method=payment_method
-            if payment_method in ["stripe", "bank", "paypal", "cash", "other"]
-            else "other",
+            payment_method=payment_method,
             status="succeeded",  # Changed from 'completed' to match model choices
             created_by=request.user,
         )

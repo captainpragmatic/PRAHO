@@ -247,9 +247,11 @@ class ProformaPaymentService:
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
         from apps.billing.services import ProformaConversionService  # noqa: PLC0415
 
-        # H9 fix: Normalize payment method at the convergence point so all callers
-        # get canonical values (e.g., "bank_transfer" → "bank", "card" → "stripe").
+        # H9 fix: Normalize and validate payment method at the convergence point.
         payment_method = _normalize_payment_method(payment_method)
+        valid_methods = frozenset({"bank", "stripe", "cash", "other"})
+        if payment_method not in valid_methods:
+            return Err(f"Invalid payment method: {payment_method}")
 
         try:
             # Lock proforma first (F4: consistent lock ordering prevents deadlock)
