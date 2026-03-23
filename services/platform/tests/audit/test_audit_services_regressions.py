@@ -1582,7 +1582,6 @@ class TestCustomersAuditService(TestCase):
         billing_profile.payment_terms = "net30"
         billing_profile.credit_limit = Decimal("1000.00")
         billing_profile.preferred_currency = "RON"
-        billing_profile.invoice_delivery_method = "email"
         billing_profile.auto_payment_enabled = True
         billing_profile.get_account_balance.return_value = Decimal("500.00")
         billing_profile.created_at = timezone.now()
@@ -1593,7 +1592,9 @@ class TestCustomersAuditService(TestCase):
     def test_log_address_event(self):
         address = _make_mock_with_pk(self._user.pk)
         address.customer = self._make_customer_mock()
-        address.address_type = "legal"
+        address.is_primary = True
+        address.is_billing = False
+        address.label = ""
         address.address_line1 = "Str. Test 1"
         address.address_line2 = ""
         address.city = "Bucharest"

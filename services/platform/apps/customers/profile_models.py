@@ -135,18 +135,6 @@ class CustomerBillingProfile(SoftDeleteModel):
         max_length=3, choices=CurrencyCode.choices(), default="RON", verbose_name=_("Monedă preferată")
     )
 
-    # Billing Preferences
-    invoice_delivery_method = models.CharField(
-        max_length=20,
-        choices=[
-            ("email", "Email"),
-            ("postal", "Poștă"),
-            ("both", "Email și poștă"),
-        ],
-        default="email",
-        verbose_name=_("Mod livrare facturi"),
-    )
-
     # Automatic Payment
     auto_payment_enabled = models.BooleanField(default=False)
 

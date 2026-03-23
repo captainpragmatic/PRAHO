@@ -124,7 +124,6 @@ def create_test_data() -> (  # Complexity: multi-step business logic
                 "credit_limit": Decimal("1000.00"),
                 "auto_payment_enabled": False,
                 "preferred_currency": "RON",
-                "invoice_delivery_method": "email",
             },
         )
         if created:
@@ -133,7 +132,7 @@ def create_test_data() -> (  # Complexity: multi-step business logic
         # 5. Create primary address for customer
         _primary_address, created = CustomerAddress.objects.get_or_create(
             customer=customer,
-            address_type="primary",
+            is_primary=True,
             defaults={
                 "address_line1": "Str. Revolutiei nr. 1",
                 "city": "Bucharest",

@@ -322,9 +322,7 @@ class UsageInvoiceService:
 
         # Try to get from customer addresses
         try:
-            billing_addr = CustomerAddress.objects.filter(
-                customer=customer, address_type="billing", is_current=True
-            ).first()
+            billing_addr = CustomerAddress.objects.filter(customer=customer, is_billing=True, is_current=True).first()
 
             if billing_addr:
                 address["address1"] = billing_addr.address_line1 or ""

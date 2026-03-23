@@ -137,13 +137,11 @@ class CustomerBillingProfileTestCase(TestCase):
             payment_terms=30,
             credit_limit=Decimal('5000.00'),
             preferred_currency='RON',
-            invoice_delivery_method='email'
         )
 
         self.assertEqual(billing_profile.payment_terms, 30)
         self.assertEqual(billing_profile.credit_limit, Decimal('5000.00'))
         self.assertEqual(billing_profile.preferred_currency, 'RON')
-        self.assertEqual(billing_profile.invoice_delivery_method, 'email')
 
     def test_credit_limit_properties(self):
         """Test credit limit calculation methods"""
@@ -164,12 +162,10 @@ class CustomerBillingProfileTestCase(TestCase):
         billing_profile = CustomerBillingProfile.objects.create(
             customer=self.customer,
             preferred_currency='RON',
-            invoice_delivery_method='email'
         )
 
         # Test that billing profile is created successfully
         self.assertEqual(billing_profile.preferred_currency, 'RON')
-        self.assertEqual(billing_profile.invoice_delivery_method, 'email')
 
         # The billing contact info is stored in the customer model
         self.assertEqual(self.customer.primary_email, 'billing@test.ro')

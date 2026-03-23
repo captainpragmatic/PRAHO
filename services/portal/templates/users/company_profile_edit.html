@@ -67,44 +67,6 @@
                             {% endif %}
                         </div>
 
-                        <!-- VAT Number -->
-                        <div>
-                            <label for="{{ form.vat_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.vat_number.label }}
-                                {% if form.vat_number.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.vat_number }}
-                            {% if form.vat_number.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.vat_number.help_text }}</p>
-                            {% endif %}
-                            {% if form.vat_number.errors %}
-                                {% for error in form.vat_number.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- Trade Registry Number -->
-                        <div>
-                            <label for="{{ form.trade_registry_number.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.trade_registry_number.label }}
-                                {% if form.trade_registry_number.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.trade_registry_number }}
-                            {% if form.trade_registry_number.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.trade_registry_number.help_text }}</p>
-                            {% endif %}
-                            {% if form.trade_registry_number.errors %}
-                                {% for error in form.trade_registry_number.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
                         <!-- Industry -->
                         <div class="md:col-span-2">
                             <label for="{{ form.industry.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
@@ -127,108 +89,29 @@
                     </div>
             {% end_section_card %}
 
-            <!-- Billing Address Section -->
-            {% trans 'Billing Address' as sc2_title %}
-            {% section_card title=sc2_title icon="map-pin" %}
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-                        <!-- Street Address -->
-                        <div class="md:col-span-2">
-                            <label for="{{ form.street_address.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.street_address.label }}
-                                {% if form.street_address.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.street_address }}
-                            {% if form.street_address.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.street_address.help_text }}</p>
-                            {% endif %}
-                            {% if form.street_address.errors %}
-                                {% for error in form.street_address.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- City -->
+            <!-- Tax & Addresses — managed via dedicated pages -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+                    <div class="flex items-center justify-between">
                         <div>
-                            <label for="{{ form.city.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.city.label }}
-                                {% if form.city.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.city }}
-                            {% if form.city.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.city.help_text }}</p>
-                            {% endif %}
-                            {% if form.city.errors %}
-                                {% for error in form.city.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
+                            <dt class="text-sm font-medium text-slate-300">{% trans "Tax & VAT" %}</dt>
+                            <dd class="text-xs text-slate-400 mt-1">{% trans "CUI, VAT number, reverse charge" %}</dd>
                         </div>
-
-                        <!-- State/County -->
-                        <div>
-                            <label for="{{ form.state.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.state.label }}
-                                {% if form.state.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.state }}
-                            {% if form.state.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.state.help_text }}</p>
-                            {% endif %}
-                            {% if form.state.errors %}
-                                {% for error in form.state.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- Postal Code -->
-                        <div>
-                            <label for="{{ form.postal_code.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.postal_code.label }}
-                                {% if form.postal_code.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.postal_code }}
-                            {% if form.postal_code.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.postal_code.help_text }}</p>
-                            {% endif %}
-                            {% if form.postal_code.errors %}
-                                {% for error in form.postal_code.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
-                        <!-- Country -->
-                        <div>
-                            <label for="{{ form.country.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
-                                {{ form.country.label }}
-                                {% if form.country.field.required %}
-                                    <span class="text-red-400">*</span>
-                                {% endif %}
-                            </label>
-                            {{ form.country }}
-                            {% if form.country.help_text %}
-                                <p class="mt-1 text-sm text-slate-400">{{ form.country.help_text }}</p>
-                            {% endif %}
-                            {% if form.country.errors %}
-                                {% for error in form.country.errors %}
-                                    <p class="mt-1 text-sm text-red-400">{{ error }}</p>
-                                {% endfor %}
-                            {% endif %}
-                        </div>
-
+                        {% trans "Manage" as tax_btn %}
+                        {% button tax_btn variant="secondary" size="sm" href="/company/tax/" icon="edit" %}
                     </div>
-            {% end_section_card %}
+                </div>
+                <div class="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-300">{% trans "Addresses" %}</dt>
+                            <dd class="text-xs text-slate-400 mt-1">{% trans "Billing & primary addresses" %}</dd>
+                        </div>
+                        {% trans "Manage" as addr_btn %}
+                        {% button addr_btn variant="secondary" size="sm" href="/company/addresses/" icon="map-pin" %}
+                    </div>
+                </div>
+            </div>
 
             <!-- Business Contact Section -->
             {% trans 'Business Contact' as sc3_title %}

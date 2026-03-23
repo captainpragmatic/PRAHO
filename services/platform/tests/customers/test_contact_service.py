@@ -147,7 +147,7 @@ class TestContactServiceCreateAddress(TestCase):
 
     def test_create_address_persisted(self) -> None:
         addr_data = AddressData(
-            address_type="legal",
+            is_primary=True,
             address_line1="Str. Test Nr. 1",
             city="București",
             county="Sector 1",
@@ -158,7 +158,7 @@ class TestContactServiceCreateAddress(TestCase):
 
     def test_create_address_is_current_by_default(self) -> None:
         addr_data = AddressData(
-            address_type="legal",
+            is_primary=True,
             address_line1="Str. Test Nr. 1",
             city="București",
             county="Sector 1",
@@ -168,9 +168,9 @@ class TestContactServiceCreateAddress(TestCase):
         self.assertTrue(addr.is_current)
 
     def test_new_current_address_supersedes_old(self) -> None:
-        """Creating a second current address of the same type makes the first non-current."""
+        """Creating a second current address supersedes the first (signal sets is_current=False)."""
         addr_data_v1 = AddressData(
-            address_type="billing",
+            is_billing=True,
             address_line1="Str. Veche Nr. 10",
             city="Cluj-Napoca",
             county="Cluj",
@@ -179,7 +179,7 @@ class TestContactServiceCreateAddress(TestCase):
         addr_v1 = ContactService.create_address(self.customer, self.user, addr_data_v1)
 
         addr_data_v2 = AddressData(
-            address_type="billing",
+            is_billing=True,
             address_line1="Str. Noua Nr. 20",
             city="Cluj-Napoca",
             county="Cluj",

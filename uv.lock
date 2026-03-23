@@ -1787,6 +1787,7 @@ dependencies = [
     { name = "lxml" },
     { name = "python-dateutil" },
     { name = "python-dotenv" },
+    { name = "python-stdnum" },
     { name = "pytz" },
     { name = "requests" },
 ]
@@ -1893,6 +1894,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "python-dateutil", specifier = ">=2.8.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "python-stdnum", specifier = ">=2.2" },
     { name = "pytz", specifier = ">=2023.3" },
     { name = "requests", specifier = ">=2.31.0" },
 ]

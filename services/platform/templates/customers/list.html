@@ -5,304 +5,244 @@
 {% block title %}{% trans 'Customers' %} - PRAHO Platform{% endblock %}
 
 {% block content %}
-<div class="px-4 py-6">
-  <!-- Header with Search and Actions -->
-  <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-    <div>
-      <h1 class="font-bold text-white">{% icon "users" size="lg" %} {% trans 'Customers' %}</h1>
-      <p class="text-slate-400 mt-1">{% trans 'Manage your companies and contacts.' %}</p>
+<div class="space-y-6">
+  <!-- Breadcrumb -->
+  {% include "components/breadcrumb.html" with items=breadcrumb_items %}
+
+  <!-- Header Card -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+    <!-- Desktop Layout -->
+    <div class="hidden md:block p-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+            {% icon "users" size="lg" css_class="text-white" %}
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold text-white">{% trans "Customers" %}</h1>
+            <p class="text-slate-400">{% trans "Manage your companies and contacts." %}</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-6">
+          <div class="grid grid-cols-2 gap-6">
+            <div class="text-center">
+              <p class="text-2xl font-bold text-green-400">{{ active_count|default:0 }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Active' %}</p>
+            </div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-white">{{ total_count|default:0 }}</p>
+              <p class="text-xs text-slate-400">{% trans 'Total' %}</p>
+            </div>
+          </div>
+          {% include "customers/partials/header_action.html" %}
+        </div>
+      </div>
     </div>
 
-    {% url 'customers:create' as create_url %}
-    <div class="sm:flex-shrink-0">
-      {% trans "New Customer" as bt1 %}{% button bt1 variant="primary" href=create_url icon="plus" %}
+    <!-- Mobile Layout -->
+    <div class="md:hidden p-4">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+            {% icon "users" css_class="text-white" %}
+          </div>
+          <div>
+            <h1 class="text-lg font-bold text-white">{% trans "Customers" %}</h1>
+          </div>
+        </div>
+        {% include "customers/partials/header_action.html" %}
+      </div>
+
+      <!-- Mobile Stats -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-green-400">{{ active_count|default:0 }}</p>
+          <p class="text-xs text-slate-400">{% trans 'Active' %}</p>
+        </div>
+        <div class="text-center py-2">
+          <p class="text-lg font-bold text-white">{{ total_count|default:0 }}</p>
+          <p class="text-xs text-slate-400">{% trans 'Total' %}</p>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- Search and Filters -->
-  <div class="bg-slate-800 rounded-lg p-4 mb-6 border border-slate-700">
-    <form method="get" class="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
+  <!-- Filters -->
+  <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+    <form hx-get="{{ search_htmx_url }}"
+          hx-target="#customers-container"
+          hx-trigger="keyup changed delay:600ms from:#search, change from:select[name='status'], change from:select[name='type']"
+          hx-sync="this:replace"
+          hx-params="q,status,type"
+          hx-indicator="#loading-indicator"
+          class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
       <div class="flex-1">
-        <label for="search" class="block text-sm font-medium text-slate-300 mb-1">
-          {% icon "search" %} {% trans 'Search' %}
-        </label>
-        {% input_field name="search" value=search_query placeholder="Name, CNP/CUI, email..." %}
+        <label for="search" class="sr-only">{% trans 'Search' %}</label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            {% icon "search" css_class="text-slate-400" %}
+          </div>
+          <input type="text" id="search" name="q" value="{{ search_query|default:'' }}" autocomplete="off"
+            class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            placeholder="{% trans 'Search by name, CUI, email...' %}">
+        </div>
       </div>
 
-      <div class="flex gap-2 sm:gap-4">
-        {% trans "Search" as bt2 %}{% button bt2 variant="primary" type="submit" %}
-
-        {% if search_query %}
-        {% url 'customers:list' as list_url %}
-        {% trans "Reset" as bt3 %}{% button bt3 variant="secondary" href=list_url %}
-        {% endif %}
+      <!-- Status Filter Tabs -->
+      <div class="flex flex-wrap gap-1">
+        {% for tab in status_tabs %}
+        <button type="button"
+          onclick="this.closest('form').querySelector('select[name=status]').value='{{ tab.value }}'; this.closest('form').querySelector('select[name=status]').dispatchEvent(new Event('change'));"
+          class="px-3 py-1.5 text-sm rounded-md transition-colors {% if filter_active_tab == tab.value %}bg-slate-600 {{ tab.text_class }} border border-{{ tab.border_class|default:'slate-500' }}{% else %}text-slate-400 hover:text-white hover:bg-slate-700{% endif %}">
+          {{ tab.label }}
+        </button>
+        {% endfor %}
       </div>
+
+      <!-- Hidden status select (driven by tab buttons) -->
+      <select name="status" class="hidden">
+        <option value=""{% if not status_filter %} selected{% endif %}>{% trans 'All' %}</option>
+        <option value="active"{% if status_filter == 'active' %} selected{% endif %}>{% trans 'Active' %}</option>
+        <option value="prospect"{% if status_filter == 'prospect' %} selected{% endif %}>{% trans 'Prospect' %}</option>
+        <option value="inactive"{% if status_filter == 'inactive' %} selected{% endif %}>{% trans 'Inactive' %}</option>
+        <option value="suspended"{% if status_filter == 'suspended' %} selected{% endif %}>{% trans 'Suspended' %}</option>
+      </select>
+
+      <!-- Type Filter -->
+      {% include "customers/partials/type_filter.html" %}
     </form>
   </div>
 
-  <!-- Results Stats -->
-  <div class="mb-4">
-    <p class="text-slate-400 text-sm">
-      {% if search_query %}
-      {% filter force_escape %}{% blocktrans count total_customers=total_customers %}
-      {{ total_customers }} result for "{{ search_query }}"
-      {% plural %}
-      {{ total_customers }} results for "{{ search_query }}"
-      {% endblocktrans %}{% endfilter %}
-      {% else %}
-      {% filter force_escape %}{% blocktrans count total_customers=total_customers %}
-      {{ total_customers }} customer in total
-      {% plural %}
-      {{ total_customers }} customers in total
-      {% endblocktrans %}{% endfilter %}
-      {% endif %}
-    </p>
-  </div>
-
-  <!-- Customers List -->
-  <!-- Desktop Table View (hidden on mobile) -->
-  <div class="hidden lg:block bg-slate-800 rounded-lg border border-slate-700">
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="bg-slate-700">
-          <tr>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Customer' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Contact' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'ID (CNP/CUI/VAT)' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Status' %}
-            </th>
-            <th class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
-              {% trans 'Actions' %}
-            </th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-700">
-          {% for customer in customers %}
-          <tr class="hover:bg-slate-700/50 transition-colors">
-            <td class="px-6 py-4">
-              <div>
-                <div class="text-white font-medium flex items-center gap-2">
-                  <a href="{% url 'customers:detail' customer.pk %}" class="hover:text-blue-400">
-                    {{ customer.get_display_name }}
-                  </a>
-                  {# Show customer type badge: Individual / Company / PFA/SRL / NGO #}
-                  {% if customer.customer_type %}
-                    {% if customer.customer_type == "individual" %}
-                      {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
-                    {% elif customer.customer_type == "company" %}
-                      {% badge customer.get_customer_type_display variant="primary" size="sm" %}
-                    {% elif customer.customer_type == "pfa" %}
-                      {% badge customer.get_customer_type_display variant="info" size="sm" %}
-                    {% elif customer.customer_type == "ngo" %}
-                      {% badge customer.get_customer_type_display variant="success" size="sm" %}
-                    {% else %}
-                      {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
-                    {% endif %}
-                  {% endif %}
-                </div>
-                <div class="text-slate-400 text-sm">
-                  {{ customer.legal_address|truncatechars:40 }}
-                </div>
-              </div>
-            </td>
-
-            <td class="px-6 py-4">
-              <div>
-                <div class="text-white">{{ customer.contact_person }}</div>
-                <div class="text-slate-400 text-sm">
-                  <div>{% icon "mail" %} {{ customer.contact_email }}</div>
-                  <div>{% icon "phone" %} {{ customer.contact_phone }}</div>
-                </div>
-              </div>
-            </td>
-
-            <td class="px-6 py-4">
-              <div>
-                {% if customer.customer_type == 'individual' %}
-                  {% if customer.tax_profile and customer.tax_profile.cnp %}
-                    <div class="text-white font-mono">{% icon "receipt" %} {{ customer.tax_profile.cnp|slice:':8' }}</div>
-                  {% else %}
-                    <div class="text-slate-400 text-sm">—</div>
-                  {% endif %}
-                {% else %}
-                  {% if customer.tax_profile and customer.tax_profile.cui %}
-                    <div class="text-white font-mono">🇷🇴 {{ customer.tax_profile.cui }}</div>
-                  {% endif %}
-                  {% if customer.tax_profile and customer.tax_profile.vat_number %}
-                    <div class="text-slate-400 text-sm">{% icon "currency" %} {{ customer.tax_profile.vat_number }}</div>
-                  {% endif %}
-                {% endif %}
-              </div>
-            </td>
-
-            <td class="px-6 py-4">
-              {% if customer.status == 'active' %}
-                {% badge customer.get_status_display variant="success" icon="check" %}
-              {% elif customer.status == 'suspended' %}
-                {% badge customer.get_status_display variant="warning" icon="clock" %}
-              {% elif customer.status == 'inactive' %}
-                {% badge customer.get_status_display variant="secondary" icon="clock" %}
-              {% elif customer.status == 'prospect' %}
-                {% badge customer.get_status_display variant="info" icon="clock" %}
-              {% else %}
-                {% badge customer.get_status_display variant="secondary" %}
-              {% endif %}
-            </td>
-
-            <td class="px-6 py-4">
-              <div class="flex items-center space-x-2">
-                {% url 'customers:detail' customer.pk as detail_url %}
-                {% url 'customers:edit' customer.pk as edit_url %}
-                {% trans "View" as bt4 %}{% button bt4 variant="info" href=detail_url size="sm" %}
-                {% trans "Edit" as bt5 %}{% button bt5 variant="success" href=edit_url size="sm" %}
-              </div>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="5" class="px-6 py-12">
-              {% if search_query %}
-                {% filter force_escape %}{% blocktrans asvar no_results %}No customers found for "{{ search_query }}"{% endblocktrans %}{% endfilter %}
-                {% empty_state no_results icon="search" %}
-              {% else %}
-                {% trans 'No customers yet' as no_cust %}
-                {% url 'customers:create' as create_url %}
-                {% trans 'Create the first customer' as create_label %}
-                {% empty_state no_cust icon="users" action_url=create_url action_text=create_label %}
-              {% endif %}
-            </td>
-          </tr>
+  <!-- Loading Indicator -->
+  <div id="loading-indicator" class="htmx-indicator">
+    <!-- Desktop Skeleton -->
+    <div class="hidden lg:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
+      <div class="animate-pulse">
+        <div class="bg-slate-800 px-6 py-3">
+          <div class="grid grid-cols-6 gap-4">
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+            <div class="h-4 bg-slate-600 rounded"></div>
+          </div>
+        </div>
+        <div class="divide-y divide-slate-700">
+          {% for i in "123456" %}
+          <div class="px-6 py-4 flex items-center space-x-4">
+            <div class="flex-1 space-y-2">
+              <div class="h-4 bg-slate-600 rounded w-3/4"></div>
+              <div class="h-3 bg-slate-700 rounded w-1/2"></div>
+            </div>
+            <div class="h-4 w-32 bg-slate-600 rounded"></div>
+            <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+            <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+          </div>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Mobile Card View (visible on mobile and tablet) -->
-  <div class="lg:hidden space-y-4">
-    {% for customer in customers %}
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
-      <!-- Customer Header -->
-      <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-3">
-        <div class="flex-1">
-          <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-2">
-            <a href="{% url 'customers:detail' customer.pk %}" class="text-white font-medium hover:text-blue-400 text-lg">
-              {{ customer.get_display_name }}
-            </a>
-
-            <!-- Customer Type Badge -->
-            {% if customer.customer_type %}
-              {% if customer.customer_type == "individual" %}
-                {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
-              {% elif customer.customer_type == "company" %}
-                {% badge customer.get_customer_type_display variant="primary" size="sm" %}
-              {% elif customer.customer_type == "pfa" %}
-                {% badge customer.get_customer_type_display variant="info" size="sm" %}
-              {% elif customer.customer_type == "ngo" %}
-                {% badge customer.get_customer_type_display variant="success" size="sm" %}
-              {% else %}
-                {% badge customer.get_customer_type_display variant="secondary" size="sm" %}
-              {% endif %}
-            {% endif %}
-          </div>
-
-          <!-- Address -->
-          {% if customer.legal_address %}
-          <div class="text-slate-400 text-sm mb-2">
-            {% icon "globe" %} {{ customer.legal_address|truncatechars:50 }}
-          </div>
-          {% endif %}
-        </div>
-
-        <!-- Status Badge -->
-        <div class="sm:flex-shrink-0">
-          {% if customer.status == 'active' %}
-            {% badge customer.get_status_display variant="success" icon="check" %}
-          {% elif customer.status == 'suspended' %}
-            {% badge customer.get_status_display variant="warning" icon="clock" %}
-          {% elif customer.status == 'inactive' %}
-            {% badge customer.get_status_display variant="secondary" icon="clock" %}
-          {% elif customer.status == 'prospect' %}
-            {% badge customer.get_status_display variant="info" icon="clock" %}
-          {% else %}
-            {% badge customer.get_status_display variant="secondary" %}
-          {% endif %}
-        </div>
-      </div>
-
-      <!-- Customer Details Grid -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-        <!-- Contact Information -->
-        <div>
-          <h4 class="text-slate-300 font-medium text-sm mb-2">{% trans 'Contact' %}</h4>
-          <div class="space-y-1 text-sm">
-            {% if customer.contact_person %}
-            <div class="text-white">{% icon "user" %} {{ customer.contact_person }}</div>
-            {% endif %}
-            {% if customer.contact_email %}
-            <div class="text-slate-400">{% icon "mail" %} {{ customer.contact_email|truncatechars:30 }}</div>
-            {% endif %}
-            {% if customer.contact_phone %}
-            <div class="text-slate-400">{% icon "phone" %} {{ customer.contact_phone }}</div>
-            {% endif %}
-          </div>
-        </div>
-
-        <!-- Tax Information -->
-        <div>
-          <h4 class="text-slate-300 font-medium text-sm mb-2">{% trans 'Tax Information' %}</h4>
-          <div class="space-y-1 text-sm">
-            {% if customer.customer_type == 'individual' %}
-              {% if customer.tax_profile and customer.tax_profile.cnp %}
-                <div class="text-white font-mono">{% icon "receipt" %} {{ customer.tax_profile.cnp|slice:':8' }}</div>
-              {% else %}
-                <div class="text-slate-400">—</div>
-              {% endif %}
-            {% else %}
-              {% if customer.tax_profile and customer.tax_profile.cui %}
-                <div class="text-white font-mono">🇷🇴 {{ customer.tax_profile.cui }}</div>
-              {% endif %}
-              {% if customer.tax_profile and customer.tax_profile.vat_number %}
-                <div class="text-slate-400">{% icon "currency" %} {{ customer.tax_profile.vat_number }}</div>
-              {% endif %}
-            {% endif %}
-          </div>
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-700">
-        {% url 'customers:detail' customer.pk as detail_url %}
-        {% url 'customers:edit' customer.pk as edit_url %}
-        <div class="flex gap-2">
-          {% trans "View Details" as bt6 %}{% button bt6 variant="info" href=detail_url size="sm" %}
-          {% trans "Edit" as bt7 %}{% button bt7 variant="success" href=edit_url size="sm" %}
         </div>
       </div>
     </div>
-    {% empty %}
-    {% if search_query %}
-      {% filter force_escape %}{% blocktrans asvar no_results %}No customers found for "{{ search_query }}"{% endblocktrans %}{% endfilter %}
-      {% empty_state no_results icon="search" %}
-    {% else %}
-      {% trans 'No customers yet' as no_cust %}
-      {% url 'customers:create' as create_url %}
-      {% trans 'Create the first customer' as create_label %}
-      {% empty_state no_cust icon="users" action_url=create_url action_text=create_label %}
-    {% endif %}
-    {% endfor %}
+
+    <!-- Mobile Skeleton -->
+    <div class="lg:hidden space-y-3">
+      <div class="animate-pulse">
+        {% for i in "123456" %}
+        <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex-1 space-y-2">
+              <div class="h-4 bg-slate-600 rounded w-2/3"></div>
+              <div class="h-3 bg-slate-700 rounded w-1/3"></div>
+            </div>
+            <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="h-3 bg-slate-700 rounded"></div>
+            <div class="h-3 bg-slate-700 rounded"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Loading Text -->
+    <div class="flex items-center justify-center p-4 bg-slate-800/30 rounded-b-lg">
+      {% spinner size="md" css_class="mr-2" %}
+      <span class="text-slate-400 text-sm">{% trans 'Loading customers...' %}</span>
+    </div>
   </div>
 
-  <!-- Pagination -->
-  {% with extra="&search="|add:search_query %}
-  {% include "components/pagination.html" with page_obj=customers extra_params=extra %}
-  {% endwith %}
+  <!-- Customer List Container -->
+  <div id="customers-container" class="relative">
+    <!-- Inline Loading Skeleton -->
+    <div id="customers-skeleton" class="htmx-indicator absolute inset-0 z-10 bg-slate-900">
+      <div class="hidden lg:block w-full h-full">
+        <div class="w-full bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden h-full">
+          <div class="animate-pulse h-full">
+            <div class="bg-slate-800 px-6 py-3">
+              <div class="grid grid-cols-6 gap-4">
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+                <div class="h-4 bg-slate-600 rounded"></div>
+              </div>
+            </div>
+            <div class="divide-y divide-slate-700">
+              {% for i in "123456" %}
+              <div class="px-6 py-4 flex items-center space-x-4">
+                <div class="flex-1 space-y-2">
+                  <div class="h-4 bg-slate-600 rounded w-3/4"></div>
+                  <div class="h-3 bg-slate-700 rounded w-1/2"></div>
+                </div>
+                <div class="h-4 w-32 bg-slate-600 rounded"></div>
+                <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+                <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lg:hidden w-full h-full">
+        <div class="space-y-3 animate-pulse">
+          {% for i in "123456" %}
+          <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+            <div class="flex items-start justify-between mb-3">
+              <div class="flex-1 space-y-2">
+                <div class="h-4 bg-slate-600 rounded w-2/3"></div>
+                <div class="h-3 bg-slate-700 rounded w-1/3"></div>
+              </div>
+              <div class="h-6 w-16 bg-slate-600 rounded-full"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="h-3 bg-slate-700 rounded"></div>
+              <div class="h-3 bg-slate-700 rounded"></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Content that will be swapped by HTMX -->
+    <div id="customers-content">
+      {% include 'customers/partials/customer_table.html' %}
+    </div>
+  </div>
 </div>
+
+<style>
+/* HTMX Loading Indicator Styles */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  display: block;
+}
+</style>
 {% endblock %}

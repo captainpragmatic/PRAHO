@@ -120,9 +120,7 @@ class Command(BaseCommand):
     @staticmethod
     def _billing_address_snapshot(customer: Customer) -> dict[str, str]:
         """Build billing address JSON snapshot from customer — used by orders, invoices, proformas."""
-        billing_addr = (
-            customer.addresses.filter(address_type="billing", is_current=True).first() or customer.addresses.first()
-        )
+        billing_addr = customer.addresses.filter(is_billing=True, is_current=True).first() or customer.addresses.first()
         if not billing_addr:
             return {}
         return {
@@ -812,10 +810,11 @@ class Command(BaseCommand):
 
     def _setup_test_company_profiles(self, customer: Customer, test_user: "User") -> None:
         """Create addresses, tax/billing profiles, payment methods, notes, and membership for test company."""
-        # All 4 address types — fully filled out
+        # Primary address (also serves as billing for this customer)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="primary",
+            is_primary=True,
+            is_billing=False,
             address_line1="Str. Victoriei nr. 10",
             address_line2="Bl. A1, Sc. 2, Et. 3, Ap. 15",
             city="București",
@@ -825,9 +824,11 @@ class Command(BaseCommand):
             is_current=True,
             is_validated=True,
         )
+        # Separate billing address
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="billing",
+            is_primary=False,
+            is_billing=True,
             address_line1="Str. Revoluției nr. 1",
             address_line2="Corp B, Parter",
             city="București",
@@ -837,21 +838,11 @@ class Command(BaseCommand):
             is_current=True,
             is_validated=True,
         )
+        # Extra address (no special role)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="legal",
-            address_line1="Bd. Unirii nr. 45",
-            address_line2="Et. 5, Birou 501",
-            city="București",
-            county="București",
-            postal_code="030167",
-            country="România",
-            is_current=True,
-            is_validated=True,
-        )
-        CustomerAddress.objects.create(
-            customer=customer,
-            address_type="delivery",
+            is_primary=False,
+            is_billing=False,
             address_line1="Str. Depozitelor nr. 8",
             city="București",
             county="București",
@@ -875,7 +866,6 @@ class Command(BaseCommand):
             customer=customer,
             payment_terms=30,
             preferred_currency="RON",
-            invoice_delivery_method="email",
             auto_payment_enabled=True,
             credit_limit=Decimal("25000.00"),
         )
@@ -1031,13 +1021,11 @@ class Command(BaseCommand):
 
         # --- Billing profile with variety ---
         currencies = ["RON", "EUR"]
-        delivery_methods = ["email", "postal", "both"]
         payment_terms_options = [15, 30, 45, 60]
         CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=payment_terms_options[index % len(payment_terms_options)],
             preferred_currency=currencies[index % len(currencies)],
-            invoice_delivery_method=delivery_methods[index % len(delivery_methods)],
             auto_payment_enabled=index % 4 == 0,
             credit_limit=Decimal("5000.00") if customer_type == "company" else Decimal("0.00"),
         )
@@ -1296,12 +1284,10 @@ class Command(BaseCommand):
             },
         ]
 
-        address_types = ["primary", "billing", "delivery", "legal"]
         payment_method_types = ["stripe_card", "bank_transfer", "cash", "other"]
         note_types = ["general", "call", "email", "meeting", "complaint", "compliment"]
         membership_roles = ["owner", "billing", "tech", "viewer"]
         currencies = ["RON", "EUR"]
-        delivery_methods = ["email", "postal", "both"]
         contact_methods = ["email", "phone", "both"]
 
         for idx, cust_data in enumerate(permutations):
@@ -1316,7 +1302,7 @@ class Command(BaseCommand):
 
             self._perm_addresses(customer, idx, city, county)
             self._perm_tax_profile(customer, idx)
-            self._perm_billing_profile(customer, idx, currencies, delivery_methods)
+            self._perm_billing_profile(customer, idx, currencies)
             self._perm_payment_methods(customer, idx, payment_method_types)
             self._perm_notes(fake, customer, idx, admin_user, note_types)
             self._perm_memberships(
@@ -1349,7 +1335,8 @@ class Command(BaseCommand):
         # Historical billing address (version 1, superseded)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="billing",
+            is_billing=True,
+            is_primary=False,
             address_line1=f"Str. Veche nr. {idx + 1}",
             city=city,
             county=county,
@@ -1362,7 +1349,8 @@ class Command(BaseCommand):
         # Current billing address (version 2)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="billing",
+            is_billing=True,
+            is_primary=False,
             address_line1=f"Bd. Unirii nr. {idx * 10 + 1}",
             city=city,
             county=county,
@@ -1375,7 +1363,8 @@ class Command(BaseCommand):
         # Primary address
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="primary",
+            is_primary=True,
+            is_billing=False,
             address_line1=f"Str. Principală nr. {idx + 10}",
             city=city,
             county=county,
@@ -1384,31 +1373,18 @@ class Command(BaseCommand):
             is_current=True,
             is_validated=idx % 2 == 0,
         )
-        # Delivery address (not for minimal customer #7)
+        # Extra address (not for minimal customer #7)
         if idx != 6:
             CustomerAddress.objects.create(
                 customer=customer,
-                address_type="delivery",
+                is_primary=False,
+                is_billing=False,
                 address_line1=f"Str. Livrare nr. {idx + 20}",
                 city=city,
                 county=county,
                 postal_code=f"{300000 + idx * 1111}",
                 country="România",
                 is_current=True,
-            )
-        # Legal address for business types
-        if customer.customer_type in ("company", "pfa", "ngo"):
-            CustomerAddress.objects.create(
-                customer=customer,
-                address_type="legal",
-                address_line1=f"Str. Sediu Social nr. {idx + 30}",
-                address_line2=f"Et. {idx + 1}, Ap. {idx * 3 + 1}",
-                city=city,
-                county=county,
-                postal_code=f"{400000 + idx * 1111}",
-                country="România",
-                is_current=True,
-                is_validated=True,
             )
 
     def _perm_tax_profile(self, customer: Customer, idx: int) -> None:
@@ -1460,15 +1436,12 @@ class Command(BaseCommand):
                 is_vat_payer=False,
             )
 
-    def _perm_billing_profile(
-        self, customer: Customer, idx: int, currencies: list[str], delivery_methods: list[str]
-    ) -> None:
+    def _perm_billing_profile(self, customer: Customer, idx: int, currencies: list[str]) -> None:
         """Create deterministic billing profile for a permutation customer."""
         CustomerBillingProfile.objects.create(
             customer=customer,
             payment_terms=[15, 30, 45, 60][idx % 4],
             preferred_currency=currencies[idx % len(currencies)],
-            invoice_delivery_method=delivery_methods[idx % len(delivery_methods)],
             auto_payment_enabled=idx in (5, 6),
             credit_limit=Decimal("10000.00") if customer.customer_type == "company" else Decimal("0.00"),
         )
@@ -1620,7 +1593,8 @@ class Command(BaseCommand):
         # Historical billing address (version 1, non-current) — demonstrates versioning
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="billing",
+            is_billing=True,
+            is_primary=False,
             address_line1=fake.street_address(),
             city=fake.city(),
             county=county,
@@ -1632,7 +1606,8 @@ class Command(BaseCommand):
         # Current billing address (version 2)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="billing",
+            is_billing=True,
+            is_primary=False,
             address_line1=fake.street_address(),
             city=fake.city(),
             county=county,
@@ -1642,10 +1617,12 @@ class Command(BaseCommand):
             is_validated=True,
             version=2,
         )
-        # Primary address
+        # Primary address (also used for registered office for business types)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type="primary",
+            is_primary=True,
+            is_billing=False,
+            label="Sediu social" if customer_type in ("company", "pfa") else "",
             address_line1=fake.street_address(),
             city=fake.city(),
             county=county,
@@ -1653,23 +1630,12 @@ class Command(BaseCommand):
             country="România",
             is_current=True,
         )
-        # Legal address for business types
-        if customer_type in ("company", "pfa"):
-            CustomerAddress.objects.create(
-                customer=customer,
-                address_type="legal",
-                address_line1=f"Str. {fake.last_name()} nr. {fake.random_int(min=1, max=200)}",
-                city=fake.city(),
-                county=county,
-                postal_code=fake.postcode(),
-                country="România",
-                is_current=True,
-            )
-        # Delivery address for some
+        # Extra address for some customers
         if index % 3 == 0:
             CustomerAddress.objects.create(
                 customer=customer,
-                address_type="delivery",
+                is_primary=False,
+                is_billing=False,
                 address_line1=fake.street_address(),
                 city=fake.city(),
                 county=county,

@@ -9,7 +9,6 @@ import logging
 from typing import cast
 
 from django.contrib import messages
-from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
@@ -17,7 +16,6 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.decorators import staff_required
 from apps.users.models import User
 
-from .contact_models import CustomerAddress
 from .customer_service import CustomerService
 from .forms import CustomerAddressForm, CustomerNoteForm
 
@@ -40,24 +38,9 @@ def customer_address_add(request: HttpRequest, customer_id: int) -> HttpResponse
             address = form.save(commit=False)
             address.customer = customer
 
-            # Handle current address versioning atomically
-            address_type = address.address_type
-            with transaction.atomic():
-                existing_current = (
-                    CustomerAddress.objects.filter(customer=customer, address_type=address_type, is_current=True)
-                    .select_for_update(of=("self",))
-                    .first()
-                )
-
-                if existing_current:
-                    existing_current.is_current = False
-                    existing_current.save()
-                    address.version = existing_current.version + 1
-
-                address.save()
-            messages.success(
-                request, _("✅ {address_type} address added").format(address_type=address.get_address_type_display())
-            )
+            # The model's save() enforces is_primary / is_billing exclusivity automatically
+            address.save()
+            messages.success(request, _("✅ Address added"))
             return redirect("customers:detail", customer_id=customer.id)
         else:
             messages.error(request, _("❌ Please correct the errors below"))

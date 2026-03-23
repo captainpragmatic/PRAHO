@@ -39,11 +39,13 @@ ROMANIAN_POSTAL_CODE_LENGTH = 6
 class AddressData:
     """Data container for address creation."""
 
-    address_type: str
     address_line1: str
     city: str
     county: str
     postal_code: str
+    is_primary: bool = False
+    is_billing: bool = False
+    label: str = ""
 
 
 class ContactService:
@@ -51,27 +53,46 @@ class ContactService:
 
     @staticmethod
     def create_address(customer: Customer, user: User, address_data: AddressData, **kwargs: Any) -> CustomerAddress:
-        """Create customer address with versioning support (atomic)."""
-        with transaction.atomic():
-            # If creating a new current address of this type, mark existing ones as non-current
-            if kwargs.get("is_current", True):
-                CustomerAddress.objects.filter(
-                    customer=customer, address_type=address_data.address_type, is_current=True
-                ).select_for_update(of=("self",)).update(is_current=False)
+        """Create customer address with role-aware versioning (atomic).
 
-                # Get the next version number
+        When a new primary or billing address is created, the previous address holding
+        that same role is marked is_current=False (historical record). The model's
+        save() enforces flag exclusivity (only one is_primary / one is_billing active
+        at a time), while this method handles the is_current versioning per role.
+        """
+        with transaction.atomic():
+            is_new_current = kwargs.get("is_current", True)
+
+            # If creating a new current address, get the next version number
+            if is_new_current:
                 last_version = (
-                    CustomerAddress.objects.filter(customer=customer, address_type=address_data.address_type).aggregate(
-                        models.Max("version")
-                    )["version__max"]
+                    CustomerAddress.objects.filter(customer=customer).aggregate(models.Max("version"))["version__max"]
                     or 0
                 )
-
                 kwargs["version"] = last_version + 1
+
+                # Mark previous same-role addresses as non-current (per-role versioning).
+                # This creates a historical audit trail while only the new address is "live".
+                if address_data.is_primary:
+                    CustomerAddress.objects.filter(
+                        customer=customer,
+                        is_primary=True,
+                        is_current=True,
+                        deleted_at__isnull=True,
+                    ).update(is_current=False)
+                if address_data.is_billing:
+                    CustomerAddress.objects.filter(
+                        customer=customer,
+                        is_billing=True,
+                        is_current=True,
+                        deleted_at__isnull=True,
+                    ).update(is_current=False)
 
             address = CustomerAddress.objects.create(
                 customer=customer,
-                address_type=address_data.address_type,
+                is_primary=address_data.is_primary,
+                is_billing=address_data.is_billing,
+                label=address_data.label,
                 address_line1=address_data.address_line1,
                 city=address_data.city,
                 county=address_data.county,
@@ -84,7 +105,8 @@ class ContactService:
             extra={
                 "customer_id": customer.id,
                 "user_id": user.id,
-                "address_type": address_data.address_type,
+                "is_primary": address_data.is_primary,
+                "is_billing": address_data.is_billing,
                 "operation": "address_create",
             },
         )

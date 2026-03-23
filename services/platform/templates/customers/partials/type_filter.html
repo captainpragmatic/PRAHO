@@ -1,0 +1,10 @@
+{% load i18n %}
+
+<select name="type"
+  class="px-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-primary">
+  <option value="">{% trans 'All types' %}</option>
+  <option value="individual"{% if type_filter == 'individual' %} selected{% endif %}>{% trans 'Individual' %}</option>
+  <option value="company"{% if type_filter == 'company' %} selected{% endif %}>{% trans 'Company' %}</option>
+  <option value="pfa"{% if type_filter == 'pfa' %} selected{% endif %}>{% trans 'PFA' %}</option>
+  <option value="ngo"{% if type_filter == 'ngo' %} selected{% endif %}>{% trans 'NGO' %}</option>
+</select>

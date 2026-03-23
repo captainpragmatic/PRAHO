@@ -70,7 +70,8 @@ def create_test_customer(name: str, admin_user: User, **kwargs) -> Customer:
 
     CustomerAddress.objects.create(
         customer=customer,
-        address_type='legal',
+        is_primary=True,
+        is_billing=True,
         address_line1='Str. Test Nr. 1',
         city='București',
         county='Sector 1',

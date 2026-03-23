@@ -124,7 +124,7 @@ class TestBillingAddressAPIAddressVersioning(TestCase):
         resp = _post_billing_address(self.client, self.user, self.customer, payload)
         self.assertEqual(resp.status_code, 200, resp.content)
 
-        addr = CustomerAddress.objects.get(customer=self.customer, address_type="primary", is_current=True)
+        addr = CustomerAddress.objects.get(customer=self.customer, is_primary=True, is_current=True)
         self.assertEqual(addr.version, 1)
 
     def test_second_update_increments_version(self) -> None:
@@ -147,7 +147,7 @@ class TestBillingAddressAPIAddressVersioning(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
 
         # Version 2 is current
-        current = CustomerAddress.objects.get(customer=self.customer, address_type="primary", is_current=True)
+        current = CustomerAddress.objects.get(customer=self.customer, is_primary=True, is_current=True)
         self.assertEqual(current.version, 2)
 
     def test_old_address_marked_non_current_after_update(self) -> None:
@@ -161,7 +161,7 @@ class TestBillingAddressAPIAddressVersioning(TestCase):
         _post_billing_address(self.client, self.user, self.customer, payload_v1)
 
         # Capture the first address pk while it is still current
-        addr_v1 = CustomerAddress.objects.get(customer=self.customer, address_type="primary", is_current=True)
+        addr_v1 = CustomerAddress.objects.get(customer=self.customer, is_primary=True, is_current=True)
         addr_v1_pk = addr_v1.pk
 
         payload_v2 = {
@@ -193,7 +193,7 @@ class TestBillingAddressAPIAddressVersioning(TestCase):
             _post_billing_address(self.client, self.user, self.customer, payload)
 
         current_count = CustomerAddress.objects.filter(
-            customer=self.customer, address_type="primary", is_current=True
+            customer=self.customer, is_primary=True, is_current=True
         ).count()
         self.assertEqual(current_count, 1, "Exactly one current primary address must exist after multiple updates.")
 

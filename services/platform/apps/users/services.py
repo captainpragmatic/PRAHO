@@ -236,14 +236,14 @@ class SecureUserRegistrationService:
                 defaults={
                     "payment_terms": 30,  # Default 30 days
                     "preferred_currency": "RON",  # Romanian Lei
-                    "invoice_delivery_method": "email",
                 },
             )
 
             # Step 6: Create billing address with validated data
             CustomerAddress.objects.create(
                 customer=customer,
-                address_type="billing",
+                is_billing=True,
+                is_primary=True,
                 address_line1=customer_data.get("billing_address", ""),  # Sanitized
                 city=customer_data.get("billing_city", ""),  # Sanitized
                 postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized

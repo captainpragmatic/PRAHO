@@ -1163,6 +1163,128 @@ class PlatformAPIClient:
             data={"user_id": user_id, "action": "status"},
         )
 
+    # ===============================================================================
+    # CUSTOMER MANAGEMENT API ENDPOINTS
+    # ===============================================================================
+
+    def get_customer_users(self, customer_id: int, user_id: int) -> dict[str, Any]:
+        """🔒 Get all users for a customer — HMAC BODY"""
+        return self.post("customers/users/", data={"customer_id": customer_id}, user_id=user_id)
+
+    def add_customer_user(self, customer_id: int, user_id: int, target_user_id: int, role: str) -> dict[str, Any]:
+        """🔒 Add an existing user to a customer — HMAC BODY"""
+        return self.post(
+            "customers/users/add/",
+            data={"customer_id": customer_id, "target_user_id": target_user_id, "role": role},
+            user_id=user_id,
+        )
+
+    def create_customer_user(  # noqa: PLR0913
+        self,
+        customer_id: int,
+        user_id: int,
+        email: str,
+        first_name: str,
+        last_name: str,
+        role: str,
+    ) -> dict[str, Any]:
+        """🔒 Create a new user and add them to a customer — HMAC BODY"""
+        return self.post(
+            "customers/users/create/",
+            data={
+                "customer_id": customer_id,
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "role": role,
+            },
+            user_id=user_id,
+        )
+
+    def change_customer_user_role(
+        self, customer_id: int, user_id: int, target_user_id: int, new_role: str
+    ) -> dict[str, Any]:
+        """🔒 Change a team member's role — HMAC BODY"""
+        return self.post(
+            "customers/users/role/",
+            data={"customer_id": customer_id, "target_user_id": target_user_id, "new_role": new_role},
+            user_id=user_id,
+        )
+
+    def remove_customer_user(self, customer_id: int, user_id: int, target_user_id: int) -> dict[str, Any]:
+        """🔒 Remove a user from a customer — HMAC BODY"""
+        return self.post(
+            "customers/users/remove/",
+            data={"customer_id": customer_id, "target_user_id": target_user_id},
+            user_id=user_id,
+        )
+
+    def toggle_customer_user_status(self, customer_id: int, user_id: int, target_user_id: int) -> dict[str, Any]:
+        """🔒 Toggle active/inactive status for a team member — HMAC BODY"""
+        return self.post(
+            "customers/users/toggle-status/",
+            data={"customer_id": customer_id, "target_user_id": target_user_id},
+            user_id=user_id,
+        )
+
+    def update_customer_company_profile(self, customer_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+        """🔒 Update customer company profile fields (name, email, etc.) — HMAC BODY"""
+        payload = {**data, "customer_id": customer_id}
+        return self.post("customers/update/", data=payload, user_id=user_id)
+
+    def get_customer_tax_profile(self, customer_id: int, user_id: int) -> dict[str, Any]:
+        """🔒 Get customer tax profile via customer details endpoint — HMAC BODY"""
+        return self.post(
+            "customers/details/",
+            data={"customer_id": customer_id, "action": "get_customer_details", "include": ["tax_profile"]},
+            user_id=user_id,
+        )
+
+    def update_customer_tax_profile(self, customer_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+        """🔒 Update customer tax profile (CUI, VAT, reverse charge) — HMAC BODY"""
+        payload = {**data, "customer_id": customer_id}
+        return self.post("customers/tax-profile/", data=payload, user_id=user_id)
+
+    def get_customer_addresses(self, customer_id: int, user_id: int) -> dict[str, Any]:
+        """🔒 List all addresses for a customer — HMAC BODY"""
+        return self.post("customers/addresses/", data={"customer_id": customer_id}, user_id=user_id)
+
+    def add_customer_address(self, customer_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+        """🔒 Add a new address to a customer — HMAC BODY"""
+        payload = {**data, "customer_id": customer_id}
+        return self.post("customers/addresses/add/", data=payload, user_id=user_id)
+
+    def update_customer_address(
+        self, customer_id: int, user_id: int, address_id: int, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """🔒 Update an existing customer address — HMAC BODY"""
+        payload = {**data, "customer_id": customer_id, "address_id": address_id}
+        return self.post("customers/addresses/update/", data=payload, user_id=user_id)
+
+    def delete_customer_address(self, customer_id: int, user_id: int, address_id: int) -> dict[str, Any]:
+        """🔒 Delete a customer address — HMAC BODY"""
+        return self.post(
+            "customers/addresses/delete/",
+            data={"customer_id": customer_id, "address_id": address_id},
+            user_id=user_id,
+        )
+
+    def set_address_primary(self, customer_id: int, user_id: int, address_id: int) -> dict[str, Any]:
+        """🔒 Set an address as the primary address — HMAC BODY"""
+        return self.post(
+            "customers/addresses/set-primary/",
+            data={"customer_id": customer_id, "address_id": address_id},
+            user_id=user_id,
+        )
+
+    def set_address_billing(self, customer_id: int, user_id: int, address_id: int) -> dict[str, Any]:
+        """🔒 Set an address as the billing address — HMAC BODY"""
+        return self.post(
+            "customers/addresses/set-billing/",
+            data={"customer_id": customer_id, "address_id": address_id},
+            user_id=user_id,
+        )
+
 
 # Singleton instance
 api_client = PlatformAPIClient()

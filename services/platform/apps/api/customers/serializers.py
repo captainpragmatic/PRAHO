@@ -288,7 +288,8 @@ class CustomerCreationSerializer(serializers.Serializer):
                 if billing_address_data:
                     CustomerAddress.objects.create(
                         customer=customer,
-                        address_type="primary",
+                        is_primary=True,
+                        is_billing=True,
                         is_current=True,
                         address_line1=billing_address_data.get("street_address", ""),
                         city=billing_address_data.get("city", ""),
@@ -332,7 +333,9 @@ class CustomerTaxProfileSerializer(serializers.Serializer):
 
     vat_number = serializers.CharField(max_length=20, allow_blank=True)
     cui = serializers.CharField(max_length=20, allow_blank=True)
+    registration_number = serializers.CharField(max_length=50, allow_blank=True)
     is_vat_payer = serializers.BooleanField()
+    reverse_charge_eligible = serializers.BooleanField()
 
 
 class CustomerBillingProfileSerializer(serializers.Serializer):
@@ -343,7 +346,6 @@ class CustomerBillingProfileSerializer(serializers.Serializer):
 
     payment_terms = serializers.CharField(max_length=50, allow_blank=True)
     preferred_currency = serializers.CharField(max_length=3, default="RON")
-    invoice_delivery_method = serializers.CharField(max_length=20, default="email")
     auto_payment_enabled = serializers.BooleanField(default=False)
 
 

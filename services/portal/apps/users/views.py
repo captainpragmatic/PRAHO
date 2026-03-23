@@ -421,6 +421,9 @@ def _load_profile_form_data(request: HttpRequest, user_id: int) -> CustomerProfi
                     "phone": profile_data.get("phone", ""),
                     "preferred_language": profile_data.get("profile", {}).get("preferred_language", "en"),
                     "timezone": profile_data.get("profile", {}).get("timezone", "Europe/Bucharest"),
+                    "email_notifications": profile_data.get("profile", {}).get("email_notifications", True),
+                    "sms_notifications": profile_data.get("profile", {}).get("sms_notifications", False),
+                    "marketing_emails": profile_data.get("profile", {}).get("marketing_emails", False),
                 }
             )
         else:
@@ -446,6 +449,9 @@ def _handle_profile_update(
             "phone": form.cleaned_data["phone"],
             "preferred_language": form.cleaned_data.get("preferred_language", "en"),
             "timezone": form.cleaned_data.get("timezone", "Europe/Bucharest"),
+            "email_notifications": form.cleaned_data.get("email_notifications", True),
+            "sms_notifications": form.cleaned_data.get("sms_notifications", False),
+            "marketing_emails": form.cleaned_data.get("marketing_emails", False),
         }
 
         result = api_client.update_customer_profile(user_id, update_data)
@@ -480,6 +486,25 @@ def _handle_profile_update(
         messages.error(request, _("Error updating profile. Please try again."))
 
     return None
+
+
+def _fetch_customer_cui(customer_id: str | int | None, user_id: str | int | None) -> str:
+    """Fetch CUI from customer tax profile for display in company card."""
+    if not customer_id or not user_id:
+        return ""
+    uid = int(user_id)
+    try:
+        response = api_client.post(
+            "customers/details/",
+            data={"customer_id": customer_id, "user_id": uid, "include": ["tax_profile"]},
+            user_id=uid,
+        )
+        if isinstance(response, dict) and response.get("success"):
+            cui: str = response.get("customer", {}).get("tax_profile", {}).get("cui", "")
+            return cui
+    except Exception as e:
+        logger.debug("Could not load CUI for company card: %s", e)
+    return ""
 
 
 @never_cache
@@ -520,17 +545,19 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         memberships = _get_user_customer_memberships(request)
         if memberships:
             request.session["user_memberships"] = memberships
-            # Set default selected customer if not set
             if not request.session.get("selected_customer_id"):
                 request.session["selected_customer_id"] = customer_id
-                # Find the customer name and role for the default customer
-                for membership in memberships:
-                    if str(membership.get("customer_id")) == str(customer_id):
-                        request.session["selected_customer_name"] = membership.get(
-                            "customer_name", f"Customer {customer_id}"
-                        )
-                        request.session["selected_customer_role"] = membership.get("role", "viewer")
-                        break
+
+    # Ensure selected customer name/role are always populated from memberships
+    if request.session.get("user_memberships") and not request.session.get("selected_customer_name"):
+        sel_id = str(request.session.get("selected_customer_id", customer_id))
+        for membership in request.session["user_memberships"]:
+            if str(membership.get("customer_id")) == sel_id:
+                request.session["selected_customer_name"] = membership.get("customer_name", f"Customer {sel_id}")
+                request.session["selected_customer_role"] = membership.get("role", "viewer")
+                break
+
+    selected_customer_cui = _fetch_customer_cui(request.session.get("selected_customer_id", customer_id), user_id)
 
     context = {
         "form": form,
@@ -543,6 +570,10 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         "selected_customer_id": request.session.get("selected_customer_id", customer_id),
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
+        "selected_customer_cui": selected_customer_cui,
+        "can_edit_profile": _can_edit_company_profile(
+            request, str(request.session.get("selected_customer_id", customer_id))
+        ),
     }
 
     return render(request, "users/profile.html", context)
@@ -950,7 +981,7 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 @require_any_role()
 @log_access_attempt
-def company_profile_view(request: HttpRequest) -> HttpResponse:
+def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912
     """
     🔒 Company profile view - displays current company information.
     Shows company details including billing address, VAT number, contact information.
@@ -963,7 +994,9 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Please select a customer to view profile."))
         return redirect("/profile/")
 
-    user_id = request.session.get("user_id")
+    user_id: int | None = request.session.get("user_id")
+    if not user_id:
+        return redirect("/login/")
 
     # Load user memberships if not cached
     if not request.session.get("user_memberships"):
@@ -988,22 +1021,40 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
 
         if response.get("success"):
             customer = response.get("customer", {})
-            billing_profile = customer.get("billing_profile", {})
             tax_profile = customer.get("tax_profile", {})
+
+            # Fetch billing address from addresses endpoint (not billing_profile)
+            billing_addr: dict[str, str] = {}
+            try:
+                addr_response = api_client.get_customer_addresses(
+                    customer_id=int(customer_id),
+                    user_id=int(user_id),
+                )
+                if isinstance(addr_response, dict) and addr_response.get("success"):
+                    for addr in addr_response.get("addresses", []):
+                        if addr.get("is_billing"):
+                            billing_addr = addr
+                            break
+            except Exception as addr_err:
+                logger.debug("Could not fetch billing address: %s", addr_err)
 
             company_data = {
                 "company_name": customer.get("company_name", ""),
                 "vat_number": tax_profile.get("vat_number", ""),
-                "trade_registry_number": customer.get("trade_registry_number", ""),
-                "primary_email": customer.get("primary_email", ""),
-                "primary_phone": customer.get("primary_phone", ""),
-                "website": customer.get("website", ""),
+                "trade_registry_number": tax_profile.get("registration_number", ""),
                 "industry": customer.get("industry", ""),
-                "billing_street": billing_profile.get("address_street", ""),
-                "billing_city": billing_profile.get("address_city", ""),
-                "billing_state": billing_profile.get("address_state", ""),
-                "billing_postal_code": billing_profile.get("address_postal_code", ""),
-                "billing_country": billing_profile.get("address_country", "RO"),
+                "billing_address": {
+                    "street_address": billing_addr.get("address_line1", ""),
+                    "city": billing_addr.get("city", ""),
+                    "state": billing_addr.get("county", ""),
+                    "postal_code": billing_addr.get("postal_code", ""),
+                    "country": billing_addr.get("country", ""),
+                },
+                "contact": {
+                    "primary_email": customer.get("primary_email", ""),
+                    "primary_phone": customer.get("primary_phone", ""),
+                    "website": customer.get("website", ""),
+                },
                 "status": customer.get("status", ""),
                 "customer_type": customer.get("customer_type", ""),
             }
@@ -1037,7 +1088,7 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @require_billing_access()
 @log_access_attempt
-def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912
+def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
     """
     🔒 Company profile edit view - allows editing company information.
     Updates company details via Platform API with form validation.
@@ -1050,7 +1101,9 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
         messages.error(request, _("Please select a customer to edit profile."))
         return redirect("/profile/")
 
-    user_id = request.session.get("user_id")
+    user_id: int | None = request.session.get("user_id")
+    if not user_id:
+        return redirect("/login/")
 
     # Check if user can edit company profile for this customer
     if not _can_edit_company_profile(request, customer_id):
@@ -1112,28 +1165,21 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
 
         if form.is_valid():
             try:
-                # Update company profile via Platform API using existing billing-address endpoint
-                update_data = {
-                    "customer_id": customer_id,
-                    "user_id": user_id,
-                    "timestamp": int(timezone.now().timestamp()),
+                # Update company profile via dedicated Platform API endpoint
+                # VAT/billing address managed via dedicated pages (/company/tax/, /company/addresses/)
+                profile_data = {
                     "company_name": form.cleaned_data["company_name"],
-                    "vat_number": form.cleaned_data["vat_number"],
-                    "trade_registry_number": form.cleaned_data["trade_registry_number"],
                     "primary_email": form.cleaned_data["primary_email"],
                     "primary_phone": form.cleaned_data["primary_phone"],
                     "website": form.cleaned_data["website"],
                     "industry": form.cleaned_data["industry"],
-                    "billing_address": {
-                        "street": form.cleaned_data["billing_street"],
-                        "city": form.cleaned_data["billing_city"],
-                        "state": form.cleaned_data["billing_state"],
-                        "postal_code": form.cleaned_data["billing_postal_code"],
-                        "country": form.cleaned_data["billing_country"],
-                    },
                 }
 
-                response = api_client.post("customers/billing-address/", data=update_data, user_id=user_id)
+                response = api_client.update_customer_company_profile(
+                    customer_id=int(customer_id),
+                    user_id=int(user_id),
+                    data=profile_data,  # type narrowed by guards above
+                )
 
                 if response.get("success"):
                     logger.info(f"✅ [Portal] Company profile updated successfully for customer {customer_id}")

@@ -47,7 +47,7 @@ class CustomerAddressTestCase(TestCase):
         """Test address creation with full Romanian address"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Strada Victoriei, nr. 10',
             city='București',
             county='București',
@@ -55,7 +55,7 @@ class CustomerAddressTestCase(TestCase):
             country='România'
         )
 
-        self.assertEqual(address.address_type, 'billing')
+        self.assertTrue(address.is_billing)
         self.assertEqual(address.address_line1, 'Strada Victoriei, nr. 10')
         self.assertEqual(address.city, 'București')
         self.assertEqual(address.country, 'România')
@@ -65,7 +65,7 @@ class CustomerAddressTestCase(TestCase):
         # Valid Romanian postal code
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Calea Dorobanților, nr. 5',
             city='Cluj-Napoca',
             postal_code='400117',
@@ -74,34 +74,36 @@ class CustomerAddressTestCase(TestCase):
 
         self.assertEqual(address.postal_code, '400117')
 
-    def test_address_types(self):
-        """Test different address types"""
-        # Billing address
+    def test_address_boolean_flags(self):
+        """Test that boolean flag fields work correctly"""
         billing_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
+            is_primary=False,
             address_line1='Strada Facturare, nr. 1',
             city='București',
             country='România'
         )
 
-        # Delivery address
-        delivery_address = CustomerAddress.objects.create(
+        primary_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='delivery',
-            address_line1='Strada Livrare, nr. 2',
+            is_primary=True,
+            is_billing=False,
+            address_line1='Strada Principala, nr. 2',
             city='Timișoara',
             country='România'
         )
 
-        self.assertEqual(billing_address.address_type, 'billing')
-        self.assertEqual(delivery_address.address_type, 'delivery')
+        self.assertTrue(billing_address.is_billing)
+        self.assertFalse(billing_address.is_primary)
+        self.assertTrue(primary_address.is_primary)
+        self.assertFalse(primary_address.is_billing)
 
     def test_address_str_representation(self):
         """Test string representation of address"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Strada Test, nr. 123',
             city='București',
             country='România'
@@ -114,15 +116,17 @@ class CustomerAddressTestCase(TestCase):
         """Test customer can have multiple addresses"""
         billing_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Strada Billing, nr. 1',
             city='București',
             country='România'
         )
 
-        delivery_address = CustomerAddress.objects.create(
+        CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='delivery',
+            is_primary=False,
+            is_billing=False,
+            label='Livrare',
             address_line1='Strada Delivery, nr. 2',
             city='Cluj-Napoca',
             country='România'
@@ -131,8 +135,8 @@ class CustomerAddressTestCase(TestCase):
         addresses = CustomerAddress.objects.filter(customer=self.customer)
         self.assertEqual(addresses.count(), 2)
 
-        # Test filtering by address type
-        billing_addresses = addresses.filter(address_type='billing')
+        # Test filtering by billing flag
+        billing_addresses = addresses.filter(is_billing=True)
         self.assertEqual(billing_addresses.count(), 1)
         self.assertEqual(billing_addresses.first(), billing_address)
 
@@ -141,7 +145,7 @@ class CustomerAddressTestCase(TestCase):
         # First address should be current
         first_address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='First Address',
             city='București',
             country='România',
@@ -149,9 +153,9 @@ class CustomerAddressTestCase(TestCase):
         )
 
         # Second address, not current
-        second_address = CustomerAddress.objects.create(
+        CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='primary',
+            is_primary=True,
             address_line1='Second Address',
             city='Timișoara',
             country='România',
@@ -170,7 +174,7 @@ class CustomerAddressTestCase(TestCase):
         """Test address formatting methods"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Bulevardul Unirii, nr. 15',
             address_line2='bl. A1, sc. 2, ap. 45',
             city='București',
@@ -189,7 +193,7 @@ class CustomerAddressTestCase(TestCase):
         """Test Romanian-specific address components"""
         address = CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Strada Mihail Kogălniceanu, nr. 17, et. 3',
             city='Iași',
             county='Iași',

@@ -8,6 +8,7 @@ from typing import cast
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -70,6 +71,15 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
         "customer": customer,
         "available_users": available_users,
         "role_choices": CustomerMembership.CUSTOMER_ROLE_CHOICES,
+        "breadcrumb_items": [
+            {"text": _("Dashboard"), "url": reverse("dashboard")},
+            {"text": _("Customers"), "url": reverse("customers:list")},
+            {
+                "text": customer.get_display_name(),
+                "url": reverse("customers:detail", kwargs={"customer_id": customer.pk}),
+            },
+            {"text": _("Add User")},
+        ],
     }
     return render(request, "customers/add_user.html", context)
 
@@ -114,6 +124,15 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
     context = {
         "customer": customer,
         "role_choices": CustomerMembership.CUSTOMER_ROLE_CHOICES,
+        "breadcrumb_items": [
+            {"text": _("Dashboard"), "url": reverse("dashboard")},
+            {"text": _("Customers"), "url": reverse("customers:list")},
+            {
+                "text": customer.get_display_name(),
+                "url": reverse("customers:detail", kwargs={"customer_id": customer.pk}),
+            },
+            {"text": _("Create User")},
+        ],
     }
     return render(request, "customers/create_user.html", context)
 

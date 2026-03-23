@@ -101,10 +101,11 @@ def romanian_customer(admin_user):
         preferred_currency='RON'
     )
 
-    # Create legal address
+    # Create primary address
     CustomerAddress.objects.create(
         customer=customer,
-        address_type='legal',
+        is_primary=True,
+        is_billing=True,
         address_line1='Str. Test Nr. 1',
         city='București',
         county='Sector 1',

@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Add Address" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 py-8">
+    <div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        {% trans 'Add Address' as ph_title %}{% trans 'Add a new billing or shipping address' as ph_sub %}
+        {% page_header title=ph_title subtitle=ph_sub icon="map-pin" %}
+        {% end_page_header %}
+
+        <!-- Back link -->
+        <div class="mb-6">
+            <a href="{% url 'customers:addresses' %}"
+               class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                {% icon "chevron-left" size="sm" css_class="mr-2" %}
+                {% trans "Back to Addresses" %}
+            </a>
+        </div>
+
+        {% trans 'Address Details' as form_title %}
+        {% section_card title=form_title icon="map-pin" %}
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            <!-- Address Role Flags -->
+            <div class="mb-5">
+                <p class="block text-sm font-medium text-slate-300 mb-2">{% trans "Address Role" %}</p>
+                <div class="flex flex-col gap-2">
+                    <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="checkbox" name="is_primary" id="is_primary" value="on"
+                               class="h-4 w-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-700">
+                        {% trans "Primary address" %}
+                    </label>
+                    <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="checkbox" name="is_billing" id="is_billing" value="on"
+                               class="h-4 w-4 rounded border-slate-500 text-blue-600 focus:ring-blue-500 bg-slate-700">
+                        {% trans "Billing address" %}
+                    </label>
+                </div>
+            </div>
+
+            <!-- Optional Label -->
+            <div class="mb-5">
+                <label for="label" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Label (optional)" %}
+                </label>
+                <input type="text" id="label" name="label" maxlength="50"
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'e.g. Home, Office, Warehouse' %}">
+            </div>
+
+            <!-- Address Line 1 -->
+            <div class="mb-5">
+                <label for="address_line1" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Street Address" %} <span class="text-red-400">*</span>
+                </label>
+                <input type="text" id="address_line1" name="address_line1" required
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'Str. Exemplu nr. 1' %}">
+            </div>
+
+            <!-- Address Line 2 -->
+            <div class="mb-5">
+                <label for="address_line2" class="block text-sm font-medium text-slate-300 mb-2">
+                    {% trans "Address Line 2" %}
+                </label>
+                <input type="text" id="address_line2" name="address_line2"
+                       class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                       placeholder="{% trans 'Apartment, suite, floor (optional)' %}">
+            </div>
+
+            <!-- City & County -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+                <div>
+                    <label for="city" class="block text-sm font-medium text-slate-300 mb-2">
+                        {% trans "City" %} <span class="text-red-400">*</span>
+                    </label>
+                    <input type="text" id="city" name="city" required
+                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                           placeholder="{% trans 'București' %}">
+                </div>
+                <div>
+                    <label for="county" class="block text-sm font-medium text-slate-300 mb-2">
+                        {% trans "County" %}
+                    </label>
+                    <input type="text" id="county" name="county"
+                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                           placeholder="{% trans 'București' %}">
+                </div>
+            </div>
+
+            <!-- Postal Code & Country -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <div>
+                    <label for="postal_code" class="block text-sm font-medium text-slate-300 mb-2">
+                        {% trans "Postal Code" %}
+                    </label>
+                    <input type="text" id="postal_code" name="postal_code"
+                           class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono placeholder-slate-500"
+                           placeholder="010101">
+                </div>
+                <div>
+                    <label for="country" class="block text-sm font-medium text-slate-300 mb-2">
+                        {% trans "Country" %} <span class="text-red-400">*</span>
+                    </label>
+                    <select id="country" name="country" required
+                            class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <option value="RO" selected>{% trans "Romania" %}</option>
+                        <option value="DE">{% trans "Germany" %}</option>
+                        <option value="FR">{% trans "France" %}</option>
+                        <option value="IT">{% trans "Italy" %}</option>
+                        <option value="ES">{% trans "Spain" %}</option>
+                        <option value="NL">{% trans "Netherlands" %}</option>
+                        <option value="BE">{% trans "Belgium" %}</option>
+                        <option value="AT">{% trans "Austria" %}</option>
+                        <option value="PL">{% trans "Poland" %}</option>
+                        <option value="HU">{% trans "Hungary" %}</option>
+                        <option value="BG">{% trans "Bulgaria" %}</option>
+                        <option value="GB">{% trans "United Kingdom" %}</option>
+                        <option value="US">{% trans "United States" %}</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Submit -->
+            <div class="flex items-center justify-end gap-4">
+                <a href="{% url 'customers:addresses' %}"
+                   class="px-6 py-3 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                    {% trans "Cancel" %}
+                </a>
+                <button type="submit"
+                        class="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-colors">
+                    {% icon "save" size="sm" css_class="mr-2" %}
+                    {% trans "Save Address" %}
+                </button>
+            </div>
+        </form>
+        {% end_section_card %}
+
+    </div>
+</div>
+{% endblock %}

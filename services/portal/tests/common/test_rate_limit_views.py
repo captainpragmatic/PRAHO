@@ -25,7 +25,7 @@ class ListViewsRateLimitTests(SimpleTestCase):
         session["user_id"] = 15
         session["email"] = "customer@example.com"
         if include_membership:
-            session["user_memberships"] = [{"customer_id": 1, "role": "admin"}]
+            session["user_memberships"] = [{"customer_id": 1, "role": "owner"}]
             session["user_memberships_fetched_at"] = time.time()
         session.save()
 

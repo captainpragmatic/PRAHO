@@ -249,7 +249,6 @@ class CustomerBillingProfileForm(forms.ModelForm):
             "payment_terms",
             "credit_limit",
             "preferred_currency",
-            "invoice_delivery_method",
             "auto_payment_enabled",
         )
 
@@ -291,7 +290,9 @@ class CustomerAddressForm(forms.ModelForm):
     class Meta:
         model = CustomerAddress
         fields: ClassVar[tuple[str, ...]] = (
-            "address_type",
+            "is_primary",
+            "is_billing",
+            "label",
             "address_line1",
             "address_line2",
             "city",
@@ -758,7 +759,8 @@ class CustomerCreationForm(forms.Form):
             # Create primary address
             CustomerAddress.objects.create(
                 customer=customer,
-                address_type="primary",
+                is_primary=True,
+                is_billing=True,
                 address_line1=data["address_line1"],
                 address_line2=data.get("address_line2", ""),
                 city=data["city"],
@@ -951,16 +953,6 @@ class CustomerEditForm(forms.Form):
         choices=CurrencyCode.choices(),
         initial="RON",
         label=_("Preferred Currency"),
-        widget=forms.Select(
-            attrs={
-                "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500"
-            }
-        ),
-    )
-    invoice_delivery_method = forms.ChoiceField(
-        choices=[("email", _("Email")), ("postal", _("Postal Mail")), ("both", _("Email + Postal"))],
-        initial="email",
-        label=_("Invoice Delivery Method"),
         widget=forms.Select(
             attrs={
                 "class": "w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500"
@@ -1187,7 +1179,6 @@ class CustomerEditForm(forms.Form):
                         "payment_terms": billing_profile.payment_terms,
                         "credit_limit": billing_profile.credit_limit,
                         "preferred_currency": billing_profile.preferred_currency,
-                        "invoice_delivery_method": billing_profile.invoice_delivery_method,
                         "auto_payment_enabled": billing_profile.auto_payment_enabled,
                     }
                 )
@@ -1210,7 +1201,7 @@ class CustomerEditForm(forms.Form):
             from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
             separate_billing_address = CustomerAddress.objects.filter(
-                customer=customer, address_type="billing", is_current=True
+                customer=customer, is_billing=True, is_primary=False, is_current=True
             ).first()
 
             if separate_billing_address:
@@ -1399,7 +1390,6 @@ class CustomerEditForm(forms.Form):
             billing_profile.payment_terms = data["payment_terms"]
             billing_profile.credit_limit = data["credit_limit"]
             billing_profile.preferred_currency = data["preferred_currency"]
-            billing_profile.invoice_delivery_method = data["invoice_delivery_method"]
             billing_profile.auto_payment_enabled = data["auto_payment_enabled"]
             billing_profile.save()
 
@@ -1409,7 +1399,7 @@ class CustomerEditForm(forms.Form):
                 from .contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: avoids circular import
 
                 primary_address = CustomerAddress.objects.create(
-                    customer=self.customer, address_type="primary", is_current=True
+                    customer=self.customer, is_primary=True, is_billing=True, is_current=True
                 )
 
             assert primary_address is not None
@@ -1426,7 +1416,7 @@ class CustomerEditForm(forms.Form):
 
             billing_same_as_primary = data.get("billing_same_as_primary", True)
             existing_billing_address = CustomerAddress.objects.filter(
-                customer=self.customer, address_type="billing", is_current=True
+                customer=self.customer, is_billing=True, is_primary=False, is_current=True
             ).first()
 
             if billing_same_as_primary:
@@ -1437,7 +1427,7 @@ class CustomerEditForm(forms.Form):
                 # Create or update separate billing address
                 if not existing_billing_address:
                     existing_billing_address = CustomerAddress.objects.create(
-                        customer=self.customer, address_type="billing", is_current=True
+                        customer=self.customer, is_billing=True, is_current=True
                     )
 
                 existing_billing_address.address_line1 = data["billing_address_line1"]

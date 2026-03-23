@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from typing import Any, cast
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -15,9 +16,10 @@ from django.contrib.messages.api import MessageFailure
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from apps.billing.models import Invoice
@@ -25,6 +27,7 @@ from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.rate_limiting import rate_limit
 from apps.common.types import Err
+from apps.customers.contact_models import CustomerAddress
 from apps.provisioning.models import Service
 from apps.tickets.models import Ticket
 from apps.users.models import User
@@ -77,38 +80,160 @@ def _handle_secure_error(request: HttpRequest, error: Exception, operation: str,
         )
 
 
-@login_required
-def customer_list(request: HttpRequest) -> HttpResponse:
-    """
-    👥 Display list of customers with search functionality
-    Uses simplified Customer model with related data loaded efficiently
-    """
-    # Get user's accessible customers (multi-tenant)
-    user = cast(User, request.user)  # Safe due to @login_required
+def _build_customer_queryset(
+    user: User,
+    search_query: str = "",
+    status_filter: str = "",
+    type_filter: str = "",
+) -> tuple[Any, str, str, str]:
+    """Build annotated, filtered customer queryset for list and HTMX views."""
     customers = CustomerService.get_accessible_customers(user)
 
-    # Search functionality — delegates to canonical service method
-    search_query = request.GET.get("search", "")
-    if search_query:
+    # Search filter — uses canonical `q` param
+    if search_query and len(search_query) >= SEARCH_QUERY_MIN_LENGTH:
         customers = CustomerService.search_customers(search_query, user)
 
-    # Expected queries: 3 (customers + tax profiles + addresses for display)
-    customers = (
-        customers.select_related("tax_profile", "billing_profile").prefetch_related("addresses").order_by("-created_at")
+    # Status filter
+    if status_filter:
+        customers = customers.filter(status=status_filter)
+
+    # Type filter
+    if type_filter:
+        customers = customers.filter(customer_type=type_filter)
+
+    # Annotations for service/ticket counts
+    customers = customers.annotate(
+        active_services_count=Count("services", filter=Q(services__status="active")),
+        open_tickets_count=Count("tickets", filter=Q(tickets__status__in=["open", "in_progress"])),
     )
+
+    # Efficient prefetch: tax profile, billing profile, primary address only
+    customers = (
+        customers.select_related("tax_profile", "billing_profile")
+        .prefetch_related(
+            Prefetch(
+                "addresses",
+                queryset=CustomerAddress.objects.filter(is_primary=True, is_current=True),
+                to_attr="primary_addresses",
+            )
+        )
+        .order_by("-created_at")
+    )
+
+    return customers, search_query, status_filter, type_filter
+
+
+@login_required
+def customer_list(request: HttpRequest) -> HttpResponse:
+    """👥 Display list of customers with search, filtering, and HTMX support."""
+    user = cast(User, request.user)
+
+    search_query = request.GET.get("q", "").strip()
+    status_filter = request.GET.get("status", "").strip()
+    type_filter = request.GET.get("type", "").strip()
+
+    customers, search_query, status_filter, type_filter = _build_customer_queryset(
+        user, search_query, status_filter, type_filter
+    )
+
+    # Compute stats before pagination (from unfiltered base)
+    all_customers = CustomerService.get_accessible_customers(user)
+    total_count = all_customers.count()
+    active_count = all_customers.filter(status="active").count()
 
     # Pagination
     paginator = Paginator(customers, 25)
     page_number = request.GET.get("page")
     customers_page = paginator.get_page(page_number)
 
+    # Build URL-safe extra params for pagination links
+    params: dict[str, str] = {}
+    if search_query:
+        params["q"] = search_query
+    if status_filter:
+        params["status"] = status_filter
+    if type_filter:
+        params["type"] = type_filter
+    extra_params = urlencode(params) if params else ""
+
+    # Status tabs for filter UI
+    status_tabs = [
+        {"value": "", "label": str(_("All")), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+        {
+            "value": "active",
+            "label": str(_("Active")),
+            "border_class": "border-green-500",
+            "text_class": "text-green-400",
+        },
+        {
+            "value": "prospect",
+            "label": str(_("Prospect")),
+            "border_class": "border-cyan-500",
+            "text_class": "text-cyan-400",
+        },
+        {
+            "value": "inactive",
+            "label": str(_("Inactive")),
+            "border_class": "border-slate-500",
+            "text_class": "text-slate-400",
+        },
+        {
+            "value": "suspended",
+            "label": str(_("Suspended")),
+            "border_class": "border-amber-500",
+            "text_class": "text-amber-400",
+        },
+    ]
+
+    # Breadcrumbs
+    breadcrumb_items = [
+        {"text": _("Dashboard"), "url": reverse("dashboard")},
+        {"text": _("Customers")},
+    ]
+
     context = {
         "customers": customers_page,
         "search_query": search_query,
+        "status_filter": status_filter,
+        "type_filter": type_filter,
         "total_customers": paginator.count,
+        "total_count": total_count,
+        "active_count": active_count,
+        "extra_params": extra_params,
+        "breadcrumb_items": breadcrumb_items,
+        "status_tabs": status_tabs,
+        "filter_active_tab": status_filter,
+        "search_htmx_url": reverse("customers:search_htmx"),
     }
 
     return render(request, "customers/list.html", context)
+
+
+@login_required
+@rate_limit(key="user", rate="45/m", method="GET")
+def customer_search_htmx(request: HttpRequest) -> HttpResponse:
+    """🔄 HTMX endpoint for live customer filtering."""
+    user = cast(User, request.user)
+
+    search_query = request.GET.get("q", "").strip()
+    status_filter = request.GET.get("status", "").strip()
+    type_filter = request.GET.get("type", "").strip()
+
+    customers, search_query, status_filter, type_filter = _build_customer_queryset(
+        user, search_query, status_filter, type_filter
+    )
+
+    # HTMX: first page only for real-time filtering
+    customers_page = customers[:25]
+
+    context = {
+        "customers": customers_page,
+        "search_query": search_query,
+        "status_filter": status_filter,
+        "type_filter": type_filter,
+    }
+
+    return render(request, "customers/partials/customer_table.html", context)
 
 
 @login_required
@@ -123,7 +248,9 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
 
     # Expected queries: 4 (customer + tax + billing + addresses)
     customer = get_object_or_404(
-        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related("addresses", "notes"),
+        accessible_qs.select_related("tax_profile", "billing_profile").prefetch_related(
+            "addresses", "notes", "memberships__user"
+        ),
         id=customer_id,
     )
 
@@ -170,6 +297,13 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     total_users = membership_stats["total"]
     owner_count = membership_stats["owners"]
 
+    # Breadcrumb navigation
+    breadcrumb_items = [
+        {"text": _("Dashboard"), "url": reverse("dashboard")},
+        {"text": _("Customers"), "url": reverse("customers:list")},
+        {"text": customer.get_display_name()},
+    ]
+
     context = {
         "customer": customer,
         "tax_profile": customer.get_tax_profile(),
@@ -189,6 +323,9 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         "owner_count": owner_count,
         "is_last_user": total_users <= 1,
         "is_last_owner": owner_count <= 1,
+        # Navigation and access
+        "breadcrumb_items": breadcrumb_items,
+        "is_staff_user": user.is_staff or bool(user.staff_role),
     }
 
     return render(request, "customers/detail.html", context)
@@ -360,6 +497,15 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
         "customer": customer,
         "title": _("Edit Customer"),
         "submit_text": _("Update Customer"),
+        "breadcrumb_items": [
+            {"text": _("Dashboard"), "url": reverse("dashboard")},
+            {"text": _("Customers"), "url": reverse("customers:list")},
+            {
+                "text": customer.get_display_name(),
+                "url": reverse("customers:detail", kwargs={"customer_id": customer.pk}),
+            },
+            {"text": _("Edit")},
+        ],
     }
 
     return render(request, "customers/edit.html", context)
@@ -562,6 +708,15 @@ def _render_assignment_form(
         "form": form,
         "customer": customer,
         "action": _("Assign User"),
+        "breadcrumb_items": [
+            {"text": _("Dashboard"), "url": reverse("dashboard")},
+            {"text": _("Customers"), "url": reverse("customers:list")},
+            {
+                "text": customer.get_display_name(),
+                "url": reverse("customers:detail", kwargs={"customer_id": customer.pk}),
+            },
+            {"text": _("Assign User")},
+        ],
     }
     return render(request, "customers/assign_user.html", context)
 

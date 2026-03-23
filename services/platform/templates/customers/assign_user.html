@@ -6,17 +6,12 @@
 
 {% block content %}
 <div class="px-4 py-6 max-w-4xl mx-auto">
-    <!-- Header with breadcrumb -->
-    <div class="mb-6">
-        <nav class="flex items-center space-x-2 text-sm text-slate-400 mb-4">
-            <a href="{% url 'customers:list' %}" class="hover:text-white">{% trans 'Customers' %}</a>
-            <span>/</span>
-            <a href="{% url 'customers:detail' customer.pk %}" class="hover:text-white">{{ customer.name }}</a>
-            <span>/</span>
-            <span class="text-white">{% trans 'Assign User' %}</span>
-        </nav>
+    <!-- Breadcrumb -->
+    {% include "components/breadcrumb.html" with items=breadcrumb_items %}
 
-        <h1 class="text-2xl font-bold text-white romanian-flag">
+    <!-- Header -->
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-white mt-4">
             {% icon "users" %} {% trans 'Assign User to' %} {{ customer.name }}
         </h1>
         <p class="mt-1 text-sm text-slate-400">
@@ -238,9 +233,11 @@
             <!-- Form Actions -->
             <div class="flex justify-between pt-6 border-t border-slate-600">
                 {% url 'customers:detail' customer.pk as cancel_url %}
-                {% include 'components/button.html' with text='Cancel' variant='secondary' href=cancel_url %}
+                {% trans "Cancel" as cancel_text %}
+                {% button cancel_text href=cancel_url variant="secondary" %}
 
-                {% include 'components/button.html' with text='Assign User' variant='primary' type='submit' %}
+                {% trans "Assign User" as assign_text %}
+                {% button assign_text type="submit" variant="primary" %}
             </div>
         </form>
     </div>

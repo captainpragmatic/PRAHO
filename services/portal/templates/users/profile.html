@@ -25,32 +25,13 @@
 
         <!-- Form Errors -->
         {% if form.non_field_errors %}
-        <div class="bg-red-900 border border-red-700 rounded-md p-3">
-          {% for error in form.non_field_errors %}
-          <p class="text-red-100 text-sm">{% icon "x" size="sm" css_class="text-red-100" %} {{ error }}</p>
-          {% endfor %}
-        </div>
+        {% form_error_summary form %}
         {% endif %}
 
         <!-- Basic Information -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label for="id_first_name" class="block text-sm font-medium text-slate-300 mb-1">
-              {% trans 'First Name' %}
-            </label>
-            <input type="text" name="first_name" id="id_first_name" value="{{ profile.first_name|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="{% trans 'Your first name' %}">
-          </div>
-
-          <div>
-            <label for="id_last_name" class="block text-sm font-medium text-slate-300 mb-1">
-              {% trans 'Last Name' %}
-            </label>
-            <input type="text" name="last_name" id="id_last_name" value="{{ profile.last_name|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="{% trans 'Your last name' %}">
-          </div>
+          {% form_field form.first_name icon_left="user" %}
+          {% form_field form.last_name icon_left="user" %}
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -58,21 +39,12 @@
             <label for="id_email" class="block text-sm font-medium text-slate-300 mb-1">
               {% trans 'Email Address' %}
             </label>
-            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled
-                   class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
+            <input type="email" name="email" id="id_email" value="{{ profile.email|default:customer_email }}" disabled class="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded-md text-slate-300 cursor-not-allowed">
             <p class="mt-1 text-xs text-slate-400">
               {% trans 'Contact support to change your email address' %}
             </p>
           </div>
-
-          <div>
-            <label for="id_phone" class="block text-sm font-medium text-slate-300 mb-1">
-              {% trans 'Phone Number' %}
-            </label>
-            <input type="text" name="phone" id="id_phone" value="{{ profile.phone|default:'' }}"
-                   class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500"
-                   placeholder="+40 721 123 456">
-          </div>
+          {% form_field form.phone icon_left="phone" %}
         </div>
 
         <!-- Language & Preferences -->
@@ -82,29 +54,47 @@
           </h4>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label for="preferred_language" class="block text-sm font-medium text-slate-300 mb-1">
-                {% trans 'Language' %}
-              </label>
-              <select name="preferred_language" id="preferred_language"
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="ro" {% if profile.profile.preferred_language == 'ro' %}selected{% endif %}>Română (RO)</option>
-                <option value="en" {% if profile.profile.preferred_language == 'en' %}selected{% endif %}>English (EN)</option>
-              </select>
-            </div>
+            {% form_field form.preferred_language %}
+            {% form_field form.timezone %}
+          </div>
+        </div>
 
-            <div>
-              <label for="timezone" class="block text-sm font-medium text-slate-300 mb-1">
-                {% trans 'Timezone' %}
-              </label>
-              <select name="timezone" id="timezone"
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="Europe/Bucharest" {% if profile.profile.timezone == 'Europe/Bucharest' or not profile.profile.timezone %}selected{% endif %}>Europe/Bucharest (RO)</option>
-                <option value="UTC" {% if profile.profile.timezone == 'UTC' %}selected{% endif %}>UTC</option>
-                <option value="Europe/London" {% if profile.profile.timezone == 'Europe/London' %}selected{% endif %}>Europe/London (UK)</option>
-                <option value="Europe/Paris" {% if profile.profile.timezone == 'Europe/Paris' %}selected{% endif %}>Europe/Paris (FR)</option>
-              </select>
-            </div>
+        <!-- Notification Preferences -->
+        <div class="border-t border-slate-600 pt-6">
+          <h4 class="text-md font-medium text-white mb-4">
+            {% icon "bell" size="sm" css_class="text-white" %} {% trans 'Notifications' %}
+          </h4>
+
+          <div class="space-y-4">
+            <label class="flex items-center space-x-3 cursor-pointer">
+              <input type="checkbox" name="email_notifications"
+                     {% if form.email_notifications.value %}checked{% endif %}
+                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans "Email Notifications" %}</div>
+                <div class="text-xs text-slate-400">{% trans "Receive important account and billing notifications via email" %}</div>
+              </div>
+            </label>
+
+            <label class="flex items-center space-x-3 cursor-pointer">
+              <input type="checkbox" name="sms_notifications"
+                     {% if form.sms_notifications.value %}checked{% endif %}
+                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans "SMS Notifications" %}</div>
+                <div class="text-xs text-slate-400">{% trans "Receive alerts via SMS" %}</div>
+              </div>
+            </label>
+
+            <label class="flex items-center space-x-3 cursor-pointer">
+              <input type="checkbox" name="marketing_emails"
+                     {% if form.marketing_emails.value %}checked{% endif %}
+                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans "Marketing Emails" %}</div>
+                <div class="text-xs text-slate-400">{% trans "Receive newsletters, product updates, and promotional offers" %}</div>
+              </div>
+            </label>
           </div>
         </div>
 
@@ -126,16 +116,16 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if profile.is_active|default:True %}
-                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="check" %}
+                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="check" size="sm" %}
               {% else %}
-                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="x" %}
+                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="x" size="sm" %}
               {% endif %}
             </dd>
           </div>
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Member Since' %}</dt>
-            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|date:"d.m.Y"|default:'N/A' }}</dd>
+            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|slice:":10"|default:'N/A' }}</dd>
           </div>
         </div>
 
@@ -144,20 +134,16 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
               {% if profile.mfa_enabled %}
-                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="lock" %}
+                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="lock" size="sm" %}
                 <div class="mt-2">
-                  <a href="{% url 'users:mfa_management' %}"
-                     class="text-blue-400 hover:text-blue-300 text-xs">
-                    {% icon "settings" size="sm" css_class="text-blue-400" %} {% trans 'Manage MFA Settings' %}
-                  </a>
+                  {% trans "Manage MFA" as mfa_btn %}
+                  {% button mfa_btn variant="secondary" size="sm" href="/mfa/" icon="settings" %}
                 </div>
               {% else %}
-                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="warning" %}
+                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="warning" size="sm" %}
                 <div class="mt-2">
-                  <a href="{% url 'users:mfa_management' %}"
-                     class="text-yellow-400 hover:text-yellow-300 text-xs">
-                    {% icon "lightning" size="sm" css_class="text-yellow-400" %} {% trans 'Enable MFA Now' %}
-                  </a>
+                  {% trans "Enable MFA" as mfa_btn %}
+                  {% button mfa_btn variant="warning" size="sm" href="/mfa/" icon="lightning" %}
                 </div>
               {% endif %}
             </dd>
@@ -166,218 +152,102 @@
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Password Security' %}</dt>
             <dd class="mt-1 text-sm">
-              <a href="{% url 'users:change_password' %}"
-                 class="text-blue-400 hover:text-blue-300">
-                {% icon "lock" size="sm" css_class="text-blue-400" %} {% trans 'Change Password' %}
-              </a>
+              {% trans "Change Password" as pw_btn %}
+              {% button pw_btn variant="secondary" size="sm" href="/change-password/" icon="lock" %}
             </dd>
           </div>
+
         </div>
       </div>
   {% end_section_card %}
 
-  <!-- Multi-Customer Company Profile Management -->
-  {% trans 'Company Profiles' as sc3_title %}
+  <!-- Company Profile Management -->
+  {% trans 'Company' as sc3_title %}
   {% section_card title=sc3_title icon="building" css_class="mt-6" %}
-      <div class="mb-6">
-        <!-- Header - Mobile Stacked, Desktop Side-by-Side -->
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
 
-          <!-- Customer Context Summary - Mobile Full Width -->
-          {% if user_memberships %}
-          <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-            <span class="text-xs text-slate-400 whitespace-nowrap">
-              {{ user_memberships|length }} {% trans 'company' %}{% if user_memberships|length != 1 %}{% trans 'ies' %}{% endif %}
-            </span>
-
-            <!-- Quick Customer Selector - Mobile Full Width -->
-            <div class="relative w-full sm:w-auto min-w-0 sm:min-w-48">
-              <select onchange="switchCustomer(this.value)" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
-                <option value="">{% trans 'Select Customer' %}</option>
-                {% for membership in user_memberships %}
-                <option value="{{ membership.customer_id }}" {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}selected{% endif %}>
-                  {{ membership.customer_name }} ({{ membership.role|title }})
-                </option>
-                {% endfor %}
-              </select>
-              <span class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">{% icon "chevron-down" size="sm" css_class="text-slate-400" %}</span>
-            </div>
-          </div>
-          {% endif %}
-        </div>
-      </div>
-
-      <!-- Current Customer Context Display -->
-      {% if selected_customer_name %}
-      <div class="mb-6 p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
-        <!-- Mobile Stacked, Desktop Side-by-Side -->
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <!-- Customer Info -->
-          <div class="flex items-start sm:items-center space-x-3 min-w-0 flex-1">
-            <span class="text-blue-400 mt-0.5 sm:mt-0 flex-shrink-0">{% icon "building" size="sm" css_class="text-blue-400" %}</span>
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-medium text-white truncate">
-                {% trans 'Currently viewing:' %} {{ selected_customer_name }}
-              </div>
-              <div class="text-xs text-slate-400 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mt-1">
-                <span class="whitespace-nowrap">{% trans 'Your role:' %}</span>
-                {% badge selected_customer_role|status_label variant=selected_customer_role|status_variant %}
-              </div>
-            </div>
-          </div>
-
-          <!-- Quick Actions - Mobile Full Width Buttons -->
-          <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <a href="{% url 'users:company_profile' %}"
-               class="flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-              {% icon "search" size="xs" css_class="text-white" %} {% trans 'View' %}
-            </a>
-            {% if can_edit_profile %}
-            <a href="{% url 'users:company_profile_edit' %}"
-               class="flex items-center justify-center px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
-              {% icon "document" size="xs" css_class="text-white" %} {% trans 'Edit' %}
-            </a>
-            {% endif %}
-          </div>
+      <!-- Company Selector (multi-customer users) -->
+      {% if user_memberships|length > 1 %}
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
+        <span class="text-xs text-slate-400 whitespace-nowrap">
+          {{ user_memberships|length }} {% trans 'companies' %}
+        </span>
+        <div class="relative w-full sm:w-auto min-w-0 sm:min-w-48">
+          <select onchange="switchCustomer(this.value)" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
+            {% for membership in user_memberships %}
+            <option value="{{ membership.customer_id }}" {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}selected{% endif %}>
+              {{ membership.customer_name }} ({{ membership.role|title }})
+            </option>
+            {% endfor %}
+          </select>
+          <span class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">{% icon "chevron-down" size="sm" css_class="text-slate-400" %}</span>
         </div>
       </div>
       {% endif %}
 
-      <!-- Company Cards Grid - Better Mobile Spacing -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-
-        <!-- Existing Company Cards -->
-        {% for membership in user_memberships %}
-        <div class="bg-slate-700/50 border border-slate-600 rounded-lg p-4 hover:border-slate-500 transition-colors
-                    {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}ring-2 ring-blue-500 border-blue-500{% endif %}">
-
-          <!-- Company Header -->
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center space-x-2">
-              <span class="text-blue-400">{% icon "building" size="sm" css_class="text-blue-400" %}</span>
-              <h4 class="font-medium text-white text-sm truncate">{{ membership.customer_name }}</h4>
-            </div>
-
-            <!-- Role Badge -->
-            {% badge membership.role|title variant=membership.role|status_variant %}
-          </div>
-
-          <!-- Company Info -->
-          <div class="space-y-2 mb-4">
-            <div class="text-xs text-slate-400">
-              <span>{% trans 'ID:' %} {{ membership.customer_id }}</span>
-            </div>
-            {% if membership.company_name %}
-            <div class="text-xs text-slate-300 truncate">
-              {{ membership.company_name }}
-            </div>
-            {% endif %}
-          </div>
-
-          <!-- Action Buttons - Mobile Friendly -->
-          <div class="flex flex-col sm:flex-row gap-2">
-            {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}
-              <!-- Current customer - direct actions -->
-              <a href="{% url 'users:company_profile' %}"
-                 class="flex-1 px-3 py-2 bg-blue-600 text-white text-xs text-center font-medium rounded-lg hover:bg-blue-700 transition-colors">
-                {% icon "search" size="xs" css_class="text-white" %} {% trans 'View' %}
-              </a>
-              {% if membership.role in 'owner,billing' %}
-              <a href="{% url 'users:company_profile_edit' %}"
-                 class="flex-1 px-3 py-2 bg-green-600 text-white text-xs text-center font-medium rounded-lg hover:bg-green-700 transition-colors">
-                {% icon "document" size="xs" css_class="text-white" %} {% trans 'Edit' %}
-              </a>
+      <!-- Current Company Summary -->
+      {% if selected_customer_name %}
+      <div class="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div class="flex items-center space-x-3 min-w-0 flex-1">
+            {% icon "building" size="md" css_class="text-blue-400 flex-shrink-0" %}
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-white truncate">{{ selected_customer_name }}</div>
+              {% if selected_customer_cui %}
+              <div class="text-xs text-slate-400 font-mono mt-0.5">CUI: {{ selected_customer_cui }}</div>
               {% endif %}
-            {% else %}
-              <!-- Other customer - switch first -->
-              <button onclick="switchToCustomer('{{ membership.customer_id|escapejs }}')"
-                      class="w-full px-3 py-2 bg-slate-600 text-white text-xs font-medium rounded-lg hover:bg-slate-500 transition-colors">
-                {% icon "refresh" size="xs" css_class="text-white" %} {% trans 'Switch & View' %}
-              </button>
-            {% endif %}
-          </div>
-        </div>
-        {% empty %}
-        <!-- No companies message - Mobile Friendly -->
-        <div class="sm:col-span-2 xl:col-span-3 text-center py-8 px-4">
-          <div class="text-slate-400 mb-4">
-            {% icon "building" size="2xl" css_class="text-slate-400" %}
-          </div>
-          <p class="text-slate-400 mb-2 text-sm sm:text-base">{% trans 'No company profiles found' %}</p>
-          <p class="text-xs text-slate-500">{% trans 'Create your first company profile to get started' %}</p>
-        </div>
-        {% endfor %}
-
-        <!-- Add New Company Card - Mobile Optimized -->
-        <div class="bg-slate-700/30 border-2 border-dashed border-slate-600 rounded-lg p-4 hover:border-slate-500 hover:bg-slate-700/40 transition-colors group">
-          <div class="text-center">
-            <div class="text-slate-400 group-hover:text-slate-300 mb-3">
-              {% icon "plus" size="xl" css_class="text-slate-400 group-hover:text-slate-300" %}
+              <div class="text-xs text-slate-400 mt-0.5">
+                {% badge selected_customer_role|status_label variant=selected_customer_role|status_variant size="sm" %}
+              </div>
             </div>
-            <h4 class="font-medium text-slate-400 group-hover:text-slate-300 mb-2 text-sm">
-              {% trans 'Add New Company' %}
-            </h4>
-            <p class="text-xs text-slate-500 group-hover:text-slate-400 mb-4 leading-relaxed">
-              {% trans 'Create a new company profile and become the owner' %}
-            </p>
-            <a href="{% url 'users:create_company' %}"
-               class="inline-flex items-center justify-center w-full px-4 py-2.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-              {% icon "building" size="sm" css_class="text-white" %} {% trans 'Create Company' %}
-            </a>
+          </div>
+          <div class="flex gap-2">
+            {% trans "View" as view_btn %}
+            {% button view_btn variant="primary" size="sm" href="/company/" icon="search" %}
+            {% if can_edit_profile %}
+              {% trans "Edit" as edit_btn %}
+              {% button edit_btn variant="success" size="sm" href="/company/edit/" icon="edit" %}
+            {% endif %}
           </div>
         </div>
       </div>
+      {% else %}
+      <div class="text-center py-6">
+        {% icon "building" size="2xl" css_class="text-slate-500 mb-3" %}
+        <p class="text-slate-400 text-sm mb-4">{% trans 'No company profile yet' %}</p>
+      </div>
+      {% endif %}
 
-      <!-- Romanian Compliance Notice - Mobile Friendly -->
-      <div class="mt-6 p-4 bg-slate-900 border border-slate-600 rounded-lg">
+      <!-- Create Company — always available -->
+      <div class="mt-4 flex justify-end">
+        {% trans "Create Company" as create_btn %}
+        {% button create_btn variant="secondary" size="sm" href="/company/create/" icon="plus" %}
+      </div>
+
+      <!-- Romanian Compliance Notice -->
+      <div class="mt-4 p-3 bg-slate-900 border border-slate-600 rounded-lg">
         <div class="flex items-start space-x-3">
-          <span class="text-blue-400 mt-0.5 flex-shrink-0">{% icon "flag" size="sm" css_class="text-blue-400" %}</span>
-          <div class="text-xs sm:text-sm text-slate-400 min-w-0">
-            <p class="font-medium text-slate-300 mb-2 text-sm">{% trans 'Romanian Business Compliance' %}</p>
-            <p class="leading-relaxed">{% trans 'VAT number (CUI) and legal address required for invoicing. Company owners can invite team members with different access levels.' %}</p>
-          </div>
+          {% icon "flag" size="sm" css_class="text-blue-400 mt-0.5 flex-shrink-0" %}
+          <p class="text-xs text-slate-400">{% trans 'VAT number (CUI) and legal address required for invoicing. Company owners can invite team members with different access levels.' %}</p>
         </div>
       </div>
   {% end_section_card %}
 
-  <!-- JavaScript for Multi-Customer Management -->
-  <script>
+  <!-- JavaScript for Customer Switching -->
+  <script nonce="{{ csp_nonce }}">
   function switchCustomer(customerId) {
     if (!customerId) return;
-
-    // Create a form and submit to switch customer
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = '{% url "users:switch_customer" %}';
-
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
-    const csrfInput = document.createElement('input');
-    csrfInput.type = 'hidden';
-    csrfInput.name = 'csrfmiddlewaretoken';
-    csrfInput.value = csrfToken;
-    form.appendChild(csrfInput);
-
-    const customerInput = document.createElement('input');
-    customerInput.type = 'hidden';
-    customerInput.name = 'customer_id';
-    customerInput.value = customerId;
-    form.appendChild(customerInput);
-
-    const nextInput = document.createElement('input');
-    nextInput.type = 'hidden';
-    nextInput.name = 'next';
-    nextInput.value = window.location.pathname;
-    form.appendChild(nextInput);
-
+    [{name: 'csrfmiddlewaretoken', value: csrfToken}, {name: 'customer_id', value: customerId}, {name: 'next', value: window.location.pathname}].forEach(({name, value}) => {
+      const input = document.createElement('input');
+      input.type = 'hidden'; input.name = name; input.value = value;
+      form.appendChild(input);
+    });
     document.body.appendChild(form);
     form.submit();
   }
-
-  function switchToCustomer(customerId) {
-    switchCustomer(customerId);
-  }
-
-  // addNewCompany function removed - now uses direct link to create_company view
   </script>
 
   <!-- GDPR Privacy & Data Protection -->
@@ -385,49 +255,14 @@
   {% section_card title=sc4_title icon="lock" css_class="mt-6" %}
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Current Consent Status -->
+        <!-- Privacy Summary -->
         <div class="space-y-4">
-          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
-
-          <div class="space-y-3">
-            <!-- Data Processing Consent -->
-            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
-              <div class="flex items-center">
-                <span class="text-green-400 mr-2">{% icon "lock" size="sm" css_class="text-green-400" %}</span>
-                <div>
-                  <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
-                  <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
-                </div>
-              </div>
-              {% if profile.gdpr_consent_date %}
-                {% trans "Given" as bt5 %}{% badge bt5 variant="success" icon="check" %}
-              {% else %}
-                {% trans "Not Given" as bt6 %}{% badge bt6 variant="danger" icon="x" %}
-              {% endif %}
-            </div>
-
-            <!-- Marketing Consent -->
-            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
-              <div class="flex items-center">
-                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" css_class="text-blue-400" %}</span>
-                <div>
-                  <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
-                  <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
-                </div>
-              </div>
-              {% if profile.accepts_marketing %}
-                {% trans "Enabled" as bt7 %}{% badge bt7 variant="success" icon="check" %}
-              {% else %}
-                {% trans "Disabled" as bt8 %}{% badge bt8 variant="secondary" icon="ban" %}
-              {% endif %}
-            </div>
-          </div>
-
-          {% if profile.gdpr_consent_date %}
-          <div class="text-xs text-slate-400">
-            {% trans 'Last updated:' %} {{ profile.gdpr_consent_date|date:"M d, Y" }}
-          </div>
-          {% endif %}
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Privacy' %}</h4>
+          <p class="text-sm text-slate-400">
+            {% trans 'Manage your data processing consent, marketing preferences, and privacy settings from the Privacy Dashboard.' %}
+          </p>
+          {% trans "Open Privacy Dashboard" as privacy_btn %}
+          {% button privacy_btn variant="primary" size="sm" href="/privacy/" icon="lock" %}
         </div>
 
         <!-- GDPR Actions -->

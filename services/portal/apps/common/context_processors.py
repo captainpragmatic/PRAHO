@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from django.http import HttpRequest
+from django.utils.translation import gettext as _
 
 from apps.common.account_health import get_account_health
 
@@ -53,5 +54,17 @@ def portal_context(request: HttpRequest) -> dict[str, Any]:
             context["account_banner"] = get_account_health(request)
         except Exception as e:
             logger.warning("⚠️ [ContextProcessor] Account health check failed: %s", e)
+
+        # "My Account" nav dropdown items — available on every authenticated page
+        context["account_menu_items"] = [
+            {"url": "/profile/", "text": _("Account Settings"), "icon": "settings"},
+            {"url": "/mfa/", "text": _("Security"), "icon": "lock"},
+            {"divider": True},
+            {"url": "/company/", "text": _("Company Profile"), "icon": "building"},
+            {"url": "/company/team/", "text": _("Team Members"), "icon": "users"},
+            {"url": "/company/addresses/", "text": _("Addresses"), "icon": "map-pin"},
+            {"divider": True},
+            {"url": "/privacy/", "text": _("Privacy"), "icon": "lock"},
+        ]
 
     return context

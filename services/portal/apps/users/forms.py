@@ -638,88 +638,9 @@ class CompanyProfileForm(forms.Form):
         help_text=_("Official company name as registered"),
     )
 
-    vat_number = forms.CharField(
-        label=_("VAT Number / CUI"),
-        max_length=50,
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("RO12345678"),
-            }
-        ),
-        help_text=_("Romanian VAT number or CUI"),
-    )
-
-    trade_registry_number = forms.CharField(
-        label=_("Trade Registry Number"),
-        max_length=50,
-        required=False,
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("J40/1234/2023"),
-            }
-        ),
-        help_text=_("Trade registry number (optional)"),
-    )
-
-    # Billing Address
-    billing_street = forms.CharField(
-        label=_("Street Address"),
-        max_length=200,
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("Strada Exemple nr. 123"),
-            }
-        ),
-        help_text=_("Street name and number"),
-    )
-
-    billing_city = forms.CharField(
-        label=_("City"),
-        max_length=100,
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("București"),
-            }
-        ),
-    )
-
-    billing_state = forms.CharField(
-        label=_("County/State"),
-        max_length=100,
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("București"),
-            }
-        ),
-    )
-
-    billing_postal_code = forms.CharField(
-        label=_("Postal Code"),
-        max_length=20,
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-slate-400",
-                "placeholder": _("010101"),
-            }
-        ),
-    )
-
-    billing_country = forms.CharField(
-        label=_("Country"),
-        initial="RO",
-        widget=forms.TextInput(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-700 text-slate-300 rounded-lg cursor-not-allowed",
-                "readonly": True,
-            }
-        ),
-        help_text=_("Currently only Romania (RO) is supported"),
-    )
+    # VAT/CUI and billing address are managed via dedicated pages:
+    # - Tax Profile: /company/tax/
+    # - Addresses: /company/addresses/
 
     # Business Contact Information
     primary_email = forms.EmailField(

@@ -166,12 +166,12 @@ class TestCustomerBillingProfile:
 class TestCustomerAddress:
     """Test customer address functionality"""
 
-    def test_legal_address_creation(self):
-        """Legal address should be created correctly"""
+    def test_primary_address_creation(self):
+        """Primary address should be created correctly"""
         from tests.factories.core_factories import create_full_customer
 
         customer = create_full_customer()
-        address = customer.addresses.filter(address_type='legal').first()
+        address = customer.addresses.filter(is_primary=True).first()
 
         assert address is not None
         assert address.address_line1 == 'Str. Test Nr. 1'
@@ -185,10 +185,11 @@ class TestCustomerAddress:
 
         customer = create_full_customer()
 
-        # Add billing address
+        # Add separate billing address
         CustomerAddress.objects.create(
             customer=customer,
-            address_type='billing',
+            is_primary=False,
+            is_billing=True,
             address_line1='Bd. Unirii Nr. 10',
             city='București',
             county='Sector 3',
@@ -198,8 +199,8 @@ class TestCustomerAddress:
         )
 
         assert customer.addresses.count() == 2
-        assert customer.addresses.filter(address_type='legal').exists()
-        assert customer.addresses.filter(address_type='billing').exists()
+        assert customer.addresses.filter(is_primary=True).exists()
+        assert customer.addresses.filter(is_billing=True).exists()
 
     def test_romanian_address_fields(self):
         """Address should support Romanian-specific fields"""

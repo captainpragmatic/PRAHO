@@ -55,6 +55,13 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     # Base queryset
     tickets = Ticket.objects.filter(customer_id__in=customer_ids).select_related("customer").order_by("-created_at")
 
+    # Filter by specific customer (for "View all" links from customer detail)
+    customer_filter = request.GET.get("customer", "").strip()
+    if customer_filter and customer_filter.isdigit():
+        customer_id = int(customer_filter)
+        if customer_id in customer_ids:
+            tickets = tickets.filter(customer_id=customer_id)
+
     # Get filter parameters
     search_query = request.GET.get("search", "").strip()
     status_filter = request.GET.get("status", "").strip()
