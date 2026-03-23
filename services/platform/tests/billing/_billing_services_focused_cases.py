@@ -19,6 +19,7 @@ from apps.billing.services import (
     RefundType,
 )
 from apps.customers.models import Customer
+from apps.orders.models import Order
 from apps.users.models import User
 
 
@@ -77,10 +78,10 @@ class RefundServiceFocusedTestCase(TestCase):
         self.assertEqual(refund_data['refund_type'], RefundType.FULL)
         self.assertEqual(refund_data['reason'], RefundReason.CUSTOMER_REQUEST)
 
-    @patch('apps.orders.models.Order.objects.select_related')
-    def test_refund_order_order_not_found_error_path(self, mock_select_related: Mock) -> None:
+    @patch('apps.billing.refund_service.Order.objects')
+    def test_refund_order_order_not_found_error_path(self, mock_qs: Mock) -> None:
         """Test error path when order is not found"""
-        mock_select_related.return_value.get.side_effect = Exception("Order matching query does not exist")
+        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Order.DoesNotExist("Order matching query does not exist")
 
         refund_data: RefundData = {
             'refund_type': RefundType.FULL,
