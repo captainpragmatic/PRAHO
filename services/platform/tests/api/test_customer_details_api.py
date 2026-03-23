@@ -4,9 +4,8 @@ import hmac
 import json
 import time
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import TestCase, Client, override_settings
+from django.test import Client, TestCase, override_settings
 
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership
@@ -94,7 +93,7 @@ class CustomerDetailsAPITests(TestCase):
             'timestamp': int(ts),
         }
         body = json.dumps(body_dict).encode()
-        headers = self._headers('POST', path, body, nonce='nonce-success-1', timestamp=ts)
+        headers = self._headers('POST', path, body, nonce='test-success-nonce-xxxxxxxxxx0000001', timestamp=ts)
 
         resp = self.client.post(path, data=body, content_type='application/json', **headers)
 
@@ -133,7 +132,7 @@ class CustomerDetailsAPITests(TestCase):
             'timestamp': int(ts),
         }
         body = json.dumps(body_dict).encode()
-        headers = self._headers('POST', path, body, nonce='nonce-nomember-1', timestamp=ts)
+        headers = self._headers('POST', path, body, nonce='test-nomember-nonce-xxxxxxxxx0000001', timestamp=ts)
 
         resp = self.client.post(path, data=body, content_type='application/json', **headers)
 
@@ -171,7 +170,7 @@ class CustomerDetailsAPITests(TestCase):
         # Build headers with wrong signature
         headers = {
             'HTTP_X_PORTAL_ID': self.portal_id,
-            'HTTP_X_NONCE': 'nonce-bad-1',
+            'HTTP_X_NONCE': 'test-bad-signature-nonce-xxxxx0000001',
             'HTTP_X_TIMESTAMP': ts,
             'HTTP_X_BODY_HASH': base64.b64encode(hashlib.sha256(body).digest()).decode('ascii'),
             'HTTP_X_SIGNATURE': '0' * 64,

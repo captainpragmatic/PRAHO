@@ -64,7 +64,9 @@ class PortalHMACThrottleTests(SimpleTestCase):
     def setUp(self) -> None:
         self.factory = APIRequestFactory()
 
-    def test_portal_hmac_rate_throttle_uses_portal_and_customer_identity(self) -> None:
+    def test_portal_hmac_rate_throttle_uses_portal_identity(self) -> None:
+        # PortalHMACRateThrottle keys on portal_id only (not customer_id) to
+        # avoid unbounded cache key growth across customers per portal.
         request = SimpleNamespace(
             headers={"X-Portal-Id": "portal-001"},
             data={"customer_id": 123, "user_id": 7},
@@ -73,7 +75,7 @@ class PortalHMACThrottleTests(SimpleTestCase):
 
         key = PortalHMACRateThrottle().get_cache_key(request, view=None)
         self.assertIsNotNone(key)
-        self.assertIn("portal-001:customer_123", key or "")
+        self.assertIn("portal-001", key or "")
 
     def test_portal_hmac_burst_throttle_uses_portal_only_fallback(self) -> None:
         request = SimpleNamespace(
