@@ -24,6 +24,9 @@ from apps.api_client.services import PlatformAPIError, api_client
 
 logger = logging.getLogger(__name__)
 
+# Circuit breaker: max consecutive fail-open validations before forced logout (#130/M1)
+_MAX_FAIL_OPEN_COUNT = 5
+
 
 class PortalAuthenticationMiddleware:
     """
@@ -285,6 +288,8 @@ class PortalAuthenticationMiddleware:
                 request.session.modified = True
 
                 logger.debug(f"✅ [Auth] User {user_id} validated successfully")
+                # Reset fail-open circuit breaker on successful validation (#130/M1)
+                cache.delete(f"auth:fail_open:{user_id}")
                 return True
             else:
                 logger.warning(f"❌ [Auth] User {user_id} validation failed - account disabled/deleted")
@@ -295,9 +300,21 @@ class PortalAuthenticationMiddleware:
                 raise
             logger.error(f"🔥 [Auth] Platform API error during validation for {user_id}: {e}")
 
-            # Fail-open strategy: Allow access during API outages but don't update metadata
-            # This provides availability during platform maintenance windows
-            logger.info(f"🛡️ [Auth] Failing open for user {user_id} due to API unavailability")
+            # Fail-open with circuit breaker (#130/M1): allow access during API outages
+            # but force logout after too many consecutive fail-opens for same user.
+            fail_open_key = f"auth:fail_open:{user_id}"
+            fail_count = cache.get(fail_open_key, 0) + 1
+            cache.set(fail_open_key, fail_count, timeout=3600)  # 1h window
+
+            if fail_count > _MAX_FAIL_OPEN_COUNT:
+                logger.warning(
+                    "🔥 [Auth] Circuit breaker tripped for user %s — %d consecutive fail-opens, forcing logout",
+                    user_id,
+                    fail_count,
+                )
+                return False
+
+            logger.info(f"🛡️ [Auth] Failing open for user {user_id} ({fail_count}/5) due to API unavailability")
             return True
 
         except Exception as e:
