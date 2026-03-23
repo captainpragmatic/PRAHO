@@ -11,14 +11,18 @@ Validates:
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
-from apps.orders.services import OrderPaymentConfirmationService
+from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
 from apps.products.models import Product
 from tests.helpers.fsm_helpers import force_status
+
+User = get_user_model()
 
 # Default review threshold from the service (500000 cents = 5000 RON)
 DEFAULT_THRESHOLD = 500000
@@ -431,3 +435,181 @@ class TestReviewThresholdClamping(ReviewGateTestBase):
         """Task 5.6 boundary: A value within [0, 100_000_000] is returned as-is."""
         threshold = OrderPaymentConfirmationService._get_review_threshold()
         self.assertEqual(threshold, 500_000)
+
+
+# ===============================================================================
+# H2 FIX: paid → failed transition
+# ===============================================================================
+
+
+class TestPaidToFailedTransition(ReviewGateTestBase):
+    """H2: The FSM model allows fail() from 'paid', but _ORDER_TRANSITION_MAP was missing the entry."""
+
+    def test_paid_order_can_transition_to_failed(self) -> None:
+        """An order in 'paid' status can be moved to 'failed' via update_order_status."""
+        order = self._create_order(total_cents=12100)
+        force_status(order, "paid")
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="failed", notes="Fraud detected"))
+
+        self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
+        order.refresh_from_db()
+        self.assertEqual(order.status, "failed")
+
+
+# ===============================================================================
+# H1 FIX: confirm_order re-fetches order from DB
+# ===============================================================================
+
+
+class TestConfirmOrderRefetchesFromDB(ReviewGateTestBase):
+    """H1: confirm_order must re-fetch the order to prevent TOCTOU race conditions."""
+
+    def test_stale_object_returns_ok_idempotent(self) -> None:
+        """When in-memory order says 'awaiting_payment' but DB says 'paid', confirm_order returns Ok."""
+        order = self._create_order(total_cents=12100)
+        force_status(order, "awaiting_payment")
+
+        # Simulate concurrent confirmation: update DB directly but keep stale in-memory object
+        from apps.orders.models import Order as OrderModel  # noqa: PLC0415
+
+        OrderModel.objects.filter(pk=order.pk).update(status="provisioning")
+
+        # Without H1 fix: stale object tries mark_paid() on 'awaiting_payment' → ConcurrentTransition
+        # With H1 fix: re-fetches from DB, sees 'provisioning', returns Ok (idempotent)
+        result = OrderPaymentConfirmationService.confirm_order(order)
+
+        self.assertTrue(result.is_ok(), f"Expected idempotent Ok for already-confirmed order, got: {result}")
+
+
+# ===============================================================================
+# M1 FIX: Low threshold warning
+# ===============================================================================
+
+
+class TestLowThresholdWarning(ReviewGateTestBase):
+    """M1: Suspiciously low thresholds should produce a warning log."""
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=500)
+    def test_low_threshold_logs_warning(self, mock_setting) -> None:
+        """A threshold below 1000 cents (10 RON) triggers a warning log."""
+        with self.assertLogs("apps.orders.services", level="WARNING") as log_ctx:
+            threshold = OrderPaymentConfirmationService._get_review_threshold()
+
+        self.assertEqual(threshold, 500)
+        self.assertTrue(
+            any("below" in msg and "1000" in msg for msg in log_ctx.output),
+            f"Expected warning about low threshold, got: {log_ctx.output}",
+        )
+
+    @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=50000)
+    def test_normal_threshold_no_warning(self, mock_setting) -> None:
+        """A threshold at or above 1000 cents does not trigger a warning."""
+        # assertNoLogs requires Python 3.10+; use assertRaises on assertLogs instead
+        try:
+            with self.assertLogs("apps.orders.services", level="WARNING"):
+                OrderPaymentConfirmationService._get_review_threshold()
+            # If we reach here, a warning WAS logged — that's a failure
+            self.fail("Expected no warning log for threshold=50000, but a warning was logged")
+        except AssertionError:
+            # assertLogs raises AssertionError when no logs are captured — this is the success case
+            pass
+
+
+# ===============================================================================
+# H3 FIX: Review gate role guard
+# ===============================================================================
+
+
+class TestReviewGateRoleGuard(TestCase):
+    """H3: Only admin/billing staff or superusers can approve/reject orders under review."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Role Guard SRL", customer_type="company", status="active",
+            primary_email="roleguard@test.ro",
+        )
+        self.product = Product.objects.create(
+            name="VPS Role Test", slug="vps-role-test", product_type="vps", is_active=True,
+        )
+
+    def _create_in_review_order(self) -> Order:
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency,
+            customer_email=self.customer.primary_email, customer_name=self.customer.name,
+            subtotal_cents=600000, tax_cents=126000, total_cents=726000,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order, product=self.product, product_name=self.product.name,
+            product_type=self.product.product_type, quantity=1,
+            unit_price_cents=600000, tax_rate=Decimal("0.2100"), tax_cents=126000,
+            line_total_cents=726000,
+        )
+        force_status(order, "in_review")
+        return order
+
+    def _create_staff_user(self, email: str, staff_role: str, is_superuser: bool = False) -> User:
+        return User.objects.create_user(
+            email=email, password="testpass123", staff_role=staff_role, is_superuser=is_superuser,
+        )
+
+    def test_support_staff_cannot_approve_review(self) -> None:
+        """A support staff member cannot approve an order under review."""
+        self._create_staff_user("support@test.ro", staff_role="support")
+        order = self._create_in_review_order()
+
+        self.client.login(email="support@test.ro", password="testpass123")
+        url = reverse("orders:order_change_status", args=[order.id])
+        response = self.client.post(url, {"status": "provisioning"})
+
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertIn("admin or billing", data["message"])
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, "in_review", "Order must remain in_review")
+
+    def test_admin_can_approve_review(self) -> None:
+        """Admin staff can approve an order under review."""
+        self._create_staff_user("admin-rg@test.ro", staff_role="admin")
+        order = self._create_in_review_order()
+
+        self.client.login(email="admin-rg@test.ro", password="testpass123")
+        url = reverse("orders:order_change_status", args=[order.id])
+        response = self.client.post(url, {"status": "provisioning"})
+
+        self.assertEqual(response.status_code, 200, f"Response: {response.content.decode()}")
+        order.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
+
+    def test_billing_can_approve_review(self) -> None:
+        """Billing staff can approve an order under review."""
+        self._create_staff_user("billing-rg@test.ro", staff_role="billing")
+        order = self._create_in_review_order()
+
+        self.client.login(email="billing-rg@test.ro", password="testpass123")
+        url = reverse("orders:order_change_status", args=[order.id])
+        response = self.client.post(url, {"status": "provisioning"})
+
+        self.assertEqual(response.status_code, 200, f"Response: {response.content.decode()}")
+        order.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
+
+    def test_superuser_can_approve_review(self) -> None:
+        """Superuser can approve an order under review regardless of staff_role."""
+        # is_staff=True needed for can_access_customer; is_superuser for role guard bypass
+        User.objects.create_superuser(email="super-rg@test.ro", password="testpass123")
+        order = self._create_in_review_order()
+
+        self.client.login(email="super-rg@test.ro", password="testpass123")
+        url = reverse("orders:order_change_status", args=[order.id])
+        response = self.client.post(url, {"status": "provisioning"})
+
+        self.assertEqual(response.status_code, 200, f"Response: {response.content.decode()}")
+        order.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")

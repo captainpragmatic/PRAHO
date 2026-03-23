@@ -396,31 +396,34 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         self.assertEqual(response.status_code, 200)
         history_count = OrderStatusHistory.objects.filter(order=order).count()
         # One from draft→pending at creation, one from pending→confirmed here
-        self.assertGreaterEqual(history_count, 1, "At least one OrderStatusHistory row must exist after confirm")
+        self.assertGreaterEqual(history_count, 2, "At least 2 OrderStatusHistory rows: paid + provisioning")
 
         latest = OrderStatusHistory.objects.filter(order=order).order_by("-created_at").first()
         self.assertIsNotNone(latest)
         assert latest is not None  # narrow type for mypy
         # Phase A+D: confirm_order auto-advances through paid→provisioning
         # (below review threshold), so latest history shows provisioning
-        self.assertIn(latest.new_status, ("paid", "provisioning"))
+        self.assertEqual(latest.new_status, "provisioning")
 
     def test_confirm_order_status_transition_awaiting_payment_to_provisioning(self) -> None:
         """confirm_order auto-advances awaiting_payment → paid → provisioning (below threshold)."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
-        order = _make_pending_order_for_h9(self.customer, self.currency)
+        pi_id = "pi_transitionTest1234567"
+        order = _make_pending_order_for_h9(self.customer, self.currency, payment_intent_id=pi_id)
         self.assertEqual(order.status, "awaiting_payment")
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
-            response = confirm_order(self._make_request({}), str(order.id))
+            response = confirm_order(
+                self._make_request({"payment_intent_id": pi_id, "payment_status": "succeeded"}), str(order.id)
+            )
 
         self.assertEqual(response.status_code, 200)
         order.refresh_from_db()
@@ -456,7 +459,11 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         """Calling confirm_order twice on the same order must return HTTP 409 on the second call."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
-        order = _make_pending_order_for_h9(self.customer, self.currency)
+        pi_id = "pi_doubleConfirmTest1234"
+        order = _make_pending_order_for_h9(self.customer, self.currency, payment_intent_id=pi_id)
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
@@ -466,8 +473,9 @@ class ConfirmOrderStatusHistoryTest(TestCase):
             patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
-            first_response = confirm_order(self._make_request({}), str(order.id))
-            second_response = confirm_order(self._make_request({}), str(order.id))
+            req_data = {"payment_intent_id": pi_id, "payment_status": "succeeded"}
+            first_response = confirm_order(self._make_request(req_data), str(order.id))
+            second_response = confirm_order(self._make_request(req_data), str(order.id))
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(
@@ -907,6 +915,7 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         """Calling confirm_order on an already-paid order must return 409 with no internal state names."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
+        pi_id = "pi_alreadyPaidTest12345"
         # An order that is already paid cannot be confirmed again
         order = Order.objects.create(
             customer=self.customer,
@@ -914,9 +923,11 @@ class ConfirmOrderErrorLeakageTest(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.company_name,
             status="paid",
+            payment_method="card",
+            payment_intent_id=pi_id,
         )
 
-        request = self._make_confirm_request({})
+        request = self._make_confirm_request({"payment_intent_id": pi_id, "payment_status": "succeeded"})
 
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
             response = confirm_order(request, str(order.id))
@@ -929,11 +940,12 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
         from apps.common.types import Err  # noqa: PLC0415
 
-        order = _make_pending_order_for_h9(self.customer, self.currency)
+        pi_id = "pi_errorLeakTest12345678"
+        order = _make_pending_order_for_h9(self.customer, self.currency, payment_intent_id=pi_id)
 
         internal_message = "Invalid status transition: awaiting_payment -> paid (constraint XYZ violated internally)"
 
-        request = self._make_confirm_request({})
+        request = self._make_confirm_request({"payment_intent_id": pi_id, "payment_status": "succeeded"})
 
         from unittest.mock import MagicMock  # noqa: PLC0415
 
@@ -941,7 +953,7 @@ class ConfirmOrderErrorLeakageTest(TestCase):
 
         mock_invoice = MagicMock()
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),

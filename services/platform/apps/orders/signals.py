@@ -387,6 +387,12 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                         proforma.number,
                         proforma.status,
                     )
+                elif proforma.status == "expired":
+                    logger.info(
+                        "📋 [Order] Proforma %s already expired when order %s cancelled — no action needed",
+                        proforma.number,
+                        order.order_number,
+                    )
 
         # Send cancellation email (deliberately vague per plan).
         # Isolated try/except so a failed email never masks a succeeded cancellation.

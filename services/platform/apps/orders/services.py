@@ -275,6 +275,7 @@ _ORDER_TRANSITION_MAP: dict[tuple[str, str], str] = {
     ("failed", "cancelled"): "cancel",
     # Failure + retry
     ("awaiting_payment", "failed"): "fail",
+    ("paid", "failed"): "fail",
     ("provisioning", "failed"): "fail",
     ("failed", "awaiting_payment"): "retry",
     # Refunds removed — handled at Invoice/Payment level, not Order FSM
@@ -860,8 +861,18 @@ class OrderPaymentConfirmationService:
         Why atomic: mark_paid() + start_provisioning() must both succeed or both fail.
         If only mark_paid succeeds, order is stuck in 'paid' with no recovery path.
         The 'paid' state is an audit checkpoint visible only in OrderStatusHistory.
+
+        Review gate: enforced here (threshold check) and in order_change_status view
+        (role guard: admin/billing only for in_review transitions). Direct FSM calls
+        bypass the review gate — always route through this method or the view.
         """
         try:
+            from .models import Order as OrderModel  # noqa: PLC0415
+
+            # H1 fix: Re-fetch with row lock to prevent TOCTOU race.
+            # Callers (signals, tasks) pass in-memory objects without select_for_update.
+            order = OrderModel.objects.select_for_update(of=("self",)).get(pk=order.pk)
+
             # Idempotent: already paid/provisioning/completed → return Ok
             if order.status in ("paid", "in_review", "provisioning", "completed"):
                 logger.info(
@@ -967,7 +978,16 @@ class OrderPaymentConfirmationService:
 
             threshold = SettingsService.get_integer_setting("orders.review_threshold_cents", _DEFAULT_REVIEW_THRESHOLD)
             # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
-            return max(0, min(threshold, _MAX_THRESHOLD))
+            clamped = max(0, min(threshold, _MAX_THRESHOLD))
+            # M1 fix: Warn when threshold is suspiciously low — likely misconfiguration.
+            _MIN_SAFE_THRESHOLD = 1000  # 10 RON  # noqa: N806
+            if clamped < _MIN_SAFE_THRESHOLD:
+                logger.warning(
+                    "⚠️ [OrderConfirm] Review threshold %d cents is below %d — all/most orders may enter review",
+                    clamped,
+                    _MIN_SAFE_THRESHOLD,
+                )
+            return clamped
         except Exception as e:
             logger.warning(
                 "⚠️ [OrderConfirm] Could not read review threshold, using default %d: %s",

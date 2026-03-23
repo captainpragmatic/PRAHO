@@ -989,6 +989,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             pi_to_verify = order.payment_intent_id
             order_payment_method = order.payment_method
             order_number_for_log = order.order_number
+            order_total_cents = order.total_cents
         # Phase 1 transaction ends here — DB lock released before any network call.
 
         # CRITICAL GUARD: This endpoint requires a valid Stripe PaymentIntent.
@@ -1035,6 +1036,19 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                     )
                     return Response(
                         {"success": False, "error": "Payment verification failed"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # H4 fix: Verify Stripe amount matches order total to prevent underpayment.
+                stripe_amount = payment_result.get("amount_received")
+                if stripe_amount is not None and stripe_amount != order_total_cents:
+                    logger.warning(
+                        "[API] Stripe amount mismatch for order %s: PI=%d, order=%d",
+                        order_number_for_log,
+                        stripe_amount,
+                        order_total_cents,
+                    )
+                    return Response(
+                        {"success": False, "error": "Payment amount does not match order total"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 # Capture verified status for the audit trail (not the client-supplied value)

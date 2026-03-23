@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar, TypedDict
+from typing import Any, ClassVar, NotRequired, TypedDict
 
 from django.conf import settings
 
@@ -38,6 +38,7 @@ class PaymentConfirmResult(TypedDict):
     success: bool
     status: str  # succeeded, failed, requires_action, etc.
     error: str | None
+    amount_received: NotRequired[int | None]
 
 
 class SubscriptionResult(TypedDict):

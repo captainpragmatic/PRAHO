@@ -54,6 +54,8 @@ _DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
 MAX_PRICE_OVERRIDE_CENTS = _DEFAULT_MAX_PRICE_OVERRIDE_CENTS
 _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
 MAX_PRICE_OVERRIDE_MULTIPLIER = _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
+# H3: Roles that can approve/reject orders under review
+_REVIEW_APPROVE_ROLES = frozenset({"admin", "billing"})
 
 
 def get_max_search_query_length() -> int:
@@ -818,6 +820,18 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
                 details={"order": order.order_number, "fields": updated_fields},
                 user_email=getattr(request.user, "email", None),
             )
+            # M4 fix: Flag payment_method changes on non-draft orders — potential bypass vector.
+            if "payment_method" in updated_fields and order.status != "draft":
+                log_security_event(
+                    event_type="payment_method_changed_non_draft",
+                    details={
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "order_status": order.status,
+                        "payment_method": order.payment_method,
+                    },
+                    user_email=getattr(request.user, "email", None),
+                )
             messages.success(request, _("✅ Order updated successfully."))
         else:
             messages.info(request, _("No changes were made."))
@@ -850,6 +864,18 @@ def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
 
     if not new_status:
         return json_error("Status is required")
+
+    # H3 fix: Review gate transitions require admin/billing privileges.
+    # @staff_required_strict only checks bool(staff_role); any staff can reach here.
+    if order.status == "in_review" and new_status in ("provisioning", "cancelled"):
+        user = request.user
+        if not (user.is_superuser or getattr(user, "staff_role", "") in _REVIEW_APPROVE_ROLES):
+            log_security_event(
+                "review_gate_unauthorized_attempt",
+                {"order_id": str(order.id), "staff_role": getattr(user, "staff_role", ""), "target": new_status},
+                user_email=getattr(user, "email", None),
+            )
+            return json_error("Only admin or billing staff can approve/reject orders under review")
 
     # Use service to change status
     status_data = StatusChangeData(new_status=new_status, notes=notes, changed_by=request.user)
