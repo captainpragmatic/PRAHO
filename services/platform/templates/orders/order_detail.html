@@ -162,15 +162,19 @@
             <!-- Address -->
             <div>
               <h4 class="text-sm font-semibold text-slate-300 mb-3">{% trans "Billing Address" %}</h4>
+              {% if order.billing_address_line1 or order.billing_city or order.billing_country %}
               <div class="space-y-1 text-sm text-slate-400">
-                <div>{{ order.billing_address_line1 }}</div>
-                {% if order.billing_address_line2 %}
-                  <div>{{ order.billing_address_line2 }}</div>
+                {% if order.billing_address_line1 %}<div>{{ order.billing_address_line1 }}</div>{% endif %}
+                {% if order.billing_address_line2 %}<div>{{ order.billing_address_line2 }}</div>{% endif %}
+                {% if order.billing_city or order.billing_county %}
+                  <div>{{ order.billing_city }}{% if order.billing_city and order.billing_county %}, {% endif %}{{ order.billing_county }}</div>
                 {% endif %}
-                <div>{{ order.billing_city }}, {{ order.billing_county }}</div>
-                <div>{{ order.billing_postal_code }}</div>
-                <div>{{ order.billing_country }}</div>
+                {% if order.billing_postal_code %}<div>{{ order.billing_postal_code }}</div>{% endif %}
+                {% if order.billing_country %}<div>{{ order.billing_country }}</div>{% endif %}
               </div>
+              {% else %}
+              <p class="text-sm text-slate-500 italic">{% trans "Not provided" %}</p>
+              {% endif %}
             </div>
 
             <!-- Romanian Compliance -->

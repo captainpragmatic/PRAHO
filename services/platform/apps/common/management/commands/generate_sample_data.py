@@ -17,6 +17,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from faker import Faker
 
 from apps.billing.currency_models import FXRate
@@ -37,7 +38,7 @@ from apps.customers.models import (
 from apps.domains.models import TLD, Domain, Registrar, TLDRegistrarAssignment
 from apps.integrations.models import WebhookEvent
 from apps.notifications.models import EmailPreference
-from apps.orders.models import Order, OrderItem
+from apps.orders.models import Order, OrderItem, OrderStatusHistory
 from apps.products.models import Product, ProductPrice
 from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket, TicketComment, TicketWorklog
@@ -1742,13 +1743,33 @@ class Command(BaseCommand):
             # Completed orders get completion timestamp and notes
             if status == "completed":
                 order_data["completed_at"] = created_at + timedelta(days=random.randint(1, 7))
-                order_data["notes"] = "Comandă procesată și livrată cu succes."
+                order_data["notes"] = str(_("Order processed and delivered successfully."))
             elif status == "cancelled":
-                order_data["notes"] = "Anulată la cererea clientului."
+                order_data["notes"] = str(_("Cancelled at customer request."))
             elif status == "draft":
                 order_data["expires_at"] = now + timedelta(days=7)
 
             order = Order.objects.create(**order_data)
+
+            # Create status history reflecting the transitions that led to current status (#99)
+            status_transitions: dict[str, list[str]] = {
+                "draft": ["draft"],
+                "pending": ["draft", "pending"],
+                "confirmed": ["draft", "pending", "confirmed"],
+                "processing": ["draft", "pending", "confirmed", "processing"],
+                "completed": ["draft", "pending", "confirmed", "processing", "completed"],
+                "cancelled": ["draft", "pending", "cancelled"],
+                "failed": ["draft", "pending", "confirmed", "processing", "failed"],
+            }
+            transitions = status_transitions.get(status, ["draft", status])
+            for idx in range(len(transitions) - 1):
+                OrderStatusHistory.objects.create(
+                    order=order,
+                    old_status=transitions[idx],
+                    new_status=transitions[idx + 1],
+                    is_automatic=True,
+                    reason=str(_("Sample data generation")),
+                )
 
             # Add order items (link to services)
             if services:

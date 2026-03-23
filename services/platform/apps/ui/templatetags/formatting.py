@@ -597,6 +597,24 @@ def divide(value: TemplateNumeric, divisor: TemplateNumeric) -> Decimal:
 
 
 @register.filter
+def humanize_slug(value: str) -> str:
+    """
+    Convert internal slugs to human-readable labels.
+
+    Usage:
+        {{ item.product.product_type|humanize_slug }}
+
+    Examples:
+        "Shared_Hosting" → "Shared Hosting"
+        "shared_hosting" → "Shared Hosting"
+        "vps-managed"    → "Vps Managed"
+    """
+    if not value:
+        return ""
+    return value.replace("_", " ").replace("-", " ").title()
+
+
+@register.filter
 def highlight_search(text: str, search_term: str) -> SafeString:
     """
     Highlight search terms in Romanian text (case-insensitive, diacritic-aware)
