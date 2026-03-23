@@ -96,6 +96,19 @@
             {% endif %}
           </dd>
         </div>
+
+        {% if invoice.meta.proforma_number %}
+        <!-- Linked Proforma -->
+        <div>
+          <dt class="text-sm font-medium text-slate-400">{% trans "From Proforma" %}</dt>
+          <dd class="mt-1 text-sm">
+            <a href="{% url 'billing:proforma_detail' proforma_number=invoice.meta.proforma_number %}"
+               class="text-blue-400 hover:text-blue-300 font-mono">
+              {{ invoice.meta.proforma_number }}
+            </a>
+          </dd>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -128,7 +141,7 @@
             </tr>
           </thead>
           <tbody class="bg-slate-800 divide-y divide-slate-700">
-            {% for line in invoice.lines.all %}
+            {% for line in invoice.lines %}
             <tr>
               <td class="px-6 py-4 text-sm text-white">
                 {{ line.description }}
@@ -185,7 +198,7 @@
 
       <!-- Mobile Card List (visible on mobile only) -->
       <div class="sm:hidden">
-        {% for line in invoice.lines.all %}
+        {% for line in invoice.lines %}
         <div class="p-4 border-b border-slate-700 last:border-b-0">
           <!-- Line Item Header -->
           <div class="flex items-center justify-between mb-2">
@@ -242,11 +255,9 @@
 {% if invoice.status == "paid" %}
 <div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-    <div class="fixed inset-0 transition-opacity" aria-hidden="true">
-      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideInvoiceRefundRequestModal()"></div>
-    </div>
+    <div class="fixed inset-0 bg-slate-900 opacity-75" aria-hidden="true" onclick="hideInvoiceRefundRequestModal()"></div>
 
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+    <div class="relative z-10 inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
       <form id="invoiceRefundRequestForm" method="post">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">

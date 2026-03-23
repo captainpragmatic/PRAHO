@@ -119,6 +119,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "bill_to",
             "pdf_url",
             "efactura_sent",
+            "meta",
         ]
 
     def get_subtotal(self, obj: Invoice) -> str:
@@ -304,6 +305,7 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
             "bill_to",
             "pdf_url",
             "notes",
+            "meta",
         ]
 
     def get_subtotal(self, obj: ProformaInvoice) -> str:
