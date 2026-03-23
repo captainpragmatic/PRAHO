@@ -841,6 +841,7 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(total_services, 1)
 
 
+<<<<<<< HEAD
 class AuditTrailOnConfirmOrderTestCase(TestCase):
     """C6: confirm_order must call AuditService.log_simple_event('order_payment_confirmed')."""
 
@@ -1227,3 +1228,60 @@ class ProformaReuseOnRetryTest(TestCase):
             first_proforma_id,
             "The original proforma must still exist and be linked after retry",
         )
+
+
+class OrderCreateMissingProductIdRegressionTests(TestCase):
+    """Regression tests for issue #127 — items without product_id must fail the order."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"name": "Romanian Leu"})
+        self.customer = Customer.objects.create(
+            name="Test Customer SRL",
+            customer_type="company",
+            status="active",
+            primary_email="regression127@customer.ro",
+        )
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            vat_number="RO99999999",
+            cui="RO99999999",
+            is_vat_payer=True,
+        )
+
+    def _make_order_data(self, product_id: int | None) -> OrderCreateData:
+        return OrderCreateData(
+            customer=self.customer,
+            currency="RON",
+            items=[
+                {
+                    "product_id": product_id,
+                    "description": "Test item",
+                    "quantity": 1,
+                    "unit_price_cents": 1000,
+                }
+            ],
+            billing_address={
+                "company_name": "Test SRL",
+                "country": "RO",
+            },
+            notes="",
+            meta={},
+            idempotency_key=str(uuid.uuid4()),
+        )
+
+    def test_order_fails_when_item_missing_product_id(self) -> None:
+        """create_order must return Err (not silently skip) when any item has no product_id."""
+        result = OrderService.create_order(self._make_order_data(None))
+        self.assertTrue(result.is_err(), "Expected Err when product_id is None")
+        self.assertIn("product_id", result.unwrap_err())
+
+    def test_order_succeeds_when_all_items_have_product_id(self) -> None:
+        """Sanity check: a valid product_id still creates the order successfully."""
+        product = Product.objects.create(
+            slug="regression-127-product",
+            name="Regression 127 Product",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+        result = OrderService.create_order(self._make_order_data(product.id))
+        self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
