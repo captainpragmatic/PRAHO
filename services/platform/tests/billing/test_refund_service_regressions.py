@@ -349,10 +349,10 @@ class TestRefundOrder(TestCase):
         r = RefundService.refund_order(order.id, {"refund_type": "full"})
         assert r.is_err()
 
-    def test_refund_order_generic_exception_in_get(self):
-        """Exception branch in refund_order where get raises non-DoesNotExist with 'does not exist'."""
+    def test_refund_order_object_does_not_exist(self):
+        """Order.DoesNotExist caught by refund_order (#120)."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Exception("thing does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Order.DoesNotExist("Order matching query does not exist")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Order not found" in r.unwrap_err()
@@ -401,9 +401,10 @@ class TestRefundInvoice(TestCase):
         assert r.is_err()
         assert "Invoice not found" in r.unwrap_err()
 
-    def test_refund_invoice_generic_exception_does_not_exist(self):
+    def test_refund_invoice_object_does_not_exist(self):
+        """Invoice.DoesNotExist caught by refund_invoice (#120)."""
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Exception("does not exist")
+            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Invoice.DoesNotExist("Invoice matching query does not exist")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Invoice not found" in r.unwrap_err()

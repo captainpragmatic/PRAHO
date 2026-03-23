@@ -129,11 +129,6 @@ class RefundService:
                     order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
                 except Order.DoesNotExist:
                     return Err("Failed to process refund: Order not found")
-                except Exception as e:
-                    # Some tests/mock paths raise a generic "does not exist" exception.
-                    if "does not exist" in str(e).lower():
-                        return Err("Failed to process refund: Order not found")
-                    raise
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_order_refund(order, refund_data)
@@ -297,11 +292,6 @@ class RefundService:
                     )
                 except Invoice.DoesNotExist:
                     return Err("Failed to process refund: Invoice not found")
-                except Exception as e:
-                    # Some tests/mock paths raise a generic "does not exist" exception.
-                    if "does not exist" in str(e).lower():
-                        return Err("Failed to process refund: Invoice not found")
-                    raise
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
