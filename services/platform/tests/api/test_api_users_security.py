@@ -11,12 +11,13 @@ import logging
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from apps.common.middleware import _is_auth_exempt
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 User = get_user_model()
 
@@ -318,7 +319,11 @@ class HMACExemptPathsExactMatchTests(TestCase):
 # ===============================================================================
 
 
-class PortalLoginAPILockoutTests(TestCase):
+# PortalServiceHMACMiddleware is excluded from the test middleware stack, so
+# _portal_authenticated is never set. Override middleware to include it and
+# send HMAC-signed requests so the lockout logic is tested, not HMAC auth.
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class PortalLoginAPILockoutTests(HMACTestMixin, TestCase):
     """portal_login_api must integrate with account lockout model methods.
 
     Mirrors AccountLockoutTokenTests but targets /api/users/login/ — the
@@ -340,11 +345,7 @@ class PortalLoginAPILockoutTests(TestCase):
 
     def test_portal_login_increments_failed_attempts_on_wrong_password(self) -> None:
         """Failed portal login with wrong password must increment failed_login_attempts."""
-        response = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": "WRONG_PASSWORD"},
-            format="json",
-        )
+        response = self.portal_post(self.url, {"email": self.user.email, "password": "WRONG_PASSWORD"})
 
         self.assertEqual(response.status_code, 401)
         self.user.refresh_from_db()
@@ -359,11 +360,7 @@ class PortalLoginAPILockoutTests(TestCase):
         self.user.failed_login_attempts = 1
         self.user.save()
 
-        response = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": self.password},
-            format="json",
-        )
+        response = self.portal_post(self.url, {"email": self.user.email, "password": self.password})
 
         self.assertEqual(response.status_code, 401)
         data = response.json()
@@ -375,11 +372,7 @@ class PortalLoginAPILockoutTests(TestCase):
         self.user.account_locked_until = timezone.now() - timedelta(minutes=10)
         self.user.save()
 
-        response = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": self.password},
-            format="json",
-        )
+        response = self.portal_post(self.url, {"email": self.user.email, "password": self.password})
 
         self.assertEqual(response.status_code, 200)
         self.user.refresh_from_db()
@@ -388,11 +381,7 @@ class PortalLoginAPILockoutTests(TestCase):
 
     def test_portal_login_nonexistent_email_returns_401(self) -> None:
         """Non-existent email must return 401 without raising an exception."""
-        response = self.client.post(
-            self.url,
-            {"email": "nonexistent@example.com", "password": "anything"},
-            format="json",
-        )
+        response = self.portal_post(self.url, {"email": "nonexistent@example.com", "password": "anything"})
 
         self.assertEqual(response.status_code, 401)
         data = response.json()
@@ -406,11 +395,7 @@ class PortalLoginAPILockoutTests(TestCase):
         self.user.is_active = False
         self.user.save(update_fields=["is_active"])
 
-        response = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": self.password},
-            format="json",
-        )
+        response = self.portal_post(self.url, {"email": self.user.email, "password": self.password})
 
         self.assertEqual(response.status_code, 401)
         data = response.json()
@@ -422,40 +407,24 @@ class PortalLoginAPILockoutTests(TestCase):
         Prevents distinguishing account state via response body differences.
         """
         # Wrong password
-        resp_wrong = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": "WRONG"},
-            format="json",
-        )
+        resp_wrong = self.portal_post(self.url, {"email": self.user.email, "password": "WRONG"})
 
         # Locked account
         self.user.refresh_from_db()
         self.user.account_locked_until = timezone.now() + timedelta(minutes=30)
         self.user.failed_login_attempts = 1
         self.user.save()
-        resp_locked = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": self.password},
-            format="json",
-        )
+        resp_locked = self.portal_post(self.url, {"email": self.user.email, "password": self.password})
 
         # Inactive account
         self.user.account_locked_until = None
         self.user.failed_login_attempts = 0
         self.user.is_active = False
         self.user.save()
-        resp_inactive = self.client.post(
-            self.url,
-            {"email": self.user.email, "password": self.password},
-            format="json",
-        )
+        resp_inactive = self.portal_post(self.url, {"email": self.user.email, "password": self.password})
 
         # Nonexistent email
-        resp_nouser = self.client.post(
-            self.url,
-            {"email": "ghost@example.com", "password": "anything"},
-            format="json",
-        )
+        resp_nouser = self.portal_post(self.url, {"email": "ghost@example.com", "password": "anything"})
 
         # All must be identical status + body
         bodies = {resp_wrong.content, resp_locked.content, resp_inactive.content, resp_nouser.content}
