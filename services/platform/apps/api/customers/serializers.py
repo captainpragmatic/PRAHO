@@ -333,7 +333,9 @@ class CustomerTaxProfileSerializer(serializers.Serializer):
 
     vat_number = serializers.CharField(max_length=20, allow_blank=True)
     cui = serializers.CharField(max_length=20, allow_blank=True)
+    registration_number = serializers.CharField(max_length=50, allow_blank=True)
     is_vat_payer = serializers.BooleanField()
+    reverse_charge_eligible = serializers.BooleanField()
 
 
 class CustomerBillingProfileSerializer(serializers.Serializer):
