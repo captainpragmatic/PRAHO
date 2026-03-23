@@ -7,7 +7,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.http import JsonResponse
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
@@ -496,7 +496,7 @@ class BillingSecurityLoggingTests(TestCase):
         self.assertIn('user_email', event.metadata)
 
 class BillingPortalAuthBypassTests(TestCase):
-    """🔒 Tests that the TESTING auth bypass is gated on DEBUG=True (issue #129)."""
+    """🔒 Tests for PORTAL_HMAC_BYPASS guard (issue #129)."""
 
     def _make_request(self, body: bytes = b'{"customer_id": 1}') -> object:
         rf = RequestFactory()
@@ -504,25 +504,20 @@ class BillingPortalAuthBypassTests(TestCase):
         return request
 
     @patch("apps.billing.views.settings")
-    def test_bypass_inactive_when_debug_false(self, mock_settings: object) -> None:
-        """🔒 TESTING bypass must not activate when DEBUG=False (production guard)."""
+    def test_bypass_raises_when_debug_false(self, mock_settings: object) -> None:
+        """🔒 PORTAL_HMAC_BYPASS=True with DEBUG=False must raise ImproperlyConfigured."""
         mock_settings.DEBUG = False
-        mock_settings.TESTING = True
+        mock_settings.PORTAL_HMAC_BYPASS = True
         request = self._make_request()
 
-        with patch("apps.billing.views.get_authenticated_customer") as mock_auth:
-            mock_auth.return_value = (None, JsonResponse({"error": "denied"}, status=403))
-            customer, error = _require_customer_auth_for_portal_api(request)
-
-        self.assertIsNone(customer)
-        self.assertIsNotNone(error)
-        self.assertEqual(error.status_code, 403)
+        with self.assertRaises(ImproperlyConfigured):
+            _require_customer_auth_for_portal_api(request)
 
     @patch("apps.billing.views.settings")
-    def test_bypass_inactive_when_not_testing(self, mock_settings: object) -> None:
-        """🔒 Bypass must not activate when TESTING=False regardless of DEBUG."""
+    def test_bypass_inactive_when_flag_false(self, mock_settings: object) -> None:
+        """🔒 Bypass must not activate when PORTAL_HMAC_BYPASS=False."""
         mock_settings.DEBUG = True
-        mock_settings.TESTING = False
+        mock_settings.PORTAL_HMAC_BYPASS = False
         request = self._make_request()
 
         with patch("apps.billing.views.get_authenticated_customer") as mock_auth:
