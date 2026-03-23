@@ -20,6 +20,7 @@ from apps.api.customers.views import (
     customer_tax_profile_update,
     customer_update,
     customer_users_add,
+    customer_users_create,
     customer_users_list,
     customer_users_remove,
     customer_users_role,
@@ -118,6 +119,71 @@ class CustomerUsersAddAPITests(TestCase):
         response = customer_users_add(request)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(CustomerMembership.objects.filter(customer=self.customer, user=self.target_user, role="tech").exists())
+
+
+class CustomerUsersCreateAPITests(TestCase):
+    """Test creating a new user and adding them to a customer."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.owner_user = User.objects.create_user(email="owner@example.com", password="pass123")
+        self.customer = Customer.objects.create(name="Create Test Co", customer_type="company", status="active")
+        CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_success(self, mock_auth):
+        """Owner can create a new user and add to customer."""
+        mock_auth.return_value = (self.customer, None)
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "newuser@example.com", "first_name": "New", "last_name": "User",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(User.objects.filter(email="newuser@example.com").exists())
+        new_user = User.objects.get(email="newuser@example.com")
+        self.assertTrue(CustomerMembership.objects.filter(customer=self.customer, user=new_user).exists())
+        self.assertFalse(new_user.has_usable_password())
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_duplicate_email_returns_400(self, mock_auth):
+        """Creating a user with an existing email returns 400."""
+        mock_auth.return_value = (self.customer, None)
+        User.objects.create_user(email="existing@example.com", password="pass123")
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "existing@example.com", "first_name": "Dup", "last_name": "User",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("already exists", response.data["error"])
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_invalid_role_returns_400(self, mock_auth):
+        """Invalid role is rejected."""
+        mock_auth.return_value = (self.customer, None)
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "new2@example.com", "role": "superadmin", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid role", response.data["error"])
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_non_owner_returns_403(self, mock_auth):
+        """Non-owner cannot create users."""
+        mock_auth.return_value = (self.customer, None)
+        viewer = User.objects.create_user(email="viewer@example.com", password="pass123")
+        CustomerMembership.objects.create(customer=self.customer, user=viewer, role="viewer")
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": viewer.pk,
+            "email": "new3@example.com", "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 403)
 
 
 class CustomerUsersRoleAPITests(TestCase):

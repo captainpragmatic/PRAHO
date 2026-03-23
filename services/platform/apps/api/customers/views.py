@@ -940,7 +940,7 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
 @authentication_classes([])
 @permission_classes([AllowAny])
 @require_customer_authentication
-def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
+def customer_users_create(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Create a new user and add them to the customer organization."""
     data = _get_request_data(request)
     try:
@@ -960,11 +960,6 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     if not email:
         return Response({"success": False, "error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if User.objects.filter(email=email).exists():
-        return Response(
-            {"success": False, "error": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST
-        )
-
     valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
     if role not in valid_roles:
         return Response(
@@ -972,11 +967,22 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    with transaction.atomic():
-        # Invite-only flow: user is created with an unusable password.
-        # They must complete account setup via the password-reset link sent separately.
-        new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
-        CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
+    try:
+        with transaction.atomic():
+            if User.objects.filter(email=email).exists():
+                return Response(
+                    {"success": False, "error": "A user with this email already exists."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Invite-only flow: user is created with an unusable password.
+            # They must complete account setup via the password-reset link sent separately.
+            new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
+            CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
+    except IntegrityError:
+        return Response(
+            {"success": False, "error": "A user with this email already exists."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     logger.info(f"✅ [User Management API] New user {email} created and added to customer {customer.id}")
     return Response(

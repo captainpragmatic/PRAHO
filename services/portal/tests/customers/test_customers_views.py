@@ -291,6 +291,80 @@ class AddressDeleteViewTests(SimpleTestCase):
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
+class AddressSetPrimaryViewTests(SimpleTestCase):
+    """Test setting an address as primary (POST)."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_set_primary_success_redirects(self, mock_api):
+        """Successful set-primary redirects to addresses page."""
+        mock_api.set_address_primary.return_value = {"success": True}
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:address_set_primary", kwargs={"address_id": 5}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("addresses", response.url)
+        mock_api.set_address_primary.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_set_primary_api_error_redirects(self, mock_api):
+        """API error still redirects to addresses page."""
+        mock_api.set_address_primary.side_effect = PlatformAPIError("error")
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:address_set_primary", kwargs={"address_id": 5}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("addresses", response.url)
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class AddressSetBillingViewTests(SimpleTestCase):
+    """Test setting an address as billing (POST)."""
+
+    def _set_session(self, **overrides):
+        session = self.client.session
+        for k, v in {**SESSION_DEFAULTS, **overrides}.items():
+            session[k] = v
+        session.save()
+
+    @patch("apps.customers.views.api_client")
+    def test_set_billing_success_redirects(self, mock_api):
+        """Successful set-billing redirects to addresses page."""
+        mock_api.set_address_billing.return_value = {"success": True}
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:address_set_billing", kwargs={"address_id": 5}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("addresses", response.url)
+        mock_api.set_address_billing.assert_called_once()
+
+    @patch("apps.customers.views.api_client")
+    def test_set_billing_api_error_redirects(self, mock_api):
+        """API error still redirects to addresses page."""
+        mock_api.set_address_billing.side_effect = PlatformAPIError("error")
+        self._set_session()
+        response = self.client.post(
+            reverse("customers:address_set_billing", kwargs={"address_id": 5}),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("addresses", response.url)
+
+
+@override_settings(
+    SESSION_ENGINE="django.contrib.sessions.backends.cache",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
 class NavigationTests(SimpleTestCase):
     """Test that navigation links appear correctly."""
 
