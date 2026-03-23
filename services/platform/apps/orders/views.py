@@ -618,7 +618,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
                 },
             )
 
-        unit_cents = int(price.effective_price_cents)
+        unit_cents = int(price.get_price_cents_for_period(billing_period))
         setup_cents = int(price.setup_cents)
         subtotal_cents = (unit_cents * quantity) + setup_cents
 
@@ -753,7 +753,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     product_type=product.product_type,
                     billing_period=billing_period,
                     quantity=quantity,
-                    unit_price_cents=int(price.effective_price_cents),
+                    unit_price_cents=int(price.get_price_cents_for_period(billing_period)),
                     setup_cents=int(price.setup_cents),
                     config={"product_price_id": str(price.id)},
                     domain_name=domain_name,

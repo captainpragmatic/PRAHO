@@ -526,13 +526,13 @@ def _handle_item_provisioning_status_change(item: OrderItem, old_status: str | N
         }
 
         if new_status in provisioning_events:
-            OrdersAuditService.log_provisioning_event(  # type: ignore[call-arg]
-                event_type=provisioning_events[new_status],
-                order_item=item,
-                service=item.service,
-                user=None,  # System event
-                context=AuditContext(actor_type="system"),
-                description=f"Order item provisioning {new_status}: {item.product_name}",
+            OrdersAuditService.log_provisioning_event(
+                BusinessEventData(
+                    event_type=provisioning_events[new_status],
+                    business_object=item,
+                    context=AuditContext(actor_type="system"),
+                    description=f"Order item provisioning {new_status}: {item.product_name}",
+                )
             )
 
         if new_status == "completed" and item.service:
