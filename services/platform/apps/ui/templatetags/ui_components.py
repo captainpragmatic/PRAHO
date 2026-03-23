@@ -246,12 +246,10 @@ def button(
             # Handle already encoded dangerous content
             s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
 
-        # Manual HTML escaping to return plain string, not SafeString
-        s = s.replace("&", "&amp;")
-        s = s.replace("<", "&lt;")
-        s = s.replace(">", "&gt;")
-        s = s.replace('"', "&quot;")
-        s = s.replace("'", "&#x27;")
+        # Strip angle brackets to prevent tag injection, but preserve quotes
+        # for valid HTML attributes (attrs is rendered with |safe in template)
+        s = s.replace("<", "")
+        s = s.replace(">", "")
         return s
 
     # Return sanitized and escaped attrs

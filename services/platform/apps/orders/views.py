@@ -811,7 +811,7 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
         if updated_fields:
             try:
-                order.full_clean()
+                order.full_clean(exclude=["status"])
             except ValidationError as e:
                 for field, errors in e.message_dict.items():
                     for error in errors:

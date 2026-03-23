@@ -145,6 +145,12 @@ def create_test_data() -> (  # Complexity: multi-step business logic
         if created:
             print("✅ Created primary address")
 
+        # 5b. Ensure primary address is also billing (required for order preflight)
+        if not CustomerAddress.objects.filter(customer=customer, is_billing=True).exists():
+            _primary_address.is_billing = True
+            _primary_address.save(update_fields=["is_billing"])
+            print("✅ Marked primary address as billing")
+
         # 6. Create customer user
         customer_user, created = User.objects.get_or_create(
             email="customer@pragmatichost.com",
