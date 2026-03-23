@@ -79,6 +79,7 @@ if not _vault_key:
 
 DEBUG = False
 TEMPLATE_DEBUG = False
+TESTING = False  # Defense-in-depth: prevent auth bypass if TESTING leaks (#129)
 
 # Note: ALLOWED_HOSTS configured in HTTPS security section below
 
