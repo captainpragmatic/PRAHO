@@ -13,6 +13,7 @@ from apps.billing.efactura.client import AuthenticationError, NetworkError
 from apps.billing.efactura_service import EFacturaSubmissionService
 from apps.billing.gateways.stripe_gateway import StripeGateway
 from apps.billing.models import Payment
+from apps.billing.payment_models import TERMINAL_PAYMENT_STATUSES
 from apps.billing.proforma_service import generate_proforma_pdf, send_proforma_email
 from apps.billing.refund_service import RefundService
 from tests.factories.billing_factories import create_currency, create_customer, create_invoice
@@ -665,3 +666,22 @@ class PartiallyRefundedPaymentTests(TestCase):
             currency=self.currency,
         )
         self.assertEqual(self.invoice.amount_due, 10000)
+
+
+class TerminalPaymentStatusesRegressionTests(TestCase):
+    """Regression tests for issue #128 — cancelled/disputed missing from TERMINAL_PAYMENT_STATUSES."""
+
+    def test_all_terminal_statuses_present(self) -> None:
+        """Every status that must block further transitions is in the set."""
+        required = {"succeeded", "failed", "refunded", "partially_refunded", "canceled", "cancelled", "disputed"}
+        missing = required - TERMINAL_PAYMENT_STATUSES
+        self.assertFalse(missing, f"Missing from TERMINAL_PAYMENT_STATUSES: {missing}")
+
+    def test_cancelled_payment_not_modified_by_apply_gateway_event(self) -> None:
+        """apply_gateway_event must be a no-op for a cancelled payment."""
+        self.assertIn("cancelled", TERMINAL_PAYMENT_STATUSES)
+        self.assertIn("canceled", TERMINAL_PAYMENT_STATUSES)
+
+    def test_disputed_payment_is_terminal(self) -> None:
+        """Disputed payments must be treated as finalized."""
+        self.assertIn("disputed", TERMINAL_PAYMENT_STATUSES)

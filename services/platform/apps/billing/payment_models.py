@@ -23,13 +23,16 @@ from .currency_models import Currency
 logger = logging.getLogger(__name__)
 
 # All statuses from which a payment MUST NOT transition.
-# Includes "cancelled"/"canceled" for safety (Stripe uses "canceled", some legacy code uses "cancelled").
+# "canceled" = Stripe spelling; "cancelled" = legacy internal spelling; "disputed" = chargeback terminal state.
 TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
     {
         "succeeded",
         "failed",
         "refunded",
         "partially_refunded",
+        "canceled",
+        "cancelled",
+        "disputed",
     }
 )
 
