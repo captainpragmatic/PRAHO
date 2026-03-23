@@ -36,19 +36,26 @@
           </a>
         {% endif %}
 
-        {% if can_convert %}
-          <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}"
-             class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
-            {% icon "refresh" %} {% trans 'Convert to Invoice' %}
-          </a>
+        {% if can_convert and proforma.status != "accepted" %}
+          {% if proforma.meta.order_id %}
+            {# Order-linked proformas: payment triggers conversion automatically #}
+            <button type="button" onclick="document.getElementById('paymentModal').classList.remove('hidden')"
+               class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
+              {% icon "currency" %} {% trans 'Record Payment' %}
+            </button>
+          {% else %}
+            {# Standalone proformas: manual conversion still available #}
+            <a href="{% url 'billing:proforma_to_invoice' proforma.pk %}"
+               class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
+              {% icon "refresh" %} {% trans 'Convert to Invoice' %}
+            </a>
+          {% endif %}
         {% endif %}
 
         <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
            class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium transition-colors">
           {% icon "document" %} {% trans 'Download PDF' %}
         </a>
-
-        {# TODO: Add "Record Payment" button once billing:proforma_record_payment URL and view are implemented #}
       </div>
   </div>
   </div>
@@ -372,4 +379,61 @@ function sendProforma(proformaId) {
     }
 }
 </script>
+
+<!-- Record Payment Modal -->
+<div id="paymentModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="fixed inset-0 bg-slate-900 opacity-75" onclick="document.getElementById('paymentModal').classList.add('hidden')"></div>
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="inline-block bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform sm:max-w-lg sm:w-full relative z-10" onclick="event.stopPropagation()">
+      <form method="post" action="{% url 'billing:process_proforma_payment' pk=proforma.pk %}">
+        {% csrf_token %}
+        <div class="px-6 pt-6 pb-4">
+          <h3 class="text-lg font-medium text-white mb-4">{% icon "currency" %} {% trans "Record Payment" %}</h3>
+
+          <div class="bg-slate-700/50 rounded-lg p-4 mb-4">
+            <div class="flex justify-between text-sm">
+              <span class="text-slate-400">{% trans "Amount:" %}</span>
+              <span class="text-white font-semibold">{{ proforma.total_cents|floatformat:0 }} {% trans "cents" %} ({{ proforma.total_display }})</span>
+            </div>
+            <div class="flex justify-between text-sm mt-1">
+              <span class="text-slate-400">{% trans "Proforma:" %}</span>
+              <span class="text-white">{{ proforma.number }}</span>
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="payment_method" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Payment Method" %}</label>
+            <select name="payment_method" id="payment_method" required
+                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+              <option value="bank_transfer">{% trans "Bank Transfer" %}</option>
+              <option value="card">{% trans "Credit/Debit Card" %}</option>
+              <option value="cash">{% trans "Cash" %}</option>
+            </select>
+          </div>
+
+          <div class="mb-4">
+            <label for="reference" class="block text-sm font-medium text-slate-400 mb-2">{% trans "Payment Reference" %} ({% trans "optional" %})</label>
+            <input type="text" name="reference" id="reference" placeholder="{% trans 'e.g., Bank transfer reference number' %}"
+                   class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
+          </div>
+
+          <div class="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 text-sm text-yellow-300">
+            {% icon "warning" %} {% trans "This will record full payment, convert the proforma to an invoice, and advance the linked order to Paid status." %}
+          </div>
+        </div>
+
+        <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
+          <button type="button" onclick="document.getElementById('paymentModal').classList.add('hidden')"
+                  class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
+            {% trans "Cancel" %}
+          </button>
+          <button type="submit"
+                  class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
+            {% icon "check" %} {% trans "Confirm Payment" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}
