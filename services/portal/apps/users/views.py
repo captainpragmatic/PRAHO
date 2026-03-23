@@ -421,6 +421,9 @@ def _load_profile_form_data(request: HttpRequest, user_id: int) -> CustomerProfi
                     "phone": profile_data.get("phone", ""),
                     "preferred_language": profile_data.get("profile", {}).get("preferred_language", "en"),
                     "timezone": profile_data.get("profile", {}).get("timezone", "Europe/Bucharest"),
+                    "email_notifications": profile_data.get("profile", {}).get("email_notifications", True),
+                    "sms_notifications": profile_data.get("profile", {}).get("sms_notifications", False),
+                    "marketing_emails": profile_data.get("profile", {}).get("marketing_emails", False),
                 }
             )
         else:
@@ -446,6 +449,9 @@ def _handle_profile_update(
             "phone": form.cleaned_data["phone"],
             "preferred_language": form.cleaned_data.get("preferred_language", "en"),
             "timezone": form.cleaned_data.get("timezone", "Europe/Bucharest"),
+            "email_notifications": form.cleaned_data.get("email_notifications", True),
+            "sms_notifications": form.cleaned_data.get("sms_notifications", False),
+            "marketing_emails": form.cleaned_data.get("marketing_emails", False),
         }
 
         result = api_client.update_customer_profile(user_id, update_data)
@@ -480,6 +486,23 @@ def _handle_profile_update(
         messages.error(request, _("Error updating profile. Please try again."))
 
     return None
+
+
+def _fetch_customer_cui(customer_id: str | int | None, user_id: str | int | None) -> str:
+    """Fetch CUI from customer tax profile for display in company card."""
+    if not customer_id or not user_id:
+        return ""
+    try:
+        response = api_client.post(
+            "customers/details/",
+            data={"customer_id": customer_id, "user_id": user_id, "include": ["tax_profile"]},
+            user_id=user_id,
+        )
+        if isinstance(response, dict) and response.get("success"):
+            return response.get("customer", {}).get("tax_profile", {}).get("cui", "")
+    except Exception as e:
+        logger.debug("Could not load CUI for company card: %s", e)
+    return ""
 
 
 @never_cache
@@ -532,6 +555,8 @@ def profile_view(request: HttpRequest) -> HttpResponse:
                 request.session["selected_customer_role"] = membership.get("role", "viewer")
                 break
 
+    selected_customer_cui = _fetch_customer_cui(request.session.get("selected_customer_id", customer_id), user_id)
+
     context = {
         "form": form,
         "profile": profile_data,
@@ -543,6 +568,7 @@ def profile_view(request: HttpRequest) -> HttpResponse:
         "selected_customer_id": request.session.get("selected_customer_id", customer_id),
         "selected_customer_name": request.session.get("selected_customer_name", ""),
         "selected_customer_role": request.session.get("selected_customer_role", ""),
+        "selected_customer_cui": selected_customer_cui,
         "can_edit_profile": _can_edit_company_profile(
             request, str(request.session.get("selected_customer_id", customer_id))
         ),

@@ -59,6 +59,45 @@
           </div>
         </div>
 
+        <!-- Notification Preferences -->
+        <div class="border-t border-slate-600 pt-6">
+          <h4 class="text-md font-medium text-white mb-4">
+            {% icon "bell" size="sm" css_class="text-white" %} {% trans 'Notifications' %}
+          </h4>
+
+          <div class="space-y-4">
+            <label class="flex items-center space-x-3 cursor-pointer">
+              <input type="checkbox" name="email_notifications"
+                     {% if form.email_notifications.value %}checked{% endif %}
+                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans "Email Notifications" %}</div>
+                <div class="text-xs text-slate-400">{% trans "Receive important account and billing notifications via email" %}</div>
+              </div>
+            </label>
+
+            <label class="flex items-center space-x-3 cursor-pointer">
+              <input type="checkbox" name="sms_notifications"
+                     {% if form.sms_notifications.value %}checked{% endif %}
+                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans "SMS Notifications" %}</div>
+                <div class="text-xs text-slate-400">{% trans "Receive alerts via SMS" %}</div>
+              </div>
+            </label>
+
+            <label class="flex items-center space-x-3 cursor-pointer">
+              <input type="checkbox" name="marketing_emails"
+                     {% if form.marketing_emails.value %}checked{% endif %}
+                     class="w-5 h-5 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+              <div>
+                <div class="text-sm font-medium text-white">{% trans "Marketing Emails" %}</div>
+                <div class="text-xs text-slate-400">{% trans "Receive newsletters, product updates, and promotional offers" %}</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
         <!-- Action Buttons -->
         <div class="flex justify-end space-x-4 pt-6 border-t border-slate-600">
           {% trans 'Save Changes' as btn_save %}
@@ -77,9 +116,9 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Account Status' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if profile.is_active|default:True %}
-                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="check" %}
+                {% trans "Active" as bt1 %}{% badge bt1 variant="success" icon="check" size="sm" %}
               {% else %}
-                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="x" %}
+                {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" icon="x" size="sm" %}
               {% endif %}
             </dd>
           </div>
@@ -95,13 +134,13 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Two-Factor Authentication' %}</dt>
             <dd class="mt-1 text-sm">
               {% if profile.mfa_enabled %}
-                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="lock" %}
+                {% trans "Enabled" as bt3 %}{% badge bt3 variant="success" icon="lock" size="sm" %}
                 <div class="mt-2">
                   {% trans "Manage MFA" as mfa_btn %}
                   {% button mfa_btn variant="secondary" size="sm" href="/mfa/" icon="settings" %}
                 </div>
               {% else %}
-                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="warning" %}
+                {% trans "Disabled" as bt4 %}{% badge bt4 variant="warning" icon="warning" size="sm" %}
                 <div class="mt-2">
                   {% trans "Enable MFA" as mfa_btn %}
                   {% button mfa_btn variant="warning" size="sm" href="/mfa/" icon="lightning" %}
@@ -153,8 +192,11 @@
             {% icon "building" size="md" css_class="text-blue-400 flex-shrink-0" %}
             <div class="min-w-0">
               <div class="text-sm font-medium text-white truncate">{{ selected_customer_name }}</div>
+              {% if selected_customer_cui %}
+              <div class="text-xs text-slate-400 font-mono mt-0.5">CUI: {{ selected_customer_cui }}</div>
+              {% endif %}
               <div class="text-xs text-slate-400 mt-0.5">
-                {% badge selected_customer_role|status_label variant=selected_customer_role|status_variant %}
+                {% badge selected_customer_role|status_label variant=selected_customer_role|status_variant size="sm" %}
               </div>
             </div>
           </div>
@@ -213,49 +255,14 @@
   {% section_card title=sc4_title icon="lock" css_class="mt-6" %}
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Current Consent Status -->
+        <!-- Privacy Summary -->
         <div class="space-y-4">
-          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Current Consent Status' %}</h4>
-
-          <div class="space-y-3">
-            <!-- Data Processing Consent -->
-            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
-              <div class="flex items-center">
-                <span class="text-green-400 mr-2">{% icon "lock" size="sm" css_class="text-green-400" %}</span>
-                <div>
-                  <div class="text-sm font-medium text-white">{% trans 'Data Processing' %}</div>
-                  <div class="text-xs text-slate-400">{% trans 'Required for service' %}</div>
-                </div>
-              </div>
-              {% if profile.gdpr_consent_date %}
-                {% trans "Given" as bt5 %}{% badge bt5 variant="success" icon="check" %}
-              {% else %}
-                {% trans "Not Given" as bt6 %}{% badge bt6 variant="danger" icon="x" %}
-              {% endif %}
-            </div>
-
-            <!-- Marketing Consent -->
-            <div class="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
-              <div class="flex items-center">
-                <span class="text-blue-400 mr-2">{% icon "mail" size="sm" css_class="text-blue-400" %}</span>
-                <div>
-                  <div class="text-sm font-medium text-white">{% trans 'Marketing Communications' %}</div>
-                  <div class="text-xs text-slate-400">{% trans 'Newsletters and updates' %}</div>
-                </div>
-              </div>
-              {% if profile.accepts_marketing %}
-                {% trans "Enabled" as bt7 %}{% badge bt7 variant="success" icon="check" %}
-              {% else %}
-                {% trans "Disabled" as bt8 %}{% badge bt8 variant="secondary" icon="ban" %}
-              {% endif %}
-            </div>
-          </div>
-
-          {% if profile.gdpr_consent_date %}
-          <div class="text-xs text-slate-400">
-            {% trans 'Last updated:' %} {{ profile.gdpr_consent_date|date:"M d, Y" }}
-          </div>
-          {% endif %}
+          <h4 class="text-sm font-semibold text-slate-300">{% trans 'Your Privacy' %}</h4>
+          <p class="text-sm text-slate-400">
+            {% trans 'Manage your data processing consent, marketing preferences, and privacy settings from the Privacy Dashboard.' %}
+          </p>
+          {% trans "Open Privacy Dashboard" as privacy_btn %}
+          {% button privacy_btn variant="primary" size="sm" href="/privacy/" icon="lock" %}
         </div>
 
         <!-- GDPR Actions -->

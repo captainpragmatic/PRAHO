@@ -923,6 +923,7 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
                 "timezone": profile.timezone,
                 "email_notifications": profile.email_notifications,
                 "sms_notifications": profile.sms_notifications,
+                "marketing_emails": profile.marketing_emails,
             }
 
             return Response({"success": True, "profile": profile_data})
@@ -949,6 +950,8 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
                 profile.email_notifications = request_data["email_notifications"]
             if "sms_notifications" in request_data:
                 profile.sms_notifications = request_data["sms_notifications"]
+            if "marketing_emails" in request_data:
+                profile.marketing_emails = request_data["marketing_emails"]
 
             profile.save()
 
