@@ -839,6 +839,15 @@ def create_orders_if_missing(customer: Any, customer_user: Any) -> None:
         if orders_created > 0:
             print(f"✅ Created {orders_created} test orders with various statuses")
 
+        # Re-snapshot billing address on existing orders with empty billing_address
+        for order in Order.objects.filter(customer=customer):
+            if not order.billing_address or order.billing_address == {}:
+                billing_addr = customer.get_billing_address()
+                if billing_addr:
+                    order.billing_address = billing_addr
+                    order.save(update_fields=["billing_address"])
+                    print(f"  ✅ Re-snapshotted billing address on {order.order_number}")
+
     except Exception as e:
         print(f"⚠️  Orders creation failed: {e}")
 

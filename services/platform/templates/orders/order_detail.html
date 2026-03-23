@@ -24,7 +24,7 @@
         {% endif %}
       {% endif %}
     </div>
-    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
+    <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none flex items-center gap-3">
       <!-- Back Button -->
       {% url 'orders:order_list' as order_list_url %}
       {% trans "← Back to Orders" as bt1 %}{% button bt1 variant="outline" href=order_list_url %}

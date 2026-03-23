@@ -188,6 +188,12 @@ class Proforma:
     valid_until: datetime
     created_at: datetime
     notes: str = ""
+    bill_to_name: str = ""
+    bill_to_email: str = ""
+    bill_to_tax_id: str = ""
+    bill_to_address1: str = ""
+    bill_to_city: str = ""
+    bill_to_country: str = ""
     lines: list[ProformaLine] = field(default_factory=list)
 
     @property

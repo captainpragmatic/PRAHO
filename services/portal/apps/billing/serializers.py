@@ -141,7 +141,22 @@ def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] |
         valid_until=cast(datetime, parse_datetime(data["valid_until"])),
         created_at=cast(datetime, parse_datetime(data["created_at"])),
         notes=data.get("notes", ""),
+        bill_to_name=data.get("bill_to_name", ""),
+        bill_to_email=data.get("bill_to_email", ""),
+        bill_to_tax_id=data.get("bill_to_tax_id", ""),
+        bill_to_address1=data.get("bill_to_address1", ""),
+        bill_to_city=data.get("bill_to_city", ""),
+        bill_to_country=data.get("bill_to_country", ""),
     )
+
+    # Extract bill_to data if present (structured billing address block)
+    bill_to = data.get("bill_to", {})
+    if bill_to:
+        proforma.bill_to_name = bill_to.get("name", "") or proforma.bill_to_name
+        proforma.bill_to_email = bill_to.get("email", "") or proforma.bill_to_email
+        proforma.bill_to_tax_id = bill_to.get("tax_id", "") or proforma.bill_to_tax_id
+        # Address may be a single string or structured
+        proforma.bill_to_address1 = bill_to.get("address", "") or proforma.bill_to_address1
 
     # Add line items if provided
     if lines:

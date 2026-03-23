@@ -212,6 +212,8 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
                         "setup_cents": int(product_price.setup_cents),
                         "description": product.name,
                         "meta": item_data.get("config", {}),
+                        "domain_name": item_data.get("domain_name", ""),
+                        "product_type": product.product_type,
                     }
                 )
 
@@ -274,6 +276,8 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
                     "unit_price_cents": item["unit_price_cents"],
                     "setup_cents": item["setup_cents"],
                     "line_total_cents": item["unit_price_cents"] * item["quantity"] + item["setup_cents"],
+                    "domain_name": item.get("domain_name", ""),
+                    "product_type": item.get("product_type", ""),
                 }
                 for item in order_items
             ],
