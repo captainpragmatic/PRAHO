@@ -38,7 +38,7 @@ class PaymentConfirmResult(TypedDict):
     success: bool
     status: str  # succeeded, failed, requires_action, etc.
     error: str | None
-    amount_received: NotRequired[int | None]
+    amount_received: NotRequired[int]
 
 
 class SubscriptionResult(TypedDict):

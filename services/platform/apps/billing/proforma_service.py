@@ -382,23 +382,32 @@ class ProformaPaymentService:
             )
 
         # Link orders to the new invoice
+        from apps.audit.services import AuditService  # noqa: PLC0415
+
         for linked_order in proforma.orders.all():
             linked_order.invoice = invoice
             linked_order.save(update_fields=["invoice", "updated_at"])
             # L1 fix: Explicit audit event for order-invoice linkage (financial compliance).
-            from apps.audit.services import AuditService  # noqa: PLC0415
-
-            AuditService.log_simple_event(
-                "order_invoice_linked",
-                content_object=linked_order,
-                description=f"Invoice {invoice.number} linked to order {linked_order.order_number}",
-                metadata={
-                    "order_id": str(linked_order.id),
-                    "invoice_id": str(invoice.id),
-                    "proforma_id": str(proforma.id),
-                },
-                actor_type="system",
-            )
+            # SFH-3 fix: Audit failures must NEVER roll back the financial transaction.
+            try:
+                AuditService.log_simple_event(
+                    "order_invoice_linked",
+                    content_object=linked_order,
+                    description=f"Invoice {invoice.number} linked to order {linked_order.order_number}",
+                    metadata={
+                        "order_id": str(linked_order.id),
+                        "invoice_id": str(invoice.id),
+                        "proforma_id": str(proforma.id),
+                    },
+                    actor_type="system",
+                )
+            except Exception:
+                logger.error(
+                    "🔥 [ProformaPayment] Audit log failed for order-invoice link %s → %s",
+                    linked_order.order_number,
+                    invoice.number,
+                    exc_info=True,
+                )
 
         log_security_event(
             "proforma_converted_to_invoice",

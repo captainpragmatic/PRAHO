@@ -873,11 +873,11 @@ def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     # @staff_required_strict only checks bool(staff_role); any staff can reach here.
     if order.status == "in_review" and new_status in ("provisioning", "cancelled"):
         user = request.user
-        if not (user.is_superuser or getattr(user, "staff_role", "") in _REVIEW_APPROVE_ROLES):
+        if not (user.is_superuser or user.staff_role in _REVIEW_APPROVE_ROLES):
             log_security_event(
                 "review_gate_unauthorized_attempt",
-                {"order_id": str(order.id), "staff_role": getattr(user, "staff_role", ""), "target": new_status},
-                user_email=getattr(user, "email", None),
+                {"order_id": str(order.id), "staff_role": user.staff_role, "target": new_status},
+                user_email=user.email,
             )
             return json_error("Only admin or billing staff can approve/reject orders under review")
 
@@ -918,6 +918,19 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     if order.status in ["completed", "cancelled"]:
         messages.error(request, _("❌ This order cannot be cancelled."))
         return redirect("orders:order_detail", pk=pk)
+
+    # CODEX-5 fix: Review gate cancellation requires admin/billing privileges.
+    # Consistent with order_change_status role guard (H3 fix).
+    if order.status == "in_review":
+        user = request.user
+        if not (user.is_superuser or user.staff_role in _REVIEW_APPROVE_ROLES):
+            log_security_event(
+                "review_gate_cancel_unauthorized",
+                {"order_id": str(order.id), "staff_role": user.staff_role, "action": "cancel"},
+                user_email=user.email,
+            )
+            messages.error(request, _("❌ Only admin or billing staff can cancel orders under review."))
+            return redirect("orders:order_detail", pk=pk)
 
     notes = request.POST.get("cancellation_reason", "Order cancelled by staff")
 

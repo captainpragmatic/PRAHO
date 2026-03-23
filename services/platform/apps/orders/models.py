@@ -71,33 +71,36 @@ class Order(ConcurrentTransitionMixin, models.Model):
         help_text=_("Current order status"),
     )
 
-    # Editable fields by status for hybrid editing approach
+    # Editable fields by status for hybrid editing approach.
+    # SECURITY: Financial fields (subtotal_cents, tax_cents, discount_cents, total_cents,
+    # currency, payment_intent_id, payment_method, proforma, invoice) are ONLY editable
+    # in draft. Post-submit statuses use explicit safe field lists to prevent tampering.
+    _SAFE_CONTACT_FIELDS: ClassVar[list[str]] = [
+        "notes",
+        "customer_notes",
+        "customer_email",
+        "customer_name",
+        "customer_company",
+        "customer_vat_id",
+        "billing_address",
+    ]
+    _SAFE_DELIVERY_FIELDS: ClassVar[list[str]] = [
+        "delivery_date",
+        "shipping_address_line1",
+        "shipping_address_line2",
+        "shipping_city",
+        "shipping_county",
+        "shipping_postal_code",
+        "shipping_country",
+    ]
     EDITABLE_FIELDS_BY_STATUS: ClassVar[dict[str, list[str]]] = {
-        "draft": ["*"],  # Everything editable
-        "awaiting_payment": ["*"],  # Everything editable (payment not processed yet)
-        "paid": [
-            "notes",
-            "delivery_date",
-            "shipping_address_line1",
-            "shipping_address_line2",
-            "shipping_city",
-            "shipping_county",
-            "shipping_postal_code",
-            "shipping_country",
-        ],  # Limited to delivery and notes
+        "draft": ["*"],  # Everything editable (pre-payment)
+        "awaiting_payment": [*_SAFE_CONTACT_FIELDS, *_SAFE_DELIVERY_FIELDS],  # No financial fields
+        "paid": ["notes", *_SAFE_DELIVERY_FIELDS],  # Delivery and notes only
         "in_review": ["notes"],  # Only notes while under review
-        "provisioning": [
-            "notes",
-            "delivery_date",
-            "shipping_address_line1",
-            "shipping_address_line2",
-            "shipping_city",
-            "shipping_county",
-            "shipping_postal_code",
-            "shipping_country",
-        ],  # Limited to delivery and notes
+        "provisioning": ["notes", *_SAFE_DELIVERY_FIELDS],  # Delivery and notes only
         "completed": ["notes"],  # Only administrative notes
-        "failed": ["*"],  # Full edit to retry/fix issues
+        "failed": [*_SAFE_CONTACT_FIELDS, *_SAFE_DELIVERY_FIELDS],  # Contact + delivery for recovery
         "cancelled": ["notes"],  # Only notes for record keeping
     }
 

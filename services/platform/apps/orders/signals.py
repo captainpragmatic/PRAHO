@@ -393,6 +393,19 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                         proforma.number,
                         order.order_number,
                     )
+                elif proforma.status == "void":
+                    logger.info(
+                        "📋 [Order] Proforma %s already void when order %s cancelled — no action needed",
+                        proforma.number,
+                        order.order_number,
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ [Order] Unhandled proforma status %s for proforma %s on cancelled order %s",
+                        proforma.status,
+                        proforma.number,
+                        order.order_number,
+                    )
 
         # Send cancellation email (deliberately vague per plan).
         # Isolated try/except so a failed email never masks a succeeded cancellation.

@@ -381,7 +381,7 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         force_status(order, "awaiting_payment")
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None, "amount_received": 0}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
@@ -414,7 +414,7 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         self.assertEqual(order.status, "awaiting_payment")
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None, "amount_received": 0}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
@@ -463,10 +463,9 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         order = _make_pending_order_for_h9(self.customer, self.currency, payment_intent_id=pi_id)
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
-
-        mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
+        mock_gateway.confirm_payment.return_value = {
+            "success": True, "status": "succeeded", "error": None, "amount_received": 0,
+        }
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
@@ -478,9 +477,11 @@ class ConfirmOrderStatusHistoryTest(TestCase):
             second_response = confirm_order(self._make_request(req_data), str(order.id))
 
         self.assertEqual(first_response.status_code, 200)
+        # CODEX-8 fix: idempotent retries return 200, not 409
         self.assertEqual(
-            second_response.status_code, 409, "Second confirmation attempt must return HTTP 409 Conflict"
+            second_response.status_code, 200, "Second confirmation attempt must return 200 (idempotent)"
         )
+        self.assertTrue(second_response.data["success"])
 
 
 # ===============================================================================
@@ -911,8 +912,8 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         request.user = self.user
         return request
 
-    def test_already_paid_order_returns_409_with_generic_message(self) -> None:
-        """Calling confirm_order on an already-paid order must return 409 with no internal state names."""
+    def test_already_paid_order_returns_200_idempotent(self) -> None:
+        """CODEX-8: Calling confirm_order on an already-paid order must return 200 (idempotent)."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
         pi_id = "pi_alreadyPaidTest12345"
@@ -932,8 +933,9 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
             response = confirm_order(request, str(order.id))
 
-        self.assertEqual(response.status_code, 409)
-        self.assertFalse(response.data["success"])
+        # CODEX-8: idempotent — already-paid returns 200
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["success"])
 
     def test_status_update_failure_does_not_expose_internal_error_message(self) -> None:
         """When OrderService.update_order_status returns Err, the response must not contain internal details."""
@@ -953,7 +955,7 @@ class ConfirmOrderErrorLeakageTest(TestCase):
 
         mock_invoice = MagicMock()
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None, "amount_received": 0}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),

@@ -391,7 +391,7 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None
+            success=True, status="succeeded", error=None, amount_received=12100,
         )
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testConfirmPfm53abcd"})
@@ -452,7 +452,7 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None
+            success=True, status="succeeded", error=None, amount_received=12100,
         )
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testInvLink53bdefgh"})
@@ -508,7 +508,7 @@ class TestConfirmOrderIdempotentAfterWebhook(CardProformaTestBase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None
+            success=True, status="succeeded", error=None, amount_received=12100,
         )
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testIdempotent54xyz1"})
@@ -519,14 +519,13 @@ class TestConfirmOrderIdempotentAfterWebhook(CardProformaTestBase):
         ):
             response = confirm_order(request, str(order.id))
 
-        # Phase 3 re-check sees order is no longer awaiting_payment → 409
+        # CODEX-8 fix: idempotent — already-confirmed orders return 200 (not 409)
         self.assertEqual(
             response.status_code,
-            409,
-            f"confirm_order must return 409 when order was already confirmed by webhook: {response.data}",
+            200,
+            f"confirm_order must return 200 (idempotent) when order was already confirmed: {response.data}",
         )
-        self.assertFalse(response.data.get("success"))
-        self.assertIn("already processed", response.data.get("error", "").lower())
+        self.assertTrue(response.data.get("success"))
 
     def test_confirm_order_no_error_when_proforma_already_converted(self) -> None:
         """confirm_order must succeed even if proforma is already converted (webhook first).

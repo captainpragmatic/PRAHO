@@ -306,7 +306,7 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         # Mock Stripe gateway to return success
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None
+            success=True, status="succeeded", error=None, amount_received=DEFAULT_THRESHOLD,
         )
         mock_gateway_factory.return_value = mock_gateway
 
@@ -315,12 +315,11 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
             email="c1-test@pragmatichost.com", password="test123", is_staff=True, staff_role="admin"
         )
 
-        # Create high-value order — give it an invoice directly so confirm_order
-        # uses the order.invoice branch (bypasses proforma conversion in the view).
-        # The review gate is tested inside confirm_order service, not the view conversion.
+        # Create high-value order with exact total (no tax recalculation drift).
+        # Give it an invoice directly so confirm_order uses the order.invoice branch.
         from apps.billing.models import Invoice  # noqa: PLC0415
 
-        order = self._create_order(total_cents=DEFAULT_THRESHOLD)
+        order = self._create_order_exact(total_cents=DEFAULT_THRESHOLD)
         invoice = Invoice.objects.create(
             customer=self.customer,
             currency=order.currency,
@@ -343,8 +342,10 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
             content_type="application/json",
         )
         request.user = user
+        request._portal_authenticated = True
 
-        confirm_order(request, str(order.id))
+        response = confirm_order(request, str(order.id))
+        self.assertIn(response.status_code, [200, 201], f"confirm_order returned {response.status_code}: {getattr(response, 'data', 'no data')}")
 
         order.refresh_from_db()
         self.assertEqual(
@@ -358,11 +359,10 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
 class TestReviewGateConfigurable(ReviewGateTestBase):
     """Review threshold is configurable via SettingsService."""
 
-    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
-    def test_custom_threshold_respected(self, mock_threshold):
-        """Custom threshold value is used when configured."""
-        mock_threshold.return_value = 10000  # 100 RON threshold
-        order = self._create_order(total_cents=12100)  # 121 RON — above custom threshold
+    @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=10000)
+    def test_custom_threshold_respected(self, mock_setting):
+        """Custom threshold value is used when configured (mocks SettingsService, not the UUT)."""
+        order = self._create_order(total_cents=12100)  # 121 RON — above custom threshold (100 RON)
         force_status(order, "awaiting_payment")
 
         result = OrderPaymentConfirmationService.confirm_order(order)
@@ -505,15 +505,8 @@ class TestLowThresholdWarning(ReviewGateTestBase):
     @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=50000)
     def test_normal_threshold_no_warning(self, mock_setting) -> None:
         """A threshold at or above 1000 cents does not trigger a warning."""
-        # assertNoLogs requires Python 3.10+; use assertRaises on assertLogs instead
-        try:
-            with self.assertLogs("apps.orders.services", level="WARNING"):
-                OrderPaymentConfirmationService._get_review_threshold()
-            # If we reach here, a warning WAS logged — that's a failure
-            self.fail("Expected no warning log for threshold=50000, but a warning was logged")
-        except AssertionError:
-            # assertLogs raises AssertionError when no logs are captured — this is the success case
-            pass
+        with self.assertNoLogs("apps.orders.services", level="WARNING"):
+            OrderPaymentConfirmationService._get_review_threshold()
 
 
 # ===============================================================================

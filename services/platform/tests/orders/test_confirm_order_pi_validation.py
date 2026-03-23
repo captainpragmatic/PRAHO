@@ -117,7 +117,7 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         request = self._make_request({"payment_intent_id": "pi_validXYZ1234567890", "payment_status": "succeeded"})
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None)
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
 
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
              patch("apps.api.orders.views._provision_confirmed_order_item"), \
@@ -227,8 +227,8 @@ class ConfirmOrderAmountVerificationTest(TestCase):
         # Phase 2 passes (amount matches), Phase 3 free order path → 200
         self.assertEqual(response.status_code, 200, f"Response: {response.data}")
 
-    def test_missing_amount_received_still_succeeds(self) -> None:
-        """Backward compat: gateways that don't return amount_received still work."""
+    def test_missing_amount_received_is_rejected(self) -> None:
+        """SFH-2 fix: Missing amount_received must be rejected (fail-closed, not fail-open)."""
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
         order = _make_pending_order(
@@ -240,14 +240,14 @@ class ConfirmOrderAmountVerificationTest(TestCase):
         request = self._make_request({"payment_intent_id": "pi_noAmountField123456", "payment_status": "succeeded"})
 
         mock_gateway = MagicMock()
-        # No amount_received key in the response
+        # No amount_received key → should be rejected, not silently passed
         mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             response = confirm_order(request, str(order.id))
 
-        self.assertEqual(response.status_code, 200, f"Response: {response.data}")
+        self.assertEqual(response.status_code, 400, f"Response: {response.data}")
+        self.assertIn("amount", response.data["error"].lower())

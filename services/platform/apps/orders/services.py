@@ -935,31 +935,50 @@ class OrderPaymentConfirmationService:
             )
 
             # C6 fix: Log the canonical payment confirmation audit event linked to the Order.
-            # Must use AuditService.log_simple_event(content_object=order) directly —
-            # log_security_event() hardcodes content_object=None so the record is not
-            # linked to the Order instance (audit compliance gap).
-            from apps.audit.services import AuditService  # noqa: PLC0415
+            # SFH-3 fix: Audit failures must NEVER roll back the financial transaction.
+            try:
+                from apps.audit.services import AuditService  # noqa: PLC0415
 
-            AuditService.log_simple_event(
-                "order_payment_confirmed",
-                content_object=order,
-                description=f"Payment confirmed for order {order.order_number}",
-                metadata={
-                    "order_id": str(order.id),
-                    "order_number": order.order_number,
-                    "invoice_id": str(invoice.id) if invoice else None,
-                    "total_cents": order.total_cents,
-                    "resulting_status": order.status,
-                },
-                actor_type="system",
-            )
+                AuditService.log_simple_event(
+                    "order_payment_confirmed",
+                    content_object=order,
+                    description=f"Payment confirmed for order {order.order_number}",
+                    metadata={
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "invoice_id": str(invoice.id) if invoice else None,
+                        "total_cents": order.total_cents,
+                        "resulting_status": order.status,
+                    },
+                    actor_type="system",
+                )
+            except Exception:
+                logger.error(
+                    "🔥 [OrderConfirm] Audit log failed for order %s (confirmation succeeded)",
+                    order.order_number,
+                    exc_info=True,
+                )
 
             logger.info("✅ [OrderConfirm] Order %s confirmed → %s", order.order_number, order.status)
             return Ok(order)
 
+        except OrderModel.DoesNotExist:
+            # SFH-1 fix: Order deleted between caller and select_for_update re-fetch.
+            # Money may have been received for a non-existent order — requires investigation.
+            logger.critical(
+                "🔥 [OrderConfirm] Order pk=%s deleted before confirmation — "
+                "payment may have been received for a non-existent order",
+                order.pk,
+            )
+            return Err(f"Order {order.pk} no longer exists — cannot confirm")
         except (TransitionNotAllowed, ConcurrentTransition) as e:
-            logger.warning("⚠️ [OrderConfirm] FSM transition denied for %s: %s", order.order_number, e)
-            return Err(f"Order transition denied: {e}")
+            logger.warning(
+                "⚠️ [OrderConfirm] FSM transition denied for %s (in-memory status=%s): %s",
+                order.order_number,
+                order.status,
+                e,
+            )
+            return Err(f"Order transition denied at status '{order.status}': {e}")
         except Exception as e:
             logger.exception("🔥 [OrderConfirm] Failed to confirm order %s: %s", order.order_number, e)
             return Err(f"Failed to confirm order: {e}")
@@ -973,6 +992,7 @@ class OrderPaymentConfirmationService:
         """
         _DEFAULT_REVIEW_THRESHOLD = 500000  # 5000 RON  # noqa: N806
         _MAX_THRESHOLD = 100_000_000  # 1,000,000 RON — upper bound guard  # noqa: N806
+        _MIN_SAFE_THRESHOLD = 1000  # 10 RON — below this is likely misconfiguration  # noqa: N806
         try:
             from apps.settings.services import SettingsService  # noqa: PLC0415
 
@@ -980,7 +1000,6 @@ class OrderPaymentConfirmationService:
             # H8 fix: Clamp to [0, 100_000_000] to reject misconfigured/negative values.
             clamped = max(0, min(threshold, _MAX_THRESHOLD))
             # M1 fix: Warn when threshold is suspiciously low — likely misconfiguration.
-            _MIN_SAFE_THRESHOLD = 1000  # 10 RON  # noqa: N806
             if clamped < _MIN_SAFE_THRESHOLD:
                 logger.warning(
                     "⚠️ [OrderConfirm] Review threshold %d cents is below %d — all/most orders may enter review",

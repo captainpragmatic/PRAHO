@@ -970,16 +970,23 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-            # Idempotency guard — prevent double-processing
+            # CODEX-8 fix: Idempotent for already-confirmed orders (200, not 409).
+            # Retries should succeed silently, not confuse the client with a conflict error.
+            if order.status in ("paid", "in_review", "provisioning", "completed"):
+                return Response(
+                    {"success": True, "order_id": str(order.id), "status": order.status},
+                    status=status.HTTP_200_OK,
+                )
             if order.status not in ["awaiting_payment"]:
                 return Response(
-                    {"success": False, "error": "Order already processed"},
+                    {"success": False, "error": "Order cannot be confirmed from this status"},
                     status=status.HTTP_409_CONFLICT,
                 )
 
             # Persist PI (and payment_method promotion) before releasing the lock
             # so Phase 2 and Phase 3 can rely on order.payment_intent_id as source of truth.
-            if payment_intent_id is not None:
+            # CODEX-7 fix: reject empty string — `if payment_intent_id` (truthy) not `is not None`
+            if payment_intent_id:
                 order.payment_intent_id = payment_intent_id
                 order.save(update_fields=["payment_intent_id", "payment_method"])
 
@@ -1039,8 +1046,19 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 # H4 fix: Verify Stripe amount matches order total to prevent underpayment.
+                # SFH-2 fix: Treat None as rejection (fail-closed). If Stripe says "succeeded"
+                # but won't tell us the amount, that's suspicious enough to reject.
                 stripe_amount = payment_result.get("amount_received")
-                if stripe_amount is not None and stripe_amount != order_total_cents:
+                if stripe_amount is None:
+                    logger.warning(
+                        "[API] Stripe amount_received is None for order %s — cannot verify payment amount",
+                        order_number_for_log,
+                    )
+                    return Response(
+                        {"success": False, "error": "Payment amount could not be verified"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if stripe_amount != order_total_cents:
                     logger.warning(
                         "[API] Stripe amount mismatch for order %s: PI=%d, order=%d",
                         order_number_for_log,
@@ -1087,9 +1105,15 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 .get(id=order_id, customer_id=customer.id)
             )
 
+            # CODEX-8 fix: Idempotent for already-confirmed orders (Phase 3 re-check).
+            if order.status in ("paid", "in_review", "provisioning", "completed"):
+                return Response(
+                    {"success": True, "order_id": str(order.id), "status": order.status},
+                    status=status.HTTP_200_OK,
+                )
             if order.status not in ["awaiting_payment"]:
                 return Response(
-                    {"success": False, "error": "Order already processed"},
+                    {"success": False, "error": "Order cannot be confirmed from this status"},
                     status=status.HTTP_409_CONFLICT,
                 )
 

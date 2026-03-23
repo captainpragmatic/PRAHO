@@ -99,7 +99,7 @@ class StripePaymentVerificationTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None,
+            success=True, status="succeeded", error=None, amount_received=0,
         )
 
         with (
@@ -230,14 +230,14 @@ class StripePaymentVerificationTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None,
+            success=True, status="succeeded", error=None, amount_received=0,
         )
 
         def confirm_order_between_phases(*args: object, **kwargs: object) -> PaymentConfirmResult:
             """Side effect: simulate concurrent confirmation during Phase 2 Stripe call."""
             # While Phase 2 is calling Stripe, another request marks the order as paid
             Order.objects.filter(id=order.id).update(status="paid")  # fsm-bypass: simulate concurrent request in test
-            return PaymentConfirmResult(success=True, status="succeeded", error=None)
+            return PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
 
         mock_gateway.confirm_payment.side_effect = confirm_order_between_phases
 
@@ -247,9 +247,9 @@ class StripePaymentVerificationTest(TestCase):
         ):
             response = confirm_order(request, str(order.id))
 
-        # Phase 3 re-checks status and finds it's no longer "pending"
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("already processed", response.data["error"])
+        # CODEX-8 fix: idempotent — already-confirmed orders return 200
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["success"])
 
     def test_confirm_verifies_stored_pi_when_request_omits_it(self) -> None:
         """Bug 1 regression: Stripe verification uses order.payment_intent_id, not request payload.

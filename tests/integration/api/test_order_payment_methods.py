@@ -88,7 +88,7 @@ class OrderPaymentMethodIntegrationTests(TestCase):
         request = self._confirm_request(payment_intent_id="pi_match1234567890")
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None)
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
 
         with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway), \
              patch("apps.api.orders.views._provision_confirmed_order_item"):
@@ -102,12 +102,12 @@ class OrderPaymentMethodIntegrationTests(TestCase):
         self.assertIn(order.status, ("paid", "provisioning"))
         self.assertEqual(order.payment_intent_id, "pi_match1234567890")
 
-    def test_confirming_non_pending_order_returns_conflict(self) -> None:
-        # Phase A: use "paid" status (already past payment)
+    def test_confirming_non_pending_order_returns_idempotent_200(self) -> None:
+        """CODEX-8: Already-confirmed orders return 200 (idempotent), not 409."""
         order = self._make_order(status="paid", payment_method="card", payment_intent_id="pi_done1234567890")
         request = self._confirm_request(payment_intent_id="pi_done1234567890")
 
         response = confirm_order(request, str(order.id))
 
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("already processed", response.data["error"])
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["success"])

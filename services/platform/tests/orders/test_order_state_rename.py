@@ -350,9 +350,16 @@ class TestEditableFieldsByStatus(OrderStateRenameTestCase):
     """Verify EDITABLE_FIELDS_BY_STATUS includes all new states."""
 
     def test_awaiting_payment_editable_fields(self):
-        """awaiting_payment should allow full editing (same as old pending)."""
-        self.assertIn("awaiting_payment", Order.EDITABLE_FIELDS_BY_STATUS)
-        self.assertEqual(Order.EDITABLE_FIELDS_BY_STATUS["awaiting_payment"], ["*"])
+        """CODEX-6 fix: awaiting_payment allows contact/delivery edits, NOT financial fields."""
+        fields = Order.EDITABLE_FIELDS_BY_STATUS["awaiting_payment"]
+        self.assertIn("notes", fields)
+        self.assertIn("billing_address", fields)
+        self.assertIn("customer_email", fields)
+        # Financial fields must NOT be editable post-submit
+        self.assertNotIn("total_cents", fields)
+        self.assertNotIn("subtotal_cents", fields)
+        self.assertNotIn("payment_intent_id", fields)
+        self.assertNotEqual(fields, ["*"])
 
     def test_paid_editable_fields(self):
         """paid allows limited editing (notes, delivery)."""
