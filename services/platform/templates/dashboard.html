@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% load ui_components %}
 {% load i18n %}
+{% load formatting %}
 
 {% block title %}{% trans 'Dashboard' %} - PRAHO Platform{% endblock %}
 
@@ -53,7 +54,7 @@
         </div>
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'Monthly Revenue' %}</p>
-          <p class="text-2xl font-semibold text-white">{{ stats.monthly_revenue|floatformat:0 }} RON</p>
+          <p class="text-2xl font-semibold text-white">{{ stats.monthly_revenue|cents_to_currency|romanian_currency:"RON" }}</p>
         </div>
       </div>
     </div>
