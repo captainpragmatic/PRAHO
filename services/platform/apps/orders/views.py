@@ -810,8 +810,13 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
             updated_fields.append(field_name)
 
         if updated_fields:
+            # Only validate the fields that were actually changed — full_clean() would
+            # fail on unrelated required fields (e.g., empty billing_address on legacy orders).
+            all_field_names = {f.name for f in Order._meta.get_fields() if hasattr(f, "column")}
+            exclude_from_validation = all_field_names - set(updated_fields)
+            exclude_from_validation.add("status")  # FSM-protected, never validate via full_clean
             try:
-                order.full_clean(exclude=["status"])
+                order.full_clean(exclude=list(exclude_from_validation))
             except ValidationError as e:
                 for field, errors in e.message_dict.items():
                     for error in errors:

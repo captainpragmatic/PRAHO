@@ -49,3 +49,39 @@ class OrderEditableFieldsTests(TestCase):
         """order_edit POST handler no longer returns placeholder message"""
         source = inspect.getsource(order_edit)
         self.assertNotIn("will be implemented next", source)
+
+    def test_edit_post_excludes_fsm_status_field(self):
+        """POST with notes on awaiting_payment order must not crash on FSM status field.
+
+        Regression test: order_edit used to 500 because full_clean() tried to
+        setattr on the FSM-protected 'status' field.
+        """
+        force_status(self.order, "awaiting_payment")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/orders/{self.order.id}/edit/",
+            {"notes": "Updated notes", "status_display": "Awaiting Payment"},
+            follow=True,
+        )
+        # Should not 500
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        # Status must NOT have changed (FSM protected)
+        self.assertEqual(self.order.status, "awaiting_payment")
+
+    def test_edit_post_draft_notes_saved(self):
+        """POST with notes on draft order saves successfully."""
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/orders/{self.order.id}/edit/",
+            {"notes": "New staff note"},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        # Debug: check for error messages
+        msgs = [str(m) for m in response.context.get("messages", [])] if hasattr(response, "context") and response.context else []
+        self.order.refresh_from_db()
+        self.assertEqual(
+            self.order.notes, "New staff note",
+            f"Notes not updated. Messages: {msgs}. Final URL: {response.request.get('PATH_INFO', '?')}",
+        )
