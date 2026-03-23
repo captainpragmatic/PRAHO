@@ -25,7 +25,6 @@ from apps.billing.models import (
     Currency,
     Invoice,
     InvoiceSequence,
-    Payment,
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
@@ -700,16 +699,15 @@ class ProcessPaymentViewTest(BillingViewsTestBase):
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "paid")
 
-    def test_process_payment_invalid_method_fallback(self):
+    def test_process_payment_invalid_method_rejected(self):
+        """Invalid payment methods are now rejected with 400 (strict allowlist)."""
         invoice = self._create_invoice()
         self.client.force_login(self.staff_user)
         response = self.client.post(
             f"/billing/invoices/{invoice.pk}/pay/",
             {"amount": "100.00", "payment_method": "bitcoin"},
         )
-        self.assertEqual(response.status_code, 200)
-        payment = Payment.objects.last()
-        self.assertEqual(payment.payment_method, "other")
+        self.assertEqual(response.status_code, 400)
 
 
 class ProcessProformaPaymentViewTest(BillingViewsTestBase):

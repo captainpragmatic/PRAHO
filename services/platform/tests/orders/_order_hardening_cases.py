@@ -334,6 +334,7 @@ def _make_pending_order_for_h9(customer: Customer, currency: Currency, **kwargs:
         customer_name=customer.company_name,
         status="awaiting_payment",
         payment_method="card",
+        payment_intent_id=kwargs.pop("payment_intent_id", "pi_test_h9_fixture"),
         billing_address={"company_name": customer.company_name or "Test", "country": "RO"},
         **kwargs,
     )
@@ -411,9 +412,13 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         order = _make_pending_order_for_h9(self.customer, self.currency)
         self.assertEqual(order.status, "awaiting_payment")
 
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
+
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch("apps.api.orders.views._provision_confirmed_order_item"),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             response = confirm_order(self._make_request({}), str(order.id))
 
@@ -453,9 +458,13 @@ class ConfirmOrderStatusHistoryTest(TestCase):
 
         order = _make_pending_order_for_h9(self.customer, self.currency)
 
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
+
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch("apps.api.orders.views._provision_confirmed_order_item"),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             first_response = confirm_order(self._make_request({}), str(order.id))
             second_response = confirm_order(self._make_request({}), str(order.id))
@@ -931,9 +940,12 @@ class ConfirmOrderErrorLeakageTest(TestCase):
         from apps.common.types import Ok  # noqa: PLC0415
 
         mock_invoice = MagicMock()
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded"}
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
             patch(
                 "apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert",
                 return_value=Ok(mock_invoice),
