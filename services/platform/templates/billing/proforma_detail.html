@@ -256,6 +256,24 @@
             </div>
           </div>
         </div>
+
+        {% if proforma.meta.order_number %}
+        <!-- Linked Order -->
+        <div class="mt-4 pt-4 border-t border-slate-700">
+          <div class="text-xs text-slate-400">
+            <div class="flex justify-between">
+              <span>{% trans 'Order:' %}</span>
+              {% if proforma.meta.order_id %}
+              <a href="{% url 'orders:order_detail' pk=proforma.meta.order_id %}" class="text-blue-400 hover:text-blue-300">
+                {{ proforma.meta.order_number }}
+              </a>
+              {% else %}
+              <span class="text-white">{{ proforma.meta.order_number }}</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endif %}
       </div>
 
       <!-- Romanian Business Info -->
