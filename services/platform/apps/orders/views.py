@@ -794,7 +794,11 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     if request.method == "POST":
         # Determine which fields to process
         if editable_fields == ["*"]:
-            valid_field_names = {f.name for f in Order._meta.get_fields() if hasattr(f, "column")}
+            # Exclude FSM-managed fields and internal fields from wildcard editing
+            fsm_fields = {"status", "id", "created_at", "updated_at", "deleted_at"}
+            valid_field_names = {
+                f.name for f in Order._meta.get_fields() if hasattr(f, "column") and f.name not in fsm_fields
+            }
             fields_to_update = [k for k in request.POST if k in valid_field_names]
         else:
             fields_to_update = [k for k in request.POST if k in editable_fields]
