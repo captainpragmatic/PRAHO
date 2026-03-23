@@ -438,10 +438,10 @@ class OrderService:
 
                 line_total_cents = subtotal_cents + tax_cents
 
-                # Handle optional product_id - if None, skip this item or handle appropriately
+                # Fail if product_id is missing — silently skipping causes total/line-item mismatch (#127)
                 product_id = item_data.get("product_id")
                 if product_id is None:
-                    continue  # Skip items without a product_id
+                    raise ValueError(f"Order item missing product_id: {item_data.get('description', 'unknown')}")
 
                 OrderItem.objects.create(
                     order=order,

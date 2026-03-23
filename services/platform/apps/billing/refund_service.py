@@ -162,7 +162,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the order row to prevent concurrent refund processing
-            order = Order.objects.select_for_update().select_related("customer").get(id=order_id)
+            order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
             return Ok(order)
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
@@ -998,13 +998,7 @@ class RefundService:
         if not order:
             return 0
 
-        # Check metadata for refunds tracking
-        if hasattr(order, "meta") and isinstance(order.meta, dict):
-            refunds = order.meta.get("refunds", [])
-            if refunds:
-                return sum(r.get("amount_cents", 0) for r in refunds)
-
-        # Check related refunds — must not silently return 0 on failure (over-refund risk, #119)
+        # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
             return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError) as exc:
@@ -1021,13 +1015,7 @@ class RefundService:
         if not invoice:
             return 0
 
-        # Check metadata for refunds tracking
-        if hasattr(invoice, "meta") and isinstance(invoice.meta, dict):
-            refunds = invoice.meta.get("refunds", [])
-            if refunds:
-                return sum(r.get("amount_cents", 0) for r in refunds)
-
-        # Check related refunds — must not silently return 0 on failure (over-refund risk, #119)
+        # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
             return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError) as exc:
