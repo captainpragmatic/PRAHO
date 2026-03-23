@@ -1017,8 +1017,22 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
 
         if response.get("success"):
             customer = response.get("customer", {})
-            billing_profile = customer.get("billing_profile", {})
             tax_profile = customer.get("tax_profile", {})
+
+            # Fetch billing address from addresses endpoint (not billing_profile)
+            billing_addr: dict[str, str] = {}
+            try:
+                addr_response = api_client.get_customer_addresses(
+                    customer_id=int(customer_id),
+                    user_id=int(user_id),
+                )
+                if isinstance(addr_response, dict) and addr_response.get("success"):
+                    for addr in addr_response.get("addresses", []):
+                        if addr.get("is_billing"):
+                            billing_addr = addr
+                            break
+            except Exception as addr_err:
+                logger.debug("Could not fetch billing address: %s", addr_err)
 
             company_data = {
                 "company_name": customer.get("company_name", ""),
@@ -1026,11 +1040,11 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
                 "trade_registry_number": tax_profile.get("registration_number", ""),
                 "industry": customer.get("industry", ""),
                 "billing_address": {
-                    "street_address": billing_profile.get("address_street", ""),
-                    "city": billing_profile.get("address_city", ""),
-                    "state": billing_profile.get("address_state", ""),
-                    "postal_code": billing_profile.get("address_postal_code", ""),
-                    "country": billing_profile.get("address_country", "RO"),
+                    "street_address": billing_addr.get("address_line1", ""),
+                    "city": billing_addr.get("city", ""),
+                    "state": billing_addr.get("county", ""),
+                    "postal_code": billing_addr.get("postal_code", ""),
+                    "country": billing_addr.get("country", ""),
                 },
                 "contact": {
                     "primary_email": customer.get("primary_email", ""),
