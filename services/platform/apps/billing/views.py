@@ -86,10 +86,11 @@ def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Custome
     # Test runner compatibility: PORTAL_HMAC_BYPASS=True is set only in test.py
     # and e2e.py. Hard-fail if it is somehow True in a non-debug environment
     # (staging/prod always have DEBUG=False, making this unreachable in practice).
-    if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not settings.DEBUG:
+    _is_test_env = getattr(settings, "TESTING", False) or settings.DEBUG
+    if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not _is_test_env:
         raise ImproperlyConfigured(
-            "PORTAL_HMAC_BYPASS=True is not allowed when DEBUG=False. "
-            "This setting must only be enabled in test/e2e environments."
+            "PORTAL_HMAC_BYPASS=True is not allowed outside test/e2e environments. "
+            "This setting must only be enabled in test.py or e2e.py settings."
         )
     if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not getattr(request, "_portal_authenticated", False):
         try:

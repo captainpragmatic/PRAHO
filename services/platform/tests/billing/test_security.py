@@ -504,9 +504,10 @@ class BillingPortalAuthBypassTests(TestCase):
         return request
 
     @patch("apps.billing.views.settings")
-    def test_bypass_raises_when_debug_false(self, mock_settings: object) -> None:
-        """🔒 PORTAL_HMAC_BYPASS=True with DEBUG=False must raise ImproperlyConfigured."""
+    def test_bypass_raises_outside_test_env(self, mock_settings: object) -> None:
+        """🔒 PORTAL_HMAC_BYPASS=True outside test/dev must raise ImproperlyConfigured."""
         mock_settings.DEBUG = False
+        mock_settings.TESTING = False
         mock_settings.PORTAL_HMAC_BYPASS = True
         request = self._make_request()
 
