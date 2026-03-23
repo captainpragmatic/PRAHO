@@ -143,6 +143,7 @@ jobs:
 
     - name: Integration tests
       env:
+        DJANGO_SETTINGS_MODULE: config.settings.ci
         DB_NAME: postgres
         DB_USER: test
         DB_PASSWORD: test
@@ -151,6 +152,7 @@ jobs:
 
     - name: Cache and security tests
       env:
+        DJANGO_SETTINGS_MODULE: config.settings.ci
         DB_NAME: postgres
         DB_USER: test
         DB_PASSWORD: test
