@@ -82,6 +82,14 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
         meta=data.get("meta", {}),
     )
 
+    # Extract bill_to data if present (API returns nested dict, not flat fields)
+    bill_to = data.get("bill_to", {})
+    if bill_to:
+        invoice.bill_to_name = bill_to.get("name", "") or invoice.bill_to_name
+        invoice.bill_to_email = bill_to.get("email", "") or invoice.bill_to_email
+        invoice.bill_to_tax_id = bill_to.get("tax_id", "") or invoice.bill_to_tax_id
+        invoice.bill_to_address1 = bill_to.get("address", "") or invoice.bill_to_address1
+
     # Add line items if provided
     if lines:
         invoice.lines = [create_invoice_line_from_api(line_data) for line_data in lines]
