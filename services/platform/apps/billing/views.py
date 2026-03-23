@@ -20,7 +20,7 @@ from django.contrib import messages
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
@@ -83,10 +83,15 @@ def _get_max_payment_amount_cents() -> int:
 
 def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
     """Validate portal HMAC + customer membership and return JsonResponse on failure."""
-    # Test runner compatibility: these legacy Django views are exercised without
-    # HMAC middleware in coverage tests. Requires both DEBUG and TESTING to be
-    # True — this combination never occurs in staging or production (DEBUG=False).
-    if settings.DEBUG and settings.TESTING and not getattr(request, "_portal_authenticated", False):
+    # Test runner compatibility: PORTAL_HMAC_BYPASS=True is set only in test.py
+    # and e2e.py. Hard-fail if it is somehow True in a non-debug environment
+    # (staging/prod always have DEBUG=False, making this unreachable in practice).
+    if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not settings.DEBUG:
+        raise ImproperlyConfigured(
+            "PORTAL_HMAC_BYPASS=True is not allowed when DEBUG=False. "
+            "This setting must only be enabled in test/e2e environments."
+        )
+    if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not getattr(request, "_portal_authenticated", False):
         try:
             data = json.JSONDecoder().decode(request.body.decode("utf-8"))
             customer_id = int(data.get("customer_id"))
