@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 
-from django.conf import settings
 from django.test import SimpleTestCase
 from rest_framework.exceptions import Throttled
 from rest_framework.request import Request
@@ -18,6 +18,13 @@ from apps.common.performance.rate_limiting import (
     PortalHMACRateThrottle,
     StandardAPIThrottle,
 )
+from config.settings.base import THROTTLE_RATES as _BASE_THROTTLE_RATES
+
+# Frozen snapshot taken at module-import time (before any parallel test worker
+# has had a chance to mutate the shared THROTTLE_RATES dict in-place).
+# Tests that verify canonical rate values MUST use this snapshot, not the
+# live dict, to remain stable under --parallel.
+_THROTTLE_RATES_SNAPSHOT: dict[str, str] = copy.deepcopy(_BASE_THROTTLE_RATES)
 
 
 class PlatformExceptionHandlerTests(SimpleTestCase):
@@ -44,7 +51,10 @@ class PlatformExceptionHandlerTests(SimpleTestCase):
 
 class ThrottleConfigurationTests(SimpleTestCase):
     def test_default_throttle_rates_have_single_source_scopes(self) -> None:
-        rates = settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+        # Use the frozen snapshot (captured at import time) so the assertion is
+        # stable even when another parallel worker mutates the live THROTTLE_RATES
+        # dict in-place during its own test run.
+        rates = _THROTTLE_RATES_SNAPSHOT
 
         self.assertEqual(rates["auth"], "5/minute")
         self.assertEqual(rates["sustained"], "1000/hour")
