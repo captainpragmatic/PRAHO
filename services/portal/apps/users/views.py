@@ -492,14 +492,16 @@ def _fetch_customer_cui(customer_id: str | int | None, user_id: str | int | None
     """Fetch CUI from customer tax profile for display in company card."""
     if not customer_id or not user_id:
         return ""
+    uid = int(user_id)
     try:
         response = api_client.post(
             "customers/details/",
-            data={"customer_id": customer_id, "user_id": user_id, "include": ["tax_profile"]},
-            user_id=user_id,
+            data={"customer_id": customer_id, "user_id": uid, "include": ["tax_profile"]},
+            user_id=uid,
         )
         if isinstance(response, dict) and response.get("success"):
-            return response.get("customer", {}).get("tax_profile", {}).get("cui", "")
+            cui: str = response.get("customer", {}).get("tax_profile", {}).get("cui", "")
+            return cui
     except Exception as e:
         logger.debug("Could not load CUI for company card: %s", e)
     return ""
@@ -979,7 +981,7 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 @require_any_role()
 @log_access_attempt
-def company_profile_view(request: HttpRequest) -> HttpResponse:
+def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912
     """
     🔒 Company profile view - displays current company information.
     Shows company details including billing address, VAT number, contact information.
@@ -992,7 +994,9 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Please select a customer to view profile."))
         return redirect("/profile/")
 
-    user_id = request.session.get("user_id")
+    user_id: int | None = request.session.get("user_id")
+    if not user_id:
+        return redirect("/login/")
 
     # Load user memberships if not cached
     if not request.session.get("user_memberships"):
@@ -1084,7 +1088,7 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @require_billing_access()
 @log_access_attempt
-def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912
+def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
     """
     🔒 Company profile edit view - allows editing company information.
     Updates company details via Platform API with form validation.
@@ -1097,7 +1101,9 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
         messages.error(request, _("Please select a customer to edit profile."))
         return redirect("/profile/")
 
-    user_id = request.session.get("user_id")
+    user_id: int | None = request.session.get("user_id")
+    if not user_id:
+        return redirect("/login/")
 
     # Check if user can edit company profile for this customer
     if not _can_edit_company_profile(request, customer_id):
@@ -1170,7 +1176,9 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: PL
                 }
 
                 response = api_client.update_customer_company_profile(
-                    customer_id=customer_id, user_id=user_id, data=profile_data
+                    customer_id=int(customer_id),
+                    user_id=int(user_id),
+                    data=profile_data,  # type narrowed by guards above
                 )
 
                 if response.get("success"):
