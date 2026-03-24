@@ -108,12 +108,14 @@ class BillingStaffSessionBypassTests(TestCase):
         response = self._make_staff_request("/billing/process-refund/")
         self.assertEqual(response.status_code, 401)
 
-    # ── Anonymous users: MUST be rejected for all billing paths ──
+    # ── Anonymous users ──
 
-    def test_anonymous_cannot_access_billing_invoices(self) -> None:
+    def test_anonymous_billing_ui_passes_through_middleware(self) -> None:
+        """Staff UI paths are not HMAC-gated; @login_required on the view handles auth."""
         response = self._make_anonymous_request("/billing/invoices/")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
 
     def test_anonymous_cannot_access_billing_api(self) -> None:
+        """Inter-service API paths require HMAC even for anonymous requests."""
         response = self._make_anonymous_request("/billing/create-payment-intent/")
         self.assertEqual(response.status_code, 401)
