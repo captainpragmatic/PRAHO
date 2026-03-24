@@ -35,7 +35,7 @@ class PriceData(TypedDict):
 
 
 # Security constants
-PRICE_SEAL_TTL_SECONDS = 60  # 🔒 SECURITY: 1 minute window - prices must be used within this tight window
+PRICE_SEAL_TTL_SECONDS = 900  # 🔒 SECURITY: 15 minute window — realistic browse→cart→checkout flow
 HMAC_ALGORITHM = "sha256"
 
 # Module-level flag to emit the dev-mode warning only once per process (B4/BUG-9)
@@ -85,14 +85,11 @@ class PriceSealingService:
         """
         🔒 Create a sealed price token that cannot be tampered with.
 
+        HMAC signature prevents tampering; IP is not bound to the token (#126).
+
         Args:
-            product_price_id: UUID of the ProductPrice record
-            amount_cents: Price amount in cents
-            setup_cents: Setup fee in cents
-            currency_code: Currency code (e.g., 'RON', 'EUR')
-            billing_period: Billing period (e.g., 'monthly', 'annual')
-            product_slug: Product slug for additional context
-            client_ip: Client IP address for token binding
+            price_data: Structured price information to seal
+            client_ip: Accepted for backward compatibility but not embedded in token
             timestamp: Optional timestamp (defaults to current time)
 
         Returns:
@@ -101,7 +98,7 @@ class PriceSealingService:
         if timestamp is None:
             timestamp = time.time()
 
-        # 🔒 SECURITY: Create price payload with IP binding
+        # 🔒 SECURITY: Create price payload (HMAC prevents tampering; IP not bound — see #126)
         payload = {
             "product_price_id": str(price_data["product_price_id"]),
             "amount_cents": int(price_data["amount_cents"]),
@@ -109,7 +106,6 @@ class PriceSealingService:
             "currency_code": price_data["currency_code"],
             "billing_period": price_data["billing_period"],
             "product_slug": price_data["product_slug"],
-            "client_ip": client_ip,  # 🔒 SECURITY: IP address binding
             "timestamp": timestamp,
         }
 
@@ -126,19 +122,19 @@ class PriceSealingService:
         return sealed_token
 
     @staticmethod
-    def unseal_price(sealed_token: str, client_ip: str) -> dict[str, Any]:
+    def unseal_price(sealed_token: str, client_ip: str = "") -> dict[str, Any]:
         """
         🔒 Validate and extract price data from a sealed token.
 
         Args:
             sealed_token: The sealed price token to validate
-            client_ip: Client IP address to validate against token binding
+            client_ip: Accepted for backward compatibility but no longer validated (#126)
 
         Returns:
             Dictionary containing price data if valid
 
         Raises:
-            ValidationError: If token is invalid, expired, tampered with, or IP mismatch
+            ValidationError: If token is invalid, expired, or tampered with
         """
         try:
             # Split token into payload and signature
@@ -174,17 +170,11 @@ class PriceSealingService:
                 "currency_code",
                 "billing_period",
                 "product_slug",
-                "client_ip",
             ]
 
             for field in required_fields:
                 if field not in price_data:
                     raise ValidationError(_("Missing required field in price token: %(field)s") % {"field": field})
-
-            # 🔒 SECURITY: Validate IP address binding
-            token_ip = price_data.get("client_ip", "")
-            if token_ip != client_ip:
-                raise ValidationError(_("Price token IP address mismatch - token not valid for this client"))
 
             return price_data
 

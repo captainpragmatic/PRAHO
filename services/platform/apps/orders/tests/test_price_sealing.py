@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 
-from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 from django.test import TestCase, override_settings
 
@@ -81,23 +80,22 @@ class TestPriceSealingWithSafeIp(TestCase):
         )
 
     @override_settings(DEBUG=True)
-    def test_seal_unseal_roundtrip_with_safe_ip(self) -> None:
-        """Seal and unseal with consistent IP succeeds."""
-        price_data = self._make_price_data()
-        client_ip = "203.0.113.10"
-
-        token = PriceSealingService.seal_price(price_data, client_ip)
-        unsealed = PriceSealingService.unseal_price(token, client_ip)
-
-        self.assertEqual(unsealed["amount_cents"], 9900)
-        self.assertEqual(unsealed["client_ip"], client_ip)
-
-    @override_settings(DEBUG=True)
-    def test_seal_ip_mismatch_rejects(self) -> None:
-        """Unsealing with a different IP raises ValidationError."""
+    def test_seal_unseal_roundtrip(self) -> None:
+        """Seal and unseal roundtrip succeeds."""
         price_data = self._make_price_data()
 
         token = PriceSealingService.seal_price(price_data, "203.0.113.10")
+        unsealed = PriceSealingService.unseal_price(token)
 
-        with self.assertRaises(ValidationError):
-            PriceSealingService.unseal_price(token, "198.51.100.99")
+        self.assertEqual(unsealed["amount_cents"], 9900)
+        self.assertNotIn("client_ip", unsealed)
+
+    @override_settings(DEBUG=True)
+    def test_different_ip_does_not_reject(self) -> None:
+        """#126: IP is no longer bound — different IP must not cause rejection."""
+        price_data = self._make_price_data()
+
+        token = PriceSealingService.seal_price(price_data, "203.0.113.10")
+        unsealed = PriceSealingService.unseal_price(token, "198.51.100.99")
+
+        self.assertEqual(unsealed["amount_cents"], 9900)
