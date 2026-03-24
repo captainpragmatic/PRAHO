@@ -131,10 +131,12 @@ class CustomerUsersCreateAPITests(TestCase):
         self.customer = Customer.objects.create(name="Create Test Co", customer_type="company", status="active")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner_user, role="owner")
 
+    @patch("apps.api.customers.views.SecureCustomerUserService._send_welcome_email_secure")
     @patch("apps.api.secure_auth.get_authenticated_customer")
-    def test_create_user_success(self, mock_auth):
+    def test_create_user_success(self, mock_auth, mock_send_email):
         """Owner can create a new user and add to customer."""
         mock_auth.return_value = (self.customer, None)
+        mock_send_email.return_value = True
         request = _make_request(self.factory, "/api/customers/users/create/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
             "email": "newuser@example.com", "first_name": "New", "last_name": "User",
@@ -146,6 +148,24 @@ class CustomerUsersCreateAPITests(TestCase):
         new_user = User.objects.get(email="newuser@example.com")
         self.assertTrue(CustomerMembership.objects.filter(customer=self.customer, user=new_user).exists())
         self.assertFalse(new_user.has_usable_password())
+        mock_send_email.assert_called_once_with(new_user, self.customer)
+        self.assertTrue(response.data["invite_email_sent"])
+
+    @patch("apps.api.customers.views.SecureCustomerUserService._send_welcome_email_secure")
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_invite_email_failure_still_succeeds(self, mock_auth, mock_send_email):
+        """User creation succeeds even if invite email fails."""
+        mock_auth.return_value = (self.customer, None)
+        mock_send_email.return_value = False
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "noemail@example.com", "first_name": "No", "last_name": "Email",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(User.objects.filter(email="noemail@example.com").exists())
+        self.assertFalse(response.data["invite_email_sent"])
 
     @patch("apps.api.secure_auth.get_authenticated_customer")
     def test_create_user_duplicate_email_returns_400(self, mock_auth):

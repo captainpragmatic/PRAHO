@@ -16,6 +16,7 @@ from apps.common.decorators import staff_required
 from apps.customers.customer_service import CustomerService
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
+from apps.users.services import SecureCustomerUserService
 
 
 def _get_accessible_customer(request: HttpRequest, customer_id: int) -> Customer:
@@ -116,6 +117,11 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
 
         # Create membership
         CustomerMembership.objects.create(customer=customer, user=user, role=role)
+
+        # Send invite email with password reset link
+        email_sent = SecureCustomerUserService._send_welcome_email_secure(user, customer)
+        if not email_sent:
+            messages.warning(request, _("User created but invite email could not be sent."))
 
         messages.success(request, _("New user '{}' created and assigned to customer.").format(user.email))
         return redirect("customers:detail", customer_id=customer.id)

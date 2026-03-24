@@ -25,6 +25,7 @@ from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
+from apps.users.services import SecureCustomerUserService
 
 from .serializers import (
     CustomerBillingAddressUpdateSerializer,
@@ -1023,9 +1024,17 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Send invite email with password reset link
+    email_sent = SecureCustomerUserService._send_welcome_email_secure(new_user, customer)
+
     logger.info(f"✅ [User Management API] New user {email} created and added to customer {customer.id}")
     return Response(
-        {"success": True, "user_id": new_user.id, "message": f"User created and added as {role}."},
+        {
+            "success": True,
+            "user_id": new_user.id,
+            "message": f"User created and added as {role}.",
+            "invite_email_sent": email_sent,
+        },
         status=status.HTTP_201_CREATED,
     )
 
