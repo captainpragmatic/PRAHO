@@ -591,7 +591,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _add_invoice_lines(self) -> None:
         """Add InvoiceLine elements for each line item."""
-        for idx, line in enumerate(self.invoice.lines.all().order_by("id"), start=1):
+        for idx, line in enumerate(self.invoice.lines.all().order_by("sort_order", "id"), start=1):
             self._add_invoice_line(idx, line)
 
     def _add_invoice_line(self, line_id: int, line: InvoiceLine) -> None:
@@ -601,9 +601,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # Line ID - Mandatory
         self._add_cbc(invoice_line, "ID", str(line_id))
 
-        # Note - Optional
-        if hasattr(line, "notes") and line.notes:
-            self._add_cbc(invoice_line, "Note", line.notes[:200])
+        # Note (BT-127) - Optional, from model field
+        if line.note:
+            self._add_cbc(invoice_line, "Note", line.note[:1000])
 
         # Invoiced Quantity - Mandatory
         quantity = getattr(line, "quantity", 1) or 1
@@ -615,6 +615,12 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         line_amount = unit_price * Decimal(str(quantity))
         line_ext = self._add_cbc(invoice_line, "LineExtensionAmount", self._format_amount(line_amount))
         line_ext.set("currencyID", self.invoice.currency.code)
+
+        # BT-134/BT-135: Service period at line level
+        if line.period_start and line.period_end:
+            period = self._add_cac(invoice_line, "InvoicePeriod")
+            self._add_cbc(period, "StartDate", line.period_start.isoformat())
+            self._add_cbc(period, "EndDate", line.period_end.isoformat())
 
         # Item
         self._add_line_item(invoice_line, line)
@@ -635,9 +641,16 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         name = description[:100] if description else f"Item {line.id}"
         self._add_cbc(item, "Name", name)
 
+        # BT-155: Seller's item identification — optional
+        if line.seller_item_id:
+            sellers_id = self._add_cac(item, "SellersItemIdentification")
+            self._add_cbc(sellers_id, "ID", line.seller_item_id)
+
         # ClassifiedTaxCategory - Mandatory
         tax_category = self._add_cac(item, "ClassifiedTaxCategory")
-        self._add_cbc(tax_category, "ID", self._get_tax_category())
+        # Use stored tax_category_code from line, fall back to document-level derivation
+        category_id = line.tax_category_code or self._get_tax_category()
+        self._add_cbc(tax_category, "ID", category_id)
 
         # Get line-specific tax rate or default
         tax_rate = getattr(line, "tax_rate", None)
@@ -646,6 +659,12 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
+
+        # AdditionalItemProperty for domain_name (BT-160)
+        if line.domain_name:
+            prop = self._add_cac(item, "AdditionalItemProperty")
+            self._add_cbc(prop, "Name", "domain")
+            self._add_cbc(prop, "Value", line.domain_name)
 
     def _add_line_price(self, parent: etree._Element, line: InvoiceLine) -> None:
         """Add Price element to invoice line."""
@@ -656,21 +675,8 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         price_amount.set("currencyID", self.invoice.currency.code)
 
     def _get_unit_code(self, line: InvoiceLine) -> str:
-        """Get UN/ECE unit code for the line item."""
-        # Check for unit type on line
-        unit_type = getattr(line, "unit_type", None)
-        if unit_type:
-            unit_mapping = {
-                "hour": UNIT_CODE_HOUR,
-                "day": UNIT_CODE_DAY,
-                "month": UNIT_CODE_MONTH,
-                "year": UNIT_CODE_YEAR,
-                "piece": UNIT_CODE_PIECE,
-            }
-            return unit_mapping.get(unit_type.lower(), UNIT_CODE_PIECE)
-
-        # Default to piece/unit
-        return UNIT_CODE_PIECE
+        """Get UN/ECE unit code from line model field."""
+        return line.unit_code if line.unit_code else UNIT_CODE_PIECE
 
 
 class UBLCreditNoteBuilder(BaseUBLBuilder):

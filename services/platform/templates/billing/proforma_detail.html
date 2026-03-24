@@ -210,6 +210,9 @@
                   {% if line.service %}
                     <div class="text-xs text-slate-400">{{ line.service.name }}</div>
                   {% endif %}
+                  {% if line.domain_name %}
+                    <div class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</div>
+                  {% endif %}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.quantity|floatformat:0 }}

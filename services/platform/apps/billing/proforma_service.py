@@ -18,6 +18,35 @@ from django.utils.translation import gettext as _t
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import log_security_event
 
+# ---------------------------------------------------------------------------
+# EN16931 pipeline helpers
+# ---------------------------------------------------------------------------
+
+BILLING_PERIOD_TO_UNIT_CODE: dict[str, str] = {
+    "monthly": "MON",
+    "semiannual": "MON",
+    "annual": "ANN",
+    "quarterly": "MON",
+    "biennial": "ANN",
+}
+
+
+def _period_delta(billing_period: str) -> timedelta:
+    return {
+        "monthly": timedelta(days=30),
+        "semiannual": timedelta(days=182),
+        "annual": timedelta(days=365),
+        "quarterly": timedelta(days=91),
+    }.get(billing_period, timedelta(days=30))
+
+
+def _derive_tax_category(vat_result: Any) -> str:
+    """Derive EU VAT category code from VAT calculation result."""
+    if vat_result.vat_cents == 0:
+        return "Z"  # Zero-rated
+    return "S"  # Standard rated
+
+
 if TYPE_CHECKING:
     from apps.orders.models import Order
     from apps.users.models import User
@@ -163,7 +192,8 @@ class ProformaService:
 
             # Create proforma lines from order items
             vat_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
-            for item in order.items.all():
+            for idx, item in enumerate(order.items.all(), start=1):
+                billing_period = getattr(item, "billing_period", "") or ""
                 line = ProformaLine(
                     proforma=proforma,
                     kind="service",
@@ -171,6 +201,13 @@ class ProformaService:
                     quantity=Decimal(str(item.quantity)),
                     unit_price_cents=item.unit_price_cents,
                     tax_rate=vat_rate_decimal,
+                    domain_name=getattr(item, "domain_name", "") or "",
+                    seller_item_id=getattr(item.product, "slug", "") if getattr(item, "product", None) else "",
+                    unit_code=BILLING_PERIOD_TO_UNIT_CODE.get(billing_period, "C62"),
+                    period_start=order.created_at.date(),
+                    period_end=(order.created_at + _period_delta(billing_period)).date(),
+                    sort_order=idx,
+                    tax_category_code=_derive_tax_category(vat_result),
                 )
                 line.calculate_totals()
                 line.save()

@@ -145,6 +145,9 @@
             <tr>
               <td class="px-6 py-4 text-sm text-white">
                 {{ line.description }}
+                {% if line.domain_name %}
+                <div class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</div>
+                {% endif %}
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
                 {{ line.get_kind_display }}
@@ -211,6 +214,9 @@
           <!-- Description -->
           <div class="mb-2">
             <p class="text-white text-sm font-medium">{{ line.description }}</p>
+            {% if line.domain_name %}
+            <p class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</p>
+            {% endif %}
           </div>
 
           <!-- Quantity and Unit Price -->
