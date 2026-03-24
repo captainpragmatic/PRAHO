@@ -627,9 +627,7 @@ class TestInvoiceNumberGeneration(TestCase):
             number="TMP-001",
             status="draft",
         )
-        mock_seq = MagicMock()
-        mock_seq.get_next_number.return_value = "INV-000001"
-        mock_numbering.get_or_create_sequence.return_value = mock_seq
+        mock_numbering.get_next_number.return_value = "INV-000001"
 
         force_status(invoice, "issued")
         # The signal handler checks for TMP- prefix on non-created issued invoices
