@@ -1760,16 +1760,28 @@ class Command(BaseCommand):
                 "completed": ["draft", "pending", "confirmed", "processing", "completed"],
                 "cancelled": ["draft", "pending", "cancelled"],
                 "failed": ["draft", "pending", "confirmed", "processing", "failed"],
+                "refunded": ["draft", "pending", "confirmed", "processing", "completed", "refunded"],
+                "partially_refunded": [
+                    "draft",
+                    "pending",
+                    "confirmed",
+                    "processing",
+                    "completed",
+                    "partially_refunded",
+                ],
             }
             transitions = status_transitions.get(status, ["draft", status])
             for idx in range(len(transitions) - 1):
-                OrderStatusHistory.objects.create(
+                transition_time = created_at + timedelta(minutes=(idx + 1) * 5)
+                history = OrderStatusHistory.objects.create(
                     order=order,
                     old_status=transitions[idx],
                     new_status=transitions[idx + 1],
                     is_automatic=True,
                     reason=str(_("Sample data generation")),
                 )
+                # Backdate created_at to align with order creation (auto_now_add prevents direct set)
+                OrderStatusHistory.objects.filter(pk=history.pk).update(created_at=transition_time)
 
             # Add order items (link to services)
             if services:

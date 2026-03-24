@@ -120,7 +120,7 @@
       </div>
     </div>
 
-    {% with other_count=status_counts.failed|add:status_counts.cancelled|add:status_counts.refunded %}
+    {% with other_count=status_counts.failed|add:status_counts.cancelled|add:status_counts.refunded|add:status_counts.partially_refunded %}
     {% if other_count %}
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
@@ -134,6 +134,7 @@
             {% if status_counts.failed %}{{ status_counts.failed }} {% trans "failed" %}{% endif %}
             {% if status_counts.cancelled %}{% if status_counts.failed %}, {% endif %}{{ status_counts.cancelled }} {% trans "cancelled" %}{% endif %}
             {% if status_counts.refunded %}{% if status_counts.failed or status_counts.cancelled %}, {% endif %}{{ status_counts.refunded }} {% trans "refunded" %}{% endif %}
+            {% if status_counts.partially_refunded %}{% if status_counts.failed or status_counts.cancelled or status_counts.refunded %}, {% endif %}{{ status_counts.partially_refunded }} {% trans "partially refunded" %}{% endif %}
           </p>
         </div>
       </div>

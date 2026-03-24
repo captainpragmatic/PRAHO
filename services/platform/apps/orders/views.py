@@ -20,7 +20,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.forms import ModelForm, modelform_factory
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -286,19 +286,20 @@ def order_list(request: HttpRequest) -> HttpResponse:
     page_number = request.GET.get("page")
     orders = paginator.get_page(page_number)
 
-    # Get status counts for filter badges
+    # Get status counts for filter badges — single aggregate query
     base_qs = Order.objects.filter(customer_id__in=customer_ids)
-    status_counts = {
-        "total": base_qs.count(),
-        "draft": base_qs.filter(status="draft").count(),
-        "pending": base_qs.filter(status="pending").count(),
-        "confirmed": base_qs.filter(status="confirmed").count(),
-        "processing": base_qs.filter(status="processing").count(),
-        "completed": base_qs.filter(status="completed").count(),
-        "failed": base_qs.filter(status="failed").count(),
-        "cancelled": base_qs.filter(status="cancelled").count(),
-        "refunded": base_qs.filter(status="refunded").count(),
-    }
+    status_counts = base_qs.aggregate(
+        total=Count("id"),
+        draft=Count("id", filter=Q(status="draft")),
+        pending=Count("id", filter=Q(status="pending")),
+        confirmed=Count("id", filter=Q(status="confirmed")),
+        processing=Count("id", filter=Q(status="processing")),
+        completed=Count("id", filter=Q(status="completed")),
+        failed=Count("id", filter=Q(status="failed")),
+        cancelled=Count("id", filter=Q(status="cancelled")),
+        refunded=Count("id", filter=Q(status="refunded")),
+        partially_refunded=Count("id", filter=Q(status="partially_refunded")),
+    )
 
     context = {
         "orders": orders,

@@ -162,15 +162,15 @@
             <!-- Address -->
             <div>
               <h4 class="text-sm font-semibold text-slate-300 mb-3">{% trans "Billing Address" %}</h4>
-              {% if order.billing_address_line1 or order.billing_city or order.billing_country %}
+              {% if order.billing_address %}
               <div class="space-y-1 text-sm text-slate-400">
-                {% if order.billing_address_line1 %}<div>{{ order.billing_address_line1 }}</div>{% endif %}
-                {% if order.billing_address_line2 %}<div>{{ order.billing_address_line2 }}</div>{% endif %}
-                {% if order.billing_city or order.billing_county %}
-                  <div>{{ order.billing_city }}{% if order.billing_city and order.billing_county %}, {% endif %}{{ order.billing_county }}</div>
+                {% if order.billing_address.line1 %}<div>{{ order.billing_address.line1 }}</div>{% endif %}
+                {% if order.billing_address.line2 %}<div>{{ order.billing_address.line2 }}</div>{% endif %}
+                {% if order.billing_address.city or order.billing_address.county %}
+                  <div>{{ order.billing_address.city }}{% if order.billing_address.city and order.billing_address.county %}, {% endif %}{{ order.billing_address.county }}</div>
                 {% endif %}
-                {% if order.billing_postal_code %}<div>{{ order.billing_postal_code }}</div>{% endif %}
-                {% if order.billing_country %}<div>{{ order.billing_country }}</div>{% endif %}
+                {% if order.billing_address.postal_code %}<div>{{ order.billing_address.postal_code }}</div>{% endif %}
+                {% if order.billing_address.country %}<div>{{ order.billing_address.country }}</div>{% endif %}
               </div>
               {% else %}
               <p class="text-sm text-slate-500 italic">{% trans "Not provided" %}</p>
